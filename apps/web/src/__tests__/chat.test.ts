@@ -148,7 +148,7 @@ describe('connectToAgentStream', () => {
     });
 
     const body = JSON.parse(mockFetch.mock.calls[0][1].body);
-    expect(body).toEqual({ message: 'Hi', stream: true, conversation_id: 'conv-9' });
+    expect(body).toEqual({ message: 'Hi', stream: true, source: 'chat', conversation_id: 'conv-9' });
   });
 
   it('reports a stream that closes before done', async () => {
@@ -189,5 +189,16 @@ describe('connectToAgentStream', () => {
 
     expect(controller).toBeDefined();
     expect(typeof controller.abort).toBe('function');
+  });
+});
+
+describe('errorRepeatsReply', () => {
+  it('skips a banner that repeats the refusal already shown', async () => {
+    const { errorRepeatsReply } = await import('@/lib/chat');
+    const refusal = 'Request blocked by your organisation\'s moderation policy. Remove that part and try again.';
+    expect(errorRepeatsReply(refusal, [{ type: 'text', content: refusal }])).toBe(true);
+    expect(errorRepeatsReply('HTTP 500', [{ type: 'text', content: refusal }])).toBe(false);
+    expect(errorRepeatsReply(refusal, [])).toBe(false);
+    expect(errorRepeatsReply('', [{ type: 'text', content: refusal }])).toBe(false);
   });
 });

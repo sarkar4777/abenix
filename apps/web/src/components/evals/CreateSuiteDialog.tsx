@@ -1,10 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Loader2, X } from 'lucide-react';
 import { apiFetch } from '@/lib/api-client';
-import { useApi } from '@/hooks/useApi';
+import { fetchAllAgents } from '@/lib/fetch-all-agents';
 import { TIER_STYLE } from '@/components/governance/TierPolicies';
 import { SCHEDULES, pct, type Tier } from '@/lib/evals';
 
@@ -16,7 +16,13 @@ interface AgentOption {
 
 export default function CreateSuiteDialog({ onClose, agentId }: { onClose: () => void; agentId?: string }) {
   const router = useRouter();
-  const { data: agents } = useApi<AgentOption[]>('/api/agents?limit=100');
+  // every agent the user can see, not just the first page
+  const [agents, setAgents] = useState<AgentOption[] | null>(null);
+  useEffect(() => {
+    let live = true;
+    fetchAllAgents<AgentOption>().then(({ agents: all }) => { if (live) setAgents(all); }).catch(() => { if (live) setAgents([]); });
+    return () => { live = false; };
+  }, []);
   const [agent, setAgent] = useState(agentId || '');
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
@@ -54,7 +60,7 @@ export default function CreateSuiteDialog({ onClose, agentId }: { onClose: () =>
           <div>
             <label htmlFor="es-agent" className="block text-sm font-medium text-slate-200 mb-1.5">Agent or pipeline</label>
             <select id="es-agent" value={agent} onChange={(e) => { setAgent(e.target.value); const a = (agents || []).find((x) => x.id === e.target.value); if (a && !name) setName(`${a.name} golden cases`); const t = a?.model_config?.risk_tier; setGating(t === 'high' || t === 'critical'); }} className="w-full bg-slate-950 border border-slate-700 rounded-md px-3 py-2 text-sm text-white" data-testid="eval-suite-agent">
-              <option value="">Pick one…</option>
+              <option value="">{agents === null ? 'Loading agents…' : 'Pick one…'}</option>
               {(agents || []).map((a) => (
                 <option key={a.id} value={a.id}>{a.name}{a.model_config?.mode === 'pipeline' ? ' (pipeline)' : ''}</option>
               ))}

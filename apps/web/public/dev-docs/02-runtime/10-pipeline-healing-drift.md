@@ -108,7 +108,7 @@ A rejected proposal returns 422 from `/diagnose` with the reason. Nothing is wri
 
 `diagnose` stores `dsl_before_sha256`, the sha256 of the canonical JSON of the live `pipeline_config` at draft time.
 
-- `apply` recomputes the hash of the live config. Mismatch returns 409 `stale_patch` and nothing changes. On match it writes `dsl_after.pipeline_config`, stores the replaced config in `applied_snapshot`, sets `accepted`, `decided_by`, `decided_at`
+- `apply` recomputes the hash of the live config. Mismatch returns 409 `stale_patch` and nothing changes. On match it writes `dsl_after.pipeline_config`, adds any tool a new step calls to `model_config.tools` so the run is not refused, stores the replaced config in `applied_snapshot`, sets `accepted`, `decided_by`, `decided_at`
 - `reject` sets `rejected`, `decided_by`, `decided_at`
 - `rollback` requires the live config to still hash to `dsl_after.pipeline_config`, else 409 `stale_rollback`. On match it restores `applied_snapshot` (falls back to `dsl_before.pipeline_config` for rows older than the snapshot column) and sets `rolled_back_at`, `rolled_back_by`. Status stays `accepted`
 
@@ -127,7 +127,7 @@ Migration `1100_f_patch_cas` adds the two compare-and-swap columns. `packages/db
 
 ### UI
 
-`/agents/{id}/healing` lists failures, pending proposals, applied patches and history. Apply and Reject show only when `meta.can_edit` is true. Roll back shows for `can_edit` or when the viewer is the approver. A failed load shows the error and a retry, it no longer reads as "no failures". There is no dashboard widget and drift does not appear on `/alerts`.
+`/agents/{id}/healing` lists failures, pending proposals, applied patches and history. A failed run in the builder shows each step's error inline and a Diagnose and fix link to this page. Each proposal lists the changed fields as step, field, old value and new value above the raw JSON-Patch. An applied patch links back to the builder to run it again. Apply and Reject show only when `meta.can_edit` is true. Roll back shows for `can_edit` or when the viewer is the approver. A failed load shows the error and a retry, it no longer reads as "no failures". There is no dashboard widget and drift does not appear on `/alerts`.
 
 ## Drift detection
 

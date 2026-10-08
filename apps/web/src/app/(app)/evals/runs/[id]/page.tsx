@@ -3,8 +3,9 @@
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { ArrowLeft, CheckCircle2, ChevronDown, ChevronRight, ExternalLink, GitCompare, Loader2, Sparkles, TrendingDown, TrendingUp, XCircle } from 'lucide-react';
+import { CheckCircle2, ChevronDown, ChevronRight, ExternalLink, FlaskConical, GitCompare, Loader2, Sparkles, TrendingDown, TrendingUp, XCircle } from 'lucide-react';
 import { useApi } from '@/hooks/useApi';
+import PageHeader from '@/components/layout/PageHeader';
 import { TRIGGER_LABEL, pct, runVerdict, shortHash, type EvalResult, type RunDetail } from '@/lib/evals';
 
 type Filter = 'all' | 'failed' | 'passed' | 'changed';
@@ -42,27 +43,37 @@ export default function RunPage() {
 
   return (
     <div className="max-w-6xl mx-auto px-6 py-8">
-      {run.suite && <Link href={`/evals/${run.suite.id}`} className="inline-flex items-center gap-1 text-sm text-slate-400 hover:text-white mb-4"><ArrowLeft className="w-4 h-4" /> {run.suite.name}</Link>}
-      <header className="flex flex-wrap items-start gap-6 mb-6">
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
-            <h1 className="text-2xl font-semibold text-white">Run {run.created_at ? new Date(run.created_at).toLocaleString() : ''}</h1>
-            <span className={`text-xs px-2 py-0.5 rounded border ${v.cls}`} data-testid="eval-run-verdict">{v.label}</span>
-          </div>
-          <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-400">
-            <span>{TRIGGER_LABEL[run.triggered_by]}</span>
-            <span className="font-mono">{run.model}{run.model_override ? ' (model override)' : ''}</span>
-            <span>version <span className="font-mono">{shortHash(run.config_hash)}</span>{run.agent_revision ? `, revision ${run.agent_revision}` : ''}</span>
-            <span>${run.cost.toFixed(4)}</span>
-          </div>
-          {run.error && <p className="mt-2 text-sm text-amber-300">{run.error}</p>}
+      <PageHeader
+        className="mb-6"
+        title={`Run ${run.created_at ? new Date(run.created_at).toLocaleString() : ''}`}
+        purpose="One run of an evaluation suite: how each case scored and why the failing ones failed. For whoever owns the agent."
+        icon={FlaskConical}
+        storageKey="eval-run"
+        docSlug="08-howto/10-evals"
+        back={run.suite ? { href: `/evals/${run.suite.id}`, label: run.suite.name } : undefined}
+        meta={<span className={`text-xs px-2 py-0.5 rounded border ${v.cls}`} data-testid="eval-run-verdict">{v.label}</span>}
+        primaryAction={run.suite
+          ? { label: 'Open the suite', href: `/evals/${run.suite.id}`, icon: ExternalLink }
+          : cmp ? { label: 'Side by side', href: `/evals/compare?a=${cmp.base_run.id}&b=${run.id}`, icon: GitCompare } : undefined}
+        steps={[
+          'The score is the weighted share of cases that passed. The run passes when it reaches the threshold.',
+          'Failed cases are listed first. Open one to see its answer and which check failed.',
+          'Side by side, under the comparison, lines this run up with the one before it.',
+        ]}
+      >
+        <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-400">
+          <span>{TRIGGER_LABEL[run.triggered_by]}</span>
+          <span className="font-mono break-all">{run.model}{run.model_override ? ' (model override)' : ''}</span>
+          <span>version <span className="font-mono">{shortHash(run.config_hash)}</span>{run.agent_revision ? `, revision ${run.agent_revision}` : ''}</span>
+          <span>${run.cost.toFixed(4)}</span>
         </div>
-        <div className="flex items-center gap-6">
+        {run.error && <p className="text-sm text-amber-300 break-words">{run.error}</p>}
+        <div className="flex flex-wrap items-center gap-6">
           <Stat label="Score" value={pct(run.score)} sub={`needs ${pct(run.threshold)}`} testid="eval-run-score" />
           <Stat label="Passed" value={`${run.passed}`} sub={`of ${run.total}`} />
           <Stat label="Failed" value={`${run.failed}`} sub={run.errored ? `${run.errored} did not run` : ' '} />
         </div>
-      </header>
+      </PageHeader>
 
       {running && (
         <div className="mb-5 rounded-xl border border-sky-500/30 bg-sky-500/5 p-4" data-testid="eval-run-progress">

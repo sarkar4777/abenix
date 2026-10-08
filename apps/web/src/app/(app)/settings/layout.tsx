@@ -18,13 +18,12 @@ import {
   Webhook,
 } from 'lucide-react';
 import { holds, useMyPermissions } from '@/lib/capabilities';
+import { usePlatformFeatures } from '@/hooks/usePlatformFeatures';
 
-const MONETIZATION_ENABLED = process.env.NEXT_PUBLIC_ENABLE_MONETIZATION !== 'false';
-
-const NAV_ITEMS: { label: string; icon: typeof User; href: string; capability?: string }[] = [
+const NAV_ITEMS: { label: string; icon: typeof User; href: string; capability?: string; monetization?: boolean }[] = [
   { label: 'Profile', icon: User, href: '/settings/profile' },
   { label: 'API Keys', icon: Key, href: '/settings/api-keys' },
-  ...(MONETIZATION_ENABLED ? [{ label: 'Billing', icon: CreditCard, href: '/settings/billing' }] : []),
+  { label: 'Billing', icon: CreditCard, href: '/settings/billing', monetization: true },
   { label: 'Team', icon: Users, href: '/settings/team' },
   { label: 'Integrations', icon: Plug, href: '/settings/integrations' },
   { label: 'Notifications', icon: Bell, href: '/settings/notifications' },
@@ -45,7 +44,10 @@ export default function SettingsLayout({
   const pathname = usePathname();
   const router = useRouter();
   const { perms } = useMyPermissions();
-  const items = NAV_ITEMS.filter((item) => !item.capability || holds(perms?.capabilities, item.capability));
+  const { monetization } = usePlatformFeatures();
+  const items = NAV_ITEMS.filter(
+    (item) => (!item.capability || holds(perms?.capabilities, item.capability)) && (!item.monetization || monetization),
+  );
   const current =
     items.find((item) => pathname === item.href || pathname.startsWith(`${item.href}/`))?.href ??
     (pathname === '/settings' ? '/settings/profile' : '');

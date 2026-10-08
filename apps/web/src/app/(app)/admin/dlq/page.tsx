@@ -5,6 +5,8 @@ import {
   AlertTriangle, Loader2, RefreshCw, Play, ChevronDown, ChevronRight, Inbox, ExternalLink,
 } from 'lucide-react';
 import { apiFetch } from '@/lib/api-client';
+import PageHeader from '@/components/layout/PageHeader';
+import { AccessGate } from '@/components/layout/NoAccess';
 
 interface DlqRow {
   id: string;
@@ -100,7 +102,7 @@ function DlqCard({ row, onReplay, busy }: { row: DlqRow; onReplay: (id: string) 
   );
 }
 
-export default function AdminDlqPage() {
+function AdminDlqPage() {
   const [rows, setRows] = useState<DlqRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -125,21 +127,21 @@ export default function AdminDlqPage() {
 
   return (
     <div className="max-w-5xl mx-auto">
-      <header className="flex flex-wrap items-center gap-3 mb-6">
-        <div className="w-10 h-10 rounded-xl bg-rose-500/15 border border-rose-500/30 flex items-center justify-center">
-          <Inbox className="w-5 h-5 text-rose-400" />
-        </div>
-        <div className="flex-1 min-w-[200px]">
-          <h1 className="text-2xl font-bold text-white">Dead Letter Queue</h1>
-          <p className="text-sm text-slate-500">Executions that failed past the retry budget. Replay re-fires the request with the original input.</p>
-        </div>
-        <button
-          onClick={load}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800/60 border border-slate-700/50 text-xs text-slate-300 hover:text-white"
-        >
-          <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} /> Refresh
-        </button>
-      </header>
+      <PageHeader
+        className="mb-6"
+        title="Dead Letter Queue"
+        purpose="Find runs that kept failing after every retry and send them again with their original input. For admins."
+        icon={Inbox}
+        iconClassName="text-rose-400"
+        storageKey="admin-dlq"
+        docSlug="02-runtime/08-queue-scaling"
+        primaryAction={{ label: 'Refresh', icon: RefreshCw, onClick: load, busy: loading }}
+        steps={[
+          'A run lands here when it still fails after all of its automatic retries.',
+          'Each card shows the agent, why it failed and a link to the failed run.',
+          'Open Original input to see what it was asked, then click Replay to run it again with the same input.',
+        ]}
+      />
 
       {error && (
         <div className="mb-4 rounded-xl border border-rose-500/40 bg-rose-500/10 p-3 text-sm text-rose-200 flex items-center gap-2">
@@ -160,5 +162,19 @@ export default function AdminDlqPage() {
         rows.map(r => <DlqCard key={r.id} row={r} onReplay={handleReplay} busy={busyId === r.id} />)
       )}
     </div>
+  );
+}
+
+export default function AdminDlqPageGated() {
+  return (
+    <AccessGate
+      title="Dead Letter Queue"
+      purpose="Find runs that kept failing after every retry and send them again with their original input. For admins."
+      icon={Inbox}
+      need={{ admin: true }}
+      instead={{ text: 'Failed runs of your own agents are listed on Executions, where you can run them again.', href: '/executions?status=failed', label: 'See failed runs' }}
+    >
+      <AdminDlqPage />
+    </AccessGate>
   );
 }

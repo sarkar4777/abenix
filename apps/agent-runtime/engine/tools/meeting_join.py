@@ -7,7 +7,7 @@ import logging
 import os
 from typing import Any
 
-from engine.tools.base import BaseTool, ConfigField, ToolResult
+from engine.tools.base import BaseTool, ConfigField, Effect, ToolResult
 from engine.tools.meeting_adapter import JoinRequest, get_adapter
 from engine.tools import _meeting_session as sessmod
 
@@ -17,6 +17,9 @@ logger = logging.getLogger(__name__)
 class MeetingJoinTool(BaseTool):
     name = "meeting_join"
     risk_tier = "medium"
+    effect = Effect(
+        kind="external", label="Join a meeting", target_param="room", reversible=True
+    )
     config_fields = (
         ConfigField(
             "LIVEKIT_API_KEY",

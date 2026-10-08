@@ -2,8 +2,10 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import PageHeader from '@/components/layout/PageHeader';
 import {
   AlertTriangle,
+  Bot,
   CheckSquare,
   Loader2,
   RefreshCw,
@@ -180,24 +182,19 @@ export default function ManageAgentsPage() {
       transition={{ duration: 0.4 }}
       className="space-y-6 max-w-3xl"
     >
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-white">Manage Agents</h1>
-          <p className="text-sm text-slate-500 mt-1">
-            Select and perform bulk operations on your agents
-          </p>
-        </div>
-        <button
-          onClick={() => mutateAgents()}
-          disabled={loading}
-          className="flex items-center gap-2 px-3 py-2 bg-slate-800/50 border border-slate-700/50 text-sm text-slate-300 rounded-lg hover:text-white hover:bg-slate-800 transition-colors disabled:opacity-50"
-        >
-          <RefreshCw
-            className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`}
-          />
-          Refresh
-        </button>
-      </div>
+      <PageHeader
+        title="Manage Agents"
+        icon={Bot}
+        purpose="Clean up many agents at once by selecting them and deleting in one go. For builders and admins."
+        primaryAction={{ label: 'Refresh', onClick: () => mutateAgents(), icon: RefreshCw, busy: loading }}
+        steps={[
+          'Click rows to select agents, or use Select All.',
+          'Press Delete Selected and confirm. Agents still used by pipelines, triggers or other agents are skipped.',
+          'Deleted agents can be restored from Recently deleted at the bottom.',
+        ]}
+        docSlug="08-howto/02-add-an-agent"
+        storageKey="agents-manage"
+      />
 
       {loadProgress && (
         <div className="rounded-lg border border-slate-700/50 bg-slate-800/40 p-3 text-xs text-slate-300 flex items-center gap-2">

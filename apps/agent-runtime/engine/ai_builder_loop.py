@@ -53,6 +53,11 @@ def normalize_config(config: dict[str, Any]) -> dict[str, Any]:
         declared.append(name)
         declared_set.add(name)
     config["tools"] = declared
+    # a chat agent gets its data in the message, a required field blocks the first send
+    if config.get("mode") == "agent":
+        for v in config.get("input_variables") or []:
+            if isinstance(v, dict):
+                v["required"] = False
     return config
 
 

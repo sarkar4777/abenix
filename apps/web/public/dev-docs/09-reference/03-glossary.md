@@ -6,6 +6,8 @@
 
 **actAs** — The delegated-subject pattern. A service-account API key calls the platform with an `X-Abenix-Subject: <type>:<id>` header so RBAC + audit attribute the action to the named end-user. See [`01-architecture/01-tenants-rbac`](../01-architecture/01-tenants-rbac.md).
 
+**Action type** — A kind of consequential action an agent can earn autonomy on, a row in `action_types`. A tool name plus an optional argument match, with its world model, outcome probe, limits decision and ladder policy. Every call is recorded in the `agent_actions` ledger. See [`02-runtime/21-earned-autonomy`](../02-runtime/21-earned-autonomy.md).
+
 **Agent** — A definition of an LLM + tools + system prompt that can be executed. Stored in the `agents` table. The runtime executes one agent per top-level call. `model_config.mode` is `agent` (single LLM loop) or `pipeline` (DAG of multiple steps).
 
 **agent-runtime** — The service that runs agents. Pools are listed under `scaling.pools` in the Helm values. `values-azure.yaml` ships `default`, `chat`, `heavy-reasoning` and `long-running`, each a separate Deployment scaled by KEDA on NATS queue depth. The base chart ships no pools.
@@ -51,6 +53,10 @@
 **Decision version** — One immutable revision of a decision's rules in `decision_versions`. Carries effective dates (`valid_from` / `valid_to`), recorded times (`recorded_at`, `published_at`, `superseded_at`) and a state from `draft` through `published` to `superseded` or `retired`.
 
 **Declared inputs** — An agent or pipeline's `model_config.input_variables`. Each has a name and an optional default that is applied under whatever the caller sends, and the pipeline validator treats the names as valid template targets.
+
+**Earned autonomy** — Agents move between five levels per action type (Off, Watching, Asks first, Acts within limits, Acts and reports) on their scored record. Promotion needs a person who did not build the agent, demotion is automatic. See [`02-runtime/21-earned-autonomy`](../02-runtime/21-earned-autonomy.md).
+
+**Effect** — What a tool call changes in the world, declared on the tool class as `effect = Effect(kind, label, ...)` or per call with `effect_for`. `READ_ONLY` for tools that only read. Required at medium tier and above.
 
 **Embedding model** — The model a collection's chunks are embedded with, stored on `knowledge_collections.embedding_model` and used by ingest and search. Changed by the re-embed job, which re-reads every document and switches the collection in one step.
 

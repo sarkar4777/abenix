@@ -5,8 +5,8 @@ import { useRouter } from 'next/navigation';
 import { mutate as swrMutate } from 'swr';
 import {
   Brain, Upload, Trash2, Play, Loader2, CheckCircle2, AlertCircle,
-  Cloud, Monitor, Server, Sparkles, ChevronDown, ChevronRight,
-  FileCode2, Database, Cpu, Workflow, ArrowRight, Pencil, Info,
+  Cloud, Monitor, Server,
+  FileCode2, Database, Cpu, Workflow, ArrowRight, Pencil,
   Share2, FlaskConical, RotateCcw,
 } from 'lucide-react';
 import { useApi } from '@/hooks/useApi';
@@ -15,13 +15,14 @@ import { toastSuccess, toastError } from '@/stores/toastStore';
 import ResourceShareDialog from '@/components/share/ResourceShareDialog';
 import InvocationsTable from '@/components/observability/InvocationsTable';
 import ConfirmModal from '@/components/ui/ConfirmModal';
+import PageHeader from '@/components/layout/PageHeader';
+import NextSteps from '@/components/shared/NextSteps';
 import {
   type MLModel, RUNNABLE_EXTENSIONS, UNRUNNABLE_HINTS, FRAMEWORK_LABELS, INPUT_SCHEMA_TEMPLATE,
   fileExt, nextVersion, featureNames, featureCount, defaultInputFor, fmtBytes,
 } from './helpers';
 
 const LIST_KEY = '/api/ml-models';
-const HOWTO_KEY = 'ml-models.howto.collapsed';
 
 const STATUS_STYLES: Record<string, { bg: string; text: string; label: string }> = {
   uploaded:   { bg: 'bg-amber-500/10', text: 'text-amber-300', label: 'Uploaded' },
@@ -54,7 +55,7 @@ export default function MLModelsPage() {
   const selected = useMemo(() => (models || []).find(m => m.id === selectedId) ?? null, [models, selectedId]);
   const detailRef = useRef<HTMLDivElement>(null);
 
-  const [howtoOpen, setHowtoOpen] = useState(true);
+  const [justAddedId, setJustAddedId] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState('');
   const [suggestedVersion, setSuggestedVersion] = useState('');
@@ -86,14 +87,9 @@ export default function MLModelsPage() {
 
   const refresh = () => swrMutate(LIST_KEY);
 
-  useEffect(() => {
-    try { if (localStorage.getItem(HOWTO_KEY) === '1') setHowtoOpen(false); } catch { /* storage blocked */ }
-  }, []);
-
-  const toggleHowto = () => {
-    const next = !howtoOpen;
-    setHowtoOpen(next);
-    try { localStorage.setItem(HOWTO_KEY, next ? '0' : '1'); } catch { /* storage blocked */ }
+  const goToTest = () => {
+    document.querySelector('[data-testid="ml-test-panel"]')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    (document.querySelector('[data-testid="ml-predict-input"]') as HTMLTextAreaElement | null)?.focus({ preventScroll: true });
   };
 
   // reset per-model panels only when the selection changes, not on every refetch
@@ -171,6 +167,7 @@ export default function MLModelsPage() {
       await refresh();
       if (created) {
         selectModel(created.id);
+        setJustAddedId(created.id);
         toastSuccess('Model ready', `${created.name} v${created.version} loaded. Try a prediction below.`);
       }
     } catch (e: any) {
@@ -198,6 +195,7 @@ export default function MLModelsPage() {
       await refresh();
       if (res.data) {
         selectModel(res.data.id);
+        setJustAddedId(res.data.id);
         setPredInput(defaultInputFor(res.data));
         setPredOutcome(null);
         toastSuccess('Sample model added', `${res.data.name} is ready. Press Run Prediction to try it.`);
@@ -335,48 +333,34 @@ export default function MLModelsPage() {
   return (
     <div className="min-h-screen bg-[#0B0F19] p-4 sm:p-6">
       <div className="max-w-7xl mx-auto space-y-4 sm:space-y-6">
-        {/* Header */}
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 shrink-0 rounded-xl bg-gradient-to-br from-purple-500/20 to-cyan-500/20 flex items-center justify-center">
-            <Brain className="w-5 h-5 text-purple-400" />
-          </div>
-          <div className="min-w-0">
-            <h1 className="text-xl font-bold text-white flex items-center gap-2">
-              ML Models <Sparkles className="w-4 h-4 text-purple-400" />
-            </h1>
-            <p className="text-sm text-slate-400">Bring a trained model, test it here, then let your agents call it for predictions.</p>
-          </div>
-        </div>
-
-        {/* How this works */}
-        <div className="rounded-xl border border-cyan-500/20 bg-cyan-500/5" data-testid="ml-howto">
-          <button onClick={toggleHowto} aria-expanded={howtoOpen}
-            className="w-full flex items-center gap-2 px-4 py-2.5 text-left text-sm text-cyan-100">
-            <Info className="w-4 h-4 text-cyan-300 shrink-0" />
-            <span className="flex-1 font-medium">How this works</span>
-            {howtoOpen ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
-          </button>
-          {howtoOpen && (
-            <div className="px-4 pb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4 text-xs text-slate-300">
-              <div className="space-y-1">
-                <p className="font-medium text-white">1. Upload a trained model</p>
-                <p>scikit-learn or XGBoost saved with joblib or pickle (<code className="text-cyan-300">.joblib</code>, <code className="text-cyan-300">.pkl</code>), ONNX (<code className="text-cyan-300">.onnx</code>) or a whole PyTorch model (<code className="text-cyan-300">.pt</code>, <code className="text-cyan-300">.pth</code>). Abenix loads it right away and tells you if the file is not usable. TensorFlow models need converting to ONNX first.</p>
-              </div>
-              <div className="space-y-1">
-                <p className="font-medium text-white">2. Describe its inputs</p>
-                <p>List the feature names in the order the model expects and give an example row. Agents and the test form use this to send the right values. Abenix fills in what it can read from the file.</p>
-              </div>
-              <div className="space-y-1">
-                <p className="font-medium text-white">3. Test it</p>
-                <p>Run a prediction on this page. It works as soon as the model is <strong>Ready</strong>, no deploy needed. Every call is counted under Invocations.</p>
-              </div>
-              <div className="space-y-1">
-                <p className="font-medium text-white">4. Use it in an agent</p>
-                <p><strong>Use in Agent</strong> opens the Agent Builder with the ML Model tool pointed at this model. Agents call it by name and get the <strong>active</strong> version.</p>
-              </div>
-            </div>
-          )}
-        </div>
+        <PageHeader
+          title="ML Models"
+          purpose="Bring a trained model, test it here, then let your agents call it for predictions. For builders."
+          icon={Brain}
+          iconClassName="text-purple-400"
+          storageKey="ml-models"
+          docSlug="02-runtime/12-ml-models"
+          howTestId="ml-howto"
+          primaryAction={{ label: 'Upload a model', icon: Upload, onClick: () => fileRef.current?.click(), testId: 'ml-upload-open' }}
+          steps={[
+            {
+              title: 'Upload a trained model',
+              body: <>scikit-learn or XGBoost saved with joblib or pickle (<code className="text-cyan-300">.joblib</code>, <code className="text-cyan-300">.pkl</code>), ONNX (<code className="text-cyan-300">.onnx</code>) or a whole PyTorch model (<code className="text-cyan-300">.pt</code>, <code className="text-cyan-300">.pth</code>). Abenix loads it right away and tells you if the file is not usable. TensorFlow models need converting to ONNX first.</>,
+            },
+            {
+              title: 'Describe its inputs',
+              body: 'List the feature names in the order the model expects and give an example row. Agents and the test form use this to send the right values. Abenix fills in what it can read from the file.',
+            },
+            {
+              title: 'Test it',
+              body: <>Run a prediction on this page. It works as soon as the model is <strong>Ready</strong>, no deploy needed. Every call is counted under Invocations.</>,
+            },
+            {
+              title: 'Use it in an agent',
+              body: <><strong>Use in Agent</strong> opens the Agent Builder with the ML Model tool pointed at this model. Agents call it by name and get the <strong>active</strong> version.</>,
+            },
+          ]}
+        />
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-6">
           {/* Left: Upload + List */}
@@ -544,6 +528,17 @@ export default function MLModelsPage() {
               )
             ) : (
               <>
+                {justAddedId === selected.id && (
+                  <NextSteps
+                    title={`${selected.name} is in. What next?`}
+                    testId="ml-next-steps"
+                    onDismiss={() => setJustAddedId(null)}
+                    steps={[
+                      { id: 'test', label: 'Test a prediction', hint: 'Send one example row and see what it returns.', icon: Play, onClick: goToTest },
+                      { id: 'agent', label: 'Use in an agent', hint: 'Open the builder with this model as a tool.', icon: Workflow, href: `/builder?tool=ml_model&model_name=${encodeURIComponent(selected.name)}` },
+                    ]}
+                  />
+                )}
                 {/* Model header */}
                 <div className="bg-slate-800/30 border border-slate-700/50 rounded-xl p-4 sm:p-5" data-testid="ml-detail">
                   <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 mb-3">

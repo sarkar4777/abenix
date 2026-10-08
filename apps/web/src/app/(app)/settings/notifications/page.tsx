@@ -8,6 +8,7 @@ import { usePageTitle } from '@/hooks/usePageTitle';
 import { useApi } from '@/hooks/useApi';
 import { apiFetch } from '@/lib/api-client';
 import { toastError, toastSuccess } from '@/stores/toastStore';
+import PageHeader from '@/components/layout/PageHeader';
 
 interface TenantSettings {
   tenant_id: string;
@@ -17,7 +18,7 @@ interface TenantSettings {
   slack_webhook_is_set: boolean;
 }
 
-type PrefKey = 'execution_complete' | 'execution_failed' | 'billing_alerts' | 'team_updates';
+type PrefKey = 'execution_complete' | 'execution_failed' | 'billing_alerts' | 'team_updates' | 'autonomy_updates' | 'moderation_reviews';
 
 interface NotifPrefs extends Record<PrefKey, boolean> {
   channels: { slack: boolean; email: boolean };
@@ -39,6 +40,16 @@ const PREF_LABELS: { key: PrefKey; label: string; description: string }[] = [
     key: 'team_updates',
     label: 'Sharing and comments',
     description: 'Someone shared something with you, stopped sharing it, commented on or changed your agent, or subscribed to your marketplace listing.',
+  },
+  {
+    key: 'autonomy_updates',
+    label: 'Agent autonomy',
+    description: 'An agent is ready to move up a level, was moved down after a harm flag or a drop in accuracy, or proposed an action waiting for your review.',
+  },
+  {
+    key: 'moderation_reviews',
+    label: 'Content held for review',
+    description: 'A moderation policy held a message or a reply and you can review it. Only people with the Review held content permission get these.',
   },
   {
     key: 'billing_alerts',
@@ -227,12 +238,28 @@ export default function NotificationsPage() {
       transition={{ duration: 0.4 }}
       className="space-y-6 max-w-2xl"
     >
-      <div>
-        <h1 className="text-2xl font-bold text-white">Notifications</h1>
-        <p className="text-sm text-slate-500 mt-1">
-          Choose which events reach your notification bell, and whether copies also go to Slack or email.
-        </p>
-      </div>
+      <PageHeader
+        title="Notifications"
+        icon={Bell}
+        purpose="Choose which events reach your notification bell, and whether copies also go to Slack or email. For everyone."
+        primaryAction={{
+          label: 'Save preferences',
+          icon: saving ? Loader2 : Check,
+          busy: saving,
+          disabled: !dirty,
+          title: dirty ? undefined : 'Change a switch first',
+          onClick: handleSave,
+          testId: 'notif-save',
+        }}
+        steps={[
+          'Turn on the events you want to hear about. They land in the bell at the top.',
+          'Pick whether copies also go to the workspace Slack channel or to your email.',
+          'Press Save preferences. Approvals and platform alerts always reach you.',
+          'An admin connects the Slack channel at the bottom of this page.',
+        ]}
+        docSlug="06-deployment/04-observability"
+        storageKey="settings-notifications"
+      />
 
       <section aria-labelledby="notif-events-title" className="space-y-2">
         <h2 id="notif-events-title" className="text-sm font-semibold text-white">What to tell you about</h2>
@@ -327,19 +354,8 @@ export default function NotificationsPage() {
             Preferences saved
           </span>
         ) : dirty ? (
-          <span className="text-xs text-amber-300">You have unsaved changes.</span>
+          <span className="text-xs text-amber-300">You have unsaved changes. Press Save preferences at the top.</span>
         ) : null}
-        <div className="ml-auto">
-          <button
-            onClick={handleSave}
-            disabled={saving || !dirty}
-            data-testid="notif-save"
-            className="px-4 py-2 bg-gradient-to-r from-cyan-500 to-purple-600 text-white text-sm font-medium rounded-lg hover:from-cyan-400 hover:to-purple-500 shadow-lg shadow-cyan-500/25 transition-all disabled:opacity-50 flex items-center gap-2"
-          >
-            {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-            Save preferences
-          </button>
-        </div>
       </div>
 
       <section aria-labelledby="notif-soon-title" className="space-y-2">

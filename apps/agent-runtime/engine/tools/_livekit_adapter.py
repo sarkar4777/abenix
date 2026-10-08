@@ -68,26 +68,16 @@ class LiveKitAdapter(MeetingAdapter):
         @room.on("track_subscribed")
         def _on_track(track, publication, participant):  # type: ignore[no-redef]
             if track.kind == rtc.TrackKind.KIND_AUDIO:
-                asyncio.create_task(
-                    self._consume_audio_track(track, participant.identity)
-                )
+                # people read the name in the transcript, not the identity
+                who = getattr(participant, "name", "") or participant.identity
+                asyncio.create_task(self._consume_audio_track(track, who))
 
         # Data channel for chat
         @room.on("data_received")
-        def _on_data(data, participant, kind):  # type: ignore[no-redef]
-            try:
-                text = (data or b"").decode("utf-8", errors="ignore")
-            except Exception:
-                return
-            asyncio.create_task(
-                self._chat_q.put(
-                    ChatMessage(
-                        sender=getattr(participant, "identity", "?"),
-                        text=text,
-                        timestamp_ms=int(time.time() * 1000),
-                    )
-                )
-            )
+        def _on_data(*args):  # type: ignore[no-redef]
+            msg = chat_from_data_event(*args)
+            if msg is not None:
+                asyncio.create_task(self._chat_q.put(msg))
 
         @room.on("disconnected")
         def _on_disc():  # type: ignore[no-redef]
@@ -223,12 +213,19 @@ class LiveKitAdapter(MeetingAdapter):
             from livekit import rtc
         except ImportError:
             return
+        lp = self._room.local_participant
         try:
-            await self._room.local_participant.publish_data(
-                text.encode("utf-8"), kind=rtc.DataPacketKind.KIND_RELIABLE
-            )
+            await lp.publish_data(text.encode("utf-8"), reliable=True)
+        except TypeError:
+            # SDKs before 0.10 took a packet kind instead of reliable=
+            try:
+                await lp.publish_data(
+                    text.encode("utf-8"), kind=rtc.DataPacketKind.KIND_RELIABLE
+                )
+            except Exception as e:
+                logger.warning("LiveKit post_chat failed: %s", e)
         except Exception as e:
-            logger.debug("LiveKit post_chat failed: %s", e)
+            logger.warning("LiveKit post_chat failed: %s", e)
 
     async def subscribe_chat(self) -> AsyncIterator[ChatMessage]:  # type: ignore[override]
         while not self._closed.is_set():
@@ -244,6 +241,28 @@ class LiveKitAdapter(MeetingAdapter):
             return [p.identity for p in self._room.remote_participants.values()]
         except Exception:
             return []
+
+
+def chat_from_data_event(*args: Any) -> ChatMessage | None:
+    """A chat line from data_received, old (data, participant, kind) or new DataPacket."""
+    if len(args) == 1 and hasattr(args[0], "data"):
+        data, participant = args[0].data, getattr(args[0], "participant", None)
+    elif args:
+        data, participant = args[0], args[1] if len(args) > 1 else None
+    else:
+        return None
+    try:
+        text = bytes(data or b"").decode("utf-8", errors="ignore").strip()
+    except Exception:
+        return None
+    if not text:
+        return None
+    return ChatMessage(
+        sender=getattr(participant, "name", "")
+        or getattr(participant, "identity", "?"),
+        text=text,
+        timestamp_ms=int(time.time() * 1000),
+    )
 
 
 def _mint_token(req: JoinRequest, *, ttl_seconds: int = 3600) -> str:

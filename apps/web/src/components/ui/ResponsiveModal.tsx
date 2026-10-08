@@ -4,6 +4,7 @@ import { useEffect, type ReactNode } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X } from 'lucide-react';
 import { useIsMobile } from '@/hooks/useMediaQuery';
+import { useEscapeToClose } from '@/hooks/useEscapeToClose';
 
 interface ResponsiveModalProps {
   open: boolean;
@@ -23,6 +24,7 @@ export default function ResponsiveModal({
   maxWidth = 'max-w-lg',
 }: ResponsiveModalProps) {
   const isMobile = useIsMobile();
+  useEscapeToClose(open, onClose);
 
   useEffect(() => {
     if (open) {
@@ -38,7 +40,7 @@ export default function ResponsiveModal({
   return (
     <AnimatePresence>
       {open && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
+        <div className="fixed inset-0 z-50 flex items-center justify-center" role="dialog" aria-modal="true" aria-label={title}>
           {/* Backdrop */}
           <motion.div
             className="absolute inset-0 bg-black/60 backdrop-blur-sm"
@@ -70,6 +72,7 @@ export default function ResponsiveModal({
                 </h2>
                 <button
                   onClick={onClose}
+                  aria-label="Close"
                   className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-800 hover:text-slate-200"
                 >
                   <X size={18} />
@@ -99,6 +102,7 @@ export default function ResponsiveModal({
                 </h2>
                 <button
                   onClick={onClose}
+                  aria-label="Close"
                   className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-800 hover:text-slate-200"
                 >
                   <X size={18} />

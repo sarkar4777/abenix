@@ -45,13 +45,14 @@ const DynamicMiniMap = dynamic(
 
 import { nodeTypes } from '@/components/builder/nodes';
 import ToolPalette from '@/components/builder/ToolPalette';
-import AgentConfigPanel, { normalizeToolConfig } from '@/components/builder/AgentConfigPanel';
+import AgentConfigPanel, { AGENT_CATEGORIES, normalizeToolConfig } from '@/components/builder/AgentConfigPanel';
 import BuilderTopBar, { type BuilderMode } from '@/components/builder/BuilderTopBar';
 import PipelineCanvas from '@/components/builder/pipeline/PipelineCanvas';
 import PipelineToolbar from '@/components/builder/pipeline/PipelineToolbar';
 import StepConfigPanel from '@/components/builder/pipeline/StepConfigPanel';
 import type { InputVariable as PipelineInputVariable } from '@/components/builder/InputVariablesEditor';
 import PipelineExecutionViewer from '@/components/builder/pipeline/PipelineExecutionViewer';
+import RunInputsDialog, { type RunInput } from '@/components/builder/pipeline/RunInputsDialog';
 import { usePipelineStore } from '@/components/builder/pipeline/usePipelineStore';
 import {
   deriveToolsFromSteps,
@@ -767,11 +768,26 @@ export default function BuilderPage() {
   );
 
   // Run pipeline
+  const [askRunInputs, setAskRunInputs] = useState(false);
+  const runInputs = useMemo(
+    () => (config.input_variables || []).filter((v) => v.name.trim() !== '') as RunInput[],
+    [config.input_variables],
+  );
+  const startRun = useCallback(async (context?: Record<string, unknown>) => {
+    if (!agentId) return;
+    setAskRunInputs(false);
+    setShowExecutionViewer(true);
+    await pipelineStore.executeAndTrack(agentId, context);
+  }, [agentId, pipelineStore]);
+  // a pipeline that reads {{context.x}} needs its inputs, without them the first step fails
   const runPipeline = useCallback(async () => {
     if (!agentId) return;
-    setShowExecutionViewer(true);
-    await pipelineStore.executeAndTrack(agentId);
-  }, [agentId, pipelineStore]);
+    if (runInputs.length > 0) {
+      setAskRunInputs(true);
+      return;
+    }
+    await startRun();
+  }, [agentId, runInputs.length, startRun]);
 
   // Save
   const save = useCallback(async () => {
@@ -788,9 +804,11 @@ export default function BuilderPage() {
       max_tokens: config.max_tokens,
     };
 
+    let pipelineSnapshot: string | null = null;
     if (builderMode === 'pipeline') {
       modelConfig.mode = 'pipeline';
       modelConfig.pipeline_config = pipelineStore.serialize();
+      pipelineSnapshot = JSON.stringify(modelConfig.pipeline_config);
       modelConfig.tools = deriveToolsFromSteps(pipelineStore.steps);
     } else {
       modelConfig.tools = selectedTools;
@@ -894,6 +912,8 @@ export default function BuilderPage() {
       }
 
       setDirty(false);
+      // without this a pipeline edit never reads as saved again
+      if (pipelineSnapshot) pipelineStore.markSaved(pipelineSnapshot);
     } catch {
       setSaveError('Could not reach the server. Your changes are still here, try again.');
     } finally {
@@ -945,10 +965,11 @@ export default function BuilderPage() {
       description: (aiConfig.description as string) || '',
       system_prompt: (aiConfig.system_prompt as string) || '',
       model: forcedModel || (mc.model as string) || 'claude-sonnet-4-5-20250929',
-      temperature: (mc.temperature as number) || 0.7,
+      temperature: typeof mc.temperature === 'number' ? mc.temperature : 0.7,
       max_tokens: 4096,
       input_variables: (mc.input_variables || aiConfig.input_variables || []) as AgentConfig['input_variables'],
-      category: (aiConfig.category as string) || 'engineering',
+      example_prompts: (mc.example_prompts || aiConfig.example_prompts || []) as string[],
+      category: AGENT_CATEGORIES.includes(aiConfig.category as string) ? (aiConfig.category as string) : 'other',
       tool_config: {},
     };
 
@@ -980,6 +1001,8 @@ export default function BuilderPage() {
         setNodes(buildInitialNodes(fullConfig, tools));
         setEdges(buildInitialEdges(tools));
         setDirty(true);
+        // the empty canvas was fitted to one node, so the new tools land off screen
+        setTimeout(() => reactFlowRef.current?.fitView({ padding: 0.2, duration: 200 }), 50);
       }, 100);
       return; // Don't set dirty here — setTimeout will do it
     }
@@ -996,7 +1019,7 @@ export default function BuilderPage() {
     if (!currentId) return;
 
     // PublishDialog already called /publish with the chosen visibility
-    router.push(`/agents/${currentId}/chat`);
+    router.push(`/agents/${currentId}/chat?published=1`);
   }, [agentId, save, router]);
 
   async function getCreatedId(): Promise<string | null> {
@@ -1156,6 +1179,12 @@ export default function BuilderPage() {
             )}
           </button>
         </div>
+        <RunInputsDialog
+          open={askRunInputs}
+          inputs={runInputs}
+          onClose={() => setAskRunInputs(false)}
+          onRun={(ctx) => void startRun(ctx)}
+        />
       </motion.div>
     );
   }
@@ -1289,6 +1318,7 @@ export default function BuilderPage() {
           </>
         ) : (
           <PipelineModeContent
+            agentId={agentId}
             showExecutionViewer={showExecutionViewer}
             setShowExecutionViewer={setShowExecutionViewer}
             inputVariables={(config.input_variables || []) as PipelineInputVariable[]}
@@ -1298,6 +1328,12 @@ export default function BuilderPage() {
           />
         )}
       </div>
+      <RunInputsDialog
+        open={askRunInputs}
+        inputs={runInputs}
+        onClose={() => setAskRunInputs(false)}
+        onRun={(ctx) => void startRun(ctx)}
+      />
     </motion.div>
   );
 }
@@ -1305,6 +1341,7 @@ export default function BuilderPage() {
 // PipelineModeContent — Bridges pipeline store ↔ ReactFlow
 
 function PipelineModeContent({
+  agentId,
   showExecutionViewer,
   setShowExecutionViewer,
   inputVariables,
@@ -1312,6 +1349,7 @@ function PipelineModeContent({
   description,
   onDescriptionChange,
 }: {
+  agentId: string | null;
   showExecutionViewer: boolean;
   setShowExecutionViewer: (v: boolean) => void;
   inputVariables: PipelineInputVariable[];
@@ -1561,6 +1599,8 @@ B: {{${b}.response}}`);
             nodeResults={pipelineStore.execution.nodeResults}
             executionPath={pipelineStore.execution.executionPath}
             totalDurationMs={pipelineStore.execution.totalDurationMs}
+            error={pipelineStore.execution.error}
+            agentId={agentId}
             onReset={() => {
               pipelineStore.resetExecution();
               setShowExecutionViewer(false);

@@ -120,6 +120,36 @@ CATALOG: tuple[Capability, ...] = (
         "Create permission sets and assign them to people.",
     ),
     Capability(
+        "autonomy.view",
+        "View autonomy",
+        "Autonomy",
+        "See what each agent may do on its own, its track record and the action ledger.",
+    ),
+    Capability(
+        "autonomy.manage",
+        "Manage autonomy",
+        "Autonomy",
+        "Enrol agents' actions, set how success is judged, demote or turn actions off.",
+    ),
+    Capability(
+        "autonomy.grant",
+        "Approve promotions",
+        "Autonomy",
+        "Approve an agent moving up a level. Never for an agent you built.",
+    ),
+    Capability(
+        "actions.review",
+        "Review agent actions",
+        "Autonomy",
+        "Answer watching reviews, record outcomes and flag harm.",
+    ),
+    Capability(
+        "moderation.review",
+        "Review held content",
+        "Moderation",
+        "Release, redact or reject messages and replies a moderation policy held for review.",
+    ),
+    Capability(
         "runs.replay",
         "Replay runs",
         "Runs",
@@ -136,6 +166,8 @@ ROLE_DEFAULTS: dict[str, frozenset[str]] = {
             "risk.view",
             "evals.run",
             "runs.replay",
+            "autonomy.view",
+            "actions.review",
         }
     ),
     "creator": frozenset(
@@ -149,6 +181,9 @@ ROLE_DEFAULTS: dict[str, frozenset[str]] = {
             "sources.manage",
             "events.manage",
             "runs.replay",
+            "autonomy.view",
+            "autonomy.manage",
+            "actions.review",
         }
     ),
     "admin": frozenset({"*"}),

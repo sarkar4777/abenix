@@ -6,6 +6,7 @@ import {
   AlertTriangle,
   BadgeCheck,
   BookOpen,
+  Bot,
   CheckCircle2,
   ChevronDown,
   ExternalLink,
@@ -33,6 +34,9 @@ import { toastSuccess, toastError } from '@/stores/toastStore';
 import { useIsMobile } from '@/hooks/useMediaQuery';
 import { useApi } from '@/hooks/useApi';
 import { usePageTitle } from '@/hooks/usePageTitle';
+import { useEscapeToClose } from '@/hooks/useEscapeToClose';
+import PageHeader from '@/components/layout/PageHeader';
+import NextSteps from '@/components/shared/NextSteps';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -227,7 +231,27 @@ function ConnectModal({
         setErr(json.error.message);
         return;
       }
-      onCreated(json.data);
+      // fetch its tools now so the card is ready to use
+      let created = json.data;
+      try {
+        const d = await fetch(`${API_URL}/api/mcp/connections/${created.id}/discover`, {
+          method: 'POST',
+          headers: getAuthHeaders(),
+        });
+        const dj = await d.json();
+        if (dj.data) {
+          created = {
+            ...created,
+            discovered_tools: dj.data.tools,
+            orphaned_agent_tools: dj.data.orphaned_agent_tools || [],
+            health_status: 'healthy',
+            last_health_check: new Date().toISOString(),
+          };
+        }
+      } catch {
+        // the card still offers Discover
+      }
+      onCreated(created);
       reset();
       onClose();
     } catch {
@@ -241,8 +265,9 @@ function ConnectModal({
     <ResponsiveModal open={open} onClose={() => { reset(); onClose(); }} title="Connect MCP Server" maxWidth="max-w-md">
       <div className="space-y-4">
         <div>
-          <label className="block text-xs text-slate-400 mb-1.5">Server Name</label>
+          <label htmlFor="mcp-name" className="block text-xs text-slate-400 mb-1.5">Server Name</label>
           <input
+            id="mcp-name"
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
@@ -251,8 +276,9 @@ function ConnectModal({
           />
         </div>
         <div>
-          <label className="block text-xs text-slate-400 mb-1.5">Server URL</label>
+          <label htmlFor="mcp-url" className="block text-xs text-slate-400 mb-1.5">Server URL</label>
           <input
+            id="mcp-url"
             type="text"
             value={url}
             onChange={(e) => {
@@ -271,7 +297,7 @@ function ConnectModal({
             </div>
           )}
           {discoverCount !== null && !discoverLoading && (
-            <div className="flex items-center gap-1.5 mt-1.5">
+            <div className="flex items-center gap-1.5 mt-1.5" data-testid="mcp-discover-count">
               <CheckCircle2 className="w-3 h-3 text-emerald-400" />
               <span className="text-xs text-emerald-400">
                 {discoverCount} tool{discoverCount !== 1 ? 's' : ''} discovered
@@ -279,15 +305,16 @@ function ConnectModal({
             </div>
           )}
           {discoverError && !discoverLoading && (
-            <div className="flex items-center gap-1.5 mt-1.5">
+            <div className="flex items-center gap-1.5 mt-1.5" role="alert" data-testid="mcp-discover-error">
               <AlertTriangle className="w-3 h-3 text-amber-400" />
               <span className="text-xs text-amber-400">{discoverError}</span>
             </div>
           )}
         </div>
         <div>
-          <label className="block text-xs text-slate-400 mb-1.5">Authentication</label>
+          <label htmlFor="mcp-auth" className="block text-xs text-slate-400 mb-1.5">Authentication</label>
           <select
+            id="mcp-auth"
             value={authType}
             onChange={(e) => setAuthType(e.target.value)}
             className="w-full px-3 py-2 bg-slate-800/50 border border-slate-700 rounded-lg text-sm text-white focus:outline-none focus:border-cyan-500"
@@ -343,7 +370,7 @@ function ConnectModal({
             </div>
           </>
         )}
-        {err && <p className="text-xs text-red-400">{err}</p>}
+        {err && <p role="alert" data-testid="mcp-add-error" className="text-xs text-red-400">{err}</p>}
         <div className="flex justify-end gap-2 pt-2">
           <button
             onClick={() => {
@@ -399,11 +426,15 @@ function ToolsDrawer({
   const tools = connection.discovered_tools || [];
   const orphaned = connection.orphaned_agent_tools || [];
   const isMobile = useIsMobile();
+  useEscapeToClose(true, onClose);
 
   return (
     <div
       className="fixed inset-0 z-50 flex justify-end bg-black/40 backdrop-blur-sm"
       onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-label={`Tools of ${connection.server_name}`}
     >
       <motion.div
         initial={{ x: '100%' }}
@@ -418,7 +449,7 @@ function ToolsDrawer({
             <h2 className="text-base font-semibold text-white">{connection.server_name}</h2>
             <p className="text-xs text-slate-500 mt-0.5">{tools.length} tools discovered</p>
           </div>
-          <button onClick={onClose} className="text-slate-400 hover:text-white">
+          <button onClick={onClose} aria-label="Close" className="text-slate-400 hover:text-white">
             <X className="w-4 h-4" />
           </button>
         </div>
@@ -473,6 +504,7 @@ function ToolsDrawer({
             return (
               <div
                 key={tool.name}
+                data-testid="mcp-tool-row"
                 className="p-3 bg-slate-800/30 border border-slate-700/50 rounded-lg"
               >
                 <div className="flex items-center gap-2 mb-1 flex-wrap">
@@ -893,10 +925,11 @@ function MyServersTab({
     if (!confirmDeleteId) return;
     setDeleting(true);
     try {
-      await fetch(`${API_URL}/api/mcp/connections/${confirmDeleteId}`, {
+      const res = await fetch(`${API_URL}/api/mcp/connections/${confirmDeleteId}`, {
         method: 'DELETE',
         headers: getAuthHeaders(),
       });
+      if (!res.ok) throw new Error(String(res.status));
       setConnections((prev) => prev.filter((c) => c.id !== confirmDeleteId));
       toastSuccess('Server disconnected');
     } catch {
@@ -963,7 +996,7 @@ function MyServersTab({
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between gap-4">
+      <div className="flex items-center justify-between gap-4 empty:hidden">
         {connections.length > 3 && (
           <div className="relative max-w-sm flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
@@ -976,13 +1009,6 @@ function MyServersTab({
             />
           </div>
         )}
-        <button
-          onClick={onOpenModal}
-          className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-cyan-500 to-blue-600 text-white text-sm font-medium rounded-lg hover:opacity-90 transition-opacity shrink-0"
-        >
-          <Plus className="w-4 h-4" />
-          Add Server
-        </button>
       </div>
 
       {filtered.length === 0 && !search && (
@@ -992,8 +1018,15 @@ function MyServersTab({
           </div>
           <p className="text-sm text-slate-400 mb-1">No MCP servers connected</p>
           <p className="text-xs text-slate-600">
-            Click &quot;Add Server&quot; to connect your first MCP server
+            Connect your first MCP server to give your agents its tools.
           </p>
+          <button
+            onClick={onOpenModal}
+            className="mt-4 inline-flex items-center gap-2 px-4 py-2 border border-slate-700 text-slate-200 text-sm rounded-lg hover:bg-slate-800"
+          >
+            <Plus className="w-4 h-4" />
+            Connect a server
+          </button>
         </div>
       )}
 
@@ -1019,7 +1052,9 @@ function MyServersTab({
               key={conn.id}
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
-              className="bg-slate-800/30 border border-slate-700/50 rounded-xl p-5 hover:border-slate-600/50 transition-colors group"
+              data-testid="mcp-server-card"
+              data-name={conn.server_name}
+              className="bg-slate-800/30 border border-slate-700/50 rounded-xl p-5 hover:border-slate-600/50 transition-colors group min-w-0"
             >
               <div className="flex items-start justify-between mb-3">
                 <div className="w-10 h-10 rounded-lg bg-cyan-500/10 flex items-center justify-center">
@@ -1108,6 +1143,7 @@ function MyServersTab({
                     disabled={isChecking}
                     className="text-xs text-slate-400 hover:text-white flex items-center gap-1 px-2 py-1 rounded hover:bg-slate-700/50 transition-colors disabled:opacity-50"
                     title="Health check"
+                    aria-label={`Check ${conn.server_name}`}
                   >
                     {isChecking ? (
                       <Loader2 className="w-3 h-3 animate-spin" />
@@ -1120,14 +1156,16 @@ function MyServersTab({
                       onClick={() => setDrawerConn(conn)}
                       className="text-xs text-slate-400 hover:text-white flex items-center gap-1 px-2 py-1 rounded hover:bg-slate-700/50 transition-colors"
                       title="View tools"
+                      aria-label={`View tools of ${conn.server_name}`}
                     >
                       <ExternalLink className="w-3 h-3" />
                     </button>
                   )}
                   <button
                     onClick={() => setConfirmDeleteId(conn.id)}
-                    className="text-xs text-slate-500 hover:text-red-400 px-2 py-1 rounded hover:bg-red-500/10 transition-colors opacity-0 group-hover:opacity-100"
+                    className="text-xs text-slate-500 hover:text-red-400 px-2 py-1 rounded hover:bg-red-500/10 transition-colors md:opacity-0 md:group-hover:opacity-100 focus:opacity-100"
                     title="Delete"
+                    aria-label={`Delete ${conn.server_name}`}
                   >
                     <Trash2 className="w-3 h-3" />
                   </button>
@@ -1666,11 +1704,15 @@ export default function MCPPage() {
     if (connectionsData) setConnections(connectionsData);
   }, [connectionsData]);
 
+  const [firstServer, setFirstServer] = useState<MCPConnection | null>(null);
+
   const handleCreated = (conn: MCPConnection) => {
+    if (connections.length === 0) setFirstServer(conn);
     setConnections((prev) => [conn, ...prev]);
   };
 
   const handleInstalled = (conn: MCPConnection) => {
+    if (connections.length === 0) setFirstServer(conn);
     setConnections((prev) => [conn, ...prev]);
     setActiveTab('servers');
   };
@@ -1698,13 +1740,33 @@ export default function MCPPage() {
       transition={{ duration: 0.4 }}
       className="space-y-6 max-w-[1400px]"
     >
-      {/* Header */}
-      <div>
-        <h1 className="text-2xl font-bold text-white">MCP Servers</h1>
-        <p className="text-sm text-slate-500 mt-1">
-          Connect Model Context Protocol tool servers to your agents
-        </p>
-      </div>
+      <PageHeader
+        title="MCP Servers"
+        icon={Plug}
+        purpose="Connect outside tool servers so your agents can use the tools, files and prompts they offer. For builders and admins."
+        primaryAction={{ label: 'Add Server', onClick: () => setModalOpen(true), icon: Plus }}
+        steps={[
+          'Add a server by its address, or install one from the Registry tab.',
+          'Its tools are discovered right away and show on the server card.',
+          'Add those tools to an agent in the builder. Resources and Prompts let you browse what else the server offers.',
+        ]}
+        docSlug="02-runtime/03-mcp"
+        storageKey="mcp"
+      />
+
+      {firstServer && (
+        <NextSteps
+          title={`${firstServer.server_name} is connected. What next?`}
+          testId="mcp-first-server-next"
+          onDismiss={() => setFirstServer(null)}
+          steps={[
+            { id: 'builder', label: 'Use it in an agent', hint: 'Add its tools to an agent in the builder.', icon: Bot, href: '/builder' },
+            { id: 'tools', label: 'See its tools', hint: 'Check what the server lets agents do.', icon: Wrench, onClick: () => setActiveTab('servers') },
+            { id: 'resources', label: 'Browse its resources', hint: 'Files and data the server shares.', icon: FileText, onClick: () => setActiveTab('resources') },
+            { id: 'prompts', label: 'Try its prompts', hint: 'Ready made prompts from the server.', icon: MessageSquare, onClick: () => setActiveTab('prompts') },
+          ]}
+        />
+      )}
 
       {/* Tab Navigation */}
       <div className="flex items-center gap-1 border-b border-slate-800 overflow-x-auto">

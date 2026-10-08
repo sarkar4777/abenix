@@ -14,7 +14,7 @@ from engine.mcp_security import (
     MCPSecurityPolicy,
     validate_tool_annotations,
 )
-from engine.tools.base import BaseTool, ToolRegistry, ToolResult
+from engine.tools.base import READ_ONLY, BaseTool, Effect, ToolRegistry, ToolResult
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +36,7 @@ class MCPToolWrapper(BaseTool):
 
     # reaches systems or runs code the platform did not write
     risk_tier = "medium"
+    effect = Effect(kind="external", label="Call a tool on an MCP server")
 
     def __init__(
         self,
@@ -52,6 +53,8 @@ class MCPToolWrapper(BaseTool):
         self.description = mcp_tool.description
         self.input_schema = mcp_tool.input_schema
         self.annotations = mcp_tool.annotations
+        if (self.annotations or {}).get("readOnlyHint"):
+            self.effect = READ_ONLY
         self._client = client
         self._mcp_tool = mcp_tool
         self._security_ctx = security_ctx

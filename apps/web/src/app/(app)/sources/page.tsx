@@ -17,6 +17,7 @@ import SourceForm from '@/components/sources/SourceForm';
 import SourceSettingsDialog from '@/components/sources/SourceSettingsDialog';
 import PauseDialog from '@/components/sources/PauseDialog';
 import { refreshSourceList } from '@/components/sources/refreshSourceList';
+import PageHeader from '@/components/layout/PageHeader';
 
 type Filter = 'all' | Health;
 
@@ -97,32 +98,27 @@ export default function SourcesPage() {
   }
 
   return (
-    <div className="max-w-7xl mx-auto px-6 py-8">
-      <header className="mb-6 flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2 mb-2">
-            <Radar className="w-6 h-6 text-cyan-400" />
-            <h1 className="text-3xl font-semibold text-white">Source Watch</h1>
-          </div>
-          <p className="text-slate-400 max-w-3xl">
-            Policy and tariff pages, guidance PDFs, data files and feeds checked on a schedule. Every version is kept as an
-            immutable snapshot, every change is diffed and announced as a source.changed event, and agents read and
-            cite the snapshots.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          {settings && (
-            <button type="button" onClick={() => setShowSettings(true)} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-sm text-slate-300 border border-slate-700 hover:bg-slate-800" data-testid="sources-settings">
-              <ShieldCheck className="w-4 h-4" /> Allowlist and limits
-            </button>
-          )}
-          {canManage && (
-            <button type="button" onClick={() => setAdding(true)} className="inline-flex items-center gap-1.5 px-4 py-2 rounded-md text-sm font-medium bg-cyan-500 text-white hover:bg-cyan-400" data-testid="source-add">
-              <Plus className="w-4 h-4" /> Add source
-            </button>
-          )}
-        </div>
-      </header>
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
+      <PageHeader
+        className="mb-6"
+        title="Source Watch"
+        purpose="Watch the policy pages, documents and feeds your work depends on, and see exactly what changed and when. For compliance and research teams."
+        icon={Radar}
+        storageKey="sources"
+        docSlug="08-howto/12-source-watch-and-events"
+        steps={[
+          'Add a page, PDF, spreadsheet or feed and say how often to check it.',
+          'Each check keeps a copy that never changes. The first one is the baseline.',
+          'When something changes you see a side by side diff and an event is sent.',
+          'Agents can read and quote these copies, and events can start a pipeline.',
+        ]}
+        primaryAction={canManage
+          ? { label: 'Add source', icon: Plus, onClick: () => setAdding(true), testId: 'source-add' }
+          : { label: 'Refresh', icon: RefreshCw, onClick: () => { mutate(); refreshChanges(); } }}
+        secondaryAction={settings
+          ? { label: 'Allowlist and limits', icon: ShieldCheck, onClick: () => setShowSettings(true), testId: 'sources-settings' }
+          : undefined}
+      />
 
       {notice && (
         <div
@@ -268,15 +264,15 @@ export default function SourcesPage() {
       {(changes || []).length > 0 && (
         <section className="mt-8" aria-labelledby="recent-changes">
           <h2 id="recent-changes" className="text-sm font-semibold text-white mb-3 flex items-center gap-2"><FileDiff className="w-4 h-4 text-cyan-400" /> Recent changes</h2>
-          <ul className="grid gap-2 md:grid-cols-2">
+          <ul className="grid grid-cols-1 gap-2 md:grid-cols-2">
             {(changes || []).map((c) => (
-              <li key={c.id}>
+              <li key={c.id} className="min-w-0">
                 <Link href={`/sources/${c.source_id}?change=${c.id}`} className="block rounded-xl border border-slate-800 bg-slate-900/40 p-3 hover:border-slate-600">
                   <div className="flex items-center justify-between gap-2">
-                    <span className="text-sm font-medium text-white truncate">{c.source_name}</span>
+                    <span className="min-w-0 text-sm font-medium text-white truncate">{c.source_name}</span>
                     <span className={`shrink-0 text-[11px] px-1.5 py-0.5 rounded border ${HINT_STYLE[c.materiality_hint].chip}`}>{HINT_STYLE[c.materiality_hint].label}</span>
                   </div>
-                  <p className="text-xs text-slate-400 mt-1 line-clamp-2">{c.summary}</p>
+                  <p className="text-xs text-slate-400 mt-1 line-clamp-2 break-words">{c.summary}</p>
                   <div className="text-[11px] text-slate-500 mt-1" title={when(c.detected_at)}>{ago(c.detected_at)}</div>
                 </Link>
               </li>
@@ -292,7 +288,7 @@ export default function SourcesPage() {
             setAdding(false);
             // refresh the cached list now so going back shows the new source
             await refreshSourceList();
-            router.push(`/sources/${s.id}`);
+            router.push(`/sources/${s.id}?new=1`);
           }}
         />
       )}

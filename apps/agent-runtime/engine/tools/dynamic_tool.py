@@ -14,7 +14,7 @@ import threading
 import types
 from typing import Any
 
-from engine.tools.base import BaseTool, ToolResult
+from engine.tools.base import READ_ONLY, BaseTool, Effect, ToolResult
 
 logger = logging.getLogger(__name__)
 
@@ -370,6 +370,9 @@ class DynamicTool(BaseTool):
 
     # reaches systems or runs code the platform did not write
     risk_tier = "medium"
+    effect = Effect(
+        kind="external", label="Run a saved tool that can reach the network"
+    )
 
     def __init__(
         self,
@@ -384,6 +387,10 @@ class DynamicTool(BaseTool):
         self.description = tool_description
         self._code = tool_code
         self._permissions = permissions or {}
+        if not (
+            self._permissions.get("network") or self._permissions.get("third_party")
+        ):
+            self.effect = READ_ONLY
         tool_params = tool_params or []
         if isinstance(input_schema, dict) and isinstance(
             input_schema.get("properties"), dict

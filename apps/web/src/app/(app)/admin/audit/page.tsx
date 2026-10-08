@@ -1,10 +1,10 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { ScrollText, RefreshCw, AlertTriangle, Settings as SettingsIcon, UserCog, Mail } from 'lucide-react';
 import { apiFetch } from '@/lib/api-client';
-import { toastError } from '@/stores/toastStore';
+import PageHeader from '@/components/layout/PageHeader';
+import { AccessGate } from '@/components/layout/NoAccess';
 
 interface AuditRow {
   actor: string;
@@ -86,8 +86,7 @@ function kindBadge(kind: AuditRow['kind']) {
   );
 }
 
-export default function AuditLogPage() {
-  const router = useRouter();
+function AuditLogPage() {
   const [rows, setRows] = useState<AuditRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
@@ -121,12 +120,10 @@ export default function AuditLogPage() {
       if (cancelled) return;
 
       if (settingsRes.error && teamRes.error) {
-        // Surface admin gate, but don't kick the user out — the layout
-        // takes care of that. We just say what happened.
         if ((settingsRes.error || '').toLowerCase().includes('403')
             || (settingsRes.error || '').toLowerCase().includes('forbid')) {
-          toastError('Admin role required', 'You do not have permission to view the audit log.');
-          router.push('/dashboard');
+          setErr('Only admins can see the audit log. Ask an admin if you need this.');
+          setLoading(false);
           return;
         }
         setErr(settingsRes.error || teamRes.error || 'Could not load audit data');
@@ -194,7 +191,7 @@ export default function AuditLogPage() {
     })();
 
     return () => { cancelled = true; };
-  }, [refreshKey, router]);
+  }, [refreshKey]);
 
   const counts = useMemo(() => {
     const c = { setting: 0, role: 0, invite: 0, admin: 0 };
@@ -204,29 +201,33 @@ export default function AuditLogPage() {
 
   return (
     <div className="max-w-6xl mx-auto p-6" data-testid="admin-audit">
-      <header className="mb-6 flex items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-cyan-500/10 ring-1 ring-cyan-500/40 flex items-center justify-center">
-            <ScrollText className="w-5 h-5 text-cyan-300" />
-          </div>
-          <div>
-            <p className="text-[10px] uppercase tracking-wider text-slate-500">Admin · platform</p>
-            <h1 className="text-2xl font-bold text-white">Audit Log</h1>
-            <p className="text-sm text-slate-400">
-              {fromNative
-                ? 'Recent admin actions across settings, roles, billing and tenant mutations.'
-                : 'Stand-in view assembled from settings updates and team membership changes.'}
-            </p>
-          </div>
-        </div>
-        <button
-          onClick={() => setRefreshKey((k) => k + 1)}
-          className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-slate-700/60 bg-slate-900/40 text-slate-300 hover:bg-slate-800/60"
-          data-testid="audit-refresh"
-        >
-          <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} /> Refresh
-        </button>
-      </header>
+      <PageHeader
+        className="mb-6"
+        title="Audit Log"
+        purpose="See who changed settings, roles and invites in this workspace and when. For admins."
+        icon={ScrollText}
+        storageKey="admin-audit"
+        docSlug="08-howto/11-governance"
+        primaryAction={{
+          label: 'Refresh',
+          icon: RefreshCw,
+          busy: loading,
+          onClick: () => setRefreshKey((k) => k + 1),
+          testId: 'audit-refresh',
+        }}
+        steps={[
+          'Changed settings, new members and pending invites are listed newest first.',
+          'The counters show how many of each kind are in the list.',
+          'Click Refresh to pick up changes made since the page opened.',
+        ]}
+        howItWorks={
+          <p className="text-xs text-slate-400">
+            {fromNative
+              ? 'This list comes from the full audit trail, so it also covers billing and workspace changes.'
+              : 'This list is built from settings updates and team changes, so older or deleted entries may be missing.'}
+          </p>
+        }
+      />
 
       {err && (
         <div className="mb-4 p-4 rounded-xl border border-red-500/40 bg-red-500/10 text-red-300 text-sm flex items-start gap-3">
@@ -301,5 +302,18 @@ export default function AuditLogPage() {
         </p>
       )}
     </div>
+  );
+}
+
+export default function AuditLogPageGated() {
+  return (
+    <AccessGate
+      title="Audit Log"
+      purpose="See who changed settings, roles and invites in this workspace and when. For admins."
+      icon={ScrollText}
+      need={{ admin: true }}
+    >
+      <AuditLogPage />
+    </AccessGate>
   );
 }

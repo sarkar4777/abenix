@@ -1,8 +1,9 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { Coins, Edit2, Save, X, Loader2, AlertTriangle } from 'lucide-react';
+import { BarChart3, Coins, Edit2, Save, X, Loader2, AlertTriangle, RefreshCw } from 'lucide-react';
 import { apiFetch } from '@/lib/api-client';
+import PageHeader from '@/components/layout/PageHeader';
 
 interface UserQuota {
   id: string;
@@ -61,18 +62,23 @@ export default function QuotasPage() {
 
   return (
     <div className="p-6 max-w-5xl mx-auto space-y-6">
-      <div>
-        <h1 className="text-xl font-bold text-white flex items-center gap-2">
-          <Coins className="w-5 h-5 text-cyan-400" />
-          Token Quotas & Usage
-        </h1>
-        <p className="text-sm text-slate-400 mt-1">
-          Monthly token and cost limits for each team member. Leave a limit blank for no limit.
-        </p>
-      </div>
+      <PageHeader
+        title="Token Quotas & Usage"
+        icon={Coins}
+        purpose="Monthly token and cost limits for each team member, and how much each has used. For workspace admins."
+        primaryAction={{ label: 'Refresh', icon: RefreshCw, onClick: fetchUsers, busy: loading }}
+        secondaryAction={{ label: 'Open Analytics', icon: BarChart3, href: '/analytics' }}
+        steps={[
+          'Press the pencil on a person to set their monthly token and cost limits.',
+          'Leave a limit blank for no limit.',
+          'Someone over their limit cannot start new runs until the next reset.',
+          'Limits reset on the 1st of each month.',
+        ]}
+        storageKey="settings-quotas"
+      />
 
       {/* Summary cards */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className="bg-slate-800/30 border border-slate-700/50 rounded-xl p-4">
           <p className="text-xs text-slate-500 uppercase">Team Members</p>
           <p className="text-2xl font-bold text-white mt-1">{users.length}</p>
@@ -92,8 +98,8 @@ export default function QuotasPage() {
       </div>
 
       {/* User table */}
-      <div className="rounded-xl border border-slate-700/50 bg-slate-800/30 overflow-hidden">
-        <table className="w-full text-sm">
+      <div className="rounded-xl border border-slate-700/50 bg-slate-800/30 overflow-x-auto">
+        <table className="w-full min-w-[640px] text-sm">
           <thead>
             <tr className="border-b border-slate-700/50">
               <th className="text-left py-3 px-4 text-slate-400 font-medium">User</th>

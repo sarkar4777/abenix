@@ -45,7 +45,10 @@ async def create_trigger(
     """Create a webhook or schedule trigger for an agent."""
     agent_id = body.get("agent_id")
     trigger_type = body.get("trigger_type", "webhook")
-    name = body.get("name", "")
+    name = body.get("name") or ""
+    if not isinstance(name, str) or len(name.strip()) > 255:
+        return error("name must be text of at most 255 characters", 400)
+    name = name.strip()
     # Validate default_context is dict if provided
     if body.get("default_context") is not None and not isinstance(
         body.get("default_context"), dict
@@ -133,6 +136,7 @@ async def list_triggers(
     trigger_type: str = Query("", description="Filter: webhook, schedule"),
     sort: str = Query("newest", description="Sort: newest, oldest, name"),
     agent_id: str = Query("", description="Only triggers for this agent"),
+    trigger_id: str = Query("", description="Only this trigger, for links from a run"),
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
     user: User = Depends(get_current_user),
@@ -159,11 +163,25 @@ async def list_triggers(
             query = query.where(AgentTrigger.agent_id == uuid.UUID(agent_id))
         except ValueError:
             return error("agent_id is not a valid id", 400)
+    if trigger_id:
+        try:
+            query = query.where(AgentTrigger.id == uuid.UUID(trigger_id))
+        except ValueError:
+            return error("trigger_id is not a valid id", 400)
 
     if search:
-        query = query.where(AgentTrigger.name.ilike(f"%{search}%"))
+        # rows show the agent name, so match on it too
+        query = query.where(
+            or_(
+                AgentTrigger.name.ilike(f"%{search}%"),
+                Agent.name.ilike(f"%{search}%"),
+            )
+        )
     if trigger_type:
         query = query.where(AgentTrigger.trigger_type == trigger_type)
+
+    # count the same rows the page lists
+    total = await db.scalar(select(func.count()).select_from(query.subquery())) or 0
 
     # Sort
     if sort == "oldest":
@@ -173,20 +191,12 @@ async def list_triggers(
     else:  # newest (default)
         query = query.order_by(AgentTrigger.created_at.desc())
 
-    # Count total before pagination
-    count_base = select(AgentTrigger).where(AgentTrigger.tenant_id == user.tenant_id)
-    if search:
-        count_base = count_base.where(AgentTrigger.name.ilike(f"%{search}%"))
-    if trigger_type:
-        count_base = count_base.where(AgentTrigger.trigger_type == trigger_type)
-    count_query = select(func.count()).select_from(count_base.subquery())
-    total = await db.scalar(count_query) or 0
-
     # Apply pagination
     query = query.limit(limit).offset(offset)
 
     result = await db.execute(query)
     rows = result.all()
+    recent = await recent_runs(db, user.tenant_id, [t.id for t, _ in rows])
     data = [
         {
             "id": str(t.id),
@@ -204,10 +214,105 @@ async def list_triggers(
             "last_run_at": t.last_run_at.isoformat() if t.last_run_at else None,
             "run_count": t.run_count,
             "last_status": t.last_status,
+            "recent_runs": recent.get(t.id, []),
         }
         for t, agent_name in rows
     ]
     return success(data, meta={"total": total, "limit": limit, "offset": offset})
+
+
+RECENT_RUNS = 5
+
+
+def _run_row(e: Any) -> dict[str, Any]:
+    status = e.status.value if hasattr(e.status, "value") else str(e.status)
+    return {
+        "id": str(e.id),
+        "status": status.lower(),
+        "trigger_kind": e.trigger_kind,
+        "created_at": e.created_at.isoformat() if e.created_at else None,
+        "duration_ms": e.duration_ms,
+        "failure_code": e.failure_code,
+    }
+
+
+async def recent_runs(
+    db: AsyncSession, tenant_id: Any, trigger_ids: list[Any], n: int = RECENT_RUNS
+) -> dict[Any, list[dict[str, Any]]]:
+    """The newest n runs of each trigger, in one query."""
+    from models.execution import Execution
+
+    if not trigger_ids:
+        return {}
+    rank = (
+        func.row_number()
+        .over(partition_by=Execution.trigger_id, order_by=Execution.created_at.desc())
+        .label("rank")
+    )
+    inner = (
+        select(Execution.id, rank)
+        .where(
+            Execution.tenant_id == tenant_id,
+            Execution.trigger_id.in_(trigger_ids),
+        )
+        .subquery()
+    )
+    rows = (
+        (
+            await db.execute(
+                select(Execution)
+                .join(inner, inner.c.id == Execution.id)
+                .where(inner.c.rank <= n)
+                .order_by(Execution.created_at.desc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+    out: dict[Any, list[dict[str, Any]]] = {}
+    for e in rows:
+        out.setdefault(e.trigger_id, []).append(_run_row(e))
+    return out
+
+
+@router.get("/{trigger_id}/runs")
+async def list_trigger_runs(
+    trigger_id: uuid.UUID,
+    limit: int = Query(20, ge=1, le=100),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Any:
+    """Runs this trigger started, newest first."""
+    from models.execution import Execution
+
+    trigger = (
+        await db.execute(
+            select(AgentTrigger).where(
+                AgentTrigger.id == trigger_id,
+                AgentTrigger.tenant_id == user.tenant_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if not trigger or not await _can_manage(db, user, trigger):
+        return error("Trigger not found", 404)
+    where = [Execution.tenant_id == user.tenant_id, Execution.trigger_id == trigger.id]
+    total = await db.scalar(select(func.count(Execution.id)).where(*where)) or 0
+    rows = (
+        (
+            await db.execute(
+                select(Execution)
+                .where(*where)
+                .order_by(Execution.created_at.desc())
+                .limit(limit)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return success(
+        [_run_row(e) for e in rows],
+        meta={"total": total, "trigger_name": trigger.name},
+    )
 
 
 async def _can_manage(db: AsyncSession, user: User, trigger: AgentTrigger) -> bool:
@@ -393,6 +498,8 @@ async def dispatch_execution(
     trigger_id: str | None = None,
     parent_execution_id: uuid.UUID | None = None,
     execution: Any = None,
+    trigger_kind: str | None = None,
+    trigger_name: str | None = None,
 ) -> tuple[Any, bool]:
     """Create (or take) a RUNNING execution and hand it to the runtime.
 
@@ -401,6 +508,7 @@ async def dispatch_execution(
     this process. Returns (execution, dispatched). On a queue failure the
     execution is marked FAILED so nothing is left RUNNING.
     """
+    from app.core import run_origin
     from app.core.config import settings
     from models.execution import Execution, ExecutionStatus
 
@@ -420,9 +528,16 @@ async def dispatch_execution(
             started_at=datetime.now(timezone.utc),
             parent_execution_id=parent_execution_id,
         )
+        run_origin.stamp(
+            execution, trigger_kind, trigger_id=trigger_id, name=trigger_name
+        )
         db.add(execution)
         await db.commit()
         await db.refresh(execution)
+    elif trigger_kind:
+        run_origin.stamp(
+            execution, trigger_kind, trigger_id=trigger_id, name=trigger_name
+        )
 
     from engine.agent_budget import BUDGET_EXCEEDED, check_agent_budget
 
@@ -605,9 +720,9 @@ async def write_trigger_outcome(
 ) -> bool:
     """Stamp last_status / last_run_at on the trigger that fired this execution.
 
-    Executions do not carry a trigger column, so the id comes from the queue
-    payload. A failed outcome also notifies the owner, which is where the
-    error text lands since agent_triggers has no last_error column.
+    The id comes from the queue payload, or from executions.trigger_id when the
+    message had none. A failed outcome also notifies the owner, which is where
+    the error text lands since agent_triggers has no last_error column.
     """
     if not trigger_id:
         return False
@@ -719,6 +834,8 @@ async def receive_webhook(
         message=message,
         context=context,
         trigger_id=str(trigger.id),
+        trigger_kind="webhook",
+        trigger_name=trigger.name,
     )
     if not dispatched:
         trigger.last_status = "failed"
@@ -917,6 +1034,8 @@ async def run_trigger_now(
             trigger.default_context if isinstance(trigger.default_context, dict) else {}
         ),
         trigger_id=str(trigger.id),
+        trigger_kind="manual",
+        trigger_name=trigger.name,
     )
     if not dispatched:
         trigger.last_status = "failed"

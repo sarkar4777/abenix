@@ -5,12 +5,15 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from engine.tools.base import BaseTool, ToolResult
+from engine.tools.base import BaseTool, Effect, ToolResult
 
 
 class DatabaseWriterTool(BaseTool):
     name = "database_writer"
     risk_tier = "high"
+    effect = Effect(
+        kind="write", label="Write rows to a database table", target_param="table"
+    )
     description = (
         "Write data to PostgreSQL tables (INSERT or UPSERT). "
         "Tables must be prefixed with 'af_' for safety. Max 10,000 rows per call. "

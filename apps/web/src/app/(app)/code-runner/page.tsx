@@ -14,6 +14,8 @@ import ResourceShareDialog from '@/components/share/ResourceShareDialog';
 import InvocationsTable from '@/components/observability/InvocationsTable';
 import OwnerBadge from '@/components/OwnerBadge';
 import DeleteWithDependents from '@/components/ui/DeleteWithDependents';
+import PageHeader from '@/components/layout/PageHeader';
+import NextSteps from '@/components/shared/NextSteps';
 
 interface AnalysisNote {
   level: 'info' | 'warn' | 'error';
@@ -78,15 +80,23 @@ export default function CodeRunnerPage() {
   // poll while an upload is still being analysed, otherwise the badge never moves
   const { data: assets, mutate } = useApi<CodeAsset[]>('/api/code-assets', pending ? { refreshInterval: 3000 } : undefined);
   const [selected, setSelected] = useState<CodeAsset | null>(null);
+  // the asset we just created, until analysis ends
+  const [watchId, setWatchId] = useState<string | null>(null);
+  const [readyAsset, setReadyAsset] = useState<CodeAsset | null>(null);
   useEffect(() => {
     setPending((assets || []).some(a => PENDING_STATUSES.includes(a.status)));
+    if (watchId) {
+      const w = (assets || []).find(a => a.id === watchId);
+      if (w && w.status === 'ready') { setReadyAsset(w); setWatchId(null); }
+      else if (w && w.status === 'failed') setWatchId(null);
+    }
     // the open asset follows the list, so Run enables when analysis finishes
     setSelected(sel => {
       if (!sel) return sel;
       const fresh = (assets || []).find(a => a.id === sel.id);
       return fresh && fresh.status !== sel.status ? { ...sel, ...fresh } : sel;
     });
-  }, [assets]);
+  }, [assets, watchId]);
 
   // Inline JSON lint state for the schema textareas — replaces the
   // alert() blocker so users see the error next to the field.
@@ -108,6 +118,7 @@ export default function CodeRunnerPage() {
   const [versionBusy, setVersionBusy] = useState(false);
   const [versionError, setVersionError] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
+  const nameRef = useRef<HTMLInputElement>(null);
 
   // test form
   const [testInput, setTestInput] = useState('{}');
@@ -146,7 +157,13 @@ export default function CodeRunnerPage() {
       fd.append('metadata', JSON.stringify({
         name: newName, description: newDesc, git_url: newGitUrl, git_ref: newGitRef,
       }));
-      await apiFetch<CodeAsset>('/api/code-assets', { method: 'POST', body: fd, headers: {} });
+      const res = await apiFetch<CodeAsset>('/api/code-assets', { method: 'POST', body: fd, headers: {} });
+      const created = res?.data;
+      if (created?.id) {
+        setReadyAsset(null);
+        if (created.status === 'ready') setReadyAsset(created);
+        else setWatchId(created.id);
+      }
       setNewName(''); setNewDesc(''); setNewZip(null); setNewGitUrl(''); setNewGitRef('');
       if (fileRef.current) fileRef.current.value = '';
       toastSuccess('Asset created', `Analyzing ${newName}…`);
@@ -243,9 +260,19 @@ export default function CodeRunnerPage() {
     setSavingMeta(false);
   };
 
+  const agentHrefFor = (id: string) => `/builder?tool=code_asset&asset_id=${encodeURIComponent(id)}`;
   const handleUseInAgent = () => {
     if (!selected) return;
-    router.push(`/builder?tool=code_asset&asset_id=${encodeURIComponent(selected.id)}`);
+    router.push(agentHrefFor(selected.id));
+  };
+
+  const goToTest = (a: CodeAsset) => {
+    setSelected(a);
+    setTimeout(() => {
+      const el = document.querySelector('[data-testid="code-test-input"]') as HTMLTextAreaElement | null;
+      el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      el?.focus({ preventScroll: true });
+    }, 50);
   };
 
   const handleTest = async () => {
@@ -273,28 +300,45 @@ export default function CodeRunnerPage() {
   };
 
   return (
-    <div className="min-h-screen bg-[#0B0F19] p-6">
+    <div className="min-h-screen bg-[#0B0F19] p-4 sm:p-6">
       <div className="max-w-7xl mx-auto space-y-6">
-        {/* Header */}
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500/20 to-cyan-500/20 flex items-center justify-center">
-            <Code2 className="w-5 h-5 text-indigo-400" />
-          </div>
-          <div>
-            <h1 className="text-xl font-bold text-white">Code Runner</h1>
-            <p className="text-sm text-slate-400">Upload a zip or git repo. We analyze, suggest an image + commands, and expose it as a pipeline-callable tool (code_asset).</p>
-          </div>
-        </div>
+        <PageHeader
+          title="Code Runner"
+          purpose="Bring your own code as a zip or git repo and turn it into a tool your agents and pipelines can call. For developers."
+          icon={Code2}
+          iconClassName="text-indigo-400"
+          storageKey="code-runner"
+          docSlug="02-runtime/11-sandboxed-code-execution"
+          steps={[
+            'Give it a name, then upload a zip or paste a git link.',
+            'We read the code and suggest the language, image and run command. You can edit them.',
+            'Try it with a test input to check the output looks right.',
+            'Use in Agent adds it to an agent as a tool. New versions go live without rewiring.',
+          ]}
+          primaryAction={{ label: 'New code asset', icon: Upload, onClick: () => { nameRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }); nameRef.current?.focus({ preventScroll: true }); }, testId: 'code-new-asset' }}
+        />
 
-        <div className="grid grid-cols-12 gap-6">
+        {readyAsset && (
+          <NextSteps
+            title={`${readyAsset.name} is ready. What next?`}
+            testId="code-next-steps"
+            onDismiss={() => setReadyAsset(null)}
+            steps={[
+              { id: 'test', label: 'Try a test run', hint: 'Send sample input and check the output.', icon: Play, onClick: () => goToTest(readyAsset) },
+              { id: 'agent', label: 'Use in an agent', hint: 'Open the builder with this code as a tool.', icon: Workflow, href: agentHrefFor(readyAsset.id) },
+            ]}
+          />
+        )}
+
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
           {/* Left: upload + list */}
-          <div className="col-span-4 space-y-4">
+          <div className="lg:col-span-4 space-y-4 min-w-0">
             <div className="bg-slate-800/30 border border-slate-700/50 rounded-xl p-4">
               <h3 className="text-xs font-semibold text-white uppercase tracking-wider mb-3 flex items-center gap-2">
                 <Upload className="w-3.5 h-3.5 text-indigo-400" /> New asset
               </h3>
               <div className="space-y-2">
-                <input type="text" value={newName} onChange={e => setNewName(e.target.value)}
+                <input ref={nameRef} type="text" value={newName} onChange={e => setNewName(e.target.value)}
                   placeholder="Name (e.g. sentiment-scorer)"
                   className="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white" />
                 <input type="text" value={newDesc} onChange={e => setNewDesc(e.target.value)}
@@ -365,7 +409,7 @@ export default function CodeRunnerPage() {
           </div>
 
           {/* Right: detail */}
-          <div className="col-span-8 space-y-4">
+          <div className="lg:col-span-8 space-y-4 min-w-0">
             {!selected ? (
               <div className="bg-slate-800/30 border border-slate-700/50 rounded-xl p-12 text-center">
                 <Code2 className="w-12 h-12 text-indigo-400/30 mx-auto mb-3" />

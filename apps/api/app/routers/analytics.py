@@ -8,11 +8,13 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse
-from sqlalchemy import case, func, or_, select
+from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, get_db, require_role
+from app.core.permissions import sees_other_users_resources
 from app.core.responses import error, success
+from app.routers.llm_models import _subscription_state
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "packages" / "db"))
 
@@ -122,6 +124,7 @@ async def get_overview(
             "total_tokens": total_input_tokens + total_output_tokens,
             "cache_hit_rate": cache_hit_rate,
             "period": period,
+            "flat_rate_billing": (await _subscription_state(db))["active"],
         }
     )
 
@@ -257,8 +260,21 @@ async def get_token_breakdown(
         {
             "by_model": by_model,
             "daily_tokens": daily_tokens,
+            "flat_rate_billing": (await _subscription_state(db))["active"],
         }
     )
+
+
+def _by_usage() -> list[Any]:
+    """Most spend first, then most tokens, so flat-rate runs at $0 still rank by use."""
+    tokens = func.coalesce(func.sum(Execution.input_tokens), 0) + func.coalesce(
+        func.sum(Execution.output_tokens), 0
+    )
+    return [
+        func.coalesce(func.sum(Execution.cost), 0).desc(),
+        tokens.desc(),
+        func.count(Execution.id).desc(),
+    ]
 
 
 @router.get("/costs")
@@ -287,7 +303,7 @@ async def get_cost_breakdown(
             *_base_filters(user.tenant_id, start, agent_id),
         )
         .group_by(Execution.agent_id, Agent.name, Agent.icon_url, Agent.category)
-        .order_by(func.sum(Execution.cost).desc())
+        .order_by(*_by_usage())
         .limit(20)
     )
     result = await db.execute(by_agent_q)
@@ -332,6 +348,27 @@ async def get_cost_breakdown(
         {
             "by_agent": by_agent,
             "daily_costs": daily_costs,
+            "flat_rate_billing": (await _subscription_state(db))["active"],
+        }
+    )
+
+
+@router.get("/billing-mode")
+async def get_billing_mode(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """Whether runs are billed on a flat-rate Claude subscription, for cost labels."""
+    state = await _subscription_state(db)
+    return success(
+        {
+            "flat_rate_billing": state["active"],
+            "label": "Claude subscription" if state["active"] else None,
+            "note": (
+                "Claude runs use a flat-rate subscription, so they show $0 per run."
+                if state["active"]
+                else None
+            ),
         }
     )
 
@@ -344,6 +381,10 @@ async def get_live_stats(
     tenant_id = user.tenant_id
     now = datetime.now(timezone.utc)
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    # same scope as the executions list the cards link to
+    scope = [Execution.tenant_id == tenant_id]
+    if not sees_other_users_resources(user):
+        scope.append(Execution.user_id == user.id)
 
     # Single aggregated query instead of 7 sequential ones (perf: ~100ms vs ~1.5s)
     from sqlalchemy import case
@@ -389,7 +430,7 @@ async def get_live_stats(
                 ),
                 0,
             ).label("today_output_tokens"),
-        ).where(Execution.tenant_id == tenant_id)
+        ).where(*scope)
     )
     row = stats_result.one()
     active_executions = row.active or 0
@@ -405,11 +446,26 @@ async def get_live_stats(
         round(today_completed / today_total * 100, 1) if today_total > 0 else 100.0
     )
 
-    # Count agents visible to user (own tenant + OOB agents)
+    # same visibility as the All tab on /agents
+    if sees_other_users_resources(user):
+        visible = or_(Agent.tenant_id == tenant_id, Agent.agent_type == AgentType.OOB)
+    else:
+        from app.core.permissions import accessible_resource_ids
+
+        shared = list(await accessible_resource_ids(db, user, kind="agent"))
+        visible = or_(
+            and_(
+                Agent.tenant_id == tenant_id,
+                or_(
+                    Agent.creator_id == user.id,
+                    Agent.id.in_(shared or [uuid.UUID(int=0)]),
+                ),
+            ),
+            Agent.agent_type == AgentType.OOB,
+        )
     agent_count_result = await db.execute(
         select(func.count(Agent.id)).where(
-            or_(Agent.tenant_id == tenant_id, Agent.agent_type == AgentType.OOB),
-            Agent.status != AgentStatus.ARCHIVED,
+            visible, Agent.status != AgentStatus.ARCHIVED
         )
     )
     total_agents = agent_count_result.scalar() or 0
@@ -426,6 +482,7 @@ async def get_live_stats(
             "today_input_tokens": today_input_tokens,
             "today_output_tokens": today_output_tokens,
             "today_total_tokens": today_total_tokens,
+            "flat_rate_billing": (await _subscription_state(db))["active"],
         }
     )
 

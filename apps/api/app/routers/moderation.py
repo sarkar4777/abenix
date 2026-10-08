@@ -34,7 +34,12 @@ from models.user import User, UserRole
 # Engine-side imports — we reuse the same evaluate() the gate uses so
 # /vet stays byte-identical to what an agent run would see.
 sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "apps" / "agent-runtime"))
-from engine.moderation_client import evaluate, content_hash  # noqa: E402
+from engine.moderation_client import (  # noqa: E402
+    content_hash,
+    evaluate,
+    mask_spans,
+    pattern_spans,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -113,6 +118,39 @@ def _normalise_custom_patterns(
     return parsed.custom_patterns, None
 
 
+HOLD_TIMEOUT_MAX = 7 * 24 * 60
+
+
+def _hold_settings(body: dict) -> tuple[dict[str, Any], JSONResponse | None]:
+    """Timeout minutes and what happens when they run out, checked at the edge."""
+    out: dict[str, Any] = {}
+    if "hold_timeout_minutes" in body:
+        raw = body.get("hold_timeout_minutes")
+        try:
+            n = int(raw)
+            if isinstance(raw, bool) or float(raw) != n:
+                raise ValueError
+        except (TypeError, ValueError):
+            return out, error(
+                "The review time limit must be a whole number of minutes.", 422
+            )
+        if n < 1 or n > HOLD_TIMEOUT_MAX:
+            return out, error(
+                f"The review time limit must be between 1 and {HOLD_TIMEOUT_MAX} minutes (7 days).",
+                422,
+            )
+        out["hold_timeout_minutes"] = n
+    if "hold_timeout_action" in body:
+        act = str(body.get("hold_timeout_action") or "").lower()
+        if act not in ("reject", "release"):
+            return out, error(
+                "When the time runs out the content is either rejected or released.",
+                422,
+            )
+        out["hold_timeout_action"] = act
+    return out, None
+
+
 def _policy_dict(p: ModerationPolicy) -> dict[str, Any]:
     return {
         "id": str(p.id),
@@ -136,6 +174,8 @@ def _policy_dict(p: ModerationPolicy) -> dict[str, Any]:
         "custom_patterns": p.custom_patterns or [],
         "redaction_mask": p.redaction_mask,
         "fail_closed": bool(p.fail_closed),
+        "hold_timeout_minutes": int(getattr(p, "hold_timeout_minutes", 60) or 60),
+        "hold_timeout_action": getattr(p, "hold_timeout_action", "reject") or "reject",
         "created_at": p.created_at.isoformat() if p.created_at else None,
         "updated_at": p.updated_at.isoformat() if p.updated_at else None,
     }
@@ -310,7 +350,12 @@ async def vet(
             else ModerationEventOutcome.ERROR
         ),
         content_sha256=content_hash(content),
-        content_preview=content[:500],
+        # what matched never lands in the event log, provider categories included
+        content_preview=mask_spans(
+            content,
+            list(decision.spans or []) + pattern_spans(content, custom_patterns),
+            redaction_mask,
+        )[:500],
         provider_response=persisted_provider_response,
         acted_categories=decision.triggered_categories,
         latency_ms=decision.latency_ms,
@@ -401,6 +446,9 @@ async def create_policy(
     patterns_normalised, err = _normalise_custom_patterns(body)
     if err is not None:
         return err
+    hold_cfg, err = _hold_settings(body)
+    if err is not None:
+        return err
 
     # Respect "only one active at a time" semantics: if the new policy
     # is active, deactivate others.
@@ -431,6 +479,8 @@ async def create_policy(
         custom_patterns=patterns_normalised if patterns_normalised is not None else [],
         redaction_mask=str(body.get("redaction_mask") or "█████"),
         fail_closed=bool(body.get("fail_closed", False)),
+        hold_timeout_minutes=hold_cfg.get("hold_timeout_minutes", 60),
+        hold_timeout_action=hold_cfg.get("hold_timeout_action", "reject"),
         created_by=user.id,
     )
     db.add(p)
@@ -503,6 +553,11 @@ async def update_policy(
     patterns_normalised, err = _normalise_custom_patterns(body)
     if err is not None:
         return err
+    hold_cfg, err = _hold_settings(body)
+    if err is not None:
+        return err
+    for k, v in hold_cfg.items():
+        setattr(p, k, v)
 
     # Enforce single-active: if toggling to active, deactivate others.
     if body.get("is_active") is True and not p.is_active:
@@ -654,3 +709,301 @@ async def list_events(
     q = q.order_by(desc(ModerationEvent.created_at)).limit(limit)
     rows = (await db.execute(q)).scalars().all()
     return success([_event_dict(r) for r in rows])
+
+
+# ── human review inbox ───────────────────────────────────────────
+
+
+def _review_error(exc: Any) -> JSONResponse:
+    return error(exc.message, exc.code, error_code=exc.error_code or None)
+
+
+async def _can_review(db: AsyncSession, user: User) -> bool:
+    from app.core.capabilities import has_capability
+    from app.services.moderation_review import REVIEW_CAP
+
+    return await has_capability(db, user, REVIEW_CAP)
+
+
+_NO_REVIEW = (
+    "Reviewing held content needs the moderation.review capability. "
+    "An admin can grant it under Admin, Permissions."
+)
+
+
+@router.get("/reviews")
+async def list_reviews(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    status: str = Query("pending"),
+    assigned: str = Query("any"),
+    priority: int | None = Query(None, ge=1, le=3),
+    page: int = Query(1, ge=1, le=10_000),
+    limit: int = Query(25, ge=1, le=100),
+) -> JSONResponse:
+    from app.services import moderation_review as mr
+
+    if not await _can_review(db, user):
+        return error(_NO_REVIEW, 403, error_code="NEEDS_MODERATION_REVIEW")
+    items, total = await mr.list_reviews(
+        db,
+        user.tenant_id,
+        user.id,
+        status=status,
+        assigned=assigned,
+        priority=priority,
+        page=page,
+        limit=limit,
+    )
+    counts = await mr.queue_counts(db, user.tenant_id, user.id)
+    return success(
+        items,
+        meta={"total": total, "page": page, "limit": limit, "counts": counts},
+    )
+
+
+@router.get("/reviews/count")
+async def review_count(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    from app.services import moderation_review as mr
+
+    if not await _can_review(db, user):
+        return success({"pending": 0, "can_review": False})
+    counts = await mr.queue_counts(db, user.tenant_id, user.id)
+    return success({**counts, "can_review": True})
+
+
+@router.post("/reviews/bulk")
+async def bulk_review(
+    body: dict,
+    request: Request,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """The same action on many reviews. Each one succeeds or says why it did not."""
+    from app.services import moderation_review as mr
+
+    if not await _can_review(db, user):
+        return error(_NO_REVIEW, 403, error_code="NEEDS_MODERATION_REVIEW")
+    action = str(body.get("action") or "").lower()
+    if action not in ("claim", "unassign", "release", "reject"):
+        return error("Bulk actions are claim, unassign, release or reject.", 400)
+    ids = [str(i) for i in (body.get("ids") or []) if i][: mr.MAX_BULK]
+    if not ids:
+        return error("Select at least one item.", 400)
+    if action == "reject" and not str(body.get("reason") or "").strip():
+        return error(
+            "Say why you are rejecting them. The people who wrote them see this reason.",
+            400,
+            error_code="REASON_REQUIRED",
+        )
+    done: list[Any] = []
+    failed: list[dict[str, str]] = []
+    for rid in ids:
+        try:
+            async with db.begin_nested():
+                r = await _act(
+                    db,
+                    user,
+                    rid,
+                    {"action": action, "reason": body.get("reason")},
+                    request,
+                )
+            done.append(r)
+        except mr.ReviewError as exc:
+            failed.append({"id": rid, "message": exc.message})
+    await db.commit()
+    if action in ("release", "reject"):
+        for r in done:
+            await mr.after_decision(db, r)
+    else:
+        await mr.push_queue(db, user.tenant_id)
+    return success({"done": [str(r.id) for r in done], "failed": failed})
+
+
+@router.get("/reviews/{review_id}")
+async def get_review(
+    review_id: str,
+    request: Request,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    from app.services import moderation_review as mr
+
+    if not await _can_review(db, user):
+        return error(_NO_REVIEW, 403, error_code="NEEDS_MODERATION_REVIEW")
+    try:
+        r = await mr.get_review(db, user.tenant_id, review_id)
+    except mr.ReviewError as exc:
+        return _review_error(exc)
+    data = (await mr.serialize_many(db, [r], user.id, full=True))[0]
+    if r.held_content is not None:
+        # who read the full held text is part of the record
+        await log_action(
+            db,
+            user.tenant_id,
+            user.id,
+            action="moderation_review_viewed",
+            details={"source": r.source},
+            request=request,
+            resource_type="moderation_review",
+            resource_id=str(r.id),
+        )
+        await db.commit()
+    return success(data)
+
+
+async def _act(
+    db: AsyncSession,
+    user: User,
+    review_id: str,
+    body: dict,
+    request: Request,
+) -> Any:
+    from app.services import moderation_review as mr
+
+    r = await mr.get_review(db, user.tenant_id, review_id, lock=True)
+    action = str(body.get("action") or "").lower()
+    is_admin = user.role == UserRole.ADMIN
+    if action == "claim":
+        await mr.claim(db, r, user.id, is_admin)
+    elif action == "unassign":
+        await mr.unassign(db, r, user.id, is_admin)
+    else:
+        await mr.decide(
+            db,
+            r,
+            actor=user.id,
+            action=action,
+            content=body.get("content"),
+            reason=body.get("reason"),
+            is_admin=is_admin,
+            request=request,
+        )
+    return r
+
+
+@router.post("/reviews/{review_id}/{action}")
+async def act_on_review(
+    review_id: str,
+    action: str,
+    request: Request,
+    body: dict | None = None,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """claim, unassign, release, redact (with content) or reject (with a reason)."""
+    from app.services import moderation_review as mr
+
+    if action not in ("claim", "unassign", "release", "redact", "reject"):
+        return error("Unknown review action.", 404)
+    if not await _can_review(db, user):
+        return error(_NO_REVIEW, 403, error_code="NEEDS_MODERATION_REVIEW")
+    try:
+        r = await _act(db, user, review_id, {**(body or {}), "action": action}, request)
+    except mr.ReviewError as exc:
+        await db.rollback()
+        return _review_error(exc)
+    await db.commit()
+    if action in ("claim", "unassign"):
+        await mr.push_queue(db, user.tenant_id)
+    else:
+        await mr.after_decision(db, r)
+    data = (await mr.serialize_many(db, [r], user.id, full=True))[0]
+    return success(data)
+
+
+@router.get("/holds/{review_id}")
+async def get_hold(
+    review_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """What the author of held content sees about it."""
+    from app.services import moderation_review as mr
+
+    try:
+        r = await mr.get_review(db, user.tenant_id, review_id)
+    except mr.ReviewError as exc:
+        return _review_error(exc)
+    if r.user_id != user.id and not await _can_review(db, user):
+        return error("This held message belongs to someone else.", 404)
+    return success(mr.owner_view(r))
+
+
+def _retention_payload(settings: dict, can_edit: bool) -> dict[str, Any]:
+    from app.services import moderation_review as mr
+
+    data = mr.retention_from(settings)
+    data["defaults"] = dict(mr.RETENTION_DEFAULTS)
+    data["limits"] = {k: list(v) for k, v in mr.RETENTION_LIMITS.items()}
+    data["can_edit"] = can_edit
+    return data
+
+
+@router.get("/retention")
+async def get_retention(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    from app.services import moderation_review as mr
+
+    settings = await mr._tenant_settings(db, user.tenant_id)
+    return success(_retention_payload(settings, user.role == UserRole.ADMIN))
+
+
+@router.put("/retention")
+async def put_retention(
+    body: dict,
+    request: Request,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    from models.tenant import Tenant
+
+    from app.services import moderation_review as mr
+
+    if user.role != UserRole.ADMIN:
+        return error(
+            "Only tenant admins can change how long moderation data is kept.", 403
+        )
+    values, errors = mr.validate_retention(body or {})
+    tenant = (
+        await db.execute(select(Tenant).where(Tenant.id == user.tenant_id))
+    ).scalar_one()
+    settings = dict(tenant.settings or {})
+    before = mr.retention_from(settings)
+    merged = {k: before[k] for k in mr.RETENTION_DEFAULTS}
+    merged.update(values)
+    if not errors and merged["held_content_days"] > merged["decision_record_days"]:
+        errors["held_content_days"] = (
+            "Full held text cannot be kept longer than the decision record."
+        )
+    if errors:
+        return error(
+            next(iter(errors.values())),
+            422,
+            error_code="INVALID_RETENTION",
+            details=errors,
+        )
+    merged["updated_at"] = datetime.now(timezone.utc).isoformat()
+    merged["updated_by"] = str(user.id)
+    merged["updated_by_name"] = user.full_name or user.email
+    settings[mr.RETENTION_KEY] = merged
+    tenant.settings = settings
+    await log_action(
+        db,
+        user.tenant_id,
+        user.id,
+        action="moderation_retention_updated",
+        details={"changed": sorted(values.keys())},
+        request=request,
+        resource_type="tenant",
+        resource_id=str(user.tenant_id),
+        old_value={k: before[k] for k in mr.RETENTION_DEFAULTS},
+        new_value={k: merged[k] for k in mr.RETENTION_DEFAULTS},
+    )
+    await db.commit()
+    return success(_retention_payload(settings, True))

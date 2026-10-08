@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { RotateCcw, Loader2, ChevronDown, ChevronRight } from 'lucide-react';
 import { useApi } from '@/hooks/useApi';
 import { apiFetch } from '@/lib/api-client';
@@ -9,11 +9,13 @@ import { toastError, toastSuccess } from '@/stores/toastStore';
 type Row = { id: string; name: string; updated_at?: string; creator_name?: string | null };
 
 // Deleted agents the viewer can bring back, with their triggers.
-export default function DeletedAgents({ onRestored }: { onRestored?: () => void }) {
+export default function DeletedAgents({ onRestored, refreshKey }: { onRestored?: () => void; refreshKey?: unknown }) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const { data, meta, mutate } = useApi<Row[]>(open ? '/api/agents/deleted?limit=100' : null);
   const total = Number((meta as { total?: number } | null)?.total ?? (data?.length || 0));
+  // a delete elsewhere on the page should show up here
+  useEffect(() => { if (open) mutate(); }, [refreshKey]);
 
   return (
     <div className="rounded-xl border border-slate-700/50 bg-slate-800/30" data-testid="deleted-agents">
@@ -35,8 +37,8 @@ export default function DeletedAgents({ onRestored }: { onRestored?: () => void 
             <li className="px-4 py-3 text-xs text-slate-500">Nothing deleted that you can restore.</li>
           )}
           {(data || []).map((a) => (
-            <li key={a.id} className="px-4 py-2 flex items-center justify-between text-sm">
-              <span className="text-slate-300">
+            <li key={a.id} data-testid="deleted-agent-row" className="px-4 py-2 flex items-center justify-between gap-3 text-sm min-w-0">
+              <span className="text-slate-300 min-w-0 break-words">
                 {a.name}
                 {a.updated_at && <span className="text-xs text-slate-500"> · deleted {new Date(a.updated_at).toLocaleString()}</span>}
               </span>

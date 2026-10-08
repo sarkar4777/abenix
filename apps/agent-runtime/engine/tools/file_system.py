@@ -6,12 +6,13 @@ import json
 from pathlib import Path
 from typing import Any
 
-from engine.tools.base import BaseTool, ToolResult
+from engine.tools.base import READ_ONLY, BaseTool, ToolResult
 
 
 class FileSystemTool(BaseTool):
     name = "file_system"
     risk_tier = "medium"
+    effect = READ_ONLY
     description = (
         "Traverse directories, list files recursively, read file contents, "
         "and match glob patterns. Works with local filesystem, mounted NFS/SMB shares, "

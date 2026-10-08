@@ -11,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, get_db
+from app.core.platform_features import require_monetization
 from app.core.responses import error, success
 from app.core.stripe import (
     PLANS,
@@ -33,8 +34,11 @@ from models.user import User
 
 router = APIRouter(prefix="/api/billing", tags=["billing"])
 
+# plans, checkout, portal and the Stripe webhook are monetization, usage is not
+_PAID = [Depends(require_monetization)]
 
-@router.get("/plans")
+
+@router.get("/plans", dependencies=_PAID)
 async def list_plans(
     user: User = Depends(get_current_user),
 ) -> JSONResponse:
@@ -57,7 +61,7 @@ async def list_plans(
     )
 
 
-@router.post("/checkout")
+@router.post("/checkout", dependencies=_PAID)
 async def create_checkout(
     body: CheckoutRequest,
     user: User = Depends(get_current_user),
@@ -98,7 +102,7 @@ async def create_checkout(
     return success(session)
 
 
-@router.post("/portal")
+@router.post("/portal", dependencies=_PAID)
 async def create_portal(
     body: PortalRequest,
     user: User = Depends(get_current_user),
@@ -128,11 +132,22 @@ async def get_billing_usage(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
+    from app.core.platform_features import monetization_enabled
+    from app.routers.llm_models import _subscription_state
+
     stats = await get_usage_stats(db, user.tenant_id)
+    flat = bool((await _subscription_state(db)).get("active"))
+    stats["billing_mode"] = "claude_subscription" if flat else "metered"
+    stats["monetization"] = await monetization_enabled(db)
+    if flat:
+        # the subscription is a flat fee, the marginal LLM spend is zero
+        stats["total_cost"] = 0.0
+        for row in stats.get("by_agent") or []:
+            row["cost"] = 0.0
     return success(stats)
 
 
-@router.post("/webhook")
+@router.post("/webhook", dependencies=_PAID)
 async def stripe_webhook(
     request: Request,
     db: AsyncSession = Depends(get_db),

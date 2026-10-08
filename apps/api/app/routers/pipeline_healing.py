@@ -66,6 +66,26 @@ def config_hash(pipeline_cfg: Any) -> str:
     return hashlib.sha256(canon.encode("utf-8")).hexdigest()
 
 
+_ENGINE_TOOLS = {"agent_step", "wait", "state_get", "state_set", "__structured__"}
+
+
+def with_node_tools(model_cfg: dict[str, Any], pipeline_cfg: Any) -> dict[str, Any]:
+    """model_config whose tools list covers every tool the nodes call."""
+    tools = list(model_cfg.get("tools") or [])
+    for n in (pipeline_cfg or {}).get("nodes") or []:
+        if not isinstance(n, dict):
+            continue
+        name = n.get("tool_name") or n.get("tool")
+        if (
+            isinstance(name, str)
+            and name
+            and name not in _ENGINE_TOOLS
+            and name not in tools
+        ):
+            tools.append(name)
+    return {**model_cfg, "tools": tools}
+
+
 def _current_cfg(pipeline: Agent) -> dict[str, Any]:
     cfg = (pipeline.model_config_ or {}) if hasattr(pipeline, "model_config_") else {}
     return cfg.get("pipeline_config") or {}
@@ -439,7 +459,8 @@ async def apply_patch(
 
     cfg = dict(pipeline.model_config_ or {})
     cfg["pipeline_config"] = new_pipeline_cfg
-    pipeline.model_config_ = cfg
+    # a patch that adds a step with a new tool would otherwise fail the tools check on run
+    pipeline.model_config_ = with_node_tools(cfg, new_pipeline_cfg)
     proposal.applied_snapshot = current_cfg
     proposal.status = PipelinePatchStatus.ACCEPTED
     proposal.decided_by = user.id

@@ -41,12 +41,94 @@ async def _clear_waiting(execution_id: str | None) -> None:
 
 
 def _api_base_url() -> str:
-    return (
+    explicit = (
         os.environ.get("INTERNAL_API_URL")
+        or os.environ.get("ABENIX_INTERNAL_URL")
         or os.environ.get("API_BASE_URL")
         or os.environ.get("ABENIX_API_URL")
-        or "http://localhost:8000"
     )
+    if explicit:
+        return explicit
+    # inside the cluster kubernetes injects the API service address
+    host = os.environ.get("ABENIX_API_SERVICE_HOST")
+    if host:
+        return f"http://{host}:{os.environ.get('ABENIX_API_SERVICE_PORT', '8000')}"
+    return "http://localhost:8000"
+
+
+def auth_headers(auth_token: str) -> dict[str, str]:
+    headers: dict[str, str] = {"Content-Type": "application/json"}
+    if auth_token:
+        if auth_token.startswith("af_"):
+            headers["X-API-Key"] = auth_token
+        else:
+            headers["Authorization"] = f"Bearer {auth_token}"
+    return headers
+
+
+def run_token(user_id: str, tenant_id: str, user_role: str = "") -> str:
+    """A short-lived token for the user the run belongs to, or the internal one."""
+    if user_id and tenant_id:
+        try:
+            from engine.tools.invoke_agent import mint_user_token
+
+            token = mint_user_token(user_id, tenant_id, user_role)
+            if token:
+                return token
+        except Exception:  # noqa: BLE001
+            pass
+    return os.environ.get("INTERNAL_API_TOKEN", "")
+
+
+async def create_approval(
+    body: dict[str, Any], headers: dict[str, str]
+) -> tuple[dict[str, Any] | None, str]:
+    """POST the approval. Returns (approval, "") or (None, why it failed)."""
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            created = await client.post(
+                f"{_api_base_url()}/api/approvals", headers=headers, json=body
+            )
+    except httpx.HTTPError as e:
+        return None, f"approval create error: {e}"
+    if created.status_code >= 300:
+        return (
+            None,
+            f"failed to create approval: {created.status_code} {created.text[:300]}",
+        )
+    approval = (created.json() or {}).get("data") or {}
+    if not approval.get("id"):
+        return None, "API did not return an approval id"
+    return approval, ""
+
+
+async def wait_for_approval(
+    approval_id: str,
+    headers: dict[str, str],
+    expires_seconds: int,
+    execution_id: str | None = None,
+    poll_interval: float = 2.0,
+) -> dict[str, Any]:
+    """Long-poll until the approval leaves pending. The execution is marked waiting meanwhile."""
+    api = _api_base_url()
+    deadline = time.monotonic() + expires_seconds + 5
+    await _mark_waiting(execution_id, expires_seconds + 5)
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            while time.monotonic() < deadline:
+                try:
+                    r = await client.get(
+                        f"{api}/api/approvals/{approval_id}", headers=headers
+                    )
+                    a = (r.json() or {}).get("data") or {}
+                    if (a.get("status") or "pending") != "pending":
+                        return a
+                except httpx.HTTPError:
+                    pass
+                await asyncio.sleep(poll_interval)
+    finally:
+        await _clear_waiting(execution_id)
+    return {"id": approval_id, "status": "expired", "signoffs": [], "timed_out": True}
 
 
 class ApprovalGateTool(BaseTool):
@@ -146,14 +228,7 @@ class ApprovalGateTool(BaseTool):
             or self._run_token()
             or os.environ.get("INTERNAL_API_TOKEN", "")
         )
-
-        api = _api_base_url()
-        headers: dict[str, str] = {"Content-Type": "application/json"}
-        if auth_token:
-            if auth_token.startswith("af_"):
-                headers["X-API-Key"] = auth_token
-            else:
-                headers["Authorization"] = f"Bearer {auth_token}"
+        headers = auth_headers(auth_token)
 
         body: dict[str, Any] = {
             "title": title,
@@ -169,55 +244,33 @@ class ApprovalGateTool(BaseTool):
         if run is not None and run.tier != "low":
             # the API raises the sign-off count to what the tenant requires at this tier
             body["risk_tier"] = run.tier
-        try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                created = await client.post(
-                    f"{api}/api/approvals", headers=headers, json=body
+        approval, err = await create_approval(body, headers)
+        if approval is None:
+            return ToolResult(content=err, is_error=True)
+        approval_id = approval["id"]
+
+        a = await wait_for_approval(
+            approval_id,
+            headers,
+            expires_seconds,
+            agent_execution_id,
+            self.POLL_INTERVAL_SECONDS,
+        )
+        status = a.get("status") or "expired"
+        if a.get("timed_out"):
+            return ToolResult(
+                content=json.dumps(
+                    {"status": "expired", "approval_id": approval_id, "signoffs": []}
                 )
-                if created.status_code >= 300:
-                    return ToolResult(
-                        content=f"failed to create approval: {created.status_code} {created.text[:300]}",
-                        is_error=True,
-                    )
-                approval = (created.json() or {}).get("data") or {}
-                approval_id = approval.get("id")
-                if not approval_id:
-                    return ToolResult(
-                        content="API did not return an approval id", is_error=True
-                    )
-        except httpx.HTTPError as e:
-            return ToolResult(content=f"approval create error: {e}", is_error=True)
-
-        deadline = time.monotonic() + expires_seconds + 5
-        await _mark_waiting(agent_execution_id, expires_seconds + 5)
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            while time.monotonic() < deadline:
-                try:
-                    r = await client.get(
-                        f"{api}/api/approvals/{approval_id}", headers=headers
-                    )
-                    a = (r.json() or {}).get("data") or {}
-                    status = a.get("status") or "pending"
-                    if status != "pending":
-                        await _clear_waiting(agent_execution_id)
-                        return ToolResult(
-                            content=json.dumps(
-                                {
-                                    "status": status,
-                                    "approval_id": approval_id,
-                                    "signoffs": a.get("signoffs") or [],
-                                    "decided_at": a.get("decided_at"),
-                                    "gate_kind": a.get("gate_kind"),
-                                }
-                            )
-                        )
-                except httpx.HTTPError:
-                    pass
-                await asyncio.sleep(self.POLL_INTERVAL_SECONDS)
-
-        await _clear_waiting(agent_execution_id)
+            )
         return ToolResult(
             content=json.dumps(
-                {"status": "expired", "approval_id": approval_id, "signoffs": []}
+                {
+                    "status": status,
+                    "approval_id": approval_id,
+                    "signoffs": a.get("signoffs") or [],
+                    "decided_at": a.get("decided_at"),
+                    "gate_kind": a.get("gate_kind"),
+                }
             )
         )

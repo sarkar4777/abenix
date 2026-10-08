@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useCallback, useId } from 'react';
+import { useEffect, useCallback, useId, type ReactNode } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { AlertTriangle, X, Loader2 } from 'lucide-react';
 import { type LucideIcon } from 'lucide-react';
@@ -16,6 +16,9 @@ interface ConfirmModalProps {
   variant?: 'danger' | 'warning';
   icon?: LucideIcon;
   loading?: boolean;
+  children?: ReactNode;
+  confirmDisabled?: boolean;
+  confirmTestId?: string;
 }
 
 export default function ConfirmModal({
@@ -29,6 +32,9 @@ export default function ConfirmModal({
   variant = 'danger',
   icon: Icon = AlertTriangle,
   loading = false,
+  children,
+  confirmDisabled = false,
+  confirmTestId,
 }: ConfirmModalProps) {
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
@@ -117,6 +123,8 @@ export default function ConfirmModal({
                 {description}
               </p>
 
+              {children && <div className="mt-4 w-full text-left">{children}</div>}
+
               {/* Buttons */}
               <div className="mt-6 flex w-full gap-3">
                 <button
@@ -129,7 +137,8 @@ export default function ConfirmModal({
                 </button>
                 <button
                   onClick={onConfirm}
-                  disabled={loading}
+                  disabled={loading || confirmDisabled}
+                  data-testid={confirmTestId}
                   className={`flex flex-1 items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium text-white transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
                     isDanger
                       ? 'bg-red-500 hover:bg-red-600'

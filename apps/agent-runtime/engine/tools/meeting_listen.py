@@ -14,6 +14,7 @@ from engine import credentials
 from engine.tools.base import BaseTool, ConfigField, ToolResult
 from engine.tools import _meeting_session as sessmod
 from engine.tools._vad import StreamingVAD
+from engine.tools.scope_gate import SCOPE_LABEL, decide
 
 logger = logging.getLogger(__name__)
 
@@ -95,7 +96,10 @@ class MeetingListenTool(BaseTool):
         "transcript. Utterances publish to the meeting's Redis event stream "
         "AS THEY CLOSE — so the UI sees text flow in real time, not in "
         "10-second batches. Honors 'bot leave' voice commands and flags "
-        "utterances that address the bot directly (addressed=true)."
+        "utterances that address the bot directly (addressed=true). Every "
+        "addressed utterance carries scope: answer, defer or decline, already "
+        "checked against the meeting's topics. Follow it: defer goes to "
+        "defer_to_human, decline gets a polite refusal."
     )
     input_schema: dict[str, Any] = {
         "type": "object",
@@ -181,12 +185,21 @@ class MeetingListenTool(BaseTool):
         # loop wake out of its `await` and return.
         exit_event = asyncio.Event()
 
+        stt_ready = stt_provider != "openai" or _get_openai_client() is not None
+
         async def transcribe_and_record(speaker: str, pcm: bytes):
             nonlocal kill_heard, addressed_any
             if stt_provider != "openai":
                 return
+            if not stt_ready:
+                await _warn_stt_once(sess, meeting_id, STT_MISSING)
+                return
             text = await _whisper_transcribe(pcm)
             if not text:
+                if _LAST_STT_ERROR:
+                    await _warn_stt_once(
+                        sess, meeting_id, f"Speech to text failed: {_LAST_STT_ERROR}"
+                    )
                 return
             if _is_likely_hallucination(text):
                 logger.debug("dropping likely-hallucinated transcript: %s", text[:80])
@@ -222,21 +235,29 @@ class MeetingListenTool(BaseTool):
             if any(k in lowered for k in _KILL_MARKERS):
                 kill_heard = True
                 exit_event.set()
+            ts_ms = int(time.time() * 1000)
             if addressed:
                 addressed_any = True
+                sess.last_addressed_ms = ts_ms
                 if early_exit:
                     exit_event.set()
             entry = {
                 "speaker": speaker,
                 "text": text,
-                "ts_ms": int(time.time() * 1000),
+                "ts_ms": ts_ms,
                 "addressed": addressed,
             }
             async with transcript_lock:
                 transcript.append(entry)
             await sessmod.append_transcript(
-                meeting_id, speaker, text, ts_ms=entry["ts_ms"]
+                meeting_id,
+                speaker,
+                text,
+                ts_ms=ts_ms,
+                extra={"addressed": addressed, "via": "voice"},
             )
+            if addressed:
+                await _gate(sess, meeting_id, entry)
 
         # Chat messages are unambiguously addressed to the bot (the user
         # typed them in the meeting chat panel). Tag them addressed=true
@@ -255,18 +276,25 @@ class MeetingListenTool(BaseTool):
                         kill_heard = True
                         exit_event.set()
                     addressed_any = True
+                    ts_ms = int(msg.timestamp_ms or time.time() * 1000)
+                    sess.last_addressed_ms = ts_ms
                     entry = {
                         "speaker": f"{msg.sender or 'chat'} (chat)",
                         "text": text,
-                        "ts_ms": int(time.time() * 1000),
+                        "ts_ms": ts_ms,
                         "addressed": True,
                         "via": "chat",
                     }
                     async with transcript_lock:
                         transcript.append(entry)
                     await sessmod.append_transcript(
-                        meeting_id, entry["speaker"], text, ts_ms=entry["ts_ms"]
+                        meeting_id,
+                        entry["speaker"],
+                        text,
+                        ts_ms=ts_ms,
+                        extra={"addressed": True, "via": "chat"},
                     )
+                    await _gate(sess, meeting_id, entry)
                     # Chat messages are ALWAYS explicitly addressed to the
                     # bot — exit the listen window immediately so the agent
                     # can respond without waiting out the full duration.
@@ -364,27 +392,63 @@ class MeetingListenTool(BaseTool):
         # though tasks completed in race-y order.
         transcript.sort(key=lambda e: e.get("ts_ms", 0))
 
+        payload: dict[str, Any] = {
+            "meeting_id": meeting_id,
+            "duration_seconds": duration,
+            "transcript": transcript,
+            "kill_requested": kill_heard,
+            "addressed": addressed_any,
+        }
+        if not stt_ready:
+            payload["stt_unavailable"] = STT_MISSING
         return ToolResult(
-            content=json.dumps(
-                {
-                    "meeting_id": meeting_id,
-                    "duration_seconds": duration,
-                    "transcript": transcript,
-                    "kill_requested": kill_heard,
-                    "addressed": addressed_any,
-                }
-            ),
+            content=json.dumps(payload),
             metadata={
                 "entries": len(transcript),
                 "kill_requested": kill_heard,
                 "addressed": addressed_any,
                 "streaming": True,
+                "stt_ready": stt_ready,
             },
         )
 
 
+STT_MISSING = (
+    "Someone spoke but the bot cannot turn speech into text: no OpenAI API key "
+    "is set. Typed chat messages still reach the bot."
+)
+
+
+async def _gate(sess: Any, meeting_id: str, entry: dict[str, Any]) -> None:
+    """Scope every question in code, so the ring-fence never rests on the model."""
+    d = decide(entry["text"], sess.scope_allow, sess.scope_defer)
+    entry["scope"] = d["decision"]
+    entry["scope_reason"] = d["reason"]
+    await sessmod.append_decision(
+        meeting_id,
+        d["decision"],
+        f"Scope check: {SCOPE_LABEL[d['decision']]}",
+        detail={
+            "tool": "scope_gate",
+            "decision": d["decision"],
+            "reason": d["reason"],
+            "question": entry["text"][:300],
+        },
+    )
+
+
+async def _warn_stt_once(sess: Any, meeting_id: str, message: str) -> None:
+    if sess.stt_warned:
+        return
+    sess.stt_warned = True
+    await sessmod.append_decision(
+        meeting_id, "notice", message, detail={"stt_unavailable": True}
+    )
+
+
 _OPENAI_CLIENT: Any = None
 _OPENAI_CLIENT_KEY: str = ""
+_LAST_STT_ERROR: str = ""
 
 
 def _get_openai_client() -> Any:
@@ -406,6 +470,7 @@ def _get_openai_client() -> Any:
 
 async def _whisper_transcribe(pcm: bytes) -> str:
     """Single-shot Whisper via OpenAI. Called per utterance (not per window)."""
+    global _LAST_STT_ERROR
     client = _get_openai_client()
     if client is None:
         return ""
@@ -421,6 +486,7 @@ async def _whisper_transcribe(pcm: bytes) -> str:
             # likely to mangle ("Tathagata", "Abenix", "LiveKit").
             prompt="Abenix LiveKit meeting — business discussion.",
         )
+        _LAST_STT_ERROR = ""
         return (
             (resp or "").strip()
             if isinstance(resp, str)
@@ -428,6 +494,7 @@ async def _whisper_transcribe(pcm: bytes) -> str:
         )
     except Exception as e:
         logger.debug("whisper transcribe failed: %s", e)
+        _LAST_STT_ERROR = str(e)[:200]
         return ""
 
 

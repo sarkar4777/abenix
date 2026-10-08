@@ -7,9 +7,12 @@ import {
   X as XIcon,
   AlertTriangle,
   ExternalLink,
+  Plug,
   Search,
+  Settings2,
 } from 'lucide-react';
 import { apiFetch } from '@/lib/api-client';
+import PageHeader from '@/components/layout/PageHeader';
 
 /**
  * Integrations dashboard.
@@ -392,31 +395,41 @@ export default function IntegrationsPage() {
 
   return (
     <div className="max-w-5xl mx-auto sm:px-6 py-2 sm:py-8">
-      <header className="mb-6">
-        <div className="flex items-baseline justify-between gap-3 flex-wrap mb-2">
-          <h1 className="text-3xl font-semibold text-white">Integrations</h1>
-          {isAdmin && (
+      <PageHeader
+        className="mb-6"
+        title="Integrations"
+        icon={Plug}
+        purpose="Every outside service your agents can talk to, and whether its keys are set. For builders checking what is available and admins setting it up."
+        meta={
+          isAdmin ? (
             <span className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-300">
-              Admin — you can configure
+              Admin, you can configure
             </span>
-          )}
-        </div>
-        <p className="text-slate-400 max-w-3xl">
-          External services the platform can talk to via its built-in tools. Tool credentials are declared by the tools themselves, so this list stays complete as tools are added.{' '}
-          {isAdmin ? (
-            <>Set live values on <Link href="/admin/tool-config" className="text-cyan-300 hover:underline" data-testid="integrations-admin-link">Admin -&gt; Tool Configuration</Link>. Agents pick them up within {propagation} seconds.</>
-          ) : (
-            <>Only an admin can change live values, under Admin -&gt; Tool Configuration.</>
-          )}
-        </p>
-      </header>
+          ) : undefined
+        }
+        primaryAction={
+          isAdmin
+            ? { label: 'Open Tool Configuration', icon: Settings2, href: '/admin/tool-config', testId: 'integrations-admin-link' }
+            : { label: 'Connect an MCP server', icon: Plug, href: '/mcp' }
+        }
+        steps={[
+          'Each tool declares the keys it needs, so this list stays complete as tools are added.',
+          'Find a service and check its status. Open Setup to see the keys it reads.',
+          isAdmin
+            ? `Set live values on Admin, Tool Configuration. Agents pick them up within ${propagation} seconds.`
+            : 'Only an admin can change live values, under Admin, Tool Configuration.',
+          'Need a tool that is not here? Connect an MCP server instead.',
+        ]}
+        docSlug="08-howto/08-tool-configuration"
+        storageKey="settings-integrations"
+      />
 
       <Link href="/mcp" className="block mb-6">
         <div className="rounded-xl border border-cyan-700/40 bg-cyan-900/15 p-4 hover:border-cyan-500/60 transition flex items-center justify-between gap-3">
           <div>
             <div className="text-sm font-semibold text-cyan-200 mb-1">Need to add a runtime tool? Use MCP servers →</div>
             <p className="text-xs text-slate-300">
-              MCP (Model Context Protocol) servers extend agent capabilities at runtime without redeploying. {mcp.registry} servers in the registry, {mcp.connections} connected.
+              MCP (Model Context Protocol) servers extend agent capabilities at runtime without redeploying. {mcp.connections} connected to this workspace{mcp.registry ? `, ${mcp.registry} more in the catalogue` : ''}.
             </p>
           </div>
           <div className="text-cyan-400 text-2xl shrink-0">↗</div>
@@ -530,10 +543,10 @@ export default function IntegrationsPage() {
                           {i.category === 'tools' ? (
                             isAdmin ? (
                               <Link href={`/admin/tool-config#${i.firstMissing || i.envVars[0]}`} className="text-cyan-300 hover:underline">
-                                Set it on Admin -&gt; Tool Configuration, live within {propagation} seconds, no redeploy →
+                                Set it on Admin, Tool Configuration, live within {propagation} seconds, no redeploy →
                               </Link>
                             ) : (
-                              <span className="text-slate-300">Ask an admin to add it under Admin -&gt; Tool Configuration.</span>
+                              <span className="text-slate-300">Ask an admin to add it under Admin, Tool Configuration.</span>
                             )
                           ) : (
                             <span className="text-slate-300">Set by the deployment (helm values or the cluster secret), see the environment reference in Help.</span>

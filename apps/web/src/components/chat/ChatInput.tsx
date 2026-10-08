@@ -10,7 +10,8 @@ interface AttachedFile {
 }
 
 interface ChatInputProps {
-  onSend: (message: string) => void;
+  // returning false keeps the text, the page refused the send
+  onSend: (message: string) => boolean | void;
   onStop: () => void;
   isStreaming: boolean;
   model: string;
@@ -82,7 +83,7 @@ export default function ChatInput({
         : `Please analyze the following file(s):\n\n${fileBlocks}`;
     }
 
-    onSend(message);
+    if (onSend(message) === false) return;
     setValue('');
     setAttachedFiles([]);
     if (textareaRef.current) {

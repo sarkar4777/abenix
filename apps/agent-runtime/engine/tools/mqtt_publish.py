@@ -17,12 +17,15 @@ import time
 from typing import Any
 from urllib.parse import urlparse
 
-from engine.tools.base import BaseTool, ToolResult
+from engine.tools.base import BaseTool, Effect, ToolResult
 
 
 class MqttPublishTool(BaseTool):
     name = "mqtt_publish"
     risk_tier = "medium"
+    effect = Effect(
+        kind="publish", label="Publish an MQTT message", target_param="topic"
+    )
     description = (
         "Publish a JSON payload to an MQTT topic on the platform broker. "
         "Use for write-back to PLC bridges, SCADA gateways, or downstream "

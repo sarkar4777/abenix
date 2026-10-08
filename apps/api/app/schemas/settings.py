@@ -45,4 +45,6 @@ class NotificationSettingsRequest(BaseModel):
     execution_failed: bool | None = None
     billing_alerts: bool | None = None
     team_updates: bool | None = None
+    autonomy_updates: bool | None = None
+    moderation_reviews: bool | None = None
     channels: NotificationChannels | None = None

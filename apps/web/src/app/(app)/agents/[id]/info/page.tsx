@@ -12,8 +12,8 @@ const PipelineDAGPreview = dynamic(
 );
 import {
   Bot, Code2, Copy, Check, Clock, Cpu, Database, ExternalLink,
-  MessageSquare, Play, Sparkles, Terminal, Thermometer, Webhook,
-  Wrench, Zap, Share2, GitBranch, Download, Upload,
+  Play, Sparkles, Terminal, Thermometer, Webhook,
+  Wrench, Zap, Share2, GitBranch, Download,
 } from 'lucide-react';
 import { useApi } from '@/hooks/useApi';
 import { apiFetch } from '@/lib/api-client';
@@ -22,6 +22,8 @@ import { usePageTitle } from '@/hooks/usePageTitle';
 import ShareDialog from '@/components/agent/ShareDialog';
 import VersionHistoryDialog from '@/components/agent/VersionHistoryDialog';
 import ExportImportDialog from '@/components/agent/ExportImportDialog';
+import AgentActionsPanel from '@/components/autonomy/AgentActionsPanel';
+import PageHeader from '@/components/layout/PageHeader';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -202,14 +204,12 @@ curl -X POST ${API_URL}/api/triggers \\
 
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.3 }}>
-      {/* Header */}
-      <div className="flex items-start gap-4 mb-6">
-        <div className="w-14 h-14 rounded-xl bg-cyan-500/10 flex items-center justify-center shrink-0">
-          <Bot className="w-7 h-7 text-cyan-400" />
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-3 mb-1">
-            <h1 className="text-2xl font-bold text-white">{agent.name}</h1>
+      <PageHeader
+        title={agent.name}
+        icon={Bot}
+        purpose="See what this agent does, which tools it has, and how to call it from code or on a schedule. For builders and developers."
+        meta={
+          <>
             {isPipeline && (
               <span className="text-xs bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded-full font-medium">
                 Pipeline
@@ -220,12 +220,102 @@ curl -X POST ${API_URL}/api/triggers \\
             }`}>
               {agent.status}
             </span>
+          </>
+        }
+        primaryAction={{ label: 'Chat', href: `/agents/${agent.id}/chat`, icon: Play }}
+        secondaryAction={{ label: 'Schedule', href: `/triggers?agent=${agent.id}`, icon: Zap, title: 'Set up webhook or scheduled triggers' }}
+        extraActions={
+          <div className="flex min-w-0 flex-wrap gap-2">
+            {agent.agent_type !== 'oob' && agent.can_edit !== false && (
+              <Link
+                href={`/builder?agent=${agent.id}`}
+                className="flex items-center gap-2 px-4 py-2 bg-slate-700/50 border border-slate-600 text-slate-200 text-sm rounded-lg hover:bg-slate-700 transition-colors"
+              >
+                Edit
+              </Link>
+            )}
+            <button
+              data-testid="agent-duplicate"
+              disabled={duplicating}
+              onClick={async () => {
+                setDuplicating(true);
+                try {
+                  const res = await apiFetch<{ id: string }>(`/api/agents/${agent.id}/duplicate`, {
+                    method: 'POST',
+                    throwOnError: false,
+                  });
+                  if (res.data?.id) {
+                    router.push(`/builder?agent=${res.data.id}`);
+                  } else {
+                    toastError('Duplicate failed', res.error || undefined);
+                  }
+                } finally {
+                  setDuplicating(false);
+                }
+              }}
+              className="flex items-center gap-2 px-4 py-2 bg-slate-700/50 border border-slate-600 text-slate-200 text-sm rounded-lg hover:bg-slate-700 transition-colors disabled:opacity-50"
+              title="Create an editable copy of this agent"
+            >
+              <Copy className="w-4 h-4" />
+              {duplicating ? 'Duplicating...' : 'Duplicate'}
+            </button>
+            {agent.can_manage !== false && (
+              <button onClick={() => setShowShare(true)}
+                className="flex items-center gap-1.5 px-3 py-2 bg-slate-700/50 border border-slate-600 text-slate-300 text-xs rounded-lg hover:bg-slate-700 transition-colors"
+                title="Share with team members"
+                data-testid="agent-share">
+                <Share2 className="w-3.5 h-3.5" /> Share
+              </button>
+            )}
+            {agent.can_edit !== false && (
+              <button onClick={() => setShowVersions(true)}
+                className="flex items-center gap-1.5 px-3 py-2 bg-slate-700/50 border border-slate-600 text-slate-300 text-xs rounded-lg hover:bg-slate-700 transition-colors"
+                title="View version history"
+                data-testid="agent-versions">
+                <GitBranch className="w-3.5 h-3.5" /> Versions
+              </button>
+            )}
+            <button onClick={() => setShowExport(true)}
+              className="flex items-center gap-1.5 px-3 py-2 bg-slate-700/50 border border-slate-600 text-slate-300 text-xs rounded-lg hover:bg-slate-700 transition-colors"
+              title="Export as template">
+              <Download className="w-3.5 h-3.5" /> Export
+            </button>
+            {(agent?.model_config as Record<string, unknown>)?.mode === 'pipeline' && (
+              <>
+                <Link
+                  href={`/agents/${agentId}/healing`}
+                  className="flex items-center gap-1.5 px-3 py-2 bg-cyan-500/10 border border-cyan-500/30 text-cyan-300 text-xs rounded-lg hover:bg-cyan-500/20 transition-colors"
+                  title="Self-healing — review failure diffs and Pipeline Surgeon proposals"
+                >
+                  <Sparkles className="w-3.5 h-3.5" /> Healing
+                </Link>
+                <Link
+                  href={`/agents/${agentId}/shell`}
+                  className="flex items-center gap-1.5 px-3 py-2 bg-cyan-500/10 border border-cyan-500/30 text-cyan-300 text-xs rounded-lg hover:bg-cyan-500/20 transition-colors"
+                  title="Talk-to-workflow shell — drive this pipeline by typing verbs"
+                >
+                  <Terminal className="w-3.5 h-3.5" /> Shell
+                </Link>
+              </>
+            )}
           </div>
-          <p className="text-sm text-slate-400">{agent.description}</p>
-          <div className="flex items-center gap-3 mt-2">
-            <span className="inline-flex items-center gap-1.5 text-xs bg-slate-800/60 border border-slate-700/60 rounded px-2 py-1">
+        }
+        steps={[
+          'Overview shows the model, tools and inputs this agent works with.',
+          'API and SDK gives copy ready code to run it from your own app.',
+          'Triggers and Events shows how to run it from a webhook or on a timer.',
+          'Use Duplicate to make your own editable copy, or Share to give others access.',
+        ]}
+        docSlug="08-howto/02-add-an-agent"
+        storageKey="agent-info"
+        className="mb-6"
+      >
+        <div className="min-w-0 space-y-2">
+          {agent.description && <p className="text-sm text-slate-300 break-words">{agent.description}</p>}
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="inline-flex items-center gap-1.5 text-xs bg-slate-800/60 border border-slate-700/60 rounded px-2 py-1 min-w-0">
               <span className="text-slate-500">Slug</span>
-              <code data-testid="agent-slug" className="font-mono text-slate-200 select-all">{agent.slug}</code>
+              <code data-testid="agent-slug" className="font-mono text-slate-200 select-all break-all">{agent.slug}</code>
               <button
                 type="button"
                 data-testid="agent-slug-copy"
@@ -242,96 +332,7 @@ curl -X POST ${API_URL}/api/triggers \\
             )}
           </div>
         </div>
-        <div className="flex gap-2 shrink-0">
-          <Link
-            href={`/agents/${agent.id}/chat`}
-            className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-cyan-500 to-purple-600 text-white text-sm font-medium rounded-lg hover:from-cyan-400 hover:to-purple-500 shadow-lg shadow-cyan-500/25 transition-all"
-          >
-            <Play className="w-4 h-4" />
-            Chat
-          </Link>
-          <Link
-            href={`/triggers?agent=${agent.id}`}
-            className="flex items-center gap-2 px-4 py-2 bg-slate-700/50 border border-slate-600 text-slate-200 text-sm rounded-lg hover:bg-slate-700 transition-colors"
-            title="Set up webhook or scheduled triggers"
-          >
-            <Zap className="w-4 h-4" />
-            Schedule
-          </Link>
-          {agent.agent_type !== 'oob' && agent.can_edit !== false && (
-            <Link
-              href={`/builder?agent=${agent.id}`}
-              className="flex items-center gap-2 px-4 py-2 bg-slate-700/50 border border-slate-600 text-slate-200 text-sm rounded-lg hover:bg-slate-700 transition-colors"
-            >
-              Edit
-            </Link>
-          )}
-          <button
-            data-testid="agent-duplicate"
-            disabled={duplicating}
-            onClick={async () => {
-              setDuplicating(true);
-              try {
-                const res = await apiFetch<{ id: string }>(`/api/agents/${agent.id}/duplicate`, {
-                  method: 'POST',
-                  throwOnError: false,
-                });
-                if (res.data?.id) {
-                  router.push(`/builder?agent=${res.data.id}`);
-                } else {
-                  toastError('Duplicate failed', res.error || undefined);
-                }
-              } finally {
-                setDuplicating(false);
-              }
-            }}
-            className="flex items-center gap-2 px-4 py-2 bg-slate-700/50 border border-slate-600 text-slate-200 text-sm rounded-lg hover:bg-slate-700 transition-colors disabled:opacity-50"
-            title="Create an editable copy of this agent"
-          >
-            <Copy className="w-4 h-4" />
-            {duplicating ? 'Duplicating...' : 'Duplicate'}
-          </button>
-          {agent.can_manage !== false && (
-            <button onClick={() => setShowShare(true)}
-              className="flex items-center gap-1.5 px-3 py-2 bg-slate-700/50 border border-slate-600 text-slate-300 text-xs rounded-lg hover:bg-slate-700 transition-colors"
-              title="Share with team members"
-              data-testid="agent-share">
-              <Share2 className="w-3.5 h-3.5" /> Share
-            </button>
-          )}
-          {agent.can_edit !== false && (
-            <button onClick={() => setShowVersions(true)}
-              className="flex items-center gap-1.5 px-3 py-2 bg-slate-700/50 border border-slate-600 text-slate-300 text-xs rounded-lg hover:bg-slate-700 transition-colors"
-              title="View version history"
-              data-testid="agent-versions">
-              <GitBranch className="w-3.5 h-3.5" /> Versions
-            </button>
-          )}
-          <button onClick={() => setShowExport(true)}
-            className="flex items-center gap-1.5 px-3 py-2 bg-slate-700/50 border border-slate-600 text-slate-300 text-xs rounded-lg hover:bg-slate-700 transition-colors"
-            title="Export as template">
-            <Download className="w-3.5 h-3.5" /> Export
-          </button>
-          {(agent?.model_config as Record<string, unknown>)?.mode === 'pipeline' && (
-            <>
-              <Link
-                href={`/agents/${agentId}/healing`}
-                className="flex items-center gap-1.5 px-3 py-2 bg-cyan-500/10 border border-cyan-500/30 text-cyan-300 text-xs rounded-lg hover:bg-cyan-500/20 transition-colors"
-                title="Self-healing — review failure diffs and Pipeline Surgeon proposals"
-              >
-                <Sparkles className="w-3.5 h-3.5" /> Healing
-              </Link>
-              <Link
-                href={`/agents/${agentId}/shell`}
-                className="flex items-center gap-1.5 px-3 py-2 bg-cyan-500/10 border border-cyan-500/30 text-cyan-300 text-xs rounded-lg hover:bg-cyan-500/20 transition-colors"
-                title="Talk-to-workflow shell — drive this pipeline by typing verbs"
-              >
-                <Terminal className="w-3.5 h-3.5" /> Shell
-              </Link>
-            </>
-          )}
-        </div>
-      </div>
+      </PageHeader>
 
       {/* Dialogs */}
       {agent && (
@@ -343,7 +344,7 @@ curl -X POST ${API_URL}/api/triggers \\
       )}
 
       {/* Tabs */}
-      <div className="flex border-b border-slate-700 mb-6">
+      <div className="flex border-b border-slate-700 mb-6 overflow-x-auto">
         {([
           { key: 'overview', label: 'Overview', icon: Bot },
           { key: 'api', label: 'API & SDK', icon: Code2 },
@@ -484,6 +485,8 @@ curl -X POST ${API_URL}/api/triggers \\
                 ))}
               </div>
             </div>
+
+            <AgentActionsPanel agentId={agent.id} agentName={agent.name} />
 
             {/* Memory link if agent has memory tools */}
             {tools.some(t => t.startsWith('memory_')) && (

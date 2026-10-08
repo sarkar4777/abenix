@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { motion } from 'framer-motion';
 import {
   Database, Trash2, Edit3, Save, FileJson, Layers, Package,
-  Sparkles, AlertTriangle, RefreshCw, Loader2, Upload, FlaskConical, Bot, PenLine, CheckCircle2, MessageSquare,
+  AlertTriangle, RefreshCw, Loader2, Upload, FlaskConical, Bot, PenLine, CheckCircle2, MessageSquare,
 } from 'lucide-react';
 import { useApi } from '@/hooks/useApi';
 import { apiFetch, ApiError } from '@/lib/api-client';
@@ -14,6 +14,7 @@ import { toastError, toastSuccess } from '@/stores/toastStore';
 import SpreadsheetImport from '@/components/portfolio-schemas/SpreadsheetImport';
 import MyRows from '@/components/portfolio-schemas/MyRows';
 import DeleteSchemaModal from '@/components/portfolio-schemas/DeleteSchemaModal';
+import PageHeader from '@/components/layout/PageHeader';
 import {
   type PortfolioSchema, type ImportCapabilities, type ImportResult,
   DEFAULT_CAPS, agentHref, exampleQuestions,
@@ -398,39 +399,39 @@ export default function PortfolioSchemasPage() {
   return (
     <div className="min-h-screen bg-[#0B0F19] p-4 sm:p-6">
       <div className="max-w-7xl mx-auto space-y-6">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-start gap-3 min-w-0">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-purple-500/20 to-pink-500/20 flex items-center justify-center shrink-0">
-              <Database className="w-5 h-5 text-purple-400" />
-            </div>
-            <div className="min-w-0">
-              <h1 className="text-xl font-bold text-white flex items-center gap-2">
-                Portfolio Schemas
-                <Sparkles className="w-4 h-4 text-purple-400" />
-              </h1>
-              <p className="text-sm text-slate-400">
-                Give your agents a table of records they can list, search and total. Bring a spreadsheet, or describe an existing table.
-              </p>
-            </div>
-          </div>
-          <div className="flex flex-wrap gap-2 shrink-0">
-            <button
-              onClick={trySample}
-              disabled={sampleBusy}
-              data-testid="ps-try-sample"
-              className="px-3 py-2 text-xs rounded-lg border border-purple-500/40 text-purple-200 hover:bg-purple-500/10 transition-colors flex items-center gap-1.5 disabled:opacity-50"
-            >
-              {sampleBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FlaskConical className="w-3.5 h-3.5" />} Try with a sample
-            </button>
-            <button
-              onClick={() => startImport()}
-              data-testid="ps-create-from-sheet"
-              className="px-3 py-2 text-xs rounded-lg bg-gradient-to-r from-purple-500 to-pink-500 text-white font-medium hover:shadow-lg hover:shadow-purple-500/20 transition-all flex items-center gap-1.5"
-            >
-              <Upload className="w-3.5 h-3.5" /> Create from a spreadsheet
-            </button>
-          </div>
-        </div>
+        <PageHeader
+          title="Portfolio Schemas"
+          purpose="Give your agents a table of records they can list, search and total. Bring a spreadsheet, or describe an existing table."
+          icon={Database}
+          iconClassName="text-purple-400"
+          storageKey="portfolio-schemas"
+          docSlug="02-runtime/02-tools"
+          howTestId="ps-howto"
+          primaryAction={{ label: 'Create from a spreadsheet', icon: Upload, onClick: () => startImport(), testId: 'ps-create-from-sheet' }}
+          secondaryAction={{ label: 'Try with a sample', icon: sampleBusy ? Loader2 : FlaskConical, busy: sampleBusy, onClick: trySample, testId: 'ps-try-sample' }}
+          steps={[
+            {
+              title: 'Bring your data',
+              body: `Upload a CSV${caps.formats.includes('xlsx') ? ' or Excel file' : ''}. The first row holds column names, every other row becomes a record. You check the column types before anything is saved.`,
+            },
+            {
+              title: 'Use it in an agent',
+              body: <>Press <strong className="text-white">Use in an agent</strong>. The builder opens with the tool added and a starter prompt. Save and publish.</>,
+            },
+            {
+              title: 'Ask questions',
+              body: <>The agent calls <code>list_records</code> to read rows, <code>search</code> to find them by text and <code>get_summary</code> for counts, totals and averages, then answers from those numbers.</>,
+            },
+          ]}
+          howItWorks={
+            <p className="text-[12px] text-slate-400 leading-relaxed">
+              A <strong className="text-white">portfolio schema</strong> describes one table of records, like trades, contracts or properties: its columns,
+              which column names each record, and which totals make sense. Each schema becomes a tool called
+              <code className="text-purple-300 mx-1">portfolio_<em>name</em></code> that any agent can use.
+              <strong className="text-white"> Each person sees only their own rows</strong>, and so do agents acting for them.
+            </p>
+          }
+        />
 
         {sampleError && (
           <div role="alert" className="bg-red-500/10 border border-red-500/30 rounded-lg p-3 text-xs text-red-300 break-words flex items-start justify-between gap-3">
@@ -439,51 +440,21 @@ export default function PortfolioSchemasPage() {
           </div>
         )}
 
-        <div className="bg-gradient-to-br from-purple-500/5 via-slate-800/30 to-pink-500/5 border border-purple-500/20 rounded-xl p-4 sm:p-5">
-          <div className="flex items-start gap-3 mb-3">
-            <div className="w-8 h-8 rounded-lg bg-purple-500/20 border border-purple-500/40 flex items-center justify-center shrink-0 mt-0.5">
-              <Sparkles className="w-4 h-4 text-purple-300" />
-            </div>
-            <div className="min-w-0">
-              <h2 className="text-sm font-semibold text-white">How this works</h2>
-              <p className="text-[12px] text-slate-300 mt-1 leading-relaxed">
-                A <strong className="text-white">portfolio schema</strong> describes one table of records, like trades, contracts or properties: its columns,
-                which column names each record, and which totals make sense. Each schema becomes a tool called
-                <code className="text-purple-300 mx-1">portfolio_<em>name</em></code> that any agent can use.
-                <strong className="text-white"> Each person sees only their own rows</strong>, and so do agents acting for them.
-              </p>
-            </div>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
-            <div className="bg-slate-900/40 border border-slate-700/40 rounded-lg p-3">
-              <p className="text-[10px] uppercase tracking-wider text-purple-300 font-semibold mb-1">1 · Bring your data</p>
-              <p className="text-[11px] text-slate-300">Upload a CSV{caps.formats.includes('xlsx') ? ' or Excel file' : ''}. The first row holds column names, every other row becomes a record. You check the column types before anything is saved.</p>
-            </div>
-            <div className="bg-slate-900/40 border border-slate-700/40 rounded-lg p-3">
-              <p className="text-[10px] uppercase tracking-wider text-purple-300 font-semibold mb-1">2 · Use it in an agent</p>
-              <p className="text-[11px] text-slate-300">Press <strong className="text-white">Use in an agent</strong>. The builder opens with the tool added and a starter prompt. Save and publish.</p>
-            </div>
-            <div className="bg-slate-900/40 border border-slate-700/40 rounded-lg p-3">
-              <p className="text-[10px] uppercase tracking-wider text-purple-300 font-semibold mb-1">3 · Ask questions</p>
-              <p className="text-[11px] text-slate-300">The agent calls <code>list_records</code> to read rows, <code>search</code> to find them by text and <code>get_summary</code> for counts, totals and averages, then answers from those numbers.</p>
+        {agentsLoaded && wired.length > 0 && (
+          <div className="flex items-start gap-2 text-[11px] text-slate-400 bg-slate-900/40 border border-slate-700/40 rounded-lg p-2.5">
+            <Database className="w-3.5 h-3.5 text-cyan-400 mt-0.5 shrink-0" />
+            <div className="min-w-0 space-y-0.5">
+              <p><strong className="text-white">In use:</strong></p>
+              {wired.slice(0, 4).map(({ s, used }) => (
+                <p key={s.id} className="break-words">
+                  <code className="text-cyan-300">{s.tool_name}</code> by {used.slice(0, 3).map(a => a.name).join(', ')}
+                  {used.length > 3 ? ` +${used.length - 3}` : ''}
+                </p>
+              ))}
+              {wired.length > 4 && <p>and {wired.length - 4} more schema{wired.length - 4 !== 1 ? 's' : ''}</p>}
             </div>
           </div>
-          {agentsLoaded && wired.length > 0 && (
-            <div className="flex items-start gap-2 mt-3 text-[11px] text-slate-400 bg-slate-900/40 border border-slate-700/40 rounded-lg p-2.5">
-              <Database className="w-3.5 h-3.5 text-cyan-400 mt-0.5 shrink-0" />
-              <div className="min-w-0 space-y-0.5">
-                <p><strong className="text-white">In use:</strong></p>
-                {wired.slice(0, 4).map(({ s, used }) => (
-                  <p key={s.id} className="break-words">
-                    <code className="text-cyan-300">{s.tool_name}</code> by {used.slice(0, 3).map(a => a.name).join(', ')}
-                    {used.length > 3 ? ` +${used.length - 3}` : ''}
-                  </p>
-                ))}
-                {wired.length > 4 && <p>and {wired.length - 4} more schema{wired.length - 4 !== 1 ? 's' : ''}</p>}
-              </div>
-            </div>
-          )}
-        </div>
+        )}
 
         {agentLoadProgress && (
           <div className="rounded-lg border border-slate-700/50 bg-slate-800/40 p-3 text-xs text-slate-300">

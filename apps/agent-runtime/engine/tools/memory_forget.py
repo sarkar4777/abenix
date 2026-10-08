@@ -4,12 +4,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from engine.tools.base import BaseTool, ToolResult
+from engine.tools.base import BaseTool, Effect, ToolResult
 
 
 class MemoryForgetTool(BaseTool):
     name = "memory_forget"
     risk_tier = "medium"
+    effect = Effect(kind="delete", label="Forget a stored memory", target_param="key")
     description = (
         "Delete a stored memory by key. Use this to remove outdated or "
         "incorrect information from the agent's persistent memory."

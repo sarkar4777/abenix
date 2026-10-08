@@ -169,6 +169,19 @@ else:
     print("run ended as", res.status)
 ```
 
+### What started a run
+
+Every run records it. `ExecutionResult` carries `trigger_kind`, `trigger_id`,
+`trigger_name` and `started_by`, and `executions.list` filters on them.
+
+```python
+runs = await client.executions.list(trigger_kind=["schedule", "webhook"], limit=10)
+for r in runs:
+    print(r["id"], r["status"], r["started_by"])
+
+nightly = await client.executions.list(trigger_id=trigger_id)
+```
+
 ---
 
 ## Streaming
@@ -472,6 +485,54 @@ await client.approvals.return_for_changes(
 
 `return_for_changes(approval_id, reason, *, client_token=None)` raises `ValueError` when `reason` is blank. It posts a `return` signoff.
 
+### Actions
+
+Earned autonomy for actions your app takes itself. Propose first, act only when the decision is `run`, then say it ran and what happened, so the agent's track record moves. The action type must be enrolled on the Autonomy page. See [08-howto/13-earned-autonomy](../08-howto/13-earned-autonomy.md#8-drive-it-from-a-standalone-app).
+
+```python
+d = await client.actions.propose(
+    "trade.execute",
+    {"symbol": "TTF", "lots": 5},
+    target="TTF-Q1",
+    intent="Spread is two sigma under fair value",
+    prediction={"metric": "pnl_eur", "value": 12000, "low": 4000, "high": 20000},
+)
+args = {"symbol": "TTF", "lots": 5}
+if d["decision"] == "wait":
+    d = await client.actions.wait(d["action_id"], timeout_seconds=1800)
+    args = d.get("arguments") or args          # a reviewer may have edited them
+if d["decision"] == "run":
+    await place_order(**args)
+    await client.actions.executed(d["action_id"], True, result_preview="filled")
+    await client.actions.report_outcome(d["action_id"], 9800)
+```
+
+| Method | Calls |
+|---|---|
+| `propose(action_key, arguments=None, *, agent_id=None, target=None, intent=None, prediction=None)` | `POST /api/autonomy/actions/propose`. Returns `{action_id, decision, approval_id, message}`. `decision` is `run`, `wait`, `watching` or `blocked` |
+| `wait(action_id, *, timeout_seconds=60)` | Long-polls `GET /api/autonomy/actions/{id}/wait` in chunks of up to 120 s until the decision is not `wait`. Returns `{decision, status, arguments, edited, decided_by_name, decision_note, message}` |
+| `executed(action_id, ok=True, *, result_preview=None)` | `POST /api/autonomy/actions/{id}/executed`. 409 `NOT_CLEARED` unless the action was cleared to run |
+| `report_outcome(action_id, value, *, note=None)` | `POST /api/autonomy/actions/{id}/outcome` with `source: "api"`. Needs `actions.review` |
+| `flag_harm(action_id, note)` | `POST /api/autonomy/actions/{id}/harm`. Drops the grant to Asks first. `ValueError` on a blank note. Needs `actions.review` |
+| `get(action_id)` | `GET /api/autonomy/actions/{id}`, the action with its card, outcome and score. Needs `autonomy.view` |
+
+`agent_id` is optional when only one agent holds a grant on the action type. A type nobody holds a grant on returns `run` with "Not enrolled, so it runs as before."
+
+### Autonomy
+
+Read the ladder for your own UI. Needs `autonomy.view`.
+
+| Method | Calls |
+|---|---|
+| `overview()` | `GET /api/autonomy/overview`. Counts for the last 7 days, every grant, ready to promote, recently demoted, unmanaged actions |
+| `grant(grant_id)` | `GET /api/autonomy/grants/{id}`. Level, stats, next-step checklist, level history and chart points |
+| `grant_actions(grant_id, *, status=None, limit=50, before=None)` | `GET /api/autonomy/grants/{id}/actions`. `{items, next_before}`, pass `next_before` back as `before` |
+
+```python
+for g in (await client.autonomy.overview())["ready_to_promote"]:
+    print(g["agent"]["name"], g["action_type"]["label"], g["next"]["next_label"])
+```
+
 ---
 
 ## Other sub-clients
@@ -506,8 +567,8 @@ Besides `by_slug`, `create` and `update` above:
 | `list(*, status=None, execution_id=None, agent_id=None, kind=None, limit=200)` | `GET /api/approvals` |
 | `get(approval_id)` | `GET /api/approvals/{id}` |
 | `create(title, payload, *, required_signoffs=1, expires_seconds=86400, gate_kind=None, agent_id=None, agent_execution_id=None, client_token=None)` | `POST /api/approvals`. A reused `client_token` returns the existing approval |
-| `signoff(approval_id, decision, *, reason="", client_token=None)` | `decision` is `approve`, `deny` or `return` |
-| `approve(approval_id, *, reason="", client_token=None)` | `signoff` with `approve` |
+| `signoff(approval_id, decision, *, reason="", client_token=None, edited_arguments=None)` | `decision` is `approve`, `deny` or `return`. `edited_arguments` only on an `action:*` approval with `approve` |
+| `approve(approval_id, *, reason="", client_token=None, edited_arguments=None)` | `signoff` with `approve` |
 | `deny(approval_id, *, reason="", client_token=None)` | `signoff` with `deny` |
 | `return_for_changes(approval_id, reason, *, client_token=None)` | see above |
 | `wait_for(approval_id, *, timeout_seconds=60, poll_seconds=2.0)` | Long-polls `/wait` in chunks of up to 120 s. Returns the last row seen, still `pending` if time ran out |

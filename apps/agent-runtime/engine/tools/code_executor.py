@@ -11,7 +11,7 @@ import tempfile
 import traceback
 from typing import Any
 
-from engine.tools.base import BaseTool, ToolResult
+from engine.tools.base import READ_ONLY, BaseTool, ToolResult
 
 logger = logging.getLogger(__name__)
 
@@ -269,6 +269,7 @@ def _validate_code(
 class CodeExecutorTool(BaseTool):
     name = "code_executor"
     risk_tier = "medium"
+    effect = READ_ONLY
     description = (
         "Execute Python code safely in a sandboxed environment. Supports complex data "
         "transformations, statistical computations, file generation (Excel, PDF, charts, "

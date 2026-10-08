@@ -19,8 +19,10 @@ class ConnectorCreate(BaseModel):
     auth_type: str = Field(
         default="none", description="none | api_key | bearer | basic | oauth2"
     )
-    secret_ref: uuid.UUID | None = Field(
-        default=None, description="API key UUID storing the auth secret"
+    secret: str | None = Field(
+        default=None,
+        max_length=8192,
+        description="Write-only. Stored encrypted, never returned",
     )
     config: dict[str, Any] | None = Field(default=None)
     is_active: bool = Field(default=True)
@@ -30,7 +32,10 @@ class ConnectorUpdate(BaseModel):
     name: str | None = None
     base_url: str | None = None
     auth_type: str | None = None
-    secret_ref: uuid.UUID | None = None
+    secret: str | None = Field(
+        default=None, max_length=8192, description="Write-only, replaces the secret"
+    )
+    clear_secret: bool = False
     config: dict[str, Any] | None = None
     is_active: bool | None = None
     preset_key: str | None = None
@@ -43,7 +48,9 @@ class ConnectorOut(BaseModel):
     preset_key: str | None
     base_url: str
     auth_type: str
-    secret_ref: str | None
+    has_secret: bool = False
+    needs_secret: bool = False
+    secret_notice: str | None = None
     config: dict[str, Any] | None
     is_active: bool
     last_test_at: str | None
@@ -58,6 +65,8 @@ class ConnectorTestResult(BaseModel):
     latency_ms: int
     status_code: int | None = None
     sample_response_excerpt: str | None = None
+    message: str | None = None
+    blocked: bool = False
     error: str | None = None
 
 
@@ -78,6 +87,8 @@ class ApprovalSignoffRequest(BaseModel):
     decision: str = Field(..., description="approve | deny | return")
     reason: str | None = Field(default=None, max_length=1000)
     client_token: str | None = Field(default=None, max_length=120)
+    # action:* gates only, the arguments the approver changed before approving
+    edited_arguments: dict[str, Any] | None = None
 
 
 class ApprovalWebhookConfig(BaseModel):

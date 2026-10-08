@@ -6,12 +6,65 @@ import json
 from typing import Any
 from urllib.parse import urlparse
 
-from engine.tools.base import BaseTool, ToolResult
+from engine.tools.base import READ_ONLY, BaseTool, Effect, ToolResult
+
+
+def plain_error(e: BaseException, host: str, timeout: float) -> str:
+    """What went wrong with a request, in words a person can act on."""
+    import asyncio
+    import socket
+    import ssl
+
+    try:
+        import aiohttp
+    except ImportError:  # pragma: no cover
+        aiohttp = None  # type: ignore[assignment]
+
+    if isinstance(e, (asyncio.TimeoutError, TimeoutError)) or (
+        aiohttp is not None and isinstance(e, aiohttp.ServerTimeoutError)
+    ):
+        return f"{host} did not answer within {int(timeout)} seconds."
+    if aiohttp is not None:
+        if isinstance(
+            e, (aiohttp.ClientConnectorCertificateError, aiohttp.ClientSSLError)
+        ):
+            return f"{host} failed the secure connection (SSL certificate) check."
+        if isinstance(e, aiohttp.ClientConnectorError):
+            dns_error = getattr(aiohttp, "ClientConnectorDNSError", ())
+            if isinstance(e, dns_error) or isinstance(
+                getattr(e, "os_error", None), socket.gaierror
+            ):
+                return (
+                    f"This server cannot find {host}. Check the address, "
+                    "or that this server can reach the internet."
+                )
+            return (
+                f"This server cannot reach {host}. It may be down, or this "
+                "server may not be allowed to connect to it."
+            )
+        if isinstance(e, aiohttp.ServerDisconnectedError):
+            return f"{host} closed the connection before answering."
+        if isinstance(e, aiohttp.TooManyRedirects):
+            return f"{host} redirected too many times."
+        if isinstance(e, aiohttp.InvalidURL):
+            return "The URL is not valid."
+    if isinstance(e, ssl.SSLError):
+        return f"{host} failed the secure connection (SSL certificate) check."
+    if isinstance(e, socket.gaierror):
+        return f"This server cannot find {host}."
+    if isinstance(e, (ConnectionError, OSError)):
+        return f"This server cannot reach {host}."
+    return f"The request to {host} failed ({e.__class__.__name__})."
 
 
 class HttpClientTool(BaseTool):
     name = "http_client"
     risk_tier = "medium"
+    effect = Effect(
+        kind="external",
+        label="Send an HTTP request that changes something",
+        target_param="url",
+    )
     description = (
         "Make HTTP requests to external APIs and web services. Supports GET, POST, "
         "PUT, DELETE methods with custom headers and JSON payloads. Useful for "
@@ -23,7 +76,7 @@ class HttpClientTool(BaseTool):
         "properties": {
             "url": {
                 "type": "string",
-                "description": "Full URL to request (must be HTTPS)",
+                "description": "Full http or https URL to request",
             },
             "method": {
                 "type": "string",
@@ -51,6 +104,11 @@ class HttpClientTool(BaseTool):
         },
         "required": ["url"],
     }
+
+    @classmethod
+    def effect_for(cls, arguments: dict[str, Any]) -> Effect | None:
+        method = str(arguments.get("method") or "GET").upper()
+        return READ_ONLY if method in ("GET", "HEAD", "OPTIONS") else cls.effect
 
     async def execute(self, arguments: dict[str, Any]) -> ToolResult:
         url = arguments.get("url", "")
@@ -129,13 +187,19 @@ class HttpClientTool(BaseTool):
                                 resp_body = text
                             break
                     except Exception as e:
-                        last_error = str(e)
+                        last_error = plain_error(e, parsed.hostname, timeout)
                         if attempt < max_retries:
                             await _asyncio.sleep(2 ** (attempt + 1))
                         else:
+                            tries = (
+                                f" Tried {max_retries + 1} times."
+                                if max_retries
+                                else ""
+                            )
                             return ToolResult(
-                                content=f"HTTP request failed after {max_retries + 1} attempts: {last_error}",
+                                content=f"{last_error}{tries}",
                                 is_error=True,
+                                metadata={"url": url, "unreachable": True},
                             )
 
             result = {
@@ -163,4 +227,6 @@ class HttpClientTool(BaseTool):
             )
 
         except Exception as e:
-            return ToolResult(content=f"HTTP request failed: {e}", is_error=True)
+            return ToolResult(
+                content=plain_error(e, parsed.hostname, timeout), is_error=True
+            )

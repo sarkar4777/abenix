@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { apiFetch } from '@/lib/api-client';
+import { usePlatformFeatures } from '@/hooks/usePlatformFeatures';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Search,
@@ -56,6 +57,7 @@ interface Command {
   category: string;
   keywords?: string[];
   shortcut?: string;
+  requires?: 'marketplace' | 'monetization';
 }
 
 const NAVIGATION_COMMANDS: Command[] = [
@@ -83,16 +85,15 @@ const NAVIGATION_COMMANDS: Command[] = [
     category: 'Navigation',
     keywords: ['create', 'build', 'canvas', 'flow'],
   },
-  ...(process.env.NEXT_PUBLIC_ENABLE_MONETIZATION !== 'false'
-    ? [{
-        id: 'nav-marketplace',
-        label: 'Marketplace',
-        icon: Store,
-        href: '/marketplace',
-        category: 'Navigation',
-        keywords: ['browse', 'shop', 'discover', 'store'],
-      }]
-    : []),
+  {
+    id: 'nav-marketplace',
+    label: 'Marketplace',
+    icon: Store,
+    href: '/marketplace',
+    category: 'Navigation',
+    keywords: ['browse', 'shop', 'discover', 'store'],
+    requires: 'marketplace',
+  },
   {
     id: 'nav-knowledge',
     label: 'Knowledge',
@@ -123,7 +124,8 @@ const NAVIGATION_COMMANDS: Command[] = [
     icon: Sparkles,
     href: '/creator',
     category: 'Navigation',
-    keywords: ['creator', 'earnings', 'revenue', 'payouts'],
+    keywords: ['creator', 'listings', 'installs'],
+    requires: 'marketplace',
   },
   {
     id: 'nav-settings',
@@ -141,16 +143,15 @@ const NAVIGATION_COMMANDS: Command[] = [
     category: 'Navigation',
     keywords: ['members', 'invite', 'organization'],
   },
-  ...(process.env.NEXT_PUBLIC_ENABLE_MONETIZATION !== 'false'
-    ? [{
-        id: 'nav-billing',
-        label: 'Billing',
-        icon: CreditCard,
-        href: '/settings/billing',
-        category: 'Navigation',
-        keywords: ['plan', 'subscription', 'payment', 'pricing'],
-      }]
-    : []),
+  {
+    id: 'nav-billing',
+    label: 'Billing',
+    icon: CreditCard,
+    href: '/settings/billing',
+    category: 'Navigation',
+    keywords: ['plan', 'subscription', 'payment', 'pricing'],
+    requires: 'monetization',
+  },
   {
     id: 'nav-api-keys',
     label: 'API Keys',
@@ -171,16 +172,15 @@ const ACTION_COMMANDS: Command[] = [
     keywords: ['create', 'new', 'build', 'agent'],
     shortcut: '\u2318N',
   },
-  ...(process.env.NEXT_PUBLIC_ENABLE_MONETIZATION !== 'false'
-    ? [{
-        id: 'action-browse-marketplace',
-        label: 'Browse Marketplace',
-        icon: Store,
-        href: '/marketplace',
-        category: 'Actions',
-        keywords: ['browse', 'discover', 'explore', 'shop'],
-      }]
-    : []),
+  {
+    id: 'action-browse-marketplace',
+    label: 'Browse Marketplace',
+    icon: Store,
+    href: '/marketplace',
+    category: 'Actions',
+    keywords: ['browse', 'discover', 'explore', 'shop'],
+    requires: 'marketplace',
+  },
 ];
 
 const ALL_COMMANDS: Command[] = [...NAVIGATION_COMMANDS, ...ACTION_COMMANDS];
@@ -194,6 +194,11 @@ export default function CommandPalette() {
   const listRef = useRef<HTMLDivElement>(null);
 
   const [remoteResults, setRemoteResults] = useState<RemoteResult[]>([]);
+  const { marketplace, monetization } = usePlatformFeatures();
+  const commands = useMemo(
+    () => ALL_COMMANDS.filter((c) => !c.requires || (c.requires === 'marketplace' ? marketplace : monetization)),
+    [marketplace, monetization],
+  );
 
   // Hit /api/search whenever the query stabilises. Local commands still match
   // instantly; remote results stream in for agents/pipelines/KB/ML/etc.
@@ -214,10 +219,10 @@ export default function CommandPalette() {
   }, [query]);
 
   const filteredCommands = useMemo(() => {
-    if (!query.trim()) return ALL_COMMANDS;
+    if (!query.trim()) return commands;
 
     const lowerQuery = query.toLowerCase();
-    const localMatches = ALL_COMMANDS.filter((cmd) => {
+    const localMatches = commands.filter((cmd) => {
       if (cmd.label.toLowerCase().includes(lowerQuery)) return true;
       if (cmd.category.toLowerCase().includes(lowerQuery)) return true;
       if (
@@ -238,7 +243,7 @@ export default function CommandPalette() {
     }));
 
     return [...localMatches, ...remoteAsCommands];
-  }, [query, remoteResults]);
+  }, [query, remoteResults, commands]);
 
   const groupedCommands = useMemo(() => {
     const groups: { category: string; commands: Command[] }[] = [];

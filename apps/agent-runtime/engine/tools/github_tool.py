@@ -7,7 +7,7 @@ import json
 import time
 from typing import Any
 
-from engine.tools.base import BaseTool, ConfigField, ToolResult
+from engine.tools.base import READ_ONLY, BaseTool, ConfigField, ToolResult
 
 GITHUB_API_BASE = "https://api.github.com"
 MAX_CONTENT_LENGTH = 100_000
@@ -16,6 +16,7 @@ MAX_CONTENT_LENGTH = 100_000
 class GitHubTool(BaseTool):
     name = "github_tool"
     risk_tier = "high"
+    effect = READ_ONLY
     config_fields = (
         ConfigField(
             "GITHUB_TOKEN",

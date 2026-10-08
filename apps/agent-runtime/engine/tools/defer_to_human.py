@@ -113,8 +113,10 @@ class DeferToHumanTool(BaseTool):
                 json.dumps({"type": "deferral", "entry": entry}),
             )
 
-            # 2. Fire webhook if configured (Slack / custom push)
-            await _fire_webhook(entry)
+            # 2. Fire webhook if configured (Slack / custom push), never for a rehearsal
+            sess = sessmod.get(self._execution_id)
+            if not (sess and sess.simulated):
+                await _fire_webhook(entry)
 
             await sessmod.append_decision(
                 meeting_id,
@@ -129,6 +131,16 @@ class DeferToHumanTool(BaseTool):
 
             # 3. Subscribe + wait for answer
             answer = await _wait_for_answer(r, pubsub_channel, hold_seconds)
+            try:
+                await r.hset(
+                    f"meeting:{meeting_id}:deferral:{deferral_id}",
+                    mapping={
+                        "status": "answered" if answer else "timed_out",
+                        "answer": answer or fallback,
+                    },
+                )
+            except Exception:
+                pass
         finally:
             try:
                 await r.aclose()

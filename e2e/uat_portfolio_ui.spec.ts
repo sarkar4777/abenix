@@ -72,7 +72,7 @@ test.beforeEach(async ({ page }) => {
 
 test('Try with a sample makes a trading book the user owns', async ({ page }) => {
   await go(page, '/portfolio-schemas');
-  await expect(page.getByRole('heading', { name: 'How this works' })).toBeVisible();
+  await expect(page.getByTestId('ps-howto')).toBeVisible();
   await page.getByTestId('ps-try-sample').click();
   const next = page.getByTestId('ps-next-step');
   await expect(next).toBeVisible({ timeout: 60_000 });

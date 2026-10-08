@@ -10,7 +10,7 @@ from email.message import EmailMessage
 from pathlib import Path
 from typing import Any
 
-from engine.tools.base import BaseTool, ConfigField, ToolResult
+from engine.tools.base import BaseTool, ConfigField, Effect, ToolResult
 
 
 EXPORT_DIR = os.environ.get("EXPORT_DIR", "/tmp/abenix_exports")
@@ -19,6 +19,7 @@ EXPORT_DIR = os.environ.get("EXPORT_DIR", "/tmp/abenix_exports")
 class EmailSenderTool(BaseTool):
     name = "email_sender"
     risk_tier = "high"
+    effect = Effect(kind="send", label="Send an email", target_param="to")
     config_fields = (
         ConfigField(
             "SMTP_HOST",

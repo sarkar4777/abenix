@@ -8,7 +8,7 @@ import uuid
 from typing import Any
 
 from engine import credentials
-from engine.tools.base import BaseTool, ConfigField, ToolResult
+from engine.tools.base import BaseTool, ConfigField, Effect, ToolResult
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +16,9 @@ logger = logging.getLogger(__name__)
 class KnowledgeStoreTool(BaseTool):
     name = "knowledge_store"
     risk_tier = "medium"
+    effect = Effect(
+        kind="write", label="Add a document to a knowledge base", reversible=True
+    )
     config_fields = (
         ConfigField(
             "OPENAI_API_KEY",

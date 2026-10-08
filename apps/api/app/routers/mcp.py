@@ -262,17 +262,17 @@ def _validate_mcp_url(url: str) -> tuple[bool, str]:
     try:
         u = urlparse(url)
     except Exception:
-        return False, "invalid url"
+        return False, "It is not a valid URL"
     if u.scheme not in ("http", "https"):
-        return False, "scheme must be http(s)"
+        return False, "Use an http or https address"
     host = (u.hostname or "").strip()
     if not host:
-        return False, "host is required"
+        return False, "The address needs a host name"
     # Block IP literals that hit internal infra / cloud metadata
     try:
         ip = ipaddress.ip_address(host)
         if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast:
-            return False, f"private/loopback IPs not allowed ({host})"
+            return False, f"Private and loopback IPs are not allowed ({host})"
     except ValueError:
         # Hostname, not an IP — check allow-list suffixes if configured
         pass
@@ -286,7 +286,10 @@ def _validate_mcp_url(url: str) -> tuple[bool, str]:
         suffixes = [s.strip().lower() for s in allow.split(",") if s.strip()]
         if any(lowered == s or lowered.endswith("." + s) for s in suffixes):
             return True, ""
-        return False, f"host '{host}' not in MCP_ALLOWED_HOSTS"
+        return False, (
+            f"{host} is not on this workspace's list of approved MCP hosts. "
+            "An admin can add it to MCP_ALLOWED_HOSTS"
+        )
     # Block hostnames that resolve inside the cluster or to localhost
     if lowered in (
         "localhost",
@@ -297,14 +300,14 @@ def _validate_mcp_url(url: str) -> tuple[bool, str]:
         "kubernetes.default.svc",
         "kubernetes",
     ):
-        return False, f"internal hostname blocked ({host})"
+        return False, f"Internal host names are blocked ({host})"
     if (
         lowered.endswith(".svc.cluster.local")
         or lowered.endswith(".cluster.local")
         or lowered.endswith(".internal")
         or lowered.endswith(".local")
     ):
-        return False, "cluster-internal DNS blocked"
+        return False, "Cluster-internal addresses are blocked"
     try:
         as_int = int(lowered)
     except ValueError:
@@ -313,7 +316,7 @@ def _validate_mcp_url(url: str) -> tuple[bool, str]:
         try:
             packed = ipaddress.ip_address(as_int)
             if packed.is_private or packed.is_loopback or packed.is_link_local:
-                return False, f"IP-literal encoding blocked ({host})"
+                return False, f"Encoded IP addresses are blocked ({host})"
         except (ValueError, ipaddress.AddressValueError):
             pass
     return True, ""
@@ -327,7 +330,7 @@ async def create_connection(
 ) -> JSONResponse:
     ok, reason = _validate_mcp_url(body.server_url)
     if not ok:
-        return error(f"server_url rejected: {reason}", 400)
+        return error(f"That address cannot be used. {reason}.", 400)
     conn = UserMCPConnection(
         tenant_id=user.tenant_id,
         user_id=user.id,
@@ -533,7 +536,7 @@ async def discover_url(
     """Inline discover: probe a URL without saving a connection."""
     ok, reason = _validate_mcp_url(body.server_url)
     if not ok:
-        return error(f"server_url rejected: {reason}", 400)
+        return error(f"That address cannot be used. {reason}.", 400)
     from engine.mcp_client import MCPClient
 
     client = MCPClient(

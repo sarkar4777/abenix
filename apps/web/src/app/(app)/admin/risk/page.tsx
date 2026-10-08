@@ -1,8 +1,11 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { FileCheck2, Layers, OctagonX, ShieldAlert, Wrench } from 'lucide-react';
 import { useApi } from '@/hooks/useApi';
+import { apiFetch } from '@/lib/api-client';
+import PageHeader from '@/components/layout/PageHeader';
+import NoAccess from '@/components/layout/NoAccess';
 import { holds, useMyPermissions } from '@/lib/capabilities';
 import TierPolicies, { type TierRow } from '@/components/governance/TierPolicies';
 import KillSwitches from '@/components/governance/KillSwitches';
@@ -38,6 +41,19 @@ export default function RiskPage() {
     if (TABS.some((t) => t.id === fromHash)) setTab(fromHash);
   }, []);
 
+  // counts toward the onboarding journey, once per visit
+  const seenSent = useRef(false);
+  useEffect(() => {
+    if (!canView || !data || seenSent.current) return;
+    seenSent.current = true;
+    apiFetch('/api/me/journey/seen', {
+      method: 'POST',
+      body: JSON.stringify({ step: 'risk' }),
+      silent: true,
+      throwOnError: false,
+    }).catch(() => {});
+  }, [canView, data]);
+
   function pick(t: Tab) {
     setTab(t);
     history.replaceState(null, '', `#${t}`);
@@ -48,13 +64,15 @@ export default function RiskPage() {
   }
   if (!canView) {
     return (
-      <div className="max-w-3xl mx-auto px-6 py-16 text-center" data-testid="risk-no-access">
-        <ShieldAlert className="w-10 h-10 text-slate-500 mx-auto mb-3" />
-        <h1 className="text-xl font-semibold text-white">Risk and Controls</h1>
-        <p className="text-slate-400 mt-2">
-          This page needs the risk.view capability. An admin can grant it under Admin, Permissions.
-        </p>
-      </div>
+      <NoAccess
+        testId="risk-no-access"
+        title="Risk and Controls"
+        purpose="Decide what each risk tier needs before an agent acts, stop anything that misbehaves, and prove the activity log is untouched. For admins and risk owners."
+        icon={ShieldAlert}
+        need={{ capability: 'risk.view', label: 'View risk and controls' }}
+        role={perms?.role}
+        instead={{ text: 'Approvals lists any agent action waiting for a decision from you.', href: '/approvals', label: 'Open Approvals' }}
+      />
     );
   }
 
@@ -62,16 +80,21 @@ export default function RiskPage() {
 
   return (
     <div className="max-w-6xl mx-auto px-6 py-8">
-      <header className="mb-6">
-        <div className="flex items-center gap-2 mb-2">
-          <ShieldAlert className="w-6 h-6 text-cyan-400" />
-          <h1 className="text-3xl font-semibold text-white">Risk and Controls</h1>
-        </div>
-        <p className="text-slate-400 max-w-3xl">
-          Decide what each risk tier requires, stop anything that misbehaves, and prove the activity log has not been
-          touched. Everything here applies to the whole tenant and is recorded in the audit log.
-        </p>
-      </header>
+      <PageHeader
+        className="mb-6"
+        title="Risk and Controls"
+        purpose="Decide what each risk tier needs before an agent acts, stop anything that misbehaves, and prove the activity log is untouched. For admins and risk owners."
+        icon={ShieldAlert}
+        storageKey="admin-risk"
+        docSlug="08-howto/11-governance"
+        primaryAction={{ label: 'Open kill switches', icon: OctagonX, onClick: () => pick('switches'), testId: 'risk-open-switches' }}
+        steps={[
+          'Tier policies set what each risk tier needs, such as sign-offs before a new version goes live or a person approving a risky tool call.',
+          'Kill switches stop an agent, a tool or everything at once, straight away.',
+          'Tool tiers show which risk tier each tool falls in.',
+          'Audit integrity checks that no one has changed the activity log. Every change here is recorded there too.',
+        ]}
+      />
 
       <div className="flex flex-wrap gap-1 border-b border-slate-800 mb-6" role="tablist" aria-label="Risk and Controls">
         {TABS.map((t) => {

@@ -7,6 +7,7 @@ import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
 import { Book, Search, Menu, X, ChevronRight } from 'lucide-react';
 import 'highlight.js/styles/github-dark.css';
+import { resolveDocHref } from '@/lib/doc-links';
 
 interface DocEntry { slug: string; title: string }
 interface Section { id: string; title: string; docs: DocEntry[] }
@@ -17,7 +18,7 @@ const DOCS_BASE = '/dev-docs';
 export default function DocsContent() {
   const params = useSearchParams();
   const router = useRouter();
-  const slug = params.get('slug') || 'README';
+  const slug = params.get('slug') || params.get('doc') || 'README';
 
   const [manifest, setManifest] = useState<Manifest | null>(null);
   const [content, setContent] = useState<string>('');
@@ -86,11 +87,11 @@ export default function DocsContent() {
   };
 
   return (
-    <div className="-m-3 md:-m-6 flex min-h-[calc(100vh-3.5rem)] bg-[#0B0F19]">
+    <div className="flex min-h-screen bg-[#0B0F19] overflow-x-hidden">
       {/* Mobile sidebar toggle */}
       <button
         onClick={() => setSidebarOpen((v) => !v)}
-        className="lg:hidden fixed top-20 left-3 z-30 p-2 rounded-lg bg-slate-800/80 border border-slate-700 text-slate-300"
+        className="lg:hidden fixed top-3 right-3 z-30 p-2 rounded-lg bg-slate-800/80 border border-slate-700 text-slate-300"
         aria-label="Toggle sidebar"
       >
         {sidebarOpen ? <X className="w-4 h-4" /> : <Menu className="w-4 h-4" />}
@@ -98,7 +99,7 @@ export default function DocsContent() {
 
       {/* Sidebar */}
       <aside
-        className={`fixed lg:sticky top-14 left-0 z-20 w-72 h-[calc(100vh-3.5rem)] bg-slate-900/95 lg:bg-slate-900/40 border-r border-slate-800 overflow-y-auto transition-transform ${
+        className={`fixed lg:sticky top-0 left-0 z-20 w-72 h-screen bg-slate-900/95 lg:bg-slate-900/40 border-r border-slate-800 overflow-y-auto transition-transform ${
           sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
         }`}
       >
@@ -175,12 +176,12 @@ export default function DocsContent() {
       </aside>
 
       {/* Main content */}
-      <main className="flex-1 min-w-0 px-4 md:px-12 py-6">
+      <main className="flex-1 min-w-0 px-4 md:px-12 py-6 pt-14 lg:pt-6">
         <article className="max-w-3xl mx-auto prose-doc">
           {loading ? (
             <p className="text-sm text-slate-500">Loading…</p>
           ) : (
-            <DocBody markdown={content} />
+            <DocBody markdown={content} slug={slug} />
           )}
         </article>
       </main>
@@ -292,7 +293,7 @@ export default function DocsContent() {
   );
 }
 
-function DocBody({ markdown }: { markdown: string }) {
+function DocBody({ markdown, slug }: { markdown: string; slug: string }) {
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
@@ -310,26 +311,10 @@ function DocBody({ markdown }: { markdown: string }) {
           );
         },
         a({ href, children }: any) {
-          // Rewrite relative .md (or .md#anchor / .md?query) links to
-          // in-app navigation. Previous version used endsWith('.md')
-          // which silently fell through on any link with a hash and
-          // produced 404s when the link target had an anchor.
-          if (typeof href === 'string' && /\.md(?:[#?].*)?$/.test(href) && !/^https?:\/\//.test(href)) {
-            const hashIdx = href.indexOf('#');
-            const queryIdx = href.indexOf('?');
-            const splitAt = [hashIdx, queryIdx].filter((i) => i >= 0).sort((a, b) => a - b)[0];
-            const path = splitAt !== undefined ? href.slice(0, splitAt) : href;
-            const fragment = splitAt !== undefined ? href.slice(splitAt) : '';
-
-            // Strip leading ../ or ./ (and any number of them) and a leading /.
-            const cleaned = path
-              .replace(/^(?:\.\.?\/)+/, '')
-              .replace(/^\//, '')
-              .replace(/\.md$/, '');
-            return <a href={`?slug=${encodeURIComponent(cleaned)}${fragment}`}>{children}</a>;
-          }
+          // relative links resolve against this page, source files open on GitHub
+          const r = resolveDocHref(typeof href === 'string' ? href : '', slug);
           return (
-            <a href={href} target={href?.startsWith('http') ? '_blank' : undefined} rel="noreferrer">
+            <a href={r.href} target={r.external ? '_blank' : undefined} rel="noreferrer">
               {children}
             </a>
           );

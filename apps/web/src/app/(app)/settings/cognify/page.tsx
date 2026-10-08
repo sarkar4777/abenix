@@ -1,7 +1,9 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { BookOpen, Network } from 'lucide-react';
 import { apiFetch } from '@/lib/api-client';
+import PageHeader from '@/components/layout/PageHeader';
 
 interface Config {
   auto_accept_threshold: number;
@@ -25,11 +27,15 @@ export default function CognifyConfigPage() {
   const [conflicts, setConflicts] = useState<Conflict[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
 
   useEffect(() => {
-    apiFetch<Config>('/api/knowledge/cognify-config')
-      .then(r => { if (r.data) setCfg(r.data); })
-      .catch(e => setError(String(e)));
+    apiFetch<Config>('/api/knowledge/cognify-config', { silent: true })
+      .then(r => {
+        if (r.data) setCfg(r.data);
+        else setError(r.error || 'Could not load the settings.');
+      })
+      .catch(e => setError(e instanceof Error ? e.message : String(e)));
     apiFetch<{ items: Conflict[] }>('/api/knowledge/cognify-conflicts')
       .then(r => setConflicts(r.data?.items || []))
       .catch(() => {});
@@ -39,13 +45,11 @@ export default function CognifyConfigPage() {
     if (!cfg) return;
     setSaving(true);
     setError(null);
-    try {
-      await apiFetch('/api/knowledge/cognify-config', { method: 'PUT', body: JSON.stringify(cfg) });
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setSaving(false);
-    }
+    setSaved(false);
+    const r = await apiFetch('/api/knowledge/cognify-config', { method: 'PUT', body: JSON.stringify(cfg), throwOnError: false });
+    if (r.error) setError(r.error);
+    else setSaved(true);
+    setSaving(false);
   }
 
   async function resolve(id: string, value: string) {
@@ -64,37 +68,48 @@ export default function CognifyConfigPage() {
   if (cfg === null) {
     return (
       <main className="max-w-5xl mx-auto sm:px-6 py-2 sm:py-8 text-slate-300">
-        <p>Loading…</p>
+        {error ? (
+          <p className="text-red-400 text-sm" role="alert" data-testid="cognify-load-error">Could not load the Cognify settings. {error}</p>
+        ) : (
+          <div className="h-40 rounded-xl bg-slate-800/40 animate-pulse" aria-busy="true" />
+        )}
       </main>
     );
   }
 
   return (
     <main className="max-w-5xl mx-auto sm:px-6 py-2 sm:py-8 space-y-8">
-      <header>
-        <h1 className="text-3xl font-semibold text-white">Cognify (knowledge graph)</h1>
-        <p className="text-slate-400 mt-2 max-w-3xl">
-          Tunes how the document → graph pipeline accepts proposed entities and relationships,
-          and surfaces open conflicts where two sources disagree on the same fact.
-        </p>
-      </header>
+      <PageHeader
+        title="Cognify (knowledge graph)"
+        icon={Network}
+        purpose="Tune how facts pulled from your documents are let into the knowledge graph, and settle cases where two sources disagree. For knowledge base owners."
+        primaryAction={{ label: 'Open knowledge bases', icon: BookOpen, href: '/knowledge' }}
+        steps={[
+          'Set how sure the extractor must be before a fact goes into the graph.',
+          'Pick what happens when two documents disagree on the same fact.',
+          'Cap how many documents run at once and how much a day may cost, then save.',
+          'Settle open conflicts below by accepting one of the two values.',
+        ]}
+        docSlug="02-runtime/15-v2-knowledge-enterprise"
+        storageKey="settings-cognify"
+      />
 
       <section className="rounded-xl border border-slate-800 bg-slate-900/50 p-5 space-y-4">
         <h2 className="text-sm font-semibold text-cyan-300 uppercase tracking-wider">Acceptance + budget</h2>
 
         <label className="block">
-          <span className="text-xs text-slate-400">Auto-accept confidence threshold</span>
+          <span className="block text-xs text-slate-400">Auto-accept confidence threshold, from 0 to 1</span>
           <input
             type="number"
             min={0}
             max={1}
             step={0.01}
             value={cfg.auto_accept_threshold}
-            onChange={e => setCfg({ ...cfg, auto_accept_threshold: parseFloat(e.target.value) })}
+            onChange={e => { setSaved(false); setCfg({ ...cfg, auto_accept_threshold: parseFloat(e.target.value) }); }}
             className="mt-1 w-32 rounded-md bg-slate-800 border border-slate-700 px-3 py-1.5 text-white"
           />
-          <span className="ml-2 text-xs text-slate-500">
-            entities and relationships the extractor rates below this are left out of the graph and counted in the job report.
+          <span className="block mt-1 text-xs text-slate-500">
+            Entities and relationships the extractor rates below this are left out of the graph and counted in the job report.
           </span>
         </label>
 
@@ -143,7 +158,8 @@ export default function CognifyConfigPage() {
         >
           {saving ? 'Saving…' : 'Save config'}
         </button>
-        {error && <p className="text-red-400 text-xs mt-2">{error}</p>}
+        {error && <p className="text-red-400 text-xs mt-2" role="alert">{error}</p>}
+        {saved && !error && <p className="text-emerald-300 text-xs mt-2" role="status" data-testid="cognify-saved">Saved. The next cognify job uses these settings.</p>}
       </section>
 
       <section className="rounded-xl border border-slate-800 bg-slate-900/50 p-5">

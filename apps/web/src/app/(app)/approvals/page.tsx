@@ -3,9 +3,15 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   CheckCircle2, XCircle, Clock, Loader2, ShieldCheck, AlertTriangle,
-  RefreshCw, ChevronDown, ChevronRight,
+  RefreshCw, ChevronDown, ChevronRight, Eye,
 } from 'lucide-react';
+import Link from 'next/link';
 import { apiFetch } from '@/lib/api-client';
+import { holds, useMyPermissions } from '@/lib/capabilities';
+import { isActionGate, levelLabel, signoffApproval } from '@/lib/autonomy';
+import ApprovalActionRow from '@/components/autonomy/ApprovalActionRow';
+import ReviewQueue from '@/components/autonomy/ReviewQueue';
+import PageHeader from '@/components/layout/PageHeader';
 
 interface SignoffEntry {
   user_id: string;
@@ -35,7 +41,13 @@ interface ApprovalRow {
 const GATE_KIND_LABEL: Record<string, string> = {
   human_approval: 'agent gate',
   decision_publish: 'rule change',
+  'autonomy.promote': 'promotion',
 };
+
+function gateLabel(kind: string): string {
+  if (isActionGate(kind)) return 'agent action';
+  return GATE_KIND_LABEL[kind] || kind;
+}
 
 const STATUS_BADGE: Record<string, string> = {
   pending: 'bg-amber-500/15 text-amber-300 border-amber-500/40',
@@ -195,7 +207,7 @@ function ApprovalCard({ row, onDecide, busy }: { row: ApprovalRow; onDecide: (id
                 data-testid="approval-gate-kind"
                 title={row.gate_kind}
               >
-                {GATE_KIND_LABEL[row.gate_kind] || row.gate_kind}
+                {gateLabel(row.gate_kind)}
               </span>
             )}
           </div>
@@ -211,6 +223,7 @@ function ApprovalCard({ row, onDecide, busy }: { row: ApprovalRow; onDecide: (id
               <span className="font-mono text-slate-600">exec {row.agent_execution_id.slice(0, 8)}</span>
             )}
           </div>
+          {row.gate_kind === 'autonomy.promote' && <PromotionSummary payload={row.payload} />}
           {row.gate_kind === 'decision_publish' && (
             <div className="mt-1.5 flex flex-wrap items-center gap-3 text-[11px]" data-testid="approval-decision">
               {typeof row.payload?.link === 'string' && (
@@ -229,6 +242,7 @@ function ApprovalCard({ row, onDecide, busy }: { row: ApprovalRow; onDecide: (id
               disabled={busy}
               onClick={() => decide('approve')}
               className="px-3 py-1.5 rounded-lg bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 text-xs font-medium hover:bg-emerald-500/25 disabled:opacity-50 flex items-center gap-1.5 justify-center"
+              data-testid="approval-approve"
             >
               <CheckCircle2 className="w-3.5 h-3.5" /> Approve
             </button>
@@ -236,6 +250,7 @@ function ApprovalCard({ row, onDecide, busy }: { row: ApprovalRow; onDecide: (id
               disabled={busy}
               onClick={() => decide('deny')}
               className="px-3 py-1.5 rounded-lg bg-rose-500/15 border border-rose-500/40 text-rose-300 text-xs font-medium hover:bg-rose-500/25 disabled:opacity-50 flex items-center gap-1.5 justify-center"
+              data-testid="approval-deny"
             >
               <XCircle className="w-3.5 h-3.5" /> Deny
             </button>
@@ -303,7 +318,54 @@ function ApprovalCard({ row, onDecide, busy }: { row: ApprovalRow; onDecide: (id
   );
 }
 
+function PromotionSummary({ payload }: { payload: Record<string, unknown> }) {
+  // the API sends grant_id with agent and action_type beside it, older rows nest them in grant
+  const g = payload?.grant as { id?: string; agent?: { name?: string }; action_type?: { label?: string } } | string | undefined;
+  const nested = typeof g === 'object' ? g : undefined;
+  const grantId = (typeof payload?.grant_id === 'string' ? payload.grant_id : undefined) || (typeof g === 'string' ? g : nested?.id);
+  const agentName = (payload?.agent as { name?: string } | undefined)?.name || nested?.agent?.name;
+  const actionLabel = (payload?.action_type as { label?: string } | undefined)?.label || nested?.action_type?.label;
+  const from = typeof payload?.from === 'number' ? payload.from : null;
+  const to = typeof payload?.to === 'number' ? payload.to : null;
+  return (
+    <div className="mt-1.5 flex flex-wrap items-center gap-3 text-[11px]" data-testid="approval-promotion">
+      <span className="text-slate-300">
+        {agentName ? `${agentName}, ` : ''}{actionLabel ? `${actionLabel}: ` : ''}
+        {from !== null && to !== null ? `${levelLabel(from)} to ${levelLabel(to)}` : 'move up a level'}
+      </span>
+      {grantId && <Link href={`/autonomy/${encodeURIComponent(grantId)}`} className="text-cyan-300 hover:underline">See the evidence</Link>}
+      {typeof payload?.self_approval === 'string' ? (
+        <span className="text-cyan-200" data-testid="approval-self-approval">{payload.self_approval}</span>
+      ) : (
+        <span className="text-slate-500">Needs autonomy.grant, and not the person who built the agent</span>
+      )}
+    </div>
+  );
+}
+
 export default function ApprovalsPage() {
+  const { perms } = useMyPermissions();
+  const canReview = holds(perms?.capabilities, 'actions.review');
+  const [tab, setTab] = useState<'pending' | 'reviews'>('pending');
+  const [reviewCount, setReviewCount] = useState<number | null>(null);
+
+  useEffect(() => {
+    try {
+      const t = new URLSearchParams(window.location.search).get('tab');
+      if (t === 'reviews' || t === 'watching') setTab('reviews');
+    } catch { /* no window in tests */ }
+  }, []);
+
+  const switchTab = (t: 'pending' | 'reviews') => {
+    setTab(t);
+    try {
+      const url = new URL(window.location.href);
+      if (t === 'reviews') url.searchParams.set('tab', 'reviews');
+      else url.searchParams.delete('tab');
+      window.history.replaceState(null, '', url.toString());
+    } catch { /* ignore */ }
+  };
+
   const [pending, setPending] = useState<ApprovalRow[]>([]);
   const [recent, setRecent] = useState<ApprovalRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -330,14 +392,15 @@ export default function ApprovalsPage() {
     return () => clearInterval(id);
   }, [load]);
 
-  const handleDecide = async (id: string, decision: 'approve' | 'deny' | 'return', reason?: string): Promise<string | null> => {
+  const handleDecide = async (
+    id: string,
+    decision: 'approve' | 'deny' | 'return',
+    reason?: string,
+    editedArguments?: Record<string, unknown>,
+  ): Promise<string | null> => {
     setBusyId(id);
     // ids are opaque strings, agent gates look like hitl:{execution}:{gate}
-    const r = await apiFetch(`/api/approvals/${encodeURIComponent(id)}/signoff`, {
-      method: 'POST',
-      body: JSON.stringify({ decision, reason }),
-      throwOnError: false,
-    });
+    const r = await signoffApproval(id, decision, reason, editedArguments);
     setBusyId(null);
     await load();
     return r.error;
@@ -345,24 +408,48 @@ export default function ApprovalsPage() {
 
   return (
     <div className="max-w-5xl mx-auto">
-      <header className="mb-6">
-        <div className="flex items-center gap-3 mb-2">
-          <div className="w-10 h-10 rounded-xl bg-cyan-500/15 border border-cyan-500/30 flex items-center justify-center">
-            <ShieldCheck className="w-5 h-5 text-cyan-400" />
-          </div>
-          <div>
-            <h1 className="text-2xl font-bold text-white">Approvals</h1>
-            <p className="text-sm text-slate-500">Sign off on agent actions that require human review.</p>
-          </div>
-          <button
-            onClick={load}
-            className="ml-auto flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800/60 border border-slate-700/50 text-xs text-slate-300 hover:text-white"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} /> Refresh
-          </button>
-        </div>
-      </header>
+      <PageHeader
+        className="mb-6"
+        title="Approvals"
+        purpose="Sign off on agent actions, rule changes and promotions that need a person before they happen. For approvers and reviewers."
+        icon={ShieldCheck}
+        storageKey="approvals"
+        docSlug="02-runtime/05-approvals-hitl"
+        primaryAction={{ label: 'Refresh', onClick: load, icon: RefreshCw, busy: loading }}
+        steps={[
+          'Pending approvals lists every request you may sign off. It refreshes every five seconds.',
+          'Open one to see what the agent wants to do and why, then approve, deny or send it back.',
+          'Watching reviews is where you agree or disagree with agents that are still earning autonomy.',
+        ]}
+      />
 
+      <div className="mb-5 flex gap-1 border-b border-slate-800" role="tablist">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === 'pending'}
+          onClick={() => switchTab('pending')}
+          className={`-mb-px border-b-2 px-3 py-2 text-sm ${tab === 'pending' ? 'border-cyan-400 text-white' : 'border-transparent text-slate-400 hover:text-white'}`}
+          data-testid="approvals-tab-pending"
+        >
+          Pending approvals{pending.length ? ` (${pending.length})` : ''}
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === 'reviews'}
+          onClick={() => switchTab('reviews')}
+          className={`-mb-px inline-flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm ${tab === 'reviews' ? 'border-cyan-400 text-white' : 'border-transparent text-slate-400 hover:text-white'}`}
+          data-testid="approvals-tab-reviews"
+        >
+          <Eye className="h-3.5 w-3.5" /> Watching reviews{reviewCount ? ` (${reviewCount})` : ''}
+        </button>
+      </div>
+
+      {tab === 'reviews' ? (
+        <ReviewQueue canReview={canReview} onCountChange={setReviewCount} />
+      ) : (
+      <>
       {error && (
         <div className="mb-4 rounded-xl border border-rose-500/40 bg-rose-500/10 p-3 flex items-center gap-2 text-sm text-rose-200">
           <AlertTriangle className="w-4 h-4 shrink-0" />
@@ -386,7 +473,9 @@ export default function ApprovalsPage() {
           </div>
         ) : (
           pending.map(a => (
-            <ApprovalCard key={a.id} row={a} onDecide={handleDecide} busy={busyId === a.id} />
+            isActionGate(a.gate_kind)
+              ? <ApprovalActionRow key={a.id} row={a} onDecide={handleDecide} busy={busyId === a.id} />
+              : <ApprovalCard key={a.id} row={a} onDecide={handleDecide} busy={busyId === a.id} />
           ))
         )}
       </section>
@@ -400,10 +489,14 @@ export default function ApprovalsPage() {
           <p className="text-xs text-slate-600">No decisions yet.</p>
         ) : (
           recent.map(a => (
-            <ApprovalCard key={a.id} row={a} onDecide={handleDecide} busy={busyId === a.id} />
+            isActionGate(a.gate_kind)
+              ? <ApprovalActionRow key={a.id} row={a} onDecide={handleDecide} busy={busyId === a.id} />
+              : <ApprovalCard key={a.id} row={a} onDecide={handleDecide} busy={busyId === a.id} />
           ))
         )}
       </section>
+      </>
+      )}
     </div>
   );
 }

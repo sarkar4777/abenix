@@ -20,6 +20,33 @@ hypertable in the stack is `metrics`, used by `tsdb_query`, not this one.
 | `status` | enum | `running`, `completed`, `failed`, `cancelled`. Stored uppercase in Postgres. |
 | `parent_execution_id` | uuid | Set when one agent invokes another, and on a replay, so a fan-out is reconstructable. |
 | `retry_count` | int | Incremented on replay. |
+| `trigger_id` | uuid | The `agent_triggers` row that started the run. `ON DELETE SET NULL`, so the run outlives its trigger. Indexed. Added by `trig0prov01`. |
+| `trigger_kind` | varchar(32) | What started the run. See [Started by](#started-by). Indexed. NULL on runs older than `trig0prov01`. |
+| `trigger_name` | varchar(255) | The trigger, subscription, source or parent agent name at the time of the run. Kept when the trigger is deleted. |
+
+### Started by
+
+Every path that writes an `executions` row sets `trigger_kind`. The helper is
+[`apps/api/app/core/run_origin.py`](../../apps/api/app/core/run_origin.py).
+
+| `trigger_kind` | Set by | `trigger_id` | `trigger_name` |
+|---|---|---|---|
+| `schedule` | the scheduler, `check_due_triggers` | the trigger | the trigger name |
+| `webhook` | `POST /api/triggers/webhook/{token}` | the trigger | the trigger name |
+| `manual` | Run now on a trigger, or a signed-in person running an agent outside chat | the trigger on Run now | the trigger name on Run now |
+| `event` | an event subscription with a run target | none | the subscription name |
+| `source_watch` | a `source.changed` event delivered to a run target | none | the source name |
+| `chat` | the chat pages, which send `source: "chat"` | none | none |
+| `api` | any call with an API key, SDK included | none | none |
+| `playground` / `builder` | the SDK playground, the pipeline builder and the BPM analyzer test | none | none |
+| `pipeline` / `agent` | a child run started by `invoke_agent`, by the parent's mode | none | the parent agent name |
+| `autonomy_sample` | Run sample on the earned autonomy page | none | `Earned autonomy sample` |
+| `eval` | an evaluation suite case | none | none |
+| `replay` | a replay from the run page, the governance replay or the dead letter queue | none | how it was replayed |
+| `a2a` / `batch` / `meeting` | the A2A endpoint, batch execute and the meeting bot | none | none |
+
+A browser may only claim `chat`, `playground` or `builder` through `source` on
+`POST /api/agents/{id}/execute`. Every other kind is decided on the server.
 
 ### Status is not the same as success
 

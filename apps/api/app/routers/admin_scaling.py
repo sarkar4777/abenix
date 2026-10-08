@@ -8,7 +8,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Body
 from fastapi.responses import JSONResponse
-from sqlalchemy import func as sqlfunc, select
+from sqlalchemy import func as sqlfunc, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_db
@@ -176,20 +176,58 @@ async def list_pools(
     return success({"pools": out})
 
 
+def agent_scale_filters(pool: str = "", q: str = "") -> list[Any]:
+    """WHERE clauses for the scaling list, shared by the rows and the totals."""
+    where: list[Any] = []
+    if pool:
+        where.append(Agent.runtime_pool == pool)
+    needle = q.strip()
+    if needle:
+        like = f"%{needle}%"
+        where.append(or_(Agent.name.ilike(like), Agent.slug.ilike(like)))
+    return where
+
+
 @router.get("/agents")
 async def list_agents_with_scale(
     pool: str = "",
+    q: str = "",
     limit: int = 200,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
-    """List all agents with their scaling knobs. Supports filter by pool."""
+    """List agents with their scaling knobs, with totals over every match, not just the page."""
     _ensure_admin(user)
-    q = select(Agent).order_by(Agent.name).limit(max(1, min(500, limit)))
-    if pool:
-        q = q.where(Agent.runtime_pool == pool)
-    rows = (await db.execute(q)).scalars().all()
-    return success({"agents": [_serialize_agent_scale(a) for a in rows]})
+    where = agent_scale_filters(pool, q)
+    rows = (
+        (
+            await db.execute(
+                select(Agent)
+                .where(*where)
+                .order_by(Agent.name)
+                .limit(max(1, min(500, limit)))
+            )
+        )
+        .scalars()
+        .all()
+    )
+    totals = (
+        await db.execute(
+            select(
+                sqlfunc.count(Agent.id),
+                sqlfunc.count(Agent.rate_limit_qps),
+                sqlfunc.count(Agent.daily_budget_usd),
+            ).where(*where)
+        )
+    ).one()
+    return success(
+        {
+            "agents": [_serialize_agent_scale(a) for a in rows],
+            "total": int(totals[0] or 0),
+            "with_rate_limit": int(totals[1] or 0),
+            "with_budget": int(totals[2] or 0),
+        }
+    )
 
 
 def scaling_updates(body: dict[str, Any]) -> tuple[dict[str, Any], str | None]:

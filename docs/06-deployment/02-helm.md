@@ -79,6 +79,7 @@ Image repositories and tags are per subchart. The deploy scripts pass them with
 | `mlModels.enabled` | `false` | Creates `ml-models-storage` and mounts it on the runtime pools |
 | `mlModels.servingImage` | `""` | `ML_MODEL_SERVING_IMAGE`, falls back to the local registry image |
 | `archives.pvc.enabled` | `false` | Archive claim, local storage mode only. Pair with `api.archivesPVC.enabled` |
+| `clusterView.rbac.enabled` / `serviceAccount` / `metrics` / `keda` | `true` / `default` / `""` / `""` | Read-only ClusterRole and Role for the `/admin/cluster` page, see [06-k8s-specifics](06-k8s-specifics.md#rbac). `metrics` and `keda` set to `"true"` force those rules when helm cannot see the APIs |
 | `sandboxedJob.enabled` / `allowNetwork` / `allowedImages` / `namespace` | `"true"` / unset / list / `""` | `SANDBOXED_JOB_*`. `enabled` also renders the RBAC |
 | `meeting.livekit.url` / `meetUrl`, `meeting.ttsVoice`, `meeting.deferNotifyWebhookUrl` | | LiveKit and meeting tool env |
 | `progress.channelPrefix` / `parentKeyPrefix` / `parentTtl` | `progress:` / `parent:` / `1800` | `PROGRESS_*` |

@@ -171,7 +171,7 @@ async def _purge_postgres(db: AsyncSession, subject: Subject) -> int:
     r = await db.execute(
         text(
             "UPDATE users SET email=:em, full_name=:fn, is_active=false, "
-            "hashed_password='', notification_settings='{}'::jsonb, "
+            "password_hash=NULL, notification_settings='{}'::jsonb, "
             "updated_at=now() WHERE id=:uid"
         ),
         {"em": placeholder_email, "fn": placeholder_name, "uid": sid},
@@ -230,15 +230,42 @@ _ERASE_RUN_INPUTS = text(
 )
 
 
+# held content of theirs still waiting is closed, nobody reviews erased text
+_CLOSE_HELD = text(
+    "UPDATE moderation_reviews SET status = 'rejected', decided_at = now(), "
+    "decision_reason = 'Closed because the author asked for their data to be erased.', "
+    "updated_at = now() "
+    "WHERE user_id = :uid AND tenant_id = :t AND status = 'pending'"
+)
+_ERASE_HELD = text(
+    "UPDATE moderation_reviews SET held_content = NULL, released_content = NULL, "
+    "masked_content = :erased, spans = '[]'::jsonb, "
+    "content_purged_at = COALESCE(content_purged_at, now()), updated_at = now() "
+    "WHERE user_id = :uid AND tenant_id = :t AND (held_content IS NOT NULL "
+    "OR released_content IS NOT NULL OR masked_content IS DISTINCT FROM :erased)"
+)
+_ERASE_EVENT_PREVIEWS = text(
+    "UPDATE moderation_events SET content_preview = NULL "
+    "WHERE user_id = :uid AND tenant_id = :t AND content_preview IS NOT NULL"
+)
+
+
 async def _erase_authored_content(db: AsyncSession, subject: Subject) -> int:
-    """The person's conversations, both sides, and what their runs took in and produced. Rows already erased are not counted again."""
+    """The person's conversations, both sides, what their runs took in and produced, and moderation copies of it. Rows already erased are not counted again."""
     params = {
         "uid": str(subject.user_id),
         "t": str(subject.tenant_id),
         "erased": ERASED,
     }
     total = 0
-    for sql in (_ERASE_MESSAGES, _ERASE_CONVERSATIONS, _ERASE_RUN_INPUTS):
+    for sql in (
+        _ERASE_MESSAGES,
+        _ERASE_CONVERSATIONS,
+        _ERASE_RUN_INPUTS,
+        _CLOSE_HELD,
+        _ERASE_HELD,
+        _ERASE_EVENT_PREVIEWS,
+    ):
         total += (await db.execute(sql, params)).rowcount or 0
     return total
 

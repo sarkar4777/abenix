@@ -25,10 +25,10 @@ apps/web/src/
 │   ├── oraclenet/         ← public OracleNet page
 │   └── demo/              ← redirects to /dashboard
 ├── components/
-│   ├── layout/            ← Sidebar, TopBar, StatusBar, CognifyIndicator
+│   ├── layout/            ← Sidebar, TopBar, StatusBar, CognifyIndicator, PageHeader
 │   ├── builder/           ← agent + pipeline canvas
 │   ├── decisions/ evals/ governance/ sources/
-│   ├── share/ shared/ observability/ chat/
+│   ├── share/ shared/ observability/ chat/   ← shared/ holds NextSteps and StartHere
 │   └── ui/                ← Toast, ConfirmModal, Skeleton, EmptyState, CommandPalette, ...
 ├── hooks/                 ← useApi, usePageTitle, useMediaQuery, ...
 ├── stores/                ← zustand stores
@@ -135,7 +135,10 @@ interface NavItem {
   adminOnly?: boolean;  // admin role only
   capability?: string;  // permissions.capabilities must hold it
   badge?: string;
+  orCapability?: string; // shown without the feature when this capability is held
+  liveCount?: 'reviews' | 'inbox'; // badge from a live count
   external?: boolean;   // open in a new tab
+  requires?: 'marketplace' | 'monetization'; // runtime switch
 }
 ```
 
@@ -143,15 +146,29 @@ The groups, in order:
 
 | Group | Open by default | Items |
 |---|---|---|
-| PINNED | always, can't collapse | Dashboard, My Agents, AI Chat, Alerts |
-| BUILD | yes | Agent Builder, Tools Catalogue, Decisions, Source Watch, Code Runner, ML Models, Knowledge Bases, Persona KB, Portfolio Schemas, BPM Analyzer, Atlas |
+| PINNED | always, can't collapse | Needs you (with the live total), Dashboard, My Agents, AI Chat, Alerts |
+| BUILD | yes | Agent Builder, Manage agents, Tools Catalogue, Decisions, Source Watch, Code Runner, ML Models, Knowledge Bases, Persona KB, Portfolio Schemas, BPM Analyzer, Atlas |
 | RUN & TEST | yes | SDK Playground, Load Playground, Triggers, Evaluations, Meetings |
-| MONITOR | yes | Observability, Executions, Live Debug, Analytics, Moderation |
-| MONETIZE | no | Marketplace, Creator Hub. Dropped entirely when `NEXT_PUBLIC_ENABLE_MONETIZATION=false` |
-| ADMIN | no | Cluster Health, Scaling, Tool Scaling, Pipeline Scaling, Archives, Dead Letter Queue, Model Selection, Tool Configuration, LLM Pricing, Connectors, Events, Review Queue, Risk & Controls, Team, Permissions |
-| WORKSPACE | yes | Approvals, MCP Servers, Edge, API Keys, Cognify config, GDPR (right to erasure), Integrations, Settings, Help, Developer docs |
+| MONITOR | yes | Observability, Executions, Live Debug, Analytics, Moderation, Autonomy |
+| MARKETPLACE | no | Marketplace, Creator Hub. Both hidden while the marketplace switch is off. The sidebar reads it from `GET /api/platform/features` |
+| ADMIN | no | Cluster Health, Scaling, Tool Scaling, Pipeline Scaling, Archives, Dead Letter Queue, Audit log, Models catalogue, Market data, Model Selection, Tool Configuration, LLM Pricing, Connectors, Marketplace & Billing, Events, Risk & Controls, Team, Roles, Permissions |
+| WORKSPACE | yes | Approvals, Review inbox (with a live count of held content), MCP Servers, Edge, API Keys, Cognify config, GDPR (right to erasure), Integrations, Settings, Help, Developer docs |
 
 Each item's gate is listed in [03-page-catalogue](03-page-catalogue.md#sidebar-pages).
+
+### Essentials and all tools
+
+The sidebar has two modes. **Essentials** is the default for every role. It shows a short flat list:
+
+| Who | Items |
+|---|---|
+| everyone | Needs you, Home (`/dashboard`), Agents, AI Chat, Knowledge, Monitor (`/executions`) |
+| creators and admins | Agent Builder, Autonomy |
+| admins | an Admin entry that opens to the admin pages |
+
+Each essential is the same `NavItem` as in the full list, so the same gates apply. When the current page is not in the short list it shows under "You are here", so a page opened from the palette or a link never leaves the person without a marker.
+
+**Show all tools** at the bottom of the sidebar switches to the full grouped list above, with every entry, gate and live count. The choice is saved per user with `PUT /api/me/ui-prefs` (`{"sidebar_mode": "all"}` or `"essentials"`) and read back with `GET /api/me/ui-prefs`. It lives in the user's settings JSON under `ui`. `localStorage` key `abenix.sidebar.mode` only paints the first frame, and the server value wins once it lands. Every page stays reachable from the full list or the command palette.
 
 ### Where the permissions come from
 
@@ -175,14 +192,18 @@ The sidebar calls `GET /api/me/permissions` ([`apps/api/app/routers/me.py`](../.
 
 ```ts
 const ADMIN_DEFAULT_FEATURES = ['review_queue', 'manage_settings', 'manage_team'];
-group.items.filter(item => {
+export function itemVisible(item, { perms, isAdmin, switches }) {
   if (item.adminOnly && !isAdmin) return false;
+  if (item.requires && !switches[item.requires]) return false;
   if (item.capability && !holds(perms?.capabilities, item.capability)) return false;
-  if (item.feature && features[item.feature] === false) return false;
+  const viaCapability = !!item.orCapability && holds(perms?.capabilities, item.orCapability);
+  if (item.feature && features[item.feature] === false && !viaCapability) return false;
   if (item.feature && !perms && ADMIN_DEFAULT_FEATURES.includes(item.feature) && !isAdmin) return false;
   return true;
-});
+}
 ```
+
+Both modes use `itemVisible`. `visibleNavGroups(ctx)` builds the full list and `essentialItems(ctx, role)` the short one.
 
 - `isAdmin` is true when `perms.is_admin` is true or the signed-in user's role is `admin`.
 - A `feature` item is hidden only when the flag is explicitly `false`. An unknown flag shows.
@@ -197,10 +218,30 @@ The sidebar is UX only. Route handlers enforce access, either with `require_role
 ### Other sidebar behaviour
 
 - Open and closed groups persist in `localStorage` under `abenix.sidebar.groups`.
+- The mode persists on the server, see above.
+- Needs you carries the live total from `GET /api/me/inbox-counts`. Review inbox keeps its own count of held content.
 - Links in a closed group stay in the DOM and are hidden with CSS, so keyboard nav, screen readers and tests still find them.
 - An item is active on an exact path match. Settings is also active on any `/settings/*` path except `/settings/team` and `/settings/api-keys`, which have their own items.
 - The four tiles at the top read `GET /api/analytics/live-stats`.
 - Collapsed mode shows icons only. On mobile the sidebar is a drawer that closes on a left swipe.
+
+---
+
+## Needs you inbox
+
+`/inbox` ([`(app)/inbox/page.tsx`](../../apps/web/src/app/(app)/inbox/page.tsx)) is one place for everything waiting on the signed-in person. Each tab shows a count and the items with their buttons inline. The full pages stay the detailed views, and each tab links to its own.
+
+| Tab | Who sees it | What is in it | Reused from |
+|---|---|---|---|
+| Approvals | everyone, the count is what you can sign | agent action cards, autonomy promotions, decision publishes, agent gates | `ApprovalActionRow` and a compact approve or deny row |
+| Watching reviews | `actions.review` | autonomy actions in Watching that nobody has answered | `ReviewQueue` |
+| Held content | `moderation.review` | content a moderation policy held for review | `HeldInbox` |
+| Marketplace submissions | admins, while the marketplace is on | agents waiting for approval | `MarketplaceSubmissions` |
+| Alerts | `view_alerts` | failure causes that are new today or up on the day before | `/api/me/inbox/alerts` |
+
+The busiest tab opens first. `?tab=` picks one. With nothing waiting the page says "Nothing needs you right now" and lists what will show up there.
+
+Counts come from `GET /api/me/inbox-counts` ([`inbox.py`](../../apps/api/app/routers/inbox.py)). It runs one query per source, scoped to the caller's tenant and capabilities, and keeps the answer for 15 seconds per user. `?fresh=1` skips that cache. [`lib/inbox.ts`](../../apps/web/src/lib/inbox.ts) polls it every 60 seconds while the browser tab is visible, and fetches fresh when the notifications socket reports a moderation queue change or an approval, review or marketplace notification, and after every inline decision.
 
 ---
 
@@ -213,6 +254,32 @@ The sidebar is UX only. Route handlers enforce access, either with `require_role
 - No route-level `loading.tsx`. The only `error.tsx` and `not-found.tsx` are at the app root
 
 Pages are client components (`'use client'`) that fetch through `useApi` or `apiFetch`. The landing page, `/docs` and most redirect-only pages are server components.
+
+---
+
+## Page header, Start here and next steps
+
+Every page under `(app)/` opens with the same block, [`PageHeader`](../../apps/web/src/components/layout/PageHeader.tsx). It holds:
+
+- the title
+- one plain sentence on what the page is for and who it is for (`data-testid="page-purpose"`)
+- the primary action, always above the fold and full width on phones (`data-testid="page-primary-action"`), plus an optional secondary action
+- a "How this works" panel with two to four short steps. It is open on the first visit and collapsed after that unless the person reopens it. The state lives in `localStorage` under `pageHeader.how.<storageKey>`, and a blocked storage just means the panel opens again
+- a Docs link to `/docs?doc=<slug>`, where the slug comes from `docs/manifest.json`
+
+The block carries `data-testid="page-header"`. A page that already had its own test ids passes them through `titleTestId`, `howTestId` and `howToggleTestId`, and a button keeps its id through the action's `testId`. The redirect pages (`/agents/new`, `/agents/{id}`, `/settings`, `/settings/api`, `/webhooks`, `/dev-docs`) have no header. Neither does `/builder`, a full-height canvas whose own top bar does the job.
+
+The dashboard shows **Start here**, a short checklist picked by role ([`StartHere.tsx`](../../apps/web/src/components/shared/StartHere.tsx)). It reads `GET /api/me/journey` ([`journey.py`](../../apps/api/app/routers/journey.py)), and every tick comes from real data in the caller's tenant:
+
+| Role | Steps |
+|---|---|
+| admin | connect a model, invite the team (more than one user), review risk policies (page visited or a policy changed), turn on moderation |
+| creator | build an agent, run it, give it knowledge (a bound knowledge base), add tests (a suite with cases), enrol an action in Autonomy, list it in the marketplace (only while the marketplace is on) |
+| user | try an agent in chat, give feedback or answer a review |
+
+Each step has a plain title, one line on why it matters, a button to the exact place and a done check. A progress bar sits on top. Hiding the guide calls `PUT /api/me/journey` with `{"dismissed": true}`, and a small "Show the Start here guide" link brings it back. Both live in the user's settings JSON under `journey`. The risk page calls `POST /api/me/journey/seen` with `{"step": "risk"}` on load. When every step is done the card celebrates once and then steps aside.
+
+After a success the page shows [`NextSteps`](../../apps/web/src/components/shared/NextSteps.tsx), two to four cards with an icon, a label and one line each. Examples are publishing an agent (try it in chat, add tests, give it knowledge, enrol its actions), creating a knowledge base, uploading an ML model, a code asset turning ready, a first good run, a new trigger, an enrolled action and a new decision.
 
 ---
 
@@ -266,6 +333,8 @@ Server state goes through **SWR** via `useApi` ([`apps/web/src/hooks/useApi.ts`]
 | **Sidebar** | [`apps/web/src/components/layout/Sidebar.tsx`](../../apps/web/src/components/layout/Sidebar.tsx) |
 | **Capability helpers** | [`apps/web/src/lib/capabilities.ts`](../../apps/web/src/lib/capabilities.ts) |
 | **Permissions endpoint** | [`apps/api/app/routers/me.py`](../../apps/api/app/routers/me.py), [`apps/api/app/core/permissions.py`](../../apps/api/app/core/permissions.py), [`apps/api/app/core/capabilities.py`](../../apps/api/app/core/capabilities.py) |
+| **Page header, Start here, next steps** | [`PageHeader.tsx`](../../apps/web/src/components/layout/PageHeader.tsx), [`StartHere.tsx`](../../apps/web/src/components/shared/StartHere.tsx), [`NextSteps.tsx`](../../apps/web/src/components/shared/NextSteps.tsx), [`journey.py`](../../apps/api/app/routers/journey.py) |
+| **Needs you inbox** | [`apps/web/src/app/(app)/inbox/page.tsx`](../../apps/web/src/app/(app)/inbox/page.tsx), [`apps/web/src/components/inbox/`](../../apps/web/src/components/inbox/), [`apps/web/src/lib/inbox.ts`](../../apps/web/src/lib/inbox.ts), [`apps/api/app/routers/inbox.py`](../../apps/api/app/routers/inbox.py) |
 | **Topbar** | [`apps/web/src/components/layout/TopBar.tsx`](../../apps/web/src/components/layout/TopBar.tsx) |
 | **Command palette** | [`apps/web/src/components/ui/CommandPalette.tsx`](../../apps/web/src/components/ui/CommandPalette.tsx) |
 | **Public landing (no auth)** | [`apps/web/src/app/page.tsx`](../../apps/web/src/app/page.tsx) — `AuthCard` in the hero handles sign-in and sign-up |

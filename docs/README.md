@@ -37,7 +37,7 @@ The big picture — what services exist, how they communicate, what guarantees t
 - [02 — Request lifecycle (web → api → agent-runtime → tool → response)](01-architecture/02-request-lifecycle.md)
 - [03 — Service inventory (api, web, worker, agent-runtime, edge, standalone apps)](01-architecture/03-services.md)
 - [04 — Data stores (Postgres, Neo4j, Redis, S3, Kafka, NATS)](01-architecture/04-data-stores.md)
-- [05 — Architectural patterns reference (45 patterns)](01-architecture/05-architectural-patterns.md)
+- [05 — Architectural patterns reference (46 patterns)](01-architecture/05-architectural-patterns.md)
 - [06 — Atlas + Knowledge Engine](01-architecture/06-atlas-knowledge-engine.md)
 - [07 — Governance: risk tiers, kill switches, capabilities, audit](01-architecture/07-governance.md)
 
@@ -65,6 +65,7 @@ How an agent runs end-to-end, what a tool is, how pipelines work, how agents tal
 - [18 — Evaluation suites](02-runtime/18-evaluation-suites.md)
 - [19 — Outbound events + webhooks](02-runtime/19-outbound-events.md)
 - [20 — Decision service (resolution, evaluation, recording)](02-runtime/20-decision-service.md)
+- [21 — Earned autonomy (levels, gate, scoring, ladder)](02-runtime/21-earned-autonomy.md)
 
 ### 3. SDK
 The polyglot client surface — how external apps and standalone verticals talk to the platform.
@@ -85,6 +86,7 @@ The shape of the database and how it maps to the runtime concepts.
 - [05 — Governance, approvals and decisions](04-data-model/05-governance-decisions.md)
 - [06 — Evals, sources and events](04-data-model/06-evals-sources-events.md)
 - [07 — Tools, models, integrations, archives](04-data-model/07-tools-and-operations.md)
+- [08 — Earned autonomy: action types, grants, ledger](04-data-model/08-autonomy.md)
 - [Document versioning](document-versioning.md)
 
 ### 5. UI
@@ -134,6 +136,7 @@ Concrete step-by-step guides for the most common developer tasks.
 - [10 — Add an evaluation suite to an agent](08-howto/10-evals.md)
 - [11 — Set risk tiers, kill switches and permission sets](08-howto/11-governance.md)
 - [12 — Watch a source and react when it changes](08-howto/12-source-watch-and-events.md)
+- [13 — Let an agent earn autonomy](08-howto/13-earned-autonomy.md)
 
 ### 9. Reference
 Catalogues and tables you'll look up rather than read end-to-end.

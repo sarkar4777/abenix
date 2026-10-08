@@ -13,6 +13,7 @@ import {
   ThumbsDown, ThumbsUp, TrendingUp, XCircle, Zap, Bot, Lock, Network,
 } from 'lucide-react';
 import Link from 'next/link';
+import PageHeader from '@/components/layout/PageHeader';
 import { fetchAllAgents } from '@/lib/fetch-all-agents';
 import { EmbeddingModelPanel } from '@/components/knowledge/EmbeddingModelPanel';
 
@@ -95,6 +96,7 @@ export default function KnowledgeEnginePage() {
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [searching, setSearching] = useState(false);
   const [searchMeta, setSearchMeta] = useState<Record<string, unknown> | null>(null);
+  const [searchError, setSearchError] = useState<string | null>(null);
 
   const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
   const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
@@ -166,17 +168,23 @@ export default function KnowledgeEnginePage() {
     if (!searchQuery.trim()) return;
     setSearching(true);
     setSearchResults([]);
+    setSearchError(null);
     try {
       const res = await fetch(`${API_URL}/api/knowledge-engines/${kbId}/search`, {
         method: 'POST', headers,
         body: JSON.stringify({ query: searchQuery, mode: searchMode, top_k: 10 }),
       });
-      const body = await res.json();
+      const body = await res.json().catch(() => ({}));
       if (body.data) {
         setSearchResults(body.data.results || []);
         setSearchMeta(body.data);
+      } else {
+        const m = typeof body.error === 'string' ? body.error : body.error?.message;
+        setSearchError(m || `Search failed (${res.status})`);
       }
-    } catch { /* ignore */ }
+    } catch {
+      setSearchError('Search failed, the server could not be reached.');
+    }
     setSearching(false);
   };
 
@@ -210,43 +218,47 @@ export default function KnowledgeEnginePage() {
 
   return (
     <div className="space-y-6">
-      {/* Header — back nav goes to the KB list (there is no /knowledge/[id]
-          URL route; the KB detail is state-based inside /knowledge). */}
-      <div className="flex items-center gap-4">
-        <button
-          onClick={() => router.push('/knowledge')}
-          className="inline-flex items-center gap-1.5 text-xs text-slate-400 hover:text-white"
-          data-testid="engine-back"
-        >
-          <ArrowLeft className="w-4 h-4" /> Back to knowledge bases
-        </button>
-        <div className="flex items-center gap-3 ml-2">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-500 to-cyan-600 flex items-center justify-center">
-            <Brain className="w-5 h-5 text-white" />
-          </div>
-          <div>
-            <h1 className="text-xl font-bold text-white">{kb?.name || 'Knowledge Engine'}</h1>
-            <p className="text-xs text-slate-500">Graph + Vector Hybrid Memory</p>
-          </div>
-        </div>
-        <div className="ml-auto flex items-center gap-3">
-          <div className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs ${
+      <button
+        onClick={() => router.push('/knowledge')}
+        className="inline-flex items-center gap-1.5 text-xs text-slate-400 hover:text-white"
+        data-testid="engine-back"
+      >
+        <ArrowLeft className="w-4 h-4" /> Back to knowledge bases
+      </button>
+      <PageHeader
+        title={kb?.name || 'Knowledge Engine'}
+        purpose="Search this knowledge base and build a map of the people, products and ideas in its documents. For agent builders."
+        icon={Brain}
+        iconClassName="text-emerald-400"
+        storageKey="knowledge-engine"
+        docSlug="02-runtime/15-v2-knowledge-enterprise"
+        meta={
+          <span className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs ${
             stats?.neo4j_available ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-400'
           }`}>
             <Database className="w-3 h-3" />
-            Neo4j {stats?.neo4j_available ? 'Connected' : 'Offline'}
-          </div>
+            Graph store {stats?.neo4j_available ? 'connected' : 'offline'}
+          </span>
+        }
+        steps={[
+          'Try a question in the search box to see which passages an agent would get back.',
+          'Run Cognify to pull out names, things and how they relate. It runs in the background.',
+          'Hybrid search mixes plain text matches with that map for better answers.',
+          'Rate results with the thumbs so search gets better over time.',
+        ]}
+        secondaryAction={{ label: 'Use in an agent', icon: Bot, href: `/builder?kb=${kbId}` }}
+        primaryAction={
           <button
             onClick={triggerCognify}
             disabled={cognifying || !!runningJob}
-            className="px-4 py-2 bg-gradient-to-r from-emerald-500 to-cyan-600 text-white text-sm font-medium rounded-lg hover:opacity-90 disabled:opacity-50 flex items-center gap-2"
+            className="px-4 py-2 min-h-[40px] bg-gradient-to-r from-emerald-500 to-cyan-600 text-white text-sm font-medium rounded-lg hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-2"
             data-testid="run-cognify"
           >
             {(cognifying || runningJob) ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
             {runningJob ? `Cognify: ${runningJob.status}…` : (cognifying ? 'Starting…' : 'Run Cognify')}
           </button>
-        </div>
-      </div>
+        }
+      />
 
       {/* Running Cognify job banner — live progress while the background
           cognify-worker extracts entities. Without this, users clicked
@@ -415,13 +427,14 @@ export default function KnowledgeEnginePage() {
           <Search className="w-4 h-4 text-cyan-400" />
           Search Playground
         </h3>
-        <div className="flex gap-2 mb-3">
+        <div className="flex flex-wrap gap-2 mb-3">
           <input
             value={searchQuery}
+            aria-label="Search question"
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Ask a question about your knowledge base..."
             data-testid="kb-search-input"
-            className="flex-1 px-3 py-2 bg-slate-900/50 border border-slate-700 rounded-lg text-sm text-white placeholder-slate-600 focus:outline-none focus:border-cyan-500"
+            className="flex-1 min-w-[180px] px-3 py-2 bg-slate-900/50 border border-slate-700 rounded-lg text-sm text-white placeholder-slate-600 focus:outline-none focus:border-cyan-500"
             onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
           />
           <div className="relative">
@@ -461,6 +474,9 @@ export default function KnowledgeEnginePage() {
         )}
 
         {/* Results */}
+        {searchError && !searching && (
+          <p role="alert" className="text-xs text-red-300 py-3" data-testid="kb-search-error">{searchError}</p>
+        )}
         {searchMeta && !searching && searchResults.length === 0 && (
           <p className="text-xs text-slate-400 py-3" data-testid="kb-search-empty">
             No matches. Check that documents finished processing, or try different words.

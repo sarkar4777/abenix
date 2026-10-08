@@ -1,15 +1,18 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { motion } from 'framer-motion';
 import {
+  BarChart3,
   CheckCircle2,
   CreditCard,
   Receipt,
   TrendingUp,
   Zap,
 } from 'lucide-react';
+import PageHeader from '@/components/layout/PageHeader';
 import {
   LazyBarChart as BarChart,
   LazyBar as Bar,
@@ -22,6 +25,8 @@ import {
 import { useApi } from '@/hooks/useApi';
 import { apiFetch } from '@/lib/api-client';
 import { usePageTitle } from '@/hooks/usePageTitle';
+import { usePlatformFeatures, plainError } from '@/hooks/usePlatformFeatures';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface UsageStats {
   plan: string;
@@ -33,6 +38,7 @@ interface UsageStats {
   total_output_tokens: number;
   total_tokens: number;
   total_cost: number;
+  billing_mode?: 'claude_subscription' | 'metered';
   daily_executions: { date: string; count: number }[];
   by_agent: {
     agent_id: string;
@@ -58,6 +64,9 @@ export default function BillingPage() {
   usePageTitle('Billing');
   const searchParams = useSearchParams();
   const [successBanner, setSuccessBanner] = useState(false);
+  const [portalError, setPortalError] = useState<string | null>(null);
+  const switches = usePlatformFeatures();
+  const { user } = useAuth();
 
   useEffect(() => {
     if (searchParams.get('success') === 'true') {
@@ -66,13 +75,15 @@ export default function BillingPage() {
     }
   }, [searchParams]);
 
-  const { data: usage, isLoading: loadingUsage } =
-    useApi<UsageStats>('/api/billing/usage');
+  const { data: usage, isLoading: loadingUsage, error: usageError, mutate: retryUsage } =
+    useApi<UsageStats>(switches.monetization ? '/api/billing/usage' : null);
+  const flatRate = usage?.billing_mode === 'claude_subscription';
+  const money = (n: number | undefined) => (flatRate ? '$0.00' : `$${(n || 0).toFixed(4)}`);
   const { data: costsData } = useApi<{
     by_agent: { agent_id: string; name: string; executions: number; total_tokens: number; cost: number }[];
   }>('/api/analytics/costs');
 
-  const loading = loadingUsage;
+  const loading = !switches.loaded || loadingUsage;
 
   // Build agent name lookup from costs endpoint
   const agentNames: Record<string, string> = {};
@@ -83,23 +94,16 @@ export default function BillingPage() {
   }
 
   const handleManageSubscription = async () => {
-    try {
-      const res = await apiFetch<{ url: string; mode: string }>(
-        '/api/billing/portal',
-        {
-          method: 'POST',
-          body: JSON.stringify({}),
-        },
-      );
-      if (res.data?.url) {
-        if (res.data.mode === 'mock') {
-          // noop in mock
-        } else {
-          window.location.href = res.data.url;
-        }
-      }
-    } catch {
-      // skip
+    setPortalError(null);
+    const res = await apiFetch<{ url: string; mode: string }>('/api/billing/portal', {
+      method: 'POST',
+      body: JSON.stringify({}),
+      throwOnError: false,
+    });
+    if (res.data?.url) {
+      if (res.data.mode !== 'mock') window.location.href = res.data.url;
+    } else {
+      setPortalError(plainError(res.error, res.errorDetail?.error_code, 'The billing portal did not open. Try again in a minute.'));
     }
   };
 
@@ -112,6 +116,37 @@ export default function BillingPage() {
     date: d.date.slice(5),
     executions: d.count,
   }));
+
+  const billingSteps = [
+    'Your plan sets how many runs the workspace gets each day.',
+    'Every agent run counts toward today and the 30 day totals below.',
+    'Paid plans can change card details, see invoices or cancel in the billing portal.',
+  ];
+
+  if (switches.loaded && !switches.monetization) {
+    return (
+      <div className="space-y-4 max-w-[1200px]" data-testid="billing-off">
+        <PageHeader
+          title="Billing & Usage"
+          icon={CreditCard}
+          purpose="Plans and invoices for this workspace. For workspace owners."
+          primaryAction={{ label: 'Open Analytics', icon: BarChart3, href: '/analytics' }}
+          docSlug="08-howto/14-marketplace-and-monetization"
+          storageKey="settings-billing"
+        />
+        <div role="status" className="rounded-lg border border-slate-600/50 bg-slate-800/40 px-4 py-3 text-sm text-slate-300">
+          Monetization is turned off on this deployment, so there are no plans, prices or invoices. Runs, tokens and cost are on{' '}
+          <Link href="/analytics" className="text-cyan-400 hover:underline">Analytics</Link>.
+          {user?.role === 'admin' && (
+            <>
+              {' '}You can turn it on in{' '}
+              <Link href="/admin/marketplace" className="text-cyan-400 hover:underline">Marketplace &amp; Billing</Link>.
+            </>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   if (loading) {
     return (
@@ -172,12 +207,35 @@ export default function BillingPage() {
       transition={{ duration: 0.4 }}
       className="space-y-6 max-w-[1200px]"
     >
-      <div>
-        <h1 className="text-2xl font-bold text-white">Billing & Usage</h1>
-        <p className="text-sm text-slate-500 mt-1">
-          Your workspace plan, what it includes, and how much of it has been used.
-        </p>
-      </div>
+      <PageHeader
+        title="Billing & Usage"
+        icon={CreditCard}
+        purpose="Your workspace plan, what it includes, and how much of it has been used. For workspace owners."
+        primaryAction={
+          usage && usage.plan !== 'free'
+            ? { label: 'Open Billing Portal', icon: Receipt, onClick: handleManageSubscription }
+            : { label: 'Open Analytics', icon: BarChart3, href: '/analytics' }
+        }
+        steps={billingSteps}
+        docSlug="08-howto/14-marketplace-and-monetization"
+        storageKey="settings-billing"
+      />
+
+      {flatRate && (
+        <div role="status" data-testid="billing-subscription" className="flex items-start gap-2 px-4 py-3 bg-cyan-500/10 border border-cyan-500/30 rounded-lg text-sm text-cyan-200">
+          <CheckCircle2 className="w-4 h-4 mt-0.5 shrink-0 text-cyan-400" />
+          LLM calls run on the Claude subscription, a flat fee, so each run costs $0 here.
+        </div>
+      )}
+
+      {(usageError || portalError) && (
+        <div role="alert" data-testid="billing-error" className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 bg-red-500/10 border border-red-500/30 rounded-lg text-sm text-red-300">
+          <span>{portalError || `Could not load usage. ${plainError(usageError)}`}</span>
+          {usageError && !portalError && (
+            <button onClick={() => retryUsage()} className="text-cyan-400 hover:underline">Try again</button>
+          )}
+        </div>
+      )}
 
       {successBanner && (
         <div className="flex items-center gap-2 px-4 py-3 bg-emerald-500/10 border border-emerald-500/30 rounded-lg">
@@ -274,8 +332,9 @@ export default function BillingPage() {
             </div>
             <div className="flex items-center justify-between">
               <span className="text-xs text-slate-500">Cost</span>
-              <span className="text-sm text-white font-medium">
-                ${usage?.total_cost?.toFixed(4) || '0.00'}
+              <span className="text-sm text-white font-medium" data-testid="billing-total-cost">
+                {money(usage?.total_cost)}
+                {flatRate && <span className="ml-1.5 text-[11px] text-cyan-300">Claude subscription</span>}
               </span>
             </div>
           </div>
@@ -365,7 +424,7 @@ export default function BillingPage() {
                       {row.tokens.toLocaleString()}
                     </td>
                     <td className="text-right text-xs text-slate-300 py-2.5 pl-4">
-                      ${row.cost.toFixed(4)}
+                      {money(row.cost)}
                     </td>
                   </tr>
                 ))}

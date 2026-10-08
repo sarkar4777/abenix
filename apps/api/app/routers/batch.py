@@ -206,6 +206,7 @@ async def _run_one(
             message=message,
             model=model,
             subject=run_as.subject,
+            kind="batch",
         )
         db.add(execution)
         await db.commit()

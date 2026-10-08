@@ -62,6 +62,10 @@ class RunContext:
     scope: str = "agent"
     subject_id: str = ""
     parent: "RunContext | None" = None
+    # who the run acts for, read by the autonomy gate
+    agent_id: str = ""
+    user_id: str = ""
+    agent_config_hash: str = ""
 
     def chain(self) -> list["RunContext"]:
         out, node = [], self

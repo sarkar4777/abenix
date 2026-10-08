@@ -6,7 +6,7 @@ import json
 import logging
 from typing import Any
 
-from engine.tools.base import BaseTool, ToolResult
+from engine.tools.base import READ_ONLY, BaseTool, ToolResult
 
 logger = logging.getLogger(__name__)
 
@@ -120,6 +120,7 @@ def _check_type_from_aggregate(agg: float, extra_signals_triggered: bool) -> str
 class KYCScorerTool(BaseTool):
     name = "kyc_scorer"
     risk_tier = "medium"
+    effect = READ_ONLY
     description = (
         "Deterministic KYC risk scorer — turns the three header indicators "
         "(Country Corruption Index rank, Annual Contracted Volume / Notional, "

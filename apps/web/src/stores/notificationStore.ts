@@ -20,6 +20,10 @@ interface NotificationState {
   panelOpen: boolean;
   ws: WebSocket | null;
   dashboardUpdate: number;
+  // the latest decision on held content of this user, chats follow it without polling
+  moderationReview: { id: string; status: string; at: number } | null;
+  // bumps whenever the review inbox changes, for reviewers
+  moderationQueueTick: number;
 
   setPanelOpen: (open: boolean) => void;
   togglePanel: () => void;
@@ -43,6 +47,8 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
   panelOpen: false,
   ws: null,
   dashboardUpdate: 0,
+  moderationReview: null,
+  moderationQueueTick: 0,
 
   setPanelOpen: (open) => set({ panelOpen: open }),
   togglePanel: () => set((s) => ({ panelOpen: !s.panelOpen })),
@@ -139,6 +145,14 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
             notifications: [msg.data as Notification, ...s.notifications],
             unreadCount: s.unreadCount + 1,
           }));
+        }
+
+        if (msg.event === 'moderation_review' && msg.data?.id) {
+          set({ moderationReview: { id: String(msg.data.id), status: String(msg.data.status || ''), at: Date.now() } });
+        }
+
+        if (msg.event === 'moderation_queue') {
+          set((s) => ({ moderationQueueTick: s.moderationQueueTick + 1 }));
         }
 
         if (msg.event === 'dashboard_update') {

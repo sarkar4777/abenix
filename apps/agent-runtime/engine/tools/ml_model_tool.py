@@ -85,6 +85,40 @@ async def _ensure_local(model_id: str, file_uri: str, tenant_id: str) -> str:
     return local
 
 
+def prediction_payload(
+    name: str,
+    version: Any,
+    source: str,
+    predictions: Any,
+    *,
+    batch: bool = False,
+    probabilities_only: bool = False,
+) -> dict[str, Any]:
+    """JSON a pipeline step or a world model can read, with a single value on top."""
+    out: dict[str, Any] = {
+        "model": name,
+        "version": str(version),
+        "source": source,
+        "operation": (
+            "batch_predict"
+            if batch
+            else ("predict_proba" if probabilities_only else "predict")
+        ),
+    }
+    if isinstance(predictions, dict):
+        out.update(predictions)
+    else:
+        out["predictions"] = predictions
+    preds = out.get("predictions")
+    if not batch and not probabilities_only and isinstance(preds, list) and preds:
+        first = preds[0]
+        if isinstance(first, list) and len(first) == 1:
+            first = first[0]
+        if isinstance(first, (int, float, str)) and not isinstance(first, bool):
+            out["prediction"] = first
+    return out
+
+
 class MLModelTool(BaseTool):
     name = "ml_model"
     risk_tier = "low"
@@ -363,17 +397,18 @@ class MLModelTool(BaseTool):
                         is_error=True,
                     )
 
-            op_label = (
-                "batch prediction"
-                if batch
-                else ("probability inference" if probabilities_only else "prediction")
-            )
-            result_text = (
-                f"{op_label.title()} from model '{row['name']}' v{row['version']} ({source} inference):\n\n"
-                f"{json.dumps(predictions, indent=2)}"
-            )
             return ToolResult(
-                content=result_text,
+                content=json.dumps(
+                    prediction_payload(
+                        row["name"],
+                        row["version"],
+                        source,
+                        predictions,
+                        batch=batch,
+                        probabilities_only=probabilities_only,
+                    ),
+                    default=str,
+                ),
                 metadata={
                     "model_name": row["name"],
                     "model_version": row["version"],

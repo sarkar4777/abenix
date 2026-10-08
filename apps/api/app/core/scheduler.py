@@ -28,7 +28,10 @@ ARCHIVE_LOCK_KEY = 0x41524348  # "ARCH"
 SWEEP_LOCK_KEY = 0x5354414C  # "STAL"
 DRIFT_LOCK_KEY = 0x44524654  # "DRFT"
 ESCALATE_LOCK_KEY = 0x45534341  # "ESCA"
+ACTION_LOCK_KEY = 0x4143544E  # "ACTN"
 VACUUM_LOCK_KEY = 0x56414355  # "VACU"
+HOLD_LOCK_KEY = 0x484F4C44  # "HOLD"
+RETAIN_LOCK_KEY = 0x52455441  # "RETA"
 
 
 def drift_scan_interval_seconds() -> int:
@@ -225,6 +228,8 @@ async def _run_trigger(trigger_id: str, agent_id: str) -> None:
                     else {}
                 ),
                 trigger_id=str(trigger.id),
+                trigger_kind="schedule",
+                trigger_name=trigger.name,
             )
             if not dispatched:
                 trigger.last_status = "failed"
@@ -655,6 +660,18 @@ def start_scheduler() -> None:
     )
 
     scheduler.add_job(
+        observe_actions,
+        trigger="interval",
+        seconds=30,
+        id="observe_actions",
+        name="Read due action outcomes, score them and move autonomy levels",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=20),
+    )
+
+    scheduler.add_job(
         _nightly_archive,
         trigger="cron",
         hour=2,
@@ -672,6 +689,27 @@ def start_scheduler() -> None:
         id="pinecone_vacuum",
         name="Queue the daily Pinecone orphan vacuum",
         replace_existing=True,
+    )
+
+    scheduler.add_job(
+        moderation_review_tick,
+        trigger="interval",
+        seconds=15,
+        id="moderation_review_tick",
+        name="Tell reviewers about held content and apply review time limits",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+
+    scheduler.add_job(
+        moderation_retention,
+        trigger="interval",
+        minutes=60,
+        id="moderation_retention",
+        name="Purge moderation data past each tenant's retention",
+        replace_existing=True,
+        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=90),
     )
 
     # Platform alerts arrive by Alertmanager webhook (routers/admin_alerts.py),
@@ -747,6 +785,22 @@ async def _escalate_approvals() -> None:
         logger.exception("approval escalation failed")
 
 
+async def observe_actions() -> None:
+    from app.core.deps import async_session
+    from app.services.autonomy import observe_tick
+
+    try:
+        async with advisory_lock(ACTION_LOCK_KEY) as held:
+            if not held:
+                return
+            async with async_session() as db:
+                out = await observe_tick(db)
+            if out.get("settled"):
+                logger.info("observe_actions settled %d outcomes", out["settled"])
+    except Exception:
+        logger.exception("observe_actions failed")
+
+
 async def _nightly_archive() -> None:
     try:
         from app.services.archiver import run_all_archives
@@ -774,6 +828,40 @@ async def enqueue_pinecone_vacuum() -> None:
                 logger.info("pinecone vacuum queued")
     except Exception as e:
         logger.exception("pinecone vacuum enqueue failed: %s", e)
+
+
+async def moderation_review_tick() -> None:
+    from app.core.deps import async_session
+    from app.services.moderation_review import announce_pending, expire_due
+
+    try:
+        async with advisory_lock(HOLD_LOCK_KEY) as held:
+            if not held:
+                return
+            async with async_session() as db:
+                await announce_pending(db)
+            async with async_session() as db:
+                n = await expire_due(db)
+            if n:
+                logger.info("review time limit applied to %d held items", n)
+    except Exception:
+        logger.exception("moderation review tick failed")
+
+
+async def moderation_retention() -> None:
+    from app.core.deps import async_session
+    from app.services.moderation_review import purge_retention
+
+    try:
+        async with advisory_lock(RETAIN_LOCK_KEY) as held:
+            if not held:
+                return
+            async with async_session() as db:
+                out = await purge_retention(db)
+            if any(out.values()):
+                logger.info("moderation retention purge: %s", out)
+    except Exception:
+        logger.exception("moderation retention purge failed")
 
 
 def stop_scheduler() -> None:

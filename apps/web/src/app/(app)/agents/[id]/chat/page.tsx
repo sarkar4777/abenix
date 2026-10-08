@@ -6,7 +6,9 @@ import Link from 'next/link';
 import { useEffect, useRef, useCallback, useState, Suspense, lazy } from 'react';
 import { useParams } from 'next/navigation';
 import { motion } from 'framer-motion';
-import { MessageSquare, Info, Loader2 } from 'lucide-react';
+import { BookOpen, FlaskConical, MessageSquare, Info, Loader2, ShieldCheck, Zap } from 'lucide-react';
+import PageHeader from '@/components/layout/PageHeader';
+import NextSteps from '@/components/shared/NextSteps';
 import ChatMessage from '@/components/chat/ChatMessage';
 import ChatInput from '@/components/chat/ChatInput';
 import ResponsiveModal from '@/components/ui/ResponsiveModal';
@@ -98,6 +100,7 @@ export default function AgentChatPage() {
     name: string; type: string; description: string; required: boolean; default?: string; options?: string[];
   }> | undefined;
   const moderationNotice = useChatStore((st) => st.moderationNotice);
+  const replyStatus = useChatStore((st) => st.replyStatus);
   const [paramValues, setParamValues] = useState<Record<string, string>>({});
   const [showParams, setShowParams] = useState(true);
 
@@ -117,6 +120,16 @@ export default function AgentChatPage() {
     if (typeof window === 'undefined') return;
     const q = new URLSearchParams(window.location.search).get('prefill');
     if (q) setPrefill(q);
+  }, []);
+
+  // ?published=1 from the builder, dropped from the URL so a reload doesn't show it again
+  const [justPublished, setJustPublished] = useState(false);
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    if (url.searchParams.get('published') !== '1') return;
+    setJustPublished(true);
+    url.searchParams.delete('published');
+    window.history.replaceState(null, '', url.pathname + url.search);
   }, []);
 
   const coerceParam = (type: string, raw: string): unknown => {
@@ -140,7 +153,7 @@ export default function AgentChatPage() {
             missing.map((m) => m.name).join(', '),
           );
           setShowParams(true);
-          return;
+          return false;
         }
       }
 
@@ -159,6 +172,7 @@ export default function AgentChatPage() {
           .map(([k, v]) => `${k}: ${v}`)
           .join('\n');
         sendMessage(agentId, `${message}\n\n[Input Parameters]\n${contextStr}`, context);
+        setShowParams(false);
       } else {
         sendMessage(agentId, message);
       }
@@ -176,34 +190,50 @@ export default function AgentChatPage() {
       className="-m-3 md:-m-6 flex h-[calc(100vh-3.5rem-1.75rem)]"
     >
       <div className="flex-1 flex flex-col min-w-0">
-        <div className="h-14 border-b border-slate-800 flex items-center justify-between px-4 md:px-6 shrink-0">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-cyan-500/10 flex items-center justify-center">
-              <MessageSquare className="w-4 h-4 text-cyan-400" />
-            </div>
-            <div>
-              <h2 className="text-sm font-semibold text-white">
-                {agentInfo?.name || 'Loading...'}
-              </h2>
-              {agentInfo && (
-                <p className="text-xs text-slate-500">{agentInfo.slug}</p>
-              )}
-            </div>
-          </div>
-          {isMobile && agentInfo && (
-            <button
-              onClick={() => setShowAgentInfo(true)}
-              className="w-9 h-9 flex items-center justify-center rounded-lg text-slate-400 hover:text-white hover:bg-slate-800/50 transition-colors"
-              title="Agent details"
-            >
-              <Info className="w-5 h-5" />
-            </button>
-          )}
+        <div className="border-b border-slate-800 px-4 md:px-6 py-3 shrink-0">
+          <PageHeader
+            compact
+            title={agentInfo?.name || 'Loading...'}
+            icon={MessageSquare}
+            purpose="Talk to this agent and watch which tools it uses to answer."
+            meta={agentInfo ? <span className="break-all text-xs text-slate-500">{agentInfo.slug}</span> : undefined}
+            primaryAction={{ label: 'Agent info', href: `/agents/${agentId}/info`, icon: Info }}
+            extraActions={
+              isMobile && agentInfo ? (
+                <button
+                  onClick={() => setShowAgentInfo(true)}
+                  className="inline-flex min-h-[40px] items-center justify-center gap-1.5 rounded-lg border border-slate-700 px-3 text-sm text-slate-300 hover:bg-slate-800 hover:text-white"
+                  title="Agent details"
+                >
+                  <Info className="w-4 h-4" /> Details
+                </button>
+              ) : undefined
+            }
+            steps={[
+              'Fill any input parameters, then type a message.',
+              'Each reply shows the tools it called. Open a run to see the full trace.',
+            ]}
+            docSlug="02-runtime/00-agent-execution"
+            storageKey="agent-chat"
+          />
         </div>
 
         <div className="flex-1 overflow-y-auto px-4 md:px-6 py-4 space-y-4">
+          {justPublished && (
+            <NextSteps
+              title="Published. Try it below, then"
+              testId="agent-published-next"
+              onDismiss={() => setJustPublished(false)}
+              steps={[
+                { id: 'evals', label: 'Add tests', hint: 'Create a test suite so changes never break it.', icon: FlaskConical, href: '/evals' },
+                { id: 'knowledge', label: 'Give it knowledge', hint: 'Upload documents it can search.', icon: BookOpen, href: '/knowledge' },
+                { id: 'autonomy', label: 'Enrol its actions', hint: 'Let it act alone once it earns trust.', icon: ShieldCheck, href: '/autonomy' },
+                { id: 'schedule', label: 'Run it on a schedule', hint: 'Add a webhook or timed trigger.', icon: Zap, href: `/triggers?agent=${agentId}` },
+              ]}
+            />
+          )}
           {messages.length === 0 && !isStreaming && (
-            <div className="flex flex-col items-center justify-center h-full text-center">
+            <div className={`flex flex-col items-center justify-center text-center ${justPublished ? 'py-8' : 'h-full'}`}>
               <div className="w-16 h-16 rounded-2xl bg-cyan-500/10 flex items-center justify-center mb-4">
                 <MessageSquare className="w-8 h-8 text-cyan-400" />
               </div>
@@ -225,6 +255,10 @@ export default function AgentChatPage() {
               requestedModel={msg.requestedModel}
               fallbackReason={msg.fallbackReason}
               executionId={msg.executionId}
+              onHoldReleased={(view) => {
+                // a reviewer released the message, it goes on to the agent once
+                if (view.content && !useChatStore.getState().isStreaming) sendMessage(agentId, view.content);
+              }}
             />
           ))}
 
@@ -233,6 +267,7 @@ export default function AgentChatPage() {
               role="assistant"
               blocks={streamingBlocks}
               isStreaming
+              status={replyStatus}
             />
           )}
 
@@ -270,7 +305,15 @@ export default function AgentChatPage() {
         </div>
 
         {/* Input Parameters Form (shown when agent defines input_variables) */}
-        {inputVars && inputVars.length > 0 && showParams && messages.length === 0 && (
+        {inputVars && inputVars.length > 0 && !showParams && messages.length > 0 && (
+          <div className="border-t border-slate-800 bg-slate-900/50 px-4 py-2 text-xs text-slate-400">
+            <button type="button" onClick={() => setShowParams(true)} className="text-cyan-300 hover:underline" data-testid="chat-params-open">
+              Change the input parameters
+            </button>
+            <span className="ml-2 text-slate-500">The next message runs with them.</span>
+          </div>
+        )}
+        {inputVars && inputVars.length > 0 && showParams && (
           <div className="border-t border-slate-800 bg-slate-900/50 px-4 py-3">
             <div className="flex items-center justify-between mb-2">
               <h4 className="text-xs font-semibold text-cyan-400">Input Parameters</h4>
@@ -305,6 +348,17 @@ export default function AgentChatPage() {
                       />
                       {v.name}
                     </label>
+                  ) : v.type === 'string' || v.type === 'text' ? (
+                    // pasted tables and lists keep their line breaks
+                    <textarea
+                      aria-label={v.name}
+                      data-testid={`chat-param-${v.name}`}
+                      rows={2}
+                      value={paramValues[v.name] || (v.default as string) || ''}
+                      placeholder={`Enter ${v.name}`}
+                      onChange={(e) => setParamValues((prev) => ({ ...prev, [v.name]: e.target.value }))}
+                      className="w-full px-2 py-1.5 text-xs bg-slate-800/50 border border-slate-700 rounded text-white focus:border-cyan-500 focus:outline-none resize-y"
+                    />
                   ) : (
                     <input
                       aria-label={v.name}
@@ -319,7 +373,7 @@ export default function AgentChatPage() {
                 </div>
               ))}
             </div>
-            <p className="text-[9px] text-slate-600 mt-1.5">These parameters are sent with your first message. Via SDK: <code className="bg-slate-800 px-1 rounded">forge.execute(id, msg, {'{'} context: {'{'} ... {'}'} {'}'})</code></p>
+            <p className="text-[9px] text-slate-600 mt-1.5">These parameters are sent with each message. Via SDK: <code className="bg-slate-800 px-1 rounded">forge.execute(id, msg, {'{'} context: {'{'} ... {'}'} {'}'})</code></p>
           </div>
         )}
 

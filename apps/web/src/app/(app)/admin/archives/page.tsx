@@ -6,6 +6,9 @@ import {
   Clock, Settings2, Save, Loader2,
 } from 'lucide-react';
 import { apiFetch, API_URL } from '@/lib/api-client';
+import ConfirmModal from '@/components/ui/ConfirmModal';
+import PageHeader from '@/components/layout/PageHeader';
+import { AccessGate } from '@/components/layout/NoAccess';
 
 // Plain <a href> drops the bearer token, so fetch the dump and hand it over as a blob
 async function downloadArchive(run: ArchiveRun): Promise<string | null> {
@@ -76,13 +79,15 @@ function fmtDate(iso?: string): string {
   }
 }
 
-export default function AdminArchivesPage() {
+function AdminArchivesPage() {
   const [runs, setRuns] = useState<ArchiveRun[]>([]);
   const [tables, setTables] = useState<string[]>([]);
   const [policies, setPolicies] = useState<RetentionPolicy[]>([]);
   const [loading, setLoading] = useState(true);
   const [triggering, setTriggering] = useState<string | null>(null);
   const [savingPolicy, setSavingPolicy] = useState<string | null>(null);
+  const [confirmTable, setConfirmTable] = useState<string | null>(null);
+  const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -99,56 +104,63 @@ export default function AdminArchivesPage() {
   useEffect(() => { load(); }, []);
 
   const triggerArchive = async (table: string) => {
+    setConfirmTable(null);
     setTriggering(table);
-    try {
-      await apiFetch('/api/admin/archives/trigger', {
-        method: 'POST',
-        body: JSON.stringify({ table }),
-      });
-      await load();
-    } catch {/* silent */}
+    setNotice(null);
+    const r = await apiFetch('/api/admin/archives/trigger', {
+      method: 'POST',
+      body: JSON.stringify({ table }),
+      throwOnError: false,
+    });
+    setNotice(r.error ? { ok: false, text: `Could not archive ${table}. ${r.error}` } : { ok: true, text: `Archive of ${table} started. It shows under Recent runs.` });
+    await load();
     setTriggering(null);
   };
 
   const updatePolicy = async (p: RetentionPolicy) => {
     setSavingPolicy(p.source_table);
-    try {
-      await apiFetch(`/api/admin/archives/retention-policies/${p.source_table}`, {
-        method: 'PUT',
-        body: JSON.stringify({
-          retention_days: p.retention_days,
-          enabled: p.enabled,
-          description: p.description,
-        }),
-      });
-      await load();
-    } catch {/* silent */}
+    setNotice(null);
+    const r = await apiFetch(`/api/admin/archives/retention-policies/${p.source_table}`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        retention_days: p.retention_days,
+        enabled: p.enabled,
+        description: p.description,
+      }),
+      throwOnError: false,
+    });
+    setNotice(r.error ? { ok: false, text: `Could not save ${p.source_table}. ${r.error}` } : { ok: true, text: `Saved. ${p.source_table} keeps ${p.retention_days} days${p.enabled ? '' : ', nightly archiving is off'}.` });
+    await load();
     setSavingPolicy(null);
   };
+  const confirmPolicy = policies.find((p) => p.source_table === confirmTable);
 
   return (
     <div className="p-6 space-y-6 max-w-6xl">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-white flex items-center gap-2">
-            <Archive className="w-6 h-6 text-cyan-400" /> Archives
-          </h1>
-          <p className="text-sm text-slate-400 mt-1">
-            Recording tables — invocations, executions, activity logs — are dumped to{' '}
-            <code className="text-cyan-300">/data/archives/</code> on a nightly schedule (02:00 UTC) and old rows deleted.
-            Retention defaults to 30 days for invocation tables, 60 for executions, 90 for audit logs.
-          </p>
-        </div>
-        <button onClick={load} className="p-2 rounded-lg border border-slate-700 hover:border-cyan-500/50">
-          <RefreshCw className={`w-4 h-4 text-slate-300 ${loading ? 'animate-spin' : ''}`} />
-        </button>
-      </div>
+      <PageHeader
+        title="Archives"
+        purpose="Decide how long run and activity records stay in the live database and download the old ones once they are archived. For admins."
+        icon={Archive}
+        storageKey="admin-archives"
+        docSlug="06-deployment/disaster-recovery"
+        primaryAction={{ label: 'Refresh', icon: RefreshCw, onClick: load, busy: loading, title: 'Refresh' }}
+        steps={[
+          'Every night at 02:00 UTC, rows older than the retention for their table are written to a dump file and removed from the live table.',
+          'Set how many days each table keeps. Defaults are 30 days for invocations, 60 for executions and 90 for audit logs.',
+          'Click a table under Manual trigger to archive it right now.',
+          'Each run shows under Recent runs, where you can download its dump file.',
+        ]}
+      />
 
       <section>
         <h2 className="text-sm font-semibold text-white mb-3 flex items-center gap-2">
           <Settings2 className="w-4 h-4" /> Retention policies
         </h2>
-        <div className="rounded-xl border border-slate-700 bg-slate-900/30 overflow-hidden">
+        {notice && (
+          <p role="status" data-testid="archives-notice" className={`mb-2 text-xs ${notice.ok ? 'text-emerald-300' : 'text-rose-300'}`}>{notice.text}</p>
+        )}
+        <div className="rounded-xl border border-slate-700 bg-slate-900/30 overflow-x-auto">
+         <div className="min-w-[640px]">
           <div className="grid grid-cols-12 gap-2 px-4 py-2 border-b border-slate-700 text-[10px] uppercase tracking-wider text-slate-500 bg-slate-900/60">
             <div className="col-span-4">Table</div>
             <div className="col-span-2">Retention (days)</div>
@@ -159,6 +171,7 @@ export default function AdminArchivesPage() {
           {policies.map((p) => (
             <PolicyRow key={p.source_table} policy={p} onSave={updatePolicy} saving={savingPolicy === p.source_table} />
           ))}
+         </div>
         </div>
       </section>
 
@@ -170,7 +183,7 @@ export default function AdminArchivesPage() {
           {tables.map((t) => (
             <button
               key={t}
-              onClick={() => triggerArchive(t)}
+              onClick={() => setConfirmTable(t)}
               disabled={triggering === t}
               className="px-3 py-1.5 rounded-lg border border-cyan-500/30 bg-cyan-500/5 hover:bg-cyan-500/15 text-cyan-300 text-xs font-mono flex items-center gap-2"
               data-testid={`archive-trigger-${t}`}
@@ -181,6 +194,16 @@ export default function AdminArchivesPage() {
           ))}
         </div>
       </section>
+
+      <ConfirmModal
+        open={!!confirmTable}
+        onClose={() => setConfirmTable(null)}
+        onConfirm={() => confirmTable && triggerArchive(confirmTable)}
+        title={`Archive ${confirmTable} now?`}
+        description={`Rows older than ${confirmPolicy?.retention_days ?? 'the retention'} days are written to a dump file under /data/archives/ and then deleted from the live table. You can download the dump from Recent runs.`}
+        confirmLabel="Archive now"
+        variant="danger"
+      />
 
       <section>
         <h2 className="text-sm font-semibold text-white mb-3 flex items-center gap-2">
@@ -211,6 +234,8 @@ function PolicyRow({ policy, onSave, saving }: { policy: RetentionPolicy; onSave
       <div className="col-span-2">
         <input
           type="number" min={1} max={3650}
+          aria-label={`Retention days for ${policy.source_table}`}
+          data-testid={`retention-days-${policy.source_table}`}
           value={local.retention_days}
           onChange={(e) => setLocal({ ...local, retention_days: parseInt(e.target.value || '30') })}
           className="w-20 px-2 py-1 bg-slate-800 border border-slate-700 rounded text-xs text-white"
@@ -218,7 +243,7 @@ function PolicyRow({ policy, onSave, saving }: { policy: RetentionPolicy; onSave
       </div>
       <div className="col-span-2">
         <label className="inline-flex items-center gap-1.5 text-[11px] text-slate-300">
-          <input type="checkbox" checked={local.enabled} onChange={(e) => setLocal({ ...local, enabled: e.target.checked })} />
+          <input type="checkbox" aria-label={`Archive ${policy.source_table} nightly`} checked={local.enabled} onChange={(e) => setLocal({ ...local, enabled: e.target.checked })} />
           {local.enabled ? 'on' : 'off'}
         </label>
       </div>
@@ -236,6 +261,8 @@ function PolicyRow({ policy, onSave, saving }: { policy: RetentionPolicy; onSave
           disabled={!dirty || saving}
           onClick={() => onSave(local)}
           className="p-1 rounded text-emerald-400 hover:bg-emerald-500/10 disabled:opacity-30"
+          aria-label={`Save ${policy.source_table}`}
+          data-testid={`retention-save-${policy.source_table}`}
           title="Save"
         >
           {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
@@ -295,5 +322,19 @@ function RunRow({ run }: { run: ArchiveRun }) {
         <div className="ml-7 mt-1 text-[9px] text-slate-600 font-mono">sha256: {run.file_sha256}</div>
       )}
     </div>
+  );
+}
+
+export default function AdminArchivesPageGated() {
+  return (
+    <AccessGate
+      title="Archives"
+      purpose="Decide how long run and activity records stay in the live database and download the old ones once they are archived. For admins."
+      icon={Archive}
+      need={{ admin: true }}
+      instead={{ text: 'You can follow your own runs and how long they take on Executions.', href: '/executions', label: 'Open Executions' }}
+    >
+      <AdminArchivesPage />
+    </AccessGate>
   );
 }

@@ -44,6 +44,13 @@
 | `GET` | `/api/me` | signed in | Alias for `GET /api/auth/me` |
 | `GET` | `/api/me/` | signed in | Same alias with a trailing slash |
 | `GET` | `/api/me/permissions` | signed in | Role, per-feature flags and UI hints that drive sidebar gating |
+| `GET` | `/api/me/journey` | signed in | The Start here checklist for your role, each step with a done flag from real data in your tenant |
+| `PUT` | `/api/me/journey` | signed in | Hide or bring back the checklist with `{"dismissed": true}` or `false` |
+| `POST` | `/api/me/journey/seen` | signed in | Record a visit that counts as a step. Only `{"step": "risk"}` today |
+| `GET` | `/api/me/inbox-counts` | signed in | Counts for the Needs you inbox, `{total, counts, available, unavailable, cached}`. Tabs are `approvals` (what you can sign), `watching` (`actions.review`), `held` (`moderation.review`), `marketplace` (admins, marketplace on) and `alerts` (`view_alerts`, failure causes new today or up on the day before). One query per source in your tenant, cached 15 seconds per user. `?fresh=1` skips the cache |
+| `GET` | `/api/me/inbox/alerts` | signed in, `view_alerts` | The new or rising failure causes behind the alerts count, each with today's count, the day before and `new` or `rising` |
+| `GET` | `/api/me/ui-prefs` | signed in | Your interface choices. `{"sidebar_mode": "essentials"}` by default |
+| `PUT` | `/api/me/ui-prefs` | signed in | Save `{"sidebar_mode": "essentials"}` or `"all"`. Anything else is a 400 |
 | `POST` | `/api/me/shares` | signed in | Share any supported resource with another user in your tenant |
 | `DELETE` | `/api/me/shares/{share_id}` | signed in | Revoke a share. The share's creator, the resource owner or an admin |
 | `GET` | `/api/me/shares/of/{resource_type}/{resource_id}` | signed in | Active shares of one resource. Caller must own or admin it |
@@ -151,7 +158,7 @@ Keys start with `af_` and go in `X-API-Key`. Roles and scopes are in [01-archite
 | `GET` | `/api/agents/{agent_id}/dependents` | signed in | Pipelines, agents and triggers that use it |
 | `DELETE` | `/api/agents/{agent_id}` | signed in | Archive. Creator or admin. Without `?force=true`, 409 `IN_USE` with the dependents when something uses it |
 | `POST` | `/api/agents/{agent_id}/duplicate` | signed in | Clone |
-| `POST` | `/api/agents/{agent_id}/publish` | signed in | Body `{visibility, marketplace_price, category}`. `tenant` makes it active, `public` sends it to admin review. 400 when the risk tier setup is incomplete, 409 `EVAL_GATE` with `details.suites` when the evaluation gate fails |
+| `POST` | `/api/agents/{agent_id}/publish` | signed in | Body `{visibility, marketplace_price, category}`. `tenant` makes it active, `public` sends it to admin review. 400 when the risk tier setup is incomplete, 409 `EVAL_GATE` with `details.suites` when the evaluation gate fails. For `public`, 409 `MARKETPLACE_OFF` while the marketplace is off and 409 `MONETIZATION_OFF` for a price while monetization is off |
 | `POST` | `/api/agents/{agent_id}/review` | admin role | Approve or reject an agent submitted for review |
 | `POST` | `/api/agents/{agent_id}/validate-smart` | signed in | Run the layered AI Validate stack on a saved agent |
 | `GET` | `/api/agents/{agent_id}/preview-validation` | signed in | Which model the agent would run on right now |
@@ -197,8 +204,8 @@ Replay on the original input, pinned or current, is under [Governance](#governan
 | `POST` | `/api/executions/{execution_id}/approve` | signed in | Approve or reject a gate. `?gate_id=` names it |
 | `GET` | `/api/executions/{execution_id}/stream` | signed in | SSE of the run's events, replayed from the start then live |
 | `GET` | `/api/executions/{execution_id}/watch` | Bearer header or `?token=` | Live DAG snapshot stream for one execution. The query token is for browser EventSource |
-| `GET` | `/api/executions/{execution_id}` | signed in | Full record with trace |
-| `GET` | `/api/executions` | signed in | Past executions with filters, paginated |
+| `GET` | `/api/executions/{execution_id}` | signed in | Full record with trace, what started it and `flat_rate_billing` |
+| `GET` | `/api/executions` | signed in | Past executions with filters, paginated. `trigger_kind` takes a comma list such as `schedule,webhook,manual`, `unknown` matches runs with nothing recorded. `trigger_id` lists one trigger's runs. Each row has `trigger_id`, `trigger_kind`, `trigger_name` and `started_by`, and `meta.flat_rate_billing` says whether runs bill on a Claude subscription |
 | `DELETE` | `/api/executions/{execution_id}` | signed in | Delete. Owner or admin |
 | `GET` | `/api/executions/{execution_id}/replay` | signed in | Full trace for step-through replay |
 | `GET` | `/api/executions/{execution_id}/children` | signed in | Child executions spawned by this run |
@@ -254,7 +261,8 @@ A pipeline is an agent with `model_config.mode = "pipeline"`, so `{agent_id}` an
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
 | `POST` | `/api/triggers` | signed in | Create a webhook or schedule trigger. Needs run access to the agent |
-| `GET` | `/api/triggers` | signed in | Triggers you created or on your agents, all for an admin. `agent_id` narrows the list |
+| `GET` | `/api/triggers` | signed in | Triggers you created or on your agents, all for an admin. `agent_id` or `trigger_id` narrows the list. Each row has `recent_runs`, its last five runs with status |
+| `GET` | `/api/triggers/{trigger_id}/runs` | signed in | Runs this trigger started, newest first. Trigger owner, agent owner or admin |
 | `DELETE` | `/api/triggers/{trigger_id}` | signed in | Delete |
 | `PUT` | `/api/triggers/{trigger_id}` | signed in | Update |
 | `POST` | `/api/triggers/webhook/{token}` | webhook token | Inbound event from an external system, runs the agent. 429 `BUDGET_EXCEEDED` when the agent is over a daily cap, with the failed run's id |
@@ -274,7 +282,7 @@ Detail in [02-runtime/05-approvals-hitl](../02-runtime/05-approvals-hitl.md).
 | `PUT` | `/api/approvals/webhooks` | admin or owner role | Set the approval webhook URL and secret |
 | `GET` | `/api/approvals/{approval_id}` | signed in | Detail |
 | `GET` | `/api/approvals/{approval_id}/wait` | signed in | Long-poll until it leaves pending or times out |
-| `POST` | `/api/approvals/{approval_id}/signoff` | signed in, plus the tier's signing capability when set | Body `{decision, reason, client_token}`. See below |
+| `POST` | `/api/approvals/{approval_id}/signoff` | signed in, plus the tier's signing capability when set | Body `{decision, reason, client_token, edited_arguments}`. See below |
 
 `decision` on signoff is one of:
 
@@ -283,6 +291,8 @@ Detail in [02-runtime/05-approvals-hitl](../02-runtime/05-approvals-hitl.md).
 - `return` sends it back to the requester as `returned`. `reason` is required, without it the call is a 400
 
 Any other value is a 400. A second signoff by the same user is a 409, so is a signoff on an approval that is no longer pending. When the approval carries a risk tier policy, signing needs that policy's capability (default `approvals.sign`), and with `exclude_requester` the requester cannot approve their own request (403). On an agent's `human_approval` gate only `approve` resumes the run, `deny` and `return` both reject it.
+
+`edited_arguments` is an object of argument names to new values. It is accepted only on an `action:*` approval and only with `approve` (400 otherwise). It may only change arguments the agent sent, and not when the card has `editable_arguments: false` (400 `BAD_EDITED_ARGUMENTS`). The merged arguments are stored as `payload.edited_arguments` and the action runs with them. An `autonomy.promote` approval needs `autonomy.grant` and refuses the agent's author with 403 `AUTHOR_CANNOT_GRANT`, unless self-approval is allowed (see [Earned autonomy](#earned-autonomy)). `GET /api/approvals` returns the action card as `payload` on `action:*` rows.
 
 A tiered approval also carries the tier's `escalate_after_hours`. When it stays pending that long, the tenant's admins get one notification. There is no escalation endpoint, the scheduler does it.
 
@@ -413,6 +423,40 @@ Permission sets, risk tiers, kill switches, audit chain, replay and provenance. 
 | `GET` | `/api/governance/runs/{execution_id}/provenance` | `runs.replay` | What a run ran with |
 | `GET` | `/api/governance/audit/export` | `audit.view` | Audit log as JSON lines with hashes, `?since=&until=` |
 | `POST` | `/api/governance/runs/{execution_id}/replay` | `runs.replay` | Run it again on its recorded input. Body `{mode, model}`, `mode` is `pinned` or `current` |
+
+---
+
+## Earned autonomy
+
+Levels, grants, the action ledger, reviews and SDK actions. Detail in [02-runtime/21-earned-autonomy](../02-runtime/21-earned-autonomy.md). Errors carry an `error_code`: `NOT_FOUND`, `NOT_READY` (409, with `details.requirements`), `AUTHOR_CANNOT_GRANT` (403), `BAD_LEVEL`, `CEILING_RAISE`, `SCOPE_TAKEN`, `BAD_ACTION_TYPE`, `TOOL_NOT_ON_AGENT`, `NOT_WATCHING`, `ALREADY_REVIEWED`, `ALTERNATIVE_REQUIRED`, `NOT_EXECUTED`, `ALREADY_FLAGGED`, `UNKNOWN_ACTION`, `NOT_CLEARED`, `SAMPLE_MISSING`.
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| `GET` | `/api/autonomy/overview` | `autonomy.view` | Counts for 7 days, every grant with stats and next step, ready to promote, recently demoted, unmanaged actions |
+| `GET` | `/api/autonomy/grants/{grant_id}` | `autonomy.view` | One grant with its action type, level history and chart points |
+| `GET` | `/api/autonomy/grants/{grant_id}/actions` | `autonomy.view` | The grant's actions, newest first. `?status=&limit=&before=`, returns `{items, next_before}` |
+| `POST` | `/api/autonomy/grants/{grant_id}/promote` | `autonomy.grant` | Open an `autonomy.promote` approval for the next level. 409 `NOT_READY` with the requirements. 403 `AUTHOR_CANNOT_GRANT` for the agent's author, except the sample or a solo builder, when the payload carries `self_approval`. From Off to Watching it applies at once |
+| `POST` | `/api/autonomy/grants/{grant_id}/demote` | `autonomy.manage` | Body `{to_level, reason}`. Applies at once, no approval |
+| `PATCH` | `/api/autonomy/grants/{grant_id}` | `autonomy.manage` | Body `{state, scope, ceiling}`. `state` is `active` or `paused`. The ceiling can only go down |
+| `DELETE` | `/api/autonomy/grants/{grant_id}` | `autonomy.manage` | Unenrol. Sets Off and `removed`, keeps the history |
+| `GET` | `/api/autonomy/action-types` | `autonomy.view` | List action types |
+| `GET` | `/api/autonomy/action-types/{type_id}` | `autonomy.view` | One action type |
+| `PATCH` | `/api/autonomy/action-types/{type_id}` | `autonomy.manage` | Change label, world model, outcome probe, limits key, band width, match, policy, reversible, ceiling (down only). A world model change marks the chart, it does not demote |
+| `POST` | `/api/autonomy/action-types/{type_id}/test` | `autonomy.manage` | Body `{part, action_id}`. Runs `world_model`, `outcome_probe` or `limits` on that action or the last real one. Returns `{ok, result, message}` |
+| `GET` | `/api/autonomy/enrol/options` | `autonomy.manage` | `?agent_id=`. The agent's effect tools with tier, existing action type, grant and prefilled settings |
+| `POST` | `/api/autonomy/enrol` | `autonomy.manage` | Body `{agent_id, tool_name, action_type: {label, key, world_model, outcome_probe, limits_decision_key, max_band_width, match, policy}, scope}`. Creates or reuses the action type and a grant at Watching |
+| `POST` | `/api/autonomy/sample` | `autonomy.manage` | Install the sample plant agent, action type, limits decision and grant. Idempotent. Returns `{grant, agent_id, limits_ready, limits_message}` |
+| `POST` | `/api/autonomy/sample/run` | `autonomy.manage` | Body `{count}` 1 to 5. Starts that many runs of the sample agent, returns `execution_ids` |
+| `GET` | `/api/autonomy/reviews` | `actions.review` | Watching actions with no answer yet, oldest first, each with a `situation`. With tenant setting `autonomy.hide_until_answered` the proposal is hidden |
+| `POST` | `/api/autonomy/actions/propose` | signed in | An app declares an action. Body `{action_key, agent_id, target, arguments, intent, prediction}`. Returns `{action_id, decision, approval_id, message}`, `decision` is `run`, `wait`, `watching` or `blocked` |
+| `GET` | `/api/autonomy/actions/{action_id}` | `autonomy.view` | One action with its card |
+| `GET` | `/api/autonomy/actions/{action_id}/wait` | signed in | Long-poll until it leaves pending. `?timeout_s=` 1 to 120, default 30. Returns the decision and the final arguments |
+| `POST` | `/api/autonomy/actions/{action_id}/executed` | signed in | Body `{ok, result_preview}`. 409 `NOT_CLEARED` unless approved or edited. Starts the outcome clock |
+| `POST` | `/api/autonomy/actions/{action_id}/review` | `actions.review` | Body `{answer, alternative}`. `answer` is `agree`, `different` (needs `alternative`) or `unsure` |
+| `POST` | `/api/autonomy/actions/{action_id}/outcome` | `actions.review` | Body `{value, note, source}`. `source` is `manual` or `api`, an API key defaults to `api`. Scores the action |
+| `POST` | `/api/autonomy/actions/{action_id}/harm` | `actions.review` | Body `{note}`. Flags harm and drops the grant to Asks first at once |
+
+Self-approval: the agent's author may promote and sign their own promotion only when the action type is the sample, or when no other active user in the tenant holds `autonomy.grant`. The promote approval then carries `payload.self_approval` with the reason. The check runs again at signing, so a teammate with `autonomy.grant` who joined in between makes the author's signoff a 403 `AUTHOR_CANNOT_GRANT`. The level change is recorded as "Self-approved by <name>" with `self_approved: true` in its evidence.
 
 ---
 
@@ -671,12 +715,12 @@ Call history for code assets, ML models and knowledge collections.
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
 | `GET` | `/api/connectors/presets` | signed in | Connector presets for the create form |
-| `POST` | `/api/connectors` | signed in | Create a connector |
-| `GET` | `/api/connectors` | signed in | List connectors |
+| `POST` | `/api/connectors` | signed in | Create a connector. Takes an optional write-only `secret`. A private or cluster-internal `base_url` is refused |
+| `GET` | `/api/connectors` | signed in | List connectors. Each says `has_secret` and `needs_secret`, never the secret |
 | `GET` | `/api/connectors/{connector_id}` | signed in | One connector |
-| `PUT` | `/api/connectors/{connector_id}` | signed in | Update |
-| `DELETE` | `/api/connectors/{connector_id}` | signed in | Delete |
-| `POST` | `/api/connectors/{connector_id}/test` | signed in | Call the base URL with the connector's auth and time it |
+| `PUT` | `/api/connectors/{connector_id}` | signed in | Update. `secret` replaces the stored secret, `clear_secret: true` removes it |
+| `DELETE` | `/api/connectors/{connector_id}` | signed in | Delete, with its stored secret |
+| `POST` | `/api/connectors/{connector_id}/test` | signed in | GET the base URL with the connector's auth. `ok` only on 2xx or 3xx, `blocked` when the address guard refused it, `message` in plain words |
 
 ---
 
@@ -691,6 +735,14 @@ Call history for code assets, ML models and knowledge collections.
 | `PATCH` | `/api/moderation/policies/{policy_id}` | admin role | Change a policy |
 | `DELETE` | `/api/moderation/policies/{policy_id}` | admin role | Delete a policy |
 | `GET` | `/api/moderation/events` | signed in | Moderation events |
+| `GET` | `/api/moderation/reviews` | `moderation.review` | Held content, filtered by status, claim and priority, 25 per page with queue counts |
+| `GET` | `/api/moderation/reviews/count` | signed in | Waiting items for the sidebar, zero without `moderation.review` |
+| `GET` | `/api/moderation/reviews/{review_id}` | `moderation.review` | One item with the full text, matched spans and history. Reading it is logged |
+| `POST` | `/api/moderation/reviews/{review_id}/{action}` | `moderation.review` | `claim`, `unassign`, `release`, `redact` with `content`, or `reject` with `reason` |
+| `POST` | `/api/moderation/reviews/bulk` | `moderation.review` | Claim, unassign, release or reject up to 100 items, each reports done or why not |
+| `GET` | `/api/moderation/holds/{review_id}` | author or reviewer | The author's view of their held message or reply and its outcome |
+| `GET` | `/api/moderation/retention` | signed in | How long moderation data is kept, with limits and who changed it last |
+| `PUT` | `/api/moderation/retention` | admin role | Change the retention windows |
 
 ---
 
@@ -700,10 +752,19 @@ Call history for code assets, ML models and knowledge collections.
 |---|---|---|---|
 | `POST` | `/api/meetings` | signed in | Create a meeting |
 | `GET` | `/api/meetings` | signed in | List meetings |
+| `GET` | `/api/meetings/readiness` | signed in | Which live pieces are missing, as booleans. `livekit_ready`, `stt_ready`, `tts_ready`, `rehearsal_ready` with plain messages |
 | `GET` | `/api/meetings/livekit-token` | signed in | Token for a person to join the same LiveKit room as the bot |
-| `GET` | `/api/meetings/{meeting_id}` | signed in | Meeting detail |
+| `GET` | `/api/meetings/{meeting_id}` | signed in | Meeting detail with transcript, decisions, deferrals and `bot_status`. Falls back to the copy on the row once Redis has expired it |
+| `DELETE` | `/api/meetings/{meeting_id}` | signed in | Delete a meeting that is not live |
+| `POST` | `/api/meetings/{meeting_id}/end` | signed in | End a live meeting. The bot writes a summary and leaves, transcript and summary are saved on the row |
+| `GET` | `/api/meetings/{meeting_id}/participants` | signed in | Who is in the LiveKit room now, from the LiveKit server |
+| `POST` | `/api/meetings/{meeting_id}/rehearsal` | signed in | Start a rehearsal, or return the running one. Body `{restart: true}` starts over |
+| `GET` | `/api/meetings/{meeting_id}/rehearsal` | signed in | The rehearsal's status, transcript, decisions, deferrals and queued turns |
+| `POST` | `/api/meetings/{meeting_id}/rehearsal/turn` | signed in | Say something as a participant. Body `{speaker, text}` |
+| `POST` | `/api/meetings/{meeting_id}/rehearsal/deferrals/{deferral_id}/answer` | signed in | Answer a question the rehearsal bot handed back |
+| `POST` | `/api/meetings/{meeting_id}/rehearsal/end` | signed in | End the rehearsal |
 | `PUT` | `/api/meetings/{meeting_id}/authorize` | signed in | Set what the bot may answer. Body `{scope_allow, scope_defer, persona_scopes}` |
-| `POST` | `/api/meetings/{meeting_id}/start` | signed in | Run the Meeting Representative agent for this meeting |
+| `POST` | `/api/meetings/{meeting_id}/start` | signed in | Run the Meeting Representative agent for this meeting. Needs at least one allowed topic and, for LiveKit, the LiveKit keys |
 | `POST` | `/api/meetings/{meeting_id}/redispatch` | signed in | Respawn the bot for a meeting that is already live |
 | `POST` | `/api/meetings/{meeting_id}/inject-turn` | signed in | Add a synthetic utterance to the live transcript |
 | `POST` | `/api/meetings/{meeting_id}/kill` | signed in | Stop the bot |
@@ -759,10 +820,11 @@ Invoke runs a published agent, or one the key's user may execute, and answers 40
 
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
-| `GET` | `/api/analytics/overview` | signed in | Dashboard totals |
+| `GET` | `/api/analytics/overview` | signed in | Dashboard totals, with `flat_rate_billing` |
 | `GET` | `/api/analytics/executions` | signed in | Executions over time |
-| `GET` | `/api/analytics/tokens` | signed in | Token use by model |
-| `GET` | `/api/analytics/costs` | signed in | Cost breakdown |
+| `GET` | `/api/analytics/tokens` | signed in | Token use by model, with `flat_rate_billing` |
+| `GET` | `/api/analytics/costs` | signed in | Cost breakdown, with `flat_rate_billing` |
+| `GET` | `/api/analytics/billing-mode` | signed in | `{flat_rate_billing, label, note}`. The web reads it once to label every cost as a Claude subscription |
 | `GET` | `/api/analytics/live-stats` | signed in | Live counters |
 | `GET` | `/api/analytics/failures` | signed in | Recent failures grouped by `failure_code` |
 | `GET` | `/api/analytics/drift-alerts/config` | signed in | Tenant drift detection toggle |
@@ -799,20 +861,26 @@ Invoke runs a published agent, or one the key's user may execute, and answers 40
 
 ## Billing, marketplace and creators
 
+Two switches gate this group, see [Marketplace and monetization](../08-howto/14-marketplace-and-monetization.md). Routes marked *marketplace* answer 404 `MARKETPLACE_OFF` while the marketplace is off. Routes marked *monetization* answer 404 `MONETIZATION_OFF` while monetization is off.
+
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
-| `GET` | `/api/billing/plans` | signed in | Plans |
-| `POST` | `/api/billing/checkout` | signed in | Start a Stripe checkout |
-| `POST` | `/api/billing/portal` | signed in | Open the Stripe billing portal |
-| `GET` | `/api/billing/usage` | signed in | Usage for the billing period |
-| `POST` | `/api/billing/webhook` | Stripe signature | Stripe webhook receiver |
-| `POST` | `/api/creator/onboard` | signed in | Start Stripe Connect onboarding as a creator |
-| `GET` | `/api/creator/status` | signed in | Creator onboarding status |
-| `GET` | `/api/creator/dashboard` | creator or admin role | Earnings and payouts. `?period=` is `7d`, `30d` or `90d` |
-| `GET` | `/api/creator/login-link` | signed in | Link to the Stripe Express dashboard |
-| `GET` | `/api/marketplace` | signed in | Browse published agents |
-| `GET` | `/api/marketplace/{agent_id}` | signed in | Marketplace agent detail |
-| `POST` | `/api/marketplace/subscribe/{agent_id}` | signed in | Subscribe to an agent |
+| `GET` | `/api/platform/features` | open | `{marketplace, monetization, source, defaults}`. `source` is `admin` or `default` |
+| `PUT` | `/api/admin/platform-features` | admin | Body `{marketplace?, monetization?}` with booleans. Stored in `platform_settings` |
+| `GET` | `/api/billing/plans` | signed in, *monetization* | Plans |
+| `POST` | `/api/billing/checkout` | signed in, *monetization* | Start a Stripe checkout |
+| `POST` | `/api/billing/portal` | signed in, *monetization* | Open the Stripe billing portal |
+| `GET` | `/api/billing/usage` | signed in | Usage for the billing period. `billing_mode` is `claude_subscription` when the Claude subscription is active, and cost then reads 0 |
+| `POST` | `/api/billing/webhook` | Stripe signature, *monetization* | Stripe webhook receiver |
+| `POST` | `/api/creator/onboard` | signed in, *monetization* | Start Stripe Connect onboarding as a creator |
+| `GET` | `/api/creator/status` | signed in, *monetization* | Creator onboarding status |
+| `GET` | `/api/creator/dashboard` | creator or admin role, *monetization* | Earnings and payouts. `?period=` is `7d`, `30d` or `90d` |
+| `GET` | `/api/creator/login-link` | signed in, *monetization* | Link to the Stripe Express dashboard |
+| `GET` | `/api/creator/listings` | signed in, *marketplace* | The caller's listings with state, installs, 30-day runs and ratings, plus the agents that can still be listed. Price only while monetization is on |
+| `GET` | `/api/marketplace` | signed in, *marketplace* | Browse published agents. Paid listings are left out while monetization is off |
+| `GET` | `/api/marketplace/{agent_id}` | signed in, *marketplace* | Marketplace agent detail |
+| `POST` | `/api/marketplace/subscribe/{agent_id}` | signed in, *marketplace* | Install a free agent or subscribe to a paid one. 409 `MONETIZATION_OFF` for a paid one while monetization is off |
+| `GET`, `POST` | `/api/agents/{agent_id}/reviews` | signed in, *marketplace* | Ratings and comments on a listing |
 
 ---
 
@@ -957,7 +1025,11 @@ Tool configuration detail in [08-howto/08-tool-configuration](../08-howto/08-too
 | `GET` | `/api/admin/alerts` | admin role | Current alerts from Alertmanager, or Prometheus when it is not reachable |
 | `GET` | `/api/admin/alerts/rules` | admin role | Loaded Prometheus rules |
 | `POST` | `/api/admin/alerts/webhook` | webhook token | Alertmanager webhook. Sends each alert to admins and Slack |
-| `GET` | `/api/admin/cluster/summary` | admin role | Cluster health: nodes, pods, PVCs, DB size |
+| `GET` | `/api/admin/cluster/summary` | admin role | Older cluster summary: nodes, pods by phase, PVCs, DB size |
+| `GET` | `/api/admin/cluster/overview` | admin role | Nodes with capacity, use and pressure, every service with ready counts, image, restarts and HPA or KEDA state, warning events from the last hour, which reads are allowed, and a health verdict with reasons. Cached 10 seconds |
+| `GET` | `/api/admin/cluster/database` | admin role | Database size and the largest tables. Cached 60 seconds |
+| `GET` | `/api/admin/cluster/pods/{name}` | admin role | One pod in the namespace: containers, last termination, conditions and its events |
+| `GET` | `/api/admin/cluster/pods/{name}/logs` | admin role | Last `lines` (1 to 2000, default 200) log lines of `container`. `previous=true` reads the run before the last restart. Colour codes are stripped. Capped at 512 KB and written to the audit log |
 | `GET` | `/api/admin/dlq` | admin role | Dead-letter queue |
 | `POST` | `/api/admin/dlq/{dlq_id}/replay` | admin role | Run a dead-lettered execution again from its original input |
 | `GET` | `/api/admin/archives` | admin role | Archive runs |

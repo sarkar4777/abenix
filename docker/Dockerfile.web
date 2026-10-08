@@ -9,11 +9,14 @@ COPY package.json package-lock.json* ./
 COPY apps/web/package.json ./apps/web/
 COPY packages/shared/package.json ./packages/shared/
 RUN npm ci --workspace=@abenix/web --include-workspace-root --include=optional 2>/dev/null || npm install --include=optional
+# npm may nest a workspace's packages under apps/web/node_modules, keep the folder so the copy below never fails
+RUN mkdir -p apps/web/node_modules
 
 FROM base AS builder
 WORKDIR /app
 RUN rm -f /usr/local/bin/yarn /usr/local/bin/yarnpkg /opt/yarn-* -rf 2>/dev/null; true
 COPY --from=deps /app/node_modules ./node_modules
+COPY --from=deps /app/apps/web/node_modules ./apps/web/node_modules
 COPY . .
 # Next.js inlines NEXT_PUBLIC_* into the bundle at build time, so they must be set here.
 # Empty means the code's own fallback, which is what an unset variable gave before.

@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import PageHeader from '@/components/layout/PageHeader';
 import { Activity, AlertTriangle, GitBranch, Radio, Server, ExternalLink, ArrowRight } from 'lucide-react';
 
 const GRAFANA = (process.env.NEXT_PUBLIC_GRAFANA_URL || 'http://localhost:3010').replace(/\/$/, '');
@@ -78,24 +79,22 @@ const ACCENT_CLASSES: Record<string, { ring: string; bg: string; text: string }>
 export default function ObservabilityHubPage() {
   return (
     <div className="max-w-6xl mx-auto p-6">
-      <header className="mb-6">
-        <div className="flex items-center gap-3 mb-2">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-cyan-500/20 to-fuchsia-500/20 ring-1 ring-cyan-500/40 flex items-center justify-center">
-            <Server className="w-5 h-5 text-cyan-300" />
-          </div>
-          <div>
-            <h1 className="text-2xl font-bold text-white">Observability</h1>
-            <p className="text-sm text-slate-400">Four layers that tell you what ran, what's running, what's breaking, and why.</p>
-          </div>
-        </div>
-        <Link
-          href="/admin/cluster"
-          className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-slate-700/60 bg-slate-900/40 text-slate-300 hover:bg-slate-800/60"
-          data-testid="observability-cluster-link"
-        >
-          <Server className="w-3.5 h-3.5" /> Cluster Health
-        </Link>
-      </header>
+      <PageHeader
+        className="mb-6"
+        title="Observability"
+        purpose="Four views that tell you what ran, what is running now, what is breaking and why. For builders and operators."
+        icon={Server}
+        storageKey="observability"
+        docSlug="06-deployment/04-observability"
+        primaryAction={{ label: 'Open runs', icon: Activity, href: '/executions' }}
+        secondaryAction={{ label: 'Cluster health', icon: Server, href: '/admin/cluster', testId: 'observability-cluster-link' }}
+        steps={[
+          { title: 'What ran', body: 'Runs and Analytics list every run with its agent, user and input.' },
+          { title: 'What is running', body: 'Runs tick live as they happen, no refresh needed.' },
+          { title: 'What broke', body: 'A failed run joins a group on the Alerts page with others of the same cause.' },
+          { title: 'Why it was slow', body: 'View Trace on any run opens the full timing tree in Grafana.' },
+        ]}
+      />
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
         {PHASES.map(p => {
@@ -142,15 +141,6 @@ export default function ObservabilityHubPage() {
             </div>
           );
         })}
-      </div>
-
-      <div className="mt-8 rounded-xl border border-slate-700/60 bg-slate-900/40 p-5">
-        <h3 className="text-sm font-semibold text-slate-200 mb-2">How they fit together</h3>
-        <p className="text-xs text-slate-400 leading-relaxed">
-          Phases 1–3 tell you <em>what happened</em>. Phase 4 tells you <em>why and how slow</em>. Click any execution on the
-          Executions page to see all four in context: status (phase 1) ticks live (phase 2); if it failed, it joins an Alerts
-          group (phase 3); and a "View Trace" chip opens Grafana Tempo with the full span tree (phase 4).
-        </p>
       </div>
     </div>
   );

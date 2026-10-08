@@ -6,6 +6,8 @@ import { motion } from 'framer-motion';
 import { KeyRound, Lock, Unlock, Search, ExternalLink, RotateCcw, FlaskConical, Save, Building2, Globe } from 'lucide-react';
 import { apiFetch } from '@/lib/api-client';
 import type { ToolCredentialSource } from '@/components/CredentialBadge';
+import PageHeader from '@/components/layout/PageHeader';
+import { AccessGate } from '@/components/layout/NoAccess';
 
 // Everything on this page comes from GET /api/admin/tool-config, which is
 // generated from the tools' own config_fields. Nothing here names a tool.
@@ -85,7 +87,7 @@ function hasRowInScope(row: KeyRow, scope: Scope): boolean {
   return scope === 'tenant' ? row.tenant_source === 'tenant' : row.platform_source === 'stored';
 }
 
-export default function ToolConfigPage() {
+function ToolConfigPage() {
   const [scope, setScope] = useState<Scope>('tenant');
   const [cat, setCat] = useState<Catalogue | null>(null);
   const [loading, setLoading] = useState(true);
@@ -237,18 +239,28 @@ export default function ToolConfigPage() {
 
   return (
     <div className="max-w-6xl mx-auto px-6 py-8">
-      <header className="mb-6">
-        <div className="flex items-center gap-2 mb-2">
-          <KeyRound className="w-6 h-6 text-cyan-400" />
-          <h1 className="text-3xl font-semibold text-white">Tool Configuration</h1>
-        </div>
-        <p className="text-slate-400 max-w-3xl">
-          Every value a built-in tool needs to run, declared by the tool itself. Save a value here and
-          agents use it within {cat.propagation_seconds} seconds, with no redeploy. A value saved for this
-          tenant wins over the platform value, which wins over the environment and over{' '}
-          <code className="text-cyan-300">tool_defaults.yaml</code>. Clear it and the next source applies again.
-        </p>
-        <div className="mt-4 flex flex-wrap items-center gap-3">
+      <PageHeader
+        className="mb-6"
+        title="Tool Configuration"
+        purpose="Fill in the keys and settings that built in tools need, like provider API keys, so agents can use those tools. For admins."
+        icon={KeyRound}
+        storageKey="admin-tool-config"
+        docSlug="08-howto/08-tool-configuration"
+        primaryAction={{
+          label: 'Show unset values',
+          icon: Search,
+          onClick: () => setOnlyMissing(true),
+          disabled: onlyMissing,
+          title: onlyMissing ? 'Already showing only unset values' : undefined,
+        }}
+        steps={[
+          'Each tool lists the values it needs. Required ones are flagged when they are missing.',
+          `Save a value and agents use it within ${cat.propagation_seconds} seconds, with no redeploy.`,
+          'A value saved for this workspace wins over the platform value, which wins over the server settings and the built in defaults.',
+          'Clear a value and the next one down applies again.',
+        ]}
+      >
+        <div className="flex flex-wrap items-center gap-3">
           <div className="inline-flex items-center gap-1 p-1 rounded-lg border border-slate-700 bg-slate-900/60" role="group" aria-label="Scope" data-testid="tool-config-scope">
             {scopeBtn('tenant', 'This tenant', Building2)}
             {scopeBtn('platform', 'Platform', Globe)}
@@ -276,7 +288,7 @@ export default function ToolConfigPage() {
             {cat.encrypted_at_rest ? 'encrypted at rest' : 'stored unencrypted, set a cluster key'}
           </span>
         </div>
-      </header>
+      </PageHeader>
 
       <div className="mb-6 flex flex-wrap items-center gap-3">
         <div className="relative flex-1 min-w-[240px]">
@@ -466,5 +478,19 @@ export default function ToolConfigPage() {
         </p>
       </div>
     </div>
+  );
+}
+
+export default function ToolConfigPageGated() {
+  return (
+    <AccessGate
+      title="Tool Configuration"
+      purpose="Fill in the keys and settings that built in tools need, like provider API keys, so agents can use those tools. For admins."
+      icon={KeyRound}
+      need={{ feature: 'manage_settings' }}
+      instead={{ text: 'The Tools Catalogue shows every tool and whether it is ready to use.', href: '/tools', label: 'Open the Tools Catalogue' }}
+    >
+      <ToolConfigPage />
+    </AccessGate>
   );
 }

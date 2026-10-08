@@ -9,8 +9,10 @@ from engine import credentials, governance, risk
 from engine.credentials import ToolNeedsConfiguration
 
 __all__ = [
+    "READ_ONLY",
     "BaseTool",
     "ConfigField",
+    "Effect",
     "ToolNeedsConfiguration",
     "ToolRegistry",
     "ToolResult",
@@ -52,6 +54,33 @@ class ConfigField:
         return d
 
 
+@dataclass(frozen=True)
+class Effect:
+    """What a call does to the world, declared on the tool class."""
+
+    kind: str  # read | write | send | publish | control | trade | delete | external
+    label: str
+    target_param: str | None = None
+    magnitude_param: str | None = None
+    reversible: bool = False
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+READ_ONLY = Effect(kind="read", label="Read only")
+
+
+AUTONOMY_ARGS = ("_intent", "_prediction")
+
+
+def strip_autonomy_args(arguments: Any) -> Any:
+    """Drop the autonomy-only arguments before a tool sees them."""
+    if isinstance(arguments, dict) and any(k in arguments for k in AUTONOMY_ARGS):
+        return {k: v for k, v in arguments.items() if k not in AUTONOMY_ARGS}
+    return arguments
+
+
 def needs_configuration_result(tool: Any, exc: ToolNeedsConfiguration) -> ToolResult:
     """The one message every tool gives when a required value is missing."""
     fld = None
@@ -77,8 +106,10 @@ def needs_configuration_result(tool: Any, exc: ToolNeedsConfiguration) -> ToolRe
     )
 
 
-async def _govern(tool: Any, arguments: dict[str, Any]) -> ToolResult | None:
-    """Kill switches and tier escalation for one tool call. None means go ahead."""
+async def _govern(
+    tool: Any, arguments: dict[str, Any], gate_out: list[Any] | None = None
+) -> ToolResult | None:
+    """Kill switches, autonomy and tier escalation for one tool call. None means go ahead."""
     run = governance.current()
     tenant = (
         run.tenant_id
@@ -98,11 +129,35 @@ async def _govern(tool: Any, arguments: dict[str, Any]) -> ToolResult | None:
             is_error=True,
             metadata={"stopped": {"scope": s.scope, "target": s.target}, "tool": name},
         )
+    from engine import autonomy
+
+    # an action let through goes back in gate_out, the caller closes it after the call
+    action = await autonomy.gate(tool, arguments, run, tenant)
+    if action is not None and action.result is not None:
+        return action.result
+    if action is not None:
+        arguments = action.arguments
+        if gate_out is not None:
+            gate_out.append(action)
+    refused = await _tier_check(tool, arguments, run, tenant, name, action)
+    if refused is not None and action is not None:
+        action.refused(refused)
+    return refused
+
+
+async def _tier_check(
+    tool: Any,
+    arguments: dict[str, Any],
+    run: Any,
+    tenant: str,
+    name: str,
+    action: Any = None,
+) -> ToolResult | None:
     tier = risk.normalize(getattr(tool, "risk_tier", "low"))
     if run is None or not risk.above(tier, run.tier):
         return None
-    action = governance.policy(tenant, tier).get("tool_call_action", "allow")
-    if action == "block":
+    action_kind = governance.policy(tenant, tier).get("tool_call_action", "allow")
+    if action_kind == "block":
         return ToolResult(
             content=(
                 f"{name} is a {tier} risk tool and this run is {run.tier} risk. "
@@ -115,7 +170,11 @@ async def _govern(tool: Any, arguments: dict[str, Any]) -> ToolResult | None:
                 "tool": name,
             },
         )
-    if action == "approval":
+    if action_kind == "approval" and action is not None and action.approved_by:
+        # a person already approved this exact call at the tool's tier
+        run.raise_to(tier, f"tool:{name}", f"approved by {action.approved_by}")
+        return None
+    if action_kind == "approval":
         from engine.tools.human_approval import HumanApprovalTool
 
         import json as _json
@@ -154,6 +213,8 @@ class BaseTool(ABC):
     config_fields: tuple[ConfigField, ...] = ()
     # low | medium | high | critical, see engine.risk.TIER_GUIDE
     risk_tier: str = "low"
+    # what a call changes in the world, None for a tool that only reads
+    effect: Effect | None = None
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
@@ -170,21 +231,38 @@ class BaseTool(ABC):
             await credentials.ensure_fresh()
             # wrappers around a tool are checked once, at the outermost call
             gtoken = None
+            action = None
             if not governance.in_tool():
+                from engine import autonomy
+
                 await governance.ensure_fresh()
-                refused = await _govern(self, arguments)
+                await autonomy.ensure_fresh()
+                gate_out: list[Any] = []
+                refused = await _govern(self, arguments, gate_out)
                 if refused is not None:
                     return refused
+                if gate_out:
+                    action = gate_out[0]
+                    arguments = action.arguments
                 gtoken = governance.enter_tool()
+            arguments = strip_autonomy_args(arguments)
             # a tool built with its own tenant_id covers reads outside an executor run
             token = None
             own_tenant = str(getattr(self, "tenant_id", "") or "")
             if own_tenant and not credentials.current_tenant():
                 token = credentials.set_tenant(own_tenant)
             try:
-                return await original(self, arguments)
-            except ToolNeedsConfiguration as exc:
-                return needs_configuration_result(self, exc)
+                try:
+                    result = await original(self, arguments)
+                except ToolNeedsConfiguration as exc:
+                    result = needs_configuration_result(self, exc)
+                except BaseException as exc:
+                    if action is not None:
+                        action.failed(exc)
+                    raise
+                if action is not None:
+                    result = action.finished(result)
+                return result
             finally:
                 if token is not None:
                     credentials.reset_tenant(token)
@@ -196,6 +274,11 @@ class BaseTool(ABC):
 
     @abstractmethod
     async def execute(self, arguments: dict[str, Any]) -> ToolResult: ...
+
+    @classmethod
+    def effect_for(cls, arguments: dict[str, Any]) -> Effect | None:
+        """The effect of one call. Tools whose operations differ override this."""
+        return cls.effect
 
     @classmethod
     def config_field(cls, key: str) -> ConfigField | None:
@@ -332,11 +415,17 @@ class _DefaultedTool(BaseTool):
                     metadata={"tool": self.name, "approval": gate.metadata},
                 )
 
+        return await self._inner.execute(self.merged_arguments(arguments))
+
+    def merged_arguments(self, arguments: dict[str, Any] | None) -> dict[str, Any]:
         if self._locked:
-            merged = {**(arguments or {}), **self._defaults}
-        else:
-            merged = {**self._defaults, **(arguments or {})}
-        return await self._inner.execute(merged)
+            return {**(arguments or {}), **self._defaults}
+        return {**self._defaults, **(arguments or {})}
+
+    def effect_for(self, arguments: dict[str, Any]) -> Effect | None:  # type: ignore[override]
+        from engine.autonomy import resolve_effect
+
+        return resolve_effect(self._inner, self.merged_arguments(arguments))
 
 
 class ToolRegistry:
@@ -350,7 +439,9 @@ class ToolRegistry:
         return self._tools.get(name)
 
     def list_all(self) -> list[dict[str, Any]]:
-        return [t.to_dict() for t in self._tools.values()]
+        from engine import autonomy
+
+        return [autonomy.describe(t.to_dict(), t) for t in self._tools.values()]
 
     def names(self) -> list[str]:
         return list(self._tools.keys())

@@ -73,6 +73,14 @@ SCHEMA_CANONICAL_COLUMNS=(
   "executions.lease_expires_at"
   "executions.delivery_attempts"
   "gdpr_purge_log.affected_count"
+  "action_types.outcome_probe"
+  "autonomy_grants.level_since"
+  "autonomy_changes.evidence"
+  "agent_actions.outcome_status"
+  "agent_actions.outcome_attempts"
+  "executions.trigger_id"
+  "executions.trigger_kind"
+  "executions.trigger_name"
 )
 
 SCHEMA_USE_CASE_COLUMNS=(

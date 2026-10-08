@@ -1,8 +1,9 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Activity, Server, Database, Wifi, AlertTriangle, CheckCircle, XCircle, RefreshCw } from 'lucide-react';
+import { Activity, Server, Database, Wifi, AlertTriangle, Bell, CheckCircle, XCircle, RefreshCw } from 'lucide-react';
 import { apiFetch } from '@/lib/api-client';
+import PageHeader from '@/components/layout/PageHeader';
 
 interface HealthStatus {
   status: string;
@@ -65,21 +66,20 @@ export default function ObservabilityPage() {
 
   return (
     <div className="p-6 max-w-4xl mx-auto space-y-8">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-bold text-white">System Health & Observability</h1>
-          <p className="text-sm text-slate-400 mt-1">Monitor infrastructure health, metrics, and SLOs</p>
-        </div>
-        <button
-          onClick={fetchHealth}
-          disabled={loading}
-          className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-700/50 border border-slate-600 text-sm text-slate-300 hover:bg-slate-700 disabled:opacity-50 transition-colors"
-          aria-label="Refresh health status"
-        >
-          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} aria-hidden="true" />
-          Refresh
-        </button>
-      </div>
+      <PageHeader
+        title="System Health & Observability"
+        icon={Activity}
+        purpose="Whether the database, cache, graph store and model provider are up, and the targets the platform aims for. For operators."
+        primaryAction={{ label: 'Refresh', icon: RefreshCw, onClick: fetchHealth, busy: loading, title: 'Refresh health status' }}
+        secondaryAction={{ label: 'Open alerts', icon: Bell, href: '/alerts' }}
+        steps={[
+          'Each service shows Healthy, Down or a warning from a live check.',
+          'If one is down, agent runs that need it fail until it is back.',
+          'Raw metrics and the health check are linked at the bottom for your own monitoring.',
+        ]}
+        docSlug="06-deployment/04-observability"
+        storageKey="settings-observability"
+      />
 
       {/* Overall Status */}
       {health && (

@@ -119,10 +119,18 @@ before the filesystem grows. Take a backup first.
 
 | Object | Scope | Grants | Created by |
 |---|---|---|---|
-| `abenix-cluster-reader` ClusterRole + binding | cluster | get, list, watch on nodes, pods and PVCs for the `default` ServiceAccount in `abenix` | `deploy-azure.sh` applies `infra/k8s/abenix-cluster-reader.yaml` |
+| `<release>-<namespace>-cluster-view` ClusterRole + binding | cluster | get, list, watch on nodes and namespaces, plus get and list on `metrics.k8s.io` nodes when metrics-server is there | The chart, when `clusterView.rbac.enabled` (default on) |
+| `<release>-cluster-view` Role + binding | release namespace | get, list, watch on pods, events, PVCs, Deployments, ReplicaSets, StatefulSets, DaemonSets, HPAs and KEDA ScaledObjects, get on `pods/log`, and pod metrics. No secrets, no writes | The chart, when `clusterView.rbac.enabled` (default on) |
+| `abenix-cluster-reader` ClusterRole + binding | cluster | get, list, watch on nodes, pods and PVCs for the `default` ServiceAccount in `abenix` | `deploy-azure.sh` applies `infra/k8s/abenix-cluster-reader.yaml`. The chart's cluster view role now covers it |
 | `<release>-sandboxed-job-runner` Role + binding | `sandboxedJob.namespace` or the release namespace | Jobs, pods and logs, Deployments, Services, Secrets, HPAs and ScaledObjects for the `default` ServiceAccount | The chart, when `sandboxedJob.enabled` |
 
-The cluster reader feeds the `/admin/cluster` page. The namespaced Role is what
+The cluster view roles feed the `/admin/cluster` page. Both bind
+`clusterView.rbac.serviceAccount`, `default` unless the API runs as another
+account. The metrics and KEDA rules render when helm sees those APIs at install
+time. Set `clusterView.rbac.metrics` or `clusterView.rbac.keda` to `"true"` to
+force them, for example under `helm template` or when KEDA lands after the
+platform. With the roles off the page still loads, lists what it cannot read and
+names the value to turn back on. The namespaced Role is what
 lets the API and runtime create sandbox Jobs, warm runners and their scalers.
 
 ---

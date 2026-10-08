@@ -223,7 +223,8 @@ It parses every file under `engine/tools/` and fails when
 - a key is read with `cfg()` or `credentials.get()` but no tool declares it,
 - a declared key is never read and is not marked `dynamic=True`,
 - a `BaseTool` subclass is not reachable from the registry,
-- a tool class does not set `risk_tier`, or sets something other than `low`, `medium`, `high` or `critical`.
+- a tool class does not set `risk_tier`, or sets something other than `low`, `medium`, `high` or `critical`,
+- a tool at `medium` tier or above declares neither an `effect` nor `effect = READ_ONLY`.
 
 `--report` also lists every environment read by file. CI runs it in the `python-test` job and fails on any problem, and `tests/unit/test_tool_contract.py` runs it under pytest. `deploy.sh` runs it before building images but only warns. This is what makes the guarantee hold: a tool that passes CI is on the admin screen.
 
@@ -348,6 +349,39 @@ bash scripts/deploy-azure.sh redeploy # AKS, always the full redeploy
 
 ---
 
+## Declare what the tool changes
+
+A tool that writes, sends, publishes, controls, trades or deletes declares an `effect` on the class. It is what lets an agent earn autonomy on the call, and it costs nothing until someone enrols it.
+
+```python
+from engine.tools.base import READ_ONLY, Effect
+
+class TicketTool(BaseTool):
+    name = "ticket_update"
+    risk_tier = "medium"
+    effect = Effect(kind="write", label="Update a support ticket", target_param="ticket_id")
+
+    @classmethod
+    def effect_for(cls, arguments):
+        return READ_ONLY if arguments.get("operation") == "get" else cls.effect
+```
+
+| Field | Meaning |
+|---|---|
+| `kind` | `write`, `send`, `publish`, `control`, `trade`, `delete` or `external` |
+| `label` | Verb phrase shown on action cards, "Update a support ticket" |
+| `target_param` | Argument naming what is acted on |
+| `magnitude_param` | Argument holding the size of the action |
+| `reversible` | Whether it can be undone |
+
+- A tool that only reads sets `effect = READ_ONLY`.
+- When only some operations change things, override `effect_for(arguments)` and return `READ_ONLY` for the rest.
+- An effect call with no enrolment runs as before and lands in the action ledger as `unmanaged`.
+
+How it is enrolled and gated: [13-earned-autonomy](13-earned-autonomy.md) and [02-runtime/21-earned-autonomy](../02-runtime/21-earned-autonomy.md).
+
+---
+
 ## Common patterns
 
 ### A key several tools share
@@ -415,6 +449,7 @@ async def execute(self, arguments):
 
 - **`tenant_id` filter on every DB query.** `credentials.current_tenant()` is the running tenant, set by the executor at the start of every run.
 - **A `risk_tier` on the class.** The lint fails without one.
+- **An `effect` when the tool changes something.** `READ_ONLY` when it only reads. Required at medium tier and above.
 - **Timeouts on external calls.** Keep HTTP timeouts at 10 to 20s.
 - **Idempotency** if the tool mutates state. The agent may call it twice.
 - **A rejected key is an error, not an empty result.** Return `is_error=True` with `metadata.needs_configuration` naming the key, as above.

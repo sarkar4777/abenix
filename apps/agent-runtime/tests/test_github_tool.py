@@ -72,8 +72,9 @@ class TestGitHubTool:
 
         mock_cm = _build_mock_client(mock_response(api_data))
 
-        with patch.dict(os.environ, {"GITHUB_TOKEN": "test-token-123"}), patch(
-            "httpx.AsyncClient", return_value=mock_cm
+        with (
+            patch.dict(os.environ, {"GITHUB_TOKEN": "test-token-123"}),
+            patch("httpx.AsyncClient", return_value=mock_cm),
         ):
             result = await tool.execute(
                 {
@@ -103,8 +104,9 @@ class TestGitHubTool:
 
         mock_cm = _build_mock_client(mock_response(api_data))
 
-        with patch.dict(os.environ, {"GITHUB_TOKEN": "test-token-123"}), patch(
-            "httpx.AsyncClient", return_value=mock_cm
+        with (
+            patch.dict(os.environ, {"GITHUB_TOKEN": "test-token-123"}),
+            patch("httpx.AsyncClient", return_value=mock_cm),
         ):
             result = await tool.execute(
                 {
@@ -136,8 +138,9 @@ class TestGitHubTool:
 
         mock_cm = _build_mock_client(mock_response(api_data))
 
-        with patch.dict(os.environ, {"GITHUB_TOKEN": "test-token-123"}), patch(
-            "httpx.AsyncClient", return_value=mock_cm
+        with (
+            patch.dict(os.environ, {"GITHUB_TOKEN": "test-token-123"}),
+            patch("httpx.AsyncClient", return_value=mock_cm),
         ):
             result = await tool.execute(
                 {
@@ -179,8 +182,9 @@ class TestGitHubTool:
 
         mock_cm = _build_mock_client(mock_response(api_data))
 
-        with patch.dict(os.environ, {"GITHUB_TOKEN": "test-token-123"}), patch(
-            "httpx.AsyncClient", return_value=mock_cm
+        with (
+            patch.dict(os.environ, {"GITHUB_TOKEN": "test-token-123"}),
+            patch("httpx.AsyncClient", return_value=mock_cm),
         ):
             result = await tool.execute(
                 {
@@ -225,8 +229,9 @@ class TestGitHubTool:
 
         mock_cm = _build_mock_client(mock_response(api_data))
 
-        with patch.dict(os.environ, {"GITHUB_TOKEN": "test-token-123"}), patch(
-            "httpx.AsyncClient", return_value=mock_cm
+        with (
+            patch.dict(os.environ, {"GITHUB_TOKEN": "test-token-123"}),
+            patch("httpx.AsyncClient", return_value=mock_cm),
         ):
             result = await tool.execute(
                 {
@@ -264,8 +269,9 @@ class TestGitHubTool:
 
         mock_cm = _build_mock_client(mock_response(api_data))
 
-        with patch.dict(os.environ, {"GITHUB_TOKEN": "test-token-123"}), patch(
-            "httpx.AsyncClient", return_value=mock_cm
+        with (
+            patch.dict(os.environ, {"GITHUB_TOKEN": "test-token-123"}),
+            patch("httpx.AsyncClient", return_value=mock_cm),
         ):
             result = await tool.execute(
                 {
@@ -308,8 +314,9 @@ class TestGitHubTool:
 
         mock_cm = _build_mock_client(mock_response(api_data))
 
-        with patch.dict(os.environ, {"GITHUB_TOKEN": "test-token-123"}), patch(
-            "httpx.AsyncClient", return_value=mock_cm
+        with (
+            patch.dict(os.environ, {"GITHUB_TOKEN": "test-token-123"}),
+            patch("httpx.AsyncClient", return_value=mock_cm),
         ):
             result = await tool.execute(
                 {
@@ -333,8 +340,9 @@ class TestGitHubTool:
 
         mock_cm = _build_mock_client(mock_response(api_data))
 
-        with patch.dict(os.environ, {"GITHUB_TOKEN": "test-token-123"}), patch(
-            "httpx.AsyncClient", return_value=mock_cm
+        with (
+            patch.dict(os.environ, {"GITHUB_TOKEN": "test-token-123"}),
+            patch("httpx.AsyncClient", return_value=mock_cm),
         ):
             result = await tool.execute(
                 {
@@ -377,8 +385,9 @@ class TestGitHubTool:
         error_response = mock_response({"message": "Not Found"}, status_code=404)
         mock_cm = _build_mock_client(error_response)
 
-        with patch.dict(os.environ, {"GITHUB_TOKEN": "test-token-123"}), patch(
-            "httpx.AsyncClient", return_value=mock_cm
+        with (
+            patch.dict(os.environ, {"GITHUB_TOKEN": "test-token-123"}),
+            patch("httpx.AsyncClient", return_value=mock_cm),
         ):
             result = await tool.execute(
                 {

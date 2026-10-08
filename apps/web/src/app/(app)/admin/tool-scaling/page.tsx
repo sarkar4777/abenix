@@ -5,6 +5,8 @@ import {
   Activity, RefreshCw, Database, Gauge, Zap, X, Save, AlertTriangle,
 } from 'lucide-react';
 import { formatCount, formatMs as fmtMs } from '@/lib/format-stats';
+import PageHeader from '@/components/layout/PageHeader';
+import { AccessGate } from '@/components/layout/NoAccess';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 function getToken() {
@@ -34,7 +36,7 @@ type Row = {
   configured?: boolean;
 };
 
-export default function ToolScalingPage() {
+function ToolScalingPage() {
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<Row | null>(null);
@@ -88,17 +90,16 @@ export default function ToolScalingPage() {
 
   return (
     <div className="p-6 max-w-7xl mx-auto">
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-2xl font-semibold text-slate-100 flex items-center gap-2">
-            <Gauge className="w-6 h-6 text-cyan-400" /> Tool runtime scaling
-          </h1>
-          <p className="text-sm text-slate-400 mt-1">
-            Per-tool cache, concurrency, rate-limit, circuit breaker, daily budget, and pool routing. Live for every direct SDK call, preset run, agent loop tool call, and pipeline step.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <label className="text-xs text-slate-400 flex items-center gap-1.5 cursor-pointer select-none px-3 py-1.5 rounded-md bg-slate-800 hover:bg-slate-700 border border-slate-700">
+      <PageHeader
+        className="mb-6"
+        title="Tool runtime scaling"
+        purpose="Set limits for each tool, like caching, how many calls run at once, rate limits and a daily budget, so one busy tool cannot slow everything else. For admins."
+        icon={Gauge}
+        storageKey="admin-tool-scaling"
+        docSlug="02-runtime/08-queue-scaling"
+        primaryAction={{ label: 'Refresh', icon: RefreshCw, onClick: load }}
+        extraActions={
+          <label className="flex min-h-[40px] cursor-pointer select-none items-center justify-center gap-1.5 rounded-md border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs text-slate-400 hover:bg-slate-700">
             <input
               type="checkbox"
               checked={showAdvanced}
@@ -107,14 +108,14 @@ export default function ToolScalingPage() {
             />
             Show advanced stats
           </label>
-          <button
-            onClick={load}
-            className="px-3 py-1.5 text-sm rounded-md bg-slate-800 hover:bg-slate-700 text-slate-200 flex items-center gap-1.5 border border-slate-700"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} /> refresh
-          </button>
-        </div>
-      </div>
+        }
+        steps={[
+          'Every tool call goes through these limits, from agents, pipelines and direct SDK calls alike.',
+          'Click Edit on a tool to change its cache time, how many calls run at once, its rate limit, daily budget or pool.',
+          'If a tool keeps failing, it is paused for a while so it does not drag other runs down.',
+          'Turn on advanced stats to see rate limits, caching and pool for every tool. The table updates every 10 seconds.',
+        ]}
+      />
 
       {error && (
         <div className="mb-4 p-3 rounded-md bg-red-900/30 border border-red-700/50 text-red-200 text-sm flex items-center gap-2">
@@ -175,6 +176,7 @@ export default function ToolScalingPage() {
                     <td className="px-3 py-2 text-right">
                       <button
                         onClick={() => setEditing({ ...r })}
+                        aria-label={`Edit ${r.slug}`}
                         className="px-2 py-1 text-xs rounded bg-slate-700 hover:bg-slate-600"
                       >Edit</button>
                     </td>
@@ -241,6 +243,7 @@ export default function ToolScalingPage() {
                     <td className="px-3 py-2 text-right">
                       <button
                         onClick={() => setEditing({ ...r })}
+                        aria-label={`Edit ${r.slug}`}
                         className="px-2 py-1 text-xs rounded bg-slate-700 hover:bg-slate-600"
                       >Edit</button>
                     </td>
@@ -315,5 +318,19 @@ function SelectField({ label, value, options, onChange, hint }: { label: string;
       </select>
       {hint && <span className="text-[10px] text-slate-500">{hint}</span>}
     </label>
+  );
+}
+
+export default function ToolScalingPageGated() {
+  return (
+    <AccessGate
+      title="Tool runtime scaling"
+      purpose="Set limits for each tool, like caching, how many calls run at once, rate limits and a daily budget, so one busy tool cannot slow everything else. For admins."
+      icon={Gauge}
+      need={{ admin: true }}
+      instead={{ text: 'The Tools Catalogue shows every tool and whether it is ready to use.', href: '/tools', label: 'Open the Tools Catalogue' }}
+    >
+      <ToolScalingPage />
+    </AccessGate>
   );
 }

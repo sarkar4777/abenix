@@ -32,12 +32,19 @@ An event exists exactly when the change it describes was committed. A rolled-bac
 | `kill_switch.cleared` | A kill switch is resumed | `routers/governance.py` |
 | `source.changed` | A watched source changed | `services/source_watch.py` |
 | `eval.completed` | An evaluation suite run finished | `services/eval_runner.py` |
+| `action.proposed` | An app proposed an action and the autonomy gate decided | `services/autonomy.py`, `POST /api/autonomy/actions/propose` |
+| `action.executed` | An app reported that a governed action ran | `services/autonomy.py`, `POST /api/autonomy/actions/{id}/executed` |
+| `action.outcome_recorded` | An action's outcome was observed and scored | `services/autonomy.py`, from a probe, an app or a person |
+| `autonomy.recommended` | A grant met the bar for the next level, once per level | `services/autonomy.py`, ladder re-evaluation |
+| `autonomy.promoted` | A promotion approval was signed | `services/autonomy.py` |
+| `autonomy.demoted` | A grant moved down, by a person or automatically | `services/autonomy.py` |
 
 Notes:
 
 - Execution events come from a trigger, `AFTER UPDATE OF status` on `executions`, so every code path that moves a run to completed or failed emits them. A row inserted already terminal, without a later status update, emits nothing. Nothing sets `cancelled` today, and it would emit nothing either.
 - Approvals closed by the expiry sweep emit `approval.resolved` with `status: expired`, the same as a sign-off that settles one.
 - The decision events and the `decision_publish` approvals behind them are covered in [Decision service](20-decision-service.md) and [the decisions how-to](../08-howto/09-decisions.md).
+- Agent tool calls go through the autonomy gate in the runtime. The `observe_actions` job emits their `action.proposed` and `action.executed` within 30 s. See [Earned autonomy](21-earned-autonomy.md).
 - `execution.started`, `agent.published` and `agent.updated` are still accepted on subscriptions created before the catalogue. Nothing emits them.
 
 ### Payload fields
@@ -53,6 +60,12 @@ Notes:
 | `kill_switch.set` | `scope`, `target`, `reason` |
 | `kill_switch.cleared` | `scope`, `target` |
 | `source.changed` | `source_id`, `name`, `url`, `kind`, `jurisdiction`, `tags`, `risk_tier`, `change_id`, `snapshot_id`, `previous_snapshot_id`, `content_sha256`, `fetched_at`, `change_summary`, `materiality_hint`, `stats` |
+| `action.proposed` | `action_id`, `agent_id`, `action_key`, `level`, `decision` (`run`, `wait`, `watching`, `blocked`), `target` |
+| `action.executed` | `action_id`, `agent_id`, `action_key`, `ok`, `mode` |
+| `action.outcome_recorded` | `action_id`, `agent_id`, `action_key`, `metric`, `value`, `within_band`, `source` |
+| `autonomy.recommended` | `grant_id`, `agent_id`, `action_key`, `from_level`, `to_level`, `evidence` |
+| `autonomy.promoted` | `grant_id`, `agent_id`, `action_key`, `from_level`, `to_level`, `approval_id`, `approved_by` |
+| `autonomy.demoted` | `grant_id`, `agent_id`, `action_key`, `from_level`, `to_level`, `reason`, `actor` (`user` or `system`) |
 | `eval.completed` | `suite_id`, `run_id`, `agent_id`, `status`, `score`, `threshold`, `threshold_met`, `passed`, `failed`, `model`, `model_override`, `config_hash`, `triggered_by` |
 
 ## The envelope

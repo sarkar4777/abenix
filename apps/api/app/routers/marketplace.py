@@ -12,6 +12,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, get_db
 from app.core.notifications import create_notification
+from app.core.platform_features import (
+    MONETIZATION_OFF,
+    monetization_enabled,
+    require_marketplace,
+)
 from app.core.responses import error, success
 from app.core.stripe import (
     create_marketplace_checkout,
@@ -29,15 +34,25 @@ from models.payout import Payout, PayoutStatus
 from models.tenant import Tenant
 from models.user import User
 
-router = APIRouter(prefix="/api/marketplace", tags=["marketplace"])
+router = APIRouter(
+    prefix="/api/marketplace",
+    tags=["marketplace"],
+    dependencies=[Depends(require_marketplace)],
+)
 
 
-def _listed_clause():
+def _listed_clause(free_only: bool = False):
     # Only reviewed marketplace agents and platform OOB agents are listable.
-    return (
+    clause = [
         or_(Agent.is_published.is_(True), Agent.agent_type == AgentType.OOB),
         Agent.status == AgentStatus.ACTIVE,
-    )
+    ]
+    if free_only:
+        # a paid listing cannot be installed while monetization is off
+        clause.append(
+            or_(Agent.marketplace_price.is_(None), Agent.marketplace_price <= 0)
+        )
+    return tuple(clause)
 
 
 def _serialize_listing(
@@ -83,6 +98,7 @@ async def browse_marketplace(
     page: int = Query(default=1, ge=1),
     per_page: int = Query(default=24, ge=1, le=100),
 ) -> JSONResponse:
+    paid = await monetization_enabled(db)
     base = (
         select(
             Agent,
@@ -94,7 +110,7 @@ async def browse_marketplace(
         .outerjoin(Review, Review.agent_id == Agent.id)
         .outerjoin(Subscription, Subscription.agent_id == Agent.id)
         .join(User, User.id == Agent.creator_id)
-        .where(*_listed_clause())
+        .where(*_listed_clause(free_only=not paid))
         .group_by(Agent.id, User.full_name)
     )
 
@@ -114,7 +130,7 @@ async def browse_marketplace(
         base = base.order_by(Agent.created_at.desc())
     elif sort == "top_rated":
         base = base.order_by(func.coalesce(func.avg(Review.rating), 0).desc())
-    elif sort == "price_low":
+    elif sort == "price_low" and paid:
         base = base.order_by(func.coalesce(Agent.marketplace_price, 0).asc())
     else:
         base = base.order_by(
@@ -137,7 +153,12 @@ async def browse_marketplace(
 
     return success(
         listings,
-        meta={"total": total, "page": page, "per_page": per_page},
+        meta={
+            "total": total,
+            "page": page,
+            "per_page": per_page,
+            "monetization": paid,
+        },
     )
 
 
@@ -147,6 +168,7 @@ async def get_marketplace_agent(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
+    paid = await monetization_enabled(db)
     result = await db.execute(
         select(
             Agent,
@@ -158,7 +180,7 @@ async def get_marketplace_agent(
         .outerjoin(Review, Review.agent_id == Agent.id)
         .outerjoin(Subscription, Subscription.agent_id == Agent.id)
         .join(User, User.id == Agent.creator_id)
-        .where(Agent.id == agent_id, *_listed_clause())
+        .where(Agent.id == agent_id, *_listed_clause(free_only=not paid))
         .group_by(Agent.id, User.full_name)
     )
     row = result.one_or_none()
@@ -178,6 +200,8 @@ async def get_marketplace_agent(
 
     data = _serialize_listing(agent, avg_r, rev_c, creator, sub_c)
     data["is_subscribed"] = is_subscribed
+    data["is_owner"] = agent.creator_id == user.id
+    data["monetization"] = paid
 
     return success(data)
 
@@ -207,6 +231,9 @@ async def subscribe_to_agent(
         return error("Already subscribed", 409)
 
     price = float(agent.marketplace_price) if agent.marketplace_price else 0
+
+    if price > 0 and not await monetization_enabled(db):
+        return error(MONETIZATION_OFF, 409, error_code="MONETIZATION_OFF")
 
     if price > 0:
         creator_result = await db.execute(

@@ -686,6 +686,64 @@ function JsonObjectField({
   );
 }
 
+// text or JSON, an object typed here is kept as an object so references inside keep their type
+export function parseAnyValue(text: string): { value: unknown; kind: 'empty' | 'json' | 'text' } {
+  const t = text.trim();
+  if (!t) return { value: undefined, kind: 'empty' };
+  if (t.startsWith('{') || t.startsWith('[')) {
+    try {
+      return { value: JSON.parse(t), kind: 'json' };
+    } catch {
+      return { value: text, kind: 'text' };
+    }
+  }
+  return { value: text, kind: 'text' };
+}
+
+function AnyValueField({
+  id,
+  value,
+  onChange,
+  placeholder,
+}: {
+  id: string;
+  value: unknown;
+  onChange: (v: unknown) => void;
+  placeholder?: string;
+}) {
+  const [text, setText] = useState(() =>
+    value === undefined || value === null ? '' : typeof value === 'object' ? JSON.stringify(value, null, 2) : String(value),
+  );
+  const parsed = parseAnyValue(text);
+  // a lone {{reference}} is not meant as JSON
+  const looksJson = /^\s*[[{]/.test(text) && !/^\s*\{\{[^}]*\}\}\s*$/.test(text);
+  return (
+    <>
+      <textarea
+        id={id}
+        value={text}
+        spellCheck={false}
+        placeholder={placeholder}
+        onChange={(e) => {
+          setText(e.target.value);
+          onChange(parseAnyValue(e.target.value).value);
+        }}
+        rows={4}
+        className="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-2 text-xs font-mono text-white resize-y focus:border-cyan-500 focus:outline-none"
+      />
+      {looksJson && parsed.kind === 'text' ? (
+        <p className="text-[10px] text-amber-300 mt-1" data-testid={`${id}-hint`}>
+          Not valid JSON, so it is sent as plain text. Put references in double quotes, like {'"mw": "{{dispatch.result.mw}}"'}, to send an object.
+        </p>
+      ) : parsed.kind === 'json' ? (
+        <p className="text-[10px] text-slate-500 mt-1" data-testid={`${id}-hint`}>Sent as a JSON object. A reference that is the whole value keeps its number or list type.</p>
+      ) : (
+        <TemplatePreview value={text} />
+      )}
+    </>
+  );
+}
+
 interface PublishedDecision {
   key: string;
   name: string;
@@ -1020,6 +1078,20 @@ function SchemaArgumentsForm({
                     onArgsChange(next);
                   } else updateField(param.name, v);
                 }}
+              />
+            ) : /* ANY -> text, or JSON kept as an object */
+            param.type === 'any' ? (
+              <AnyValueField
+                id={fieldId}
+                value={value}
+                onChange={(v) => {
+                  if (v === undefined) {
+                    const next = { ...args };
+                    delete next[param.name];
+                    onArgsChange(next);
+                  } else updateField(param.name, v);
+                }}
+                placeholder={param.description}
               />
             ) : /* OBJECT -> JSON textarea that keeps what is typed */
             param.type === 'object' ? (

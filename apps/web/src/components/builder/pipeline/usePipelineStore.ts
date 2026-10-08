@@ -42,6 +42,8 @@ export interface ExecutionState {
   nodeResults: Record<string, NodeResult>;
   executionPath: string[];
   totalDurationMs: number;
+  // run-level failure that no single step owns
+  error?: string | null;
 }
 
 export interface ValidationError {
@@ -102,10 +104,12 @@ interface PipelineStore {
   // ── Serialization ──────────────────────────────────────────────────────
   serialize: () => PipelineConfig;
   deserialize: (config: PipelineConfig) => void;
+  // clears dirty when nothing changed since the saved snapshot
+  markSaved: (snapshot: string) => void;
   reset: () => void;
 
   // ── Execution ──────────────────────────────────────────────────────────
-  executeAndTrack: (agentId: string) => Promise<void>;
+  executeAndTrack: (agentId: string, context?: Record<string, unknown>) => Promise<void>;
   executeWithStreaming: (agentId: string) => Promise<void>;
   resetExecution: () => void;
 
@@ -395,6 +399,10 @@ export const usePipelineStore = create<PipelineStore>((set, get) => ({
     });
   },
 
+  markSaved: (snapshot: string): void => {
+    if (JSON.stringify(get().serialize()) === snapshot) set({ dirty: false });
+  },
+
   reset: (): void => {
     set({
       steps: [],
@@ -407,7 +415,7 @@ export const usePipelineStore = create<PipelineStore>((set, get) => ({
 
   // ── Execution ──────────────────────────────────────────────────────────
 
-  executeAndTrack: async (agentId: string): Promise<void> => {
+  executeAndTrack: async (agentId: string, context?: Record<string, unknown>): Promise<void> => {
     const { steps } = get();
 
     // 1. Mark all nodes as pending and set running flag
@@ -440,7 +448,7 @@ export const usePipelineStore = create<PipelineStore>((set, get) => ({
             'Content-Type': 'application/json',
             ...(token ? { Authorization: `Bearer ${token}` } : {}),
           },
-          body: JSON.stringify({ nodes: serializedNodes }),
+          body: JSON.stringify({ nodes: serializedNodes, context: context || {} }),
         },
       );
 
@@ -463,6 +471,7 @@ export const usePipelineStore = create<PipelineStore>((set, get) => ({
             execution: {
               ...state.execution,
               isRunning: false,
+              error: errorMessage,
               nodeStatuses: failedStatuses,
               nodeResults: {
                 _error: {
@@ -539,12 +548,15 @@ export const usePipelineStore = create<PipelineStore>((set, get) => ({
           nodeResults,
           executionPath,
           totalDurationMs: data?.total_duration_ms ?? 0,
+          error: data?.status === 'failed' ? data?.error_message || 'The run failed.' : null,
         },
       });
     } catch (err) {
       // Network or parsing error — mark everything as failed
       const errorMessage =
-        err instanceof Error ? err.message : 'Unknown execution error';
+        err instanceof TypeError
+          ? 'Could not reach the server, the pipeline did not run.'
+          : err instanceof Error ? err.message : 'Unknown execution error';
 
       set((state) => {
         const failedStatuses: Record<string, NodeStatus> = {};
@@ -555,6 +567,7 @@ export const usePipelineStore = create<PipelineStore>((set, get) => ({
           execution: {
             ...state.execution,
             isRunning: false,
+            error: errorMessage,
             nodeStatuses: failedStatuses,
             nodeResults: {
               _error: {

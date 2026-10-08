@@ -12,7 +12,7 @@ from typing import Any
 
 import httpx
 
-from engine.tools.base import BaseTool, ConfigField, ToolResult
+from engine.tools.base import READ_ONLY, BaseTool, ConfigField, ToolResult
 
 logger = logging.getLogger(__name__)
 
@@ -327,6 +327,7 @@ async def _query_gov_roster(
 class PEPScreeningTool(BaseTool):
     name = "pep_screening"
     risk_tier = "medium"
+    effect = READ_ONLY
     config_fields = (
         ConfigField(
             "OPENSANCTIONS_API_KEY",

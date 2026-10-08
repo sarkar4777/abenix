@@ -74,6 +74,11 @@ class ExecutionResult:
     execution_id: str | None = None
     status: str = "completed"               # completed | failed | paused | running
     paused_at: ApprovalRef | None = None    # set when status == "paused"
+    # what started the run: schedule, webhook, manual, event, source_watch, chat, api ...
+    trigger_kind: str | None = None
+    trigger_id: str | None = None
+    trigger_name: str | None = None
+    started_by: str | None = None
 
 
 @dataclass
@@ -124,6 +129,33 @@ class ExecutionsClient:
 
     async def get(self, execution_id: str) -> dict[str, Any]:
         return await self._client._get(f"/api/executions/{execution_id}")
+
+    async def list(
+        self,
+        *,
+        agent_id: str | None = None,
+        status: str | None = None,
+        trigger_kind: str | list[str] | None = None,
+        trigger_id: str | None = None,
+        search: str = "",
+        limit: int = 20,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        """Past runs, each with trigger_kind, trigger_id, trigger_name and started_by."""
+        if isinstance(trigger_kind, (list, tuple)):
+            trigger_kind = ",".join(trigger_kind)
+        params = {
+            "agent_id": agent_id,
+            "status": status,
+            "trigger_kind": trigger_kind,
+            "trigger_id": trigger_id,
+            "search": search or None,
+            "limit": limit,
+            "offset": offset,
+        }
+        return await self._client._get(
+            "/api/executions", {k: v for k, v in params.items() if v is not None}
+        ) or []
 
     async def replay(self, execution_id: str) -> dict[str, Any]:
         return await self._client._get(f"/api/executions/{execution_id}/replay")
@@ -354,10 +386,14 @@ class ApprovalsClient:
         *,
         reason: str = "",
         client_token: str | None = None,
+        edited_arguments: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         body: dict[str, Any] = {"decision": decision, "reason": reason}
         if client_token:
             body["client_token"] = client_token
+        # action approvals only, the agent runs with these values instead
+        if edited_arguments is not None:
+            body["edited_arguments"] = edited_arguments
         res = await self._client._http.post(
             f"/api/approvals/{approval_id}/signoff", json=body
         )
@@ -365,10 +401,19 @@ class ApprovalsClient:
         return (res.json() or {}).get("data") or {}
 
     async def approve(
-        self, approval_id: str, *, reason: str = "", client_token: str | None = None
+        self,
+        approval_id: str,
+        *,
+        reason: str = "",
+        client_token: str | None = None,
+        edited_arguments: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         return await self.signoff(
-            approval_id, "approve", reason=reason, client_token=client_token
+            approval_id,
+            "approve",
+            reason=reason,
+            client_token=client_token,
+            edited_arguments=edited_arguments,
         )
 
     async def deny(
@@ -1108,6 +1153,115 @@ class ChatClient:
         return res.json().get("data", {})
 
 
+class ActionsClient:
+    """Earned autonomy for actions an app takes itself: propose, wait for a person, report what ran and what happened."""
+
+    def __init__(self, client: "Abenix"):
+        self._client = client
+
+    async def _call(self, method: str, path: str, **kw: Any) -> Any:
+        return await _call(self._client, AbenixError, method, path, **kw)
+
+    async def propose(
+        self,
+        action_key: str,
+        arguments: dict[str, Any] | None = None,
+        *,
+        agent_id: str | None = None,
+        target: str | None = None,
+        intent: str | None = None,
+        prediction: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Ask before acting. decision is run, wait, watching or blocked, only run means go ahead."""
+        body: dict[str, Any] = {"action_key": action_key, "arguments": arguments or {}}
+        if agent_id:
+            body["agent_id"] = agent_id
+        if target is not None:
+            body["target"] = target
+        if intent:
+            body["intent"] = intent
+        if prediction is not None:
+            body["prediction"] = prediction
+        return await self._call("POST", "/api/autonomy/actions/propose", json=body)
+
+    async def wait(self, action_id: str, *, timeout_seconds: int = 60) -> dict[str, Any]:
+        """Block until a person decides or the timeout fires. Use the returned arguments, a reviewer may have edited them."""
+        deadline = max(1, int(timeout_seconds))
+        elapsed = 0
+        last: dict[str, Any] = {}
+        while elapsed < deadline:
+            chunk = min(120, deadline - elapsed)
+            last = await self._call(
+                "GET", f"/api/autonomy/actions/{action_id}/wait", params={"timeout_s": chunk}
+            ) or {}
+            if last.get("decision") != "wait":
+                return last
+            elapsed += chunk
+        return last
+
+    async def executed(
+        self, action_id: str, ok: bool = True, *, result_preview: str | None = None
+    ) -> dict[str, Any]:
+        """Say the action ran, or failed. Starts the outcome clock when the action type has a probe."""
+        body: dict[str, Any] = {"ok": bool(ok)}
+        if result_preview is not None:
+            body["result_preview"] = result_preview
+        return await self._call("POST", f"/api/autonomy/actions/{action_id}/executed", json=body)
+
+    async def report_outcome(
+        self, action_id: str, value: float | int | str, *, note: str | None = None
+    ) -> dict[str, Any]:
+        """What actually happened. Scored against the prediction band."""
+        body: dict[str, Any] = {"value": value, "source": "api"}
+        if note:
+            body["note"] = note
+        return await self._call("POST", f"/api/autonomy/actions/{action_id}/outcome", json=body)
+
+    async def flag_harm(self, action_id: str, note: str) -> dict[str, Any]:
+        """Flag that the action did harm. Drops the agent to Asks first at once."""
+        if not (note or "").strip():
+            raise ValueError("Say what went wrong.")
+        return await self._call("POST", f"/api/autonomy/actions/{action_id}/harm", json={"note": note})
+
+    async def get(self, action_id: str) -> dict[str, Any]:
+        """One action with its card, outcome and score."""
+        return await self._call("GET", f"/api/autonomy/actions/{action_id}")
+
+
+class AutonomyClient:
+    """Read the autonomy ladder: levels, track records and the actions behind them."""
+
+    def __init__(self, client: "Abenix"):
+        self._client = client
+
+    async def _call(self, method: str, path: str, **kw: Any) -> Any:
+        return await _call(self._client, AbenixError, method, path, **kw)
+
+    async def overview(self) -> dict[str, Any]:
+        """Counts, every grant, what is ready to promote, recent demotions and unmanaged actions."""
+        return await self._call("GET", "/api/autonomy/overview") or {}
+
+    async def grant(self, grant_id: str) -> dict[str, Any]:
+        """One grant with its next-step checklist, level history and chart points."""
+        return await self._call("GET", f"/api/autonomy/grants/{grant_id}")
+
+    async def grant_actions(
+        self,
+        grant_id: str,
+        *,
+        status: str | None = None,
+        limit: int = 50,
+        before: str | None = None,
+    ) -> dict[str, Any]:
+        """A page of the grant's actions, newest first. Pass next_before as before for the next page."""
+        params: dict[str, Any] = {"limit": limit}
+        if status:
+            params["status"] = status
+        if before:
+            params["before"] = before
+        return await self._call("GET", f"/api/autonomy/grants/{grant_id}/actions", params=params) or {}
+
+
 class Abenix:
     """Abenix Python SDK client."""
 
@@ -1139,6 +1293,8 @@ class Abenix:
         self.decisions = DecisionsClient(self)
         self.sources = SourcesClient(self)
         self.events = EventsClient(self)
+        self.actions = ActionsClient(self)
+        self.autonomy = AutonomyClient(self)
         self._http = httpx.AsyncClient(
             base_url=self.base_url,
             headers={"X-API-Key": self.api_key, "Content-Type": "application/json"},
@@ -1277,8 +1433,12 @@ class Abenix:
             model=data.get("model", "") or "",
             tool_calls=data.get("tool_calls", []) or [],
             confidence_score=data.get("confidence_score"),
-            execution_id=data.get("execution_id"),
+            execution_id=data.get("execution_id") or data.get("id"),
             status=(data.get("status") or "completed"),
+            trigger_kind=data.get("trigger_kind"),
+            trigger_id=data.get("trigger_id"),
+            trigger_name=data.get("trigger_name"),
+            started_by=data.get("started_by"),
         )
 
     async def _poll_execution(

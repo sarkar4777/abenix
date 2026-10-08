@@ -100,6 +100,21 @@ export interface ExecutionResult {
   /** completed | failed | paused | running */
   status: string;
   pausedAt?: ApprovalRef;
+  /** what started the run: schedule, webhook, manual, event, source_watch, chat, api ... */
+  triggerKind?: string | null;
+  triggerId?: string | null;
+  triggerName?: string | null;
+  startedBy?: string | null;
+}
+
+export interface ListExecutionsOptions {
+  agentId?: string;
+  status?: string;
+  triggerKind?: string | string[];
+  triggerId?: string;
+  search?: string;
+  limit?: number;
+  offset?: number;
 }
 
 export interface Approval {
@@ -193,6 +208,8 @@ export class Abenix {
   public decisions: DecisionsClient;
   public sources: SourcesClient;
   public events: EventsClient;
+  public actions: ActionsClient;
+  public autonomy: AutonomyClient;
 
   constructor(config: AbenixConfig) {
     this.apiKey = config.apiKey;
@@ -206,6 +223,8 @@ export class Abenix {
     this.decisions = new DecisionsClient(this);
     this.sources = new SourcesClient(this);
     this.events = new EventsClient(this);
+    this.actions = new ActionsClient(this);
+    this.autonomy = new AutonomyClient(this);
   }
 
   /** The key's user, role and capabilities. */
@@ -312,6 +331,10 @@ export class Abenix {
       confidenceScore: d.confidence_score,
       executionId: d.execution_id,
       status: d.status || 'completed',
+      triggerKind: d.trigger_kind ?? null,
+      triggerId: d.trigger_id ?? null,
+      triggerName: d.trigger_name ?? null,
+      startedBy: d.started_by ?? null,
     };
   }
 
@@ -443,6 +466,23 @@ class ExecutionsClient {
     const res = await this.client._fetch(`/api/executions/${executionId}`);
     const data = await res.json();
     return data.data;
+  }
+
+  /** Past runs, each with trigger_kind, trigger_id, trigger_name and started_by. */
+  async list(options: ListExecutionsOptions = {}): Promise<Array<Record<string, unknown>>> {
+    const q = new URLSearchParams();
+    if (options.agentId) q.set('agent_id', options.agentId);
+    if (options.status) q.set('status', options.status);
+    if (options.triggerKind) {
+      q.set('trigger_kind', Array.isArray(options.triggerKind) ? options.triggerKind.join(',') : options.triggerKind);
+    }
+    if (options.triggerId) q.set('trigger_id', options.triggerId);
+    if (options.search) q.set('search', options.search);
+    q.set('limit', String(options.limit ?? 20));
+    q.set('offset', String(options.offset ?? 0));
+    const res = await this.client._fetch(`/api/executions?${q.toString()}`);
+    const data = await res.json();
+    return data.data || [];
   }
 
   async replay(executionId: string): Promise<Record<string, unknown>> {
@@ -811,6 +851,115 @@ export class EventsClient {
   }
 }
 
+export type ActionDecision = 'run' | 'wait' | 'watching' | 'blocked';
+
+export interface ActionPrediction {
+  metric?: string;
+  value: number | string;
+  low?: number;
+  high?: number;
+  horizon_s?: number;
+  note?: string;
+}
+
+export interface ProposeResult {
+  action_id: string;
+  decision: ActionDecision;
+  approval_id: string | null;
+  message: string;
+}
+
+export interface ActionWaitResult {
+  action_id: string;
+  status: string;
+  decision: ActionDecision;
+  /** Use these, a reviewer may have edited them. */
+  arguments: Record<string, unknown>;
+  edited: boolean;
+  decided_by_name: string | null;
+  decision_note: string | null;
+  approval_id: string | null;
+  message: string;
+}
+
+/** Earned autonomy for actions an app takes itself: propose, wait for a person, report what ran and what happened. */
+export class ActionsClient {
+  constructor(private client: Abenix) {}
+
+  /** Ask before acting. Only decision 'run' means go ahead. */
+  propose(
+    actionKey: string,
+    args: Record<string, unknown> = {},
+    opts: { agentId?: string; target?: string; intent?: string; prediction?: ActionPrediction } = {},
+  ): Promise<ProposeResult> {
+    const body: Record<string, unknown> = { action_key: actionKey, arguments: args };
+    if (opts.agentId) body.agent_id = opts.agentId;
+    if (opts.target !== undefined) body.target = opts.target;
+    if (opts.intent) body.intent = opts.intent;
+    if (opts.prediction) body.prediction = opts.prediction;
+    return platformCall(this.client, 'POST', '/api/autonomy/actions/propose', body);
+  }
+
+  /** Block until a person decides or the timeout fires. */
+  async wait(actionId: string, opts: { timeoutSeconds?: number } = {}): Promise<ActionWaitResult> {
+    const deadline = Math.max(1, opts.timeoutSeconds ?? 60);
+    let elapsed = 0;
+    let last = {} as ActionWaitResult;
+    while (elapsed < deadline) {
+      const chunk = Math.min(120, deadline - elapsed);
+      last = await platformCall<ActionWaitResult>(this.client, 'GET', `/api/autonomy/actions/${actionId}/wait?timeout_s=${chunk}`);
+      if (last?.decision !== 'wait') return last;
+      elapsed += chunk;
+    }
+    return last;
+  }
+
+  /** Say the action ran, or failed. Starts the outcome clock when the action type has a probe. */
+  executed(actionId: string, ok = true, opts: { resultPreview?: string } = {}): Promise<any> {
+    const body: Record<string, unknown> = { ok };
+    if (opts.resultPreview !== undefined) body.result_preview = opts.resultPreview;
+    return platformCall(this.client, 'POST', `/api/autonomy/actions/${actionId}/executed`, body);
+  }
+
+  /** What actually happened. Scored against the prediction band. */
+  reportOutcome(actionId: string, value: number | string, opts: { note?: string } = {}): Promise<any> {
+    const body: Record<string, unknown> = { value, source: 'api' };
+    if (opts.note) body.note = opts.note;
+    return platformCall(this.client, 'POST', `/api/autonomy/actions/${actionId}/outcome`, body);
+  }
+
+  /** Flag that the action did harm. Drops the agent to Asks first at once. */
+  flagHarm(actionId: string, note: string): Promise<any> {
+    if (!note.trim()) return Promise.reject(new Error('Say what went wrong.'));
+    return platformCall(this.client, 'POST', `/api/autonomy/actions/${actionId}/harm`, { note });
+  }
+
+  /** One action with its card, outcome and score. */
+  get(actionId: string): Promise<any> {
+    return platformCall(this.client, 'GET', `/api/autonomy/actions/${actionId}`);
+  }
+}
+
+/** Read the autonomy ladder: levels, track records and the actions behind them. */
+export class AutonomyClient {
+  constructor(private client: Abenix) {}
+
+  overview(): Promise<any> {
+    return platformCall(this.client, 'GET', '/api/autonomy/overview');
+  }
+
+  grant(grantId: string): Promise<any> {
+    return platformCall(this.client, 'GET', `/api/autonomy/grants/${grantId}`);
+  }
+
+  grantActions(grantId: string, opts: { status?: string; limit?: number; before?: string } = {}): Promise<{ items: any[]; next_before: string | null }> {
+    const q = new URLSearchParams({ limit: String(opts.limit ?? 50) });
+    if (opts.status) q.set('status', opts.status);
+    if (opts.before) q.set('before', opts.before);
+    return platformCall(this.client, 'GET', `/api/autonomy/grants/${grantId}/actions?${q.toString()}`);
+  }
+}
+
 export class ApprovalsClient {
   constructor(private client: Abenix) {}
 
@@ -902,13 +1051,15 @@ export class ApprovalsClient {
   async signoff(
     approvalId: string,
     decision: 'approve' | 'deny' | 'return',
-    options?: { reason?: string; clientToken?: string },
+    options?: { reason?: string; clientToken?: string; editedArguments?: Record<string, unknown> },
   ): Promise<Approval> {
     const body: Record<string, unknown> = {
       decision,
       reason: options?.reason || '',
     };
     if (options?.clientToken) body.client_token = options.clientToken;
+    // action approvals only, the agent runs with these values instead
+    if (options?.editedArguments) body.edited_arguments = options.editedArguments;
     const res = await this.client._fetch(`/api/approvals/${approvalId}/signoff`, {
       method: 'POST',
       body: JSON.stringify(body),
@@ -921,7 +1072,7 @@ export class ApprovalsClient {
     return this._normalize(data.data || {});
   }
 
-  approve(approvalId: string, options?: { reason?: string; clientToken?: string }): Promise<Approval> {
+  approve(approvalId: string, options?: { reason?: string; clientToken?: string; editedArguments?: Record<string, unknown> }): Promise<Approval> {
     return this.signoff(approvalId, 'approve', options);
   }
 

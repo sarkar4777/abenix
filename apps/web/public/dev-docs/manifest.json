@@ -36,7 +36,7 @@
         },
         {
           "slug": "01-architecture/05-architectural-patterns",
-          "title": "Architectural patterns (45)"
+          "title": "Architectural patterns (46)"
         },
         {
           "slug": "01-architecture/06-atlas-knowledge-engine",
@@ -135,6 +135,10 @@
         {
           "slug": "02-runtime/20-decision-service",
           "title": "Decision service"
+        },
+        {
+          "slug": "02-runtime/21-earned-autonomy",
+          "title": "Earned autonomy"
         }
       ]
     },
@@ -195,6 +199,10 @@
         {
           "slug": "04-data-model/07-tools-and-operations",
           "title": "Tools, models, integrations, archives"
+        },
+        {
+          "slug": "04-data-model/08-autonomy",
+          "title": "Earned autonomy: action types, grants, ledger"
         },
         {
           "slug": "document-versioning",
@@ -351,6 +359,18 @@
         {
           "slug": "08-howto/12-source-watch-and-events",
           "title": "Watch a source and react when it changes"
+        },
+        {
+          "slug": "08-howto/13-earned-autonomy",
+          "title": "Let an agent earn autonomy"
+        },
+        {
+          "slug": "08-howto/14-marketplace-and-monetization",
+          "title": "Marketplace and monetization"
+        },
+        {
+          "slug": "08-howto/15-meetings",
+          "title": "Send a bot to a meeting"
         }
       ]
     },

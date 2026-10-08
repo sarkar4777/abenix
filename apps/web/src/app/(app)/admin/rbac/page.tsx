@@ -1,10 +1,10 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { Shield, RefreshCw, AlertTriangle, ExternalLink, UserCog, Check, X } from 'lucide-react';
 import { apiFetch } from '@/lib/api-client';
-import { toastError } from '@/stores/toastStore';
+import PageHeader from '@/components/layout/PageHeader';
+import { AccessGate } from '@/components/layout/NoAccess';
 
 interface MePermissions {
   role: string;
@@ -45,8 +45,7 @@ const ROLE_COLOR: Record<string, string> = {
   user:    'border-slate-700/60 bg-slate-900/40 text-slate-300',
 };
 
-export default function RbacPage() {
-  const router = useRouter();
+function RbacPage() {
   const [me, setMe] = useState<MePermissions | null>(null);
   const [members, setMembers] = useState<TeamMember[]>([]);
   const [loading, setLoading] = useState(true);
@@ -64,17 +63,12 @@ export default function RbacPage() {
       ]);
       if (cancelled) return;
 
-      if (meRes.data && !meRes.data.is_admin) {
-        toastError('Admin role required', 'You do not have permission to view RBAC.');
-        router.push('/dashboard');
-        return;
-      }
 
       if (meRes.error && teamRes.error) {
         const lower = (meRes.error || teamRes.error || '').toLowerCase();
         if (lower.includes('403') || lower.includes('forbid')) {
-          toastError('Admin role required', 'You do not have permission to view RBAC.');
-          router.push('/dashboard');
+          setErr('Only admins can see roles. Ask an admin if you need this.');
+          setLoading(false);
           return;
         }
         setErr(meRes.error || teamRes.error || 'Could not load RBAC data');
@@ -88,7 +82,7 @@ export default function RbacPage() {
     })();
 
     return () => { cancelled = true; };
-  }, [refreshKey, router]);
+  }, [refreshKey]);
 
   const byRole = useMemo(() => {
     const buckets: Record<string, TeamMember[]> = { admin: [], creator: [], user: [] };
@@ -107,34 +101,28 @@ export default function RbacPage() {
 
   return (
     <div className="max-w-6xl mx-auto p-6" data-testid="admin-rbac">
-      <header className="mb-6 flex items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-purple-500/10 ring-1 ring-purple-500/40 flex items-center justify-center">
-            <Shield className="w-5 h-5 text-purple-300" />
-          </div>
-          <div>
-            <p className="text-[10px] uppercase tracking-wider text-slate-500">Admin · platform</p>
-            <h1 className="text-2xl font-bold text-white">Roles &amp; Permissions</h1>
-            <p className="text-sm text-slate-400">Who has access to what. Edit role-membership in Settings &gt; Team.</p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => setRefreshKey((k) => k + 1)}
-            className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-slate-700/60 bg-slate-900/40 text-slate-300 hover:bg-slate-800/60"
-            data-testid="rbac-refresh"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} /> Refresh
-          </button>
-          <a
-            href="/settings/team"
-            className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-purple-500/40 bg-purple-500/10 text-purple-300 hover:bg-purple-500/20"
-            data-testid="rbac-edit-link"
-          >
-            Edit roles <ExternalLink className="w-3 h-3" />
-          </a>
-        </div>
-      </header>
+      <PageHeader
+        className="mb-6"
+        title="Roles & Permissions"
+        purpose="See who in the workspace has which role and what each role can open. For admins."
+        icon={Shield}
+        iconClassName="text-purple-300"
+        storageKey="admin-rbac"
+        docSlug="01-architecture/01-tenants-rbac"
+        primaryAction={{ label: 'Edit roles', icon: UserCog, href: '/settings/team', testId: 'rbac-edit-link' }}
+        secondaryAction={{
+          label: 'Refresh',
+          icon: RefreshCw,
+          busy: loading,
+          onClick: () => setRefreshKey((k) => k + 1),
+          testId: 'rbac-refresh',
+        }}
+        steps={[
+          'Every person has one role: user, creator or admin.',
+          'The table shows which parts of the platform each role can use.',
+          'Change someone’s role on the Team settings page. Use Permissions to grant extra abilities without changing the role.',
+        ]}
+      />
 
       {err && (
         <div className="mb-4 p-4 rounded-xl border border-red-500/40 bg-red-500/10 text-red-300 text-sm flex items-start gap-3">
@@ -266,5 +254,18 @@ export default function RbacPage() {
         Per-user permission overrides land in a future <code className="text-cyan-300">/api/users/{`{id}`}/permissions</code> endpoint.
       </p>
     </div>
+  );
+}
+
+export default function RbacPageGated() {
+  return (
+    <AccessGate
+      title="Roles & Permissions"
+      purpose="See who in the workspace has which role and what each role can open. For admins."
+      icon={Shield}
+      need={{ admin: true }}
+    >
+      <RbacPage />
+    </AccessGate>
   );
 }

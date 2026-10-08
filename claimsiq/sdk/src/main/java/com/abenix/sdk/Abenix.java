@@ -35,6 +35,8 @@ public final class Abenix implements AutoCloseable {
     private final KnowledgeClient knowledge;
     private final ChatClient chat;
     private final ExecutionsClient executions;
+    private final ActionsClient actions;
+    private final AutonomyClient autonomy;
 
     private Abenix(Builder b) {
         this.baseUrl = stripTrailingSlash(Objects.requireNonNull(b.baseUrl, "baseUrl"));
@@ -58,6 +60,8 @@ public final class Abenix implements AutoCloseable {
         this.knowledge = new KnowledgeClient(kit);
         this.chat = new ChatClient(kit);
         this.executions = new ExecutionsClient(kit);
+        this.actions = new ActionsClient(kit);
+        this.autonomy = new AutonomyClient(kit);
     }
 
     public static Builder builder() { return new Builder(); }
@@ -78,6 +82,10 @@ public final class Abenix implements AutoCloseable {
     public ChatClient chat() { return chat; }
     /** Read-side executions helpers (live, replay, tree, …). */
     public ExecutionsClient executions() { return executions; }
+    /** Earned autonomy for actions the app takes itself: propose, wait, report. */
+    public ActionsClient actions() { return actions; }
+    /** Autonomy ladder reads: overview, grants and their actions. */
+    public AutonomyClient autonomy() { return autonomy; }
 
     // ─────────────────────────── Public verbs ───────────────────────────
 

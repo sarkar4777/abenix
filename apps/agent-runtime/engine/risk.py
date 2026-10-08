@@ -105,7 +105,8 @@ def merged_policy(tier: str, override: dict[str, Any] | None) -> dict[str, Any]:
 def validate_policy(policy: dict[str, Any]) -> list[str]:
     """Problems with a policy a tenant is about to store, empty when it is fine."""
     problems: list[str] = []
-    allowed = set(DEFAULT_POLICIES["low"].keys())
+    # autonomy holds earned-autonomy thresholds for the tier, see autonomy_ladder
+    allowed = set(DEFAULT_POLICIES["low"].keys()) | {"autonomy"}
     for k in policy:
         if k not in allowed:
             problems.append(
@@ -134,6 +135,9 @@ def validate_policy(policy: dict[str, Any]) -> list[str]:
     rep = policy.get("require_eval_pass")
     if rep is not None and not isinstance(rep, bool):
         problems.append("require_eval_pass must be true or false")
+    auto = policy.get("autonomy")
+    if auto is not None and not isinstance(auto, dict):
+        problems.append("autonomy must be an object of ladder thresholds")
     models = policy.get("allowed_models")
     if models is not None and (
         not isinstance(models, list) or not all(isinstance(m, str) for m in models)

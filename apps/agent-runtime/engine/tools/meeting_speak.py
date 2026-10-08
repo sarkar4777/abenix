@@ -10,7 +10,7 @@ import time
 from typing import Any
 
 from engine import credentials
-from engine.tools.base import BaseTool, ConfigField, ToolResult
+from engine.tools.base import BaseTool, ConfigField, Effect, ToolResult
 from engine.tools import _meeting_session as sessmod
 
 logger = logging.getLogger(__name__)
@@ -45,6 +45,7 @@ def _get_tts_openai_client() -> Any:
 class MeetingSpeakTool(BaseTool):
     name = "meeting_speak"
     risk_tier = "medium"
+    effect = Effect(kind="send", label="Speak in a meeting", target_param="meeting_id")
     config_fields = (
         ConfigField(
             "ELEVENLABS_API_KEY",
@@ -134,15 +135,22 @@ class MeetingSpeakTool(BaseTool):
                     voice_id[:10],
                 )
 
-        # Hard 15s budget on synthesize so a slow TTS can't freeze the bot.
-        try:
-            pcm = await asyncio.wait_for(
-                _synthesize(provider, text, voice=voice, voice_id=voice_id),
-                timeout=15.0,
-            )
-        except asyncio.TimeoutError:
+        simulated = sess.simulated
+        latency_ms = reply_latency_ms(sess)
+        if simulated:
+            # a rehearsal shows the words and spends no voice credits
             pcm = b""
-            logger.warning("meeting_speak: TTS synthesis timed out (15s)")
+            provider = "none"
+        else:
+            # Hard 15s budget on synthesize so a slow TTS can't freeze the bot.
+            try:
+                pcm = await asyncio.wait_for(
+                    _synthesize(provider, text, voice=voice, voice_id=voice_id),
+                    timeout=15.0,
+                )
+            except asyncio.TimeoutError:
+                pcm = b""
+                logger.warning("meeting_speak: TTS synthesis timed out (15s)")
         spoke_ok = False
         if pcm:
             # Publish in chunked blocks with periodic kill-switch checks so
@@ -168,11 +176,33 @@ class MeetingSpeakTool(BaseTool):
             except Exception as e:
                 logger.debug("publish_audio failed: %s", e)
 
-        if mirror:
+        # no voice means the chat copy is the only way the room hears it
+        if mirror or (not spoke_ok and not simulated):
             try:
                 await sess.adapter.post_chat(text)
             except Exception as e:
                 logger.debug("post_chat mirror failed: %s", e)
+
+        await sessmod.append_transcript(
+            meeting_id,
+            sess.display_name or "Bot",
+            text,
+            extra={
+                "bot": True,
+                "via": "voice" if spoke_ok else ("rehearsal" if simulated else "chat"),
+                "latency_ms": latency_ms,
+            },
+        )
+        # only a missing voice is worth a notice, a kill mid-sentence is not
+        if not pcm and not simulated and not sess.tts_warned:
+            sess.tts_warned = True
+            await sessmod.append_decision(
+                meeting_id,
+                "notice",
+                "The bot could not speak aloud, so it posted the reply in the meeting "
+                "chat. Voice needs an OpenAI or ElevenLabs API key.",
+                detail={"tts_unavailable": True},
+            )
 
         await sessmod.append_decision(
             meeting_id,
@@ -185,6 +215,8 @@ class MeetingSpeakTool(BaseTool):
                 "tts_ok": spoke_ok,
                 "mirror": mirror,
                 "cloned_fallback": cloned_fallback,
+                "latency_ms": latency_ms,
+                "rehearsal": simulated,
             },
         )
         return ToolResult(
@@ -197,6 +229,15 @@ class MeetingSpeakTool(BaseTool):
                 "cloned_fallback": cloned_fallback,
             },
         )
+
+
+def reply_latency_ms(sess: Any) -> int | None:
+    """Time from the question to this reply, once per question."""
+    started = int(getattr(sess, "last_addressed_ms", 0) or 0)
+    if not started:
+        return None
+    sess.last_addressed_ms = 0
+    return max(0, int(time.time() * 1000) - started)
 
 
 async def _consent_ok(voice_id: str, user_id: str) -> bool:

@@ -259,6 +259,8 @@ NOTIFICATION_DEFAULTS = {
     "execution_failed": True,
     "billing_alerts": True,
     "team_updates": True,
+    "autonomy_updates": True,
+    "moderation_reviews": True,
 }
 
 

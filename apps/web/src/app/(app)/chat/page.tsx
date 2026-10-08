@@ -23,10 +23,14 @@ import {
 } from 'lucide-react';
 import ChatMessage from '@/components/chat/ChatMessage';
 import ConfirmModal from '@/components/ui/ConfirmModal';
-import type { ChatMessage as ChatMsg, ContentBlock } from '@/stores/chatStore';
-import { connectToAgentStream, type DoneData, type ToolCallData, type ToolResultData } from '@/lib/chat';
+import { holdBlockFrom, type ChatMessage as ChatMsg, type ContentBlock } from '@/stores/chatStore';
+import { connectToAgentStream, errorRepeatsReply, type DoneData, type ModerationData, type ToolAutonomyData, type ToolCallData, type ToolResultData } from '@/lib/chat';
+import type { HoldView } from '@/components/moderation/HeldNotice';
+import { autonomyMetaOf } from '@/lib/autonomy';
 import { fetchAllAgents } from '@/lib/fetch-all-agents';
 import { usePageTitle } from '@/hooks/usePageTitle';
+import { CostValue } from '@/components/shared/CostValue';
+import PageHeader from '@/components/layout/PageHeader';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -141,6 +145,8 @@ export default function ChatPage() {
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamingBlocks, setStreamingBlocks] = useState<ContentBlock[]>([]);
+  // set while the server holds the reply back for the moderation check
+  const [replyStatus, setReplyStatus] = useState<string | null>(null);
   const [tokenCount, setTokenCount] = useState({ input: 0, output: 0 });
   const [cost, setCost] = useState(0);
   const [chatError, setChatError] = useState<string | null>(null);
@@ -341,7 +347,8 @@ export default function ChatPage() {
     } catch { /* the reply still shows, it is just not stored */ }
   }, []);
 
-  const sendMessage = useCallback(async (text: string) => {
+  // resume sends a message a reviewer released, it is already in the thread
+  const sendMessage = useCallback(async (text: string, resume = false) => {
     if (!text.trim() || isStreaming) return;
     const agentId = selectedAgent?.id;
     if (!agentId) {
@@ -351,6 +358,7 @@ export default function ChatPage() {
     setChatError(null);
 
     let convId = activeConvId;
+    if (!convId && resume) return;
     if (!convId) {
       try {
         const res = await apiFetch('/api/conversations', {
@@ -374,7 +382,7 @@ export default function ChatPage() {
     }
 
     // text files go to the agent inside the message, the bubble lists their names
-    const files = attachments;
+    const files = resume ? [] : attachments;
     const outgoing = files.length
       ? `${text}\n\n${files.map((f) => `[Attached file: ${f.name}]\n\`\`\`\n${f.text}\n\`\`\``).join('\n\n')}`
       : text;
@@ -382,19 +390,27 @@ export default function ChatPage() {
       ? `${text}\n\n_Attached: ${files.map((f) => f.name).join(', ')}_`
       : text;
     const userBlocks: ContentBlock[] = [{ type: 'text', content: shown }];
-    setMessages((prev) => [...prev, { id: uid(), role: 'user', blocks: userBlocks, timestamp: new Date() }]);
-    setAttachments([]);
-    setAttachError(null);
+    const userMsgId = uid();
+    if (!resume) {
+      setMessages((prev) => [...prev, { id: userMsgId, role: 'user', blocks: userBlocks, timestamp: new Date() }]);
+      setAttachments([]);
+      setAttachError(null);
+    }
     setIsStreaming(true);
     setStreamingBlocks([]);
+    setReplyStatus(null);
 
-    await saveMessageToServer(convId, 'user', outgoing, userBlocks);
+    if (!resume) await saveMessageToServer(convId, 'user', outgoing, userBlocks);
 
     let currentBlocks: ContentBlock[] = [];
     const threadId = convId;
+    // set when moderation held the message or the reply for a reviewer
+    let heldSource: string | null = null;
 
     const controller = connectToAgentStream(agentId, outgoing, {
       onToken: (tok: string) => {
+        if (heldSource) return;
+        setReplyStatus(null);
         const blocks = [...currentBlocks];
         const last = blocks[blocks.length - 1];
         if (last && last.type === 'text') {
@@ -414,15 +430,62 @@ export default function ChatPage() {
         for (let i = blocks.length - 1; i >= 0; i--) {
           const b = blocks[i];
           if (b.type === 'tool' && b.name === tr.name && b.result === undefined) {
-            blocks[i] = { ...b, result: tr.result };
+            blocks[i] = { ...b, result: tr.result, autonomy: autonomyMetaOf(tr) ?? b.autonomy };
             break;
           }
         }
         currentBlocks = blocks;
         setStreamingBlocks(blocks);
       },
+      onToolAutonomy: (ta: ToolAutonomyData) => {
+        const blocks = [...currentBlocks];
+        for (let i = blocks.length - 1; i >= 0; i--) {
+          const b = blocks[i];
+          if (b.type === 'tool' && b.name === ta.name && b.result === undefined) {
+            blocks[i] = { ...b, autonomy: ta.autonomy };
+            break;
+          }
+        }
+        currentBlocks = blocks;
+        setStreamingBlocks(blocks);
+      },
+      onReplyChecking: () => setReplyStatus('Checking the reply before it is shown…'),
+      onModeration: (data: ModerationData) => {
+        setReplyStatus(null);
+        const hold = holdBlockFrom(data, data.source === 'pre_llm' ? shown : undefined);
+        if (hold) {
+          heldSource = data.source;
+          if (data.source === 'pre_llm' && !resume) {
+            // the server swapped the stored message for this card too
+            setMessages((prev) => prev.map((m) => (m.id === userMsgId ? { ...m, blocks: [hold] } : m)));
+            currentBlocks = [];
+          } else {
+            currentBlocks = [hold];
+          }
+          setStreamingBlocks(currentBlocks);
+          return;
+        }
+        if (heldSource) return;
+        // a post answer redaction or block replaces the text already streamed
+        if (data.source === 'post_llm' && typeof data.content === 'string') {
+          currentBlocks = [...currentBlocks.filter((b) => b.type !== 'text'), { type: 'text', content: data.content }];
+          setStreamingBlocks(currentBlocks);
+        }
+      },
       onDone: (data: DoneData) => {
+        setReplyStatus(null);
         const usedModel = data.effective_model || data.model;
+        if (heldSource) {
+          if (currentBlocks.length) {
+            setMessages((prev) => [...prev, { id: uid(), role: 'assistant', blocks: currentBlocks, timestamp: new Date() }]);
+          }
+          setIsStreaming(false);
+          setStreamingBlocks([]);
+          abortRef.current = null;
+          // the server stores the hold card and retitles the thread a moment after done
+          setTimeout(loadConversations, 1500);
+          return;
+        }
         setMessages((prev) => [...prev, {
           id: uid(),
           role: 'assistant',
@@ -453,18 +516,45 @@ export default function ChatPage() {
         }).then(loadConversations);
       },
       onError: (errMsg: string) => {
+        setReplyStatus(null);
+        if (heldSource) {
+          // a held run ends as failed on the queue path, the hold card already explains it
+          if (currentBlocks.length) {
+            setMessages((prev) => [...prev, { id: uid(), role: 'assistant', blocks: currentBlocks, timestamp: new Date() }]);
+          }
+          setIsStreaming(false);
+          setStreamingBlocks([]);
+          abortRef.current = null;
+          setTimeout(loadConversations, 1500);
+          return;
+        }
         if (currentBlocks.length > 0) {
           setMessages((prev) => [...prev, { id: uid(), role: 'assistant', blocks: currentBlocks, timestamp: new Date() }]);
         }
         setIsStreaming(false);
         setStreamingBlocks([]);
         abortRef.current = null;
-        setChatError(friendlyError(errMsg));
+        // a refusal already shown as the reply does not need a second red copy
+        setChatError(errorRepeatsReply(errMsg, currentBlocks) ? null : friendlyError(errMsg));
       },
     }, undefined, convId);
 
     abortRef.current = controller;
   }, [activeConvId, selectedAgent, isStreaming, attachments, saveMessageToServer, loadConversations, router]);
+
+  // released messages wait here until the current reply finishes
+  const [resumeQueue, setResumeQueue] = useState<string[]>([]);
+  const onHoldReleased = useCallback((view: HoldView) => {
+    if (!view.content || !view.conversation_id || view.conversation_id !== activeConvId) return;
+    const text = view.content;
+    setResumeQueue((q) => (q.includes(text) ? q : [...q, text]));
+  }, [activeConvId]);
+  useEffect(() => {
+    if (isStreaming || !resumeQueue.length || !selectedAgent) return;
+    const [next, ...rest] = resumeQueue;
+    setResumeQueue(rest);
+    sendMessage(next, true);
+  }, [isStreaming, resumeQueue, selectedAgent, sendMessage]);
 
   const stopStreaming = useCallback(() => {
     abortRef.current?.abort();
@@ -710,6 +800,21 @@ export default function ChatPage() {
 
       {/* main chat area */}
       <div className="flex-1 flex flex-col min-w-0">
+        <div className="border-b border-slate-800/50 px-3 sm:px-4 py-3 shrink-0">
+          <PageHeader
+            compact
+            title="Chat"
+            icon={MessageSquare}
+            purpose="Ask any of your agents a question. Your conversations are saved on the left."
+            primaryAction={{ label: 'New chat', onClick: createNewChat, icon: Plus, testId: 'chat-new-header' }}
+            steps={[
+              'Pick the agent that should answer, then type your message.',
+              'Replies show the tools the agent used. Pipelines do not remember earlier messages.',
+            ]}
+            docSlug="02-runtime/00-agent-execution"
+            storageKey="chat"
+          />
+        </div>
         <div className="h-14 border-b border-slate-800/50 flex items-center justify-between gap-2 px-3 sm:px-4 shrink-0">
           <div className="flex items-center gap-2 min-w-0">
             <button
@@ -840,7 +945,7 @@ export default function ChatPage() {
                 className="hidden lg:inline text-xs text-slate-500 bg-slate-800/50 px-2 py-1 rounded"
                 title="Tokens and cost used in this conversation"
               >
-                {totalTokens.toLocaleString()} tokens &middot; ${cost.toFixed(4)}
+                {totalTokens.toLocaleString()} tokens &middot; <CostValue cost={cost} testId="chat-cost" />
               </span>
             )}
             {activeConvId && (
@@ -907,10 +1012,11 @@ export default function ChatPage() {
               model={msg.model}
               requestedModel={msg.requestedModel}
               fallbackReason={msg.fallbackReason}
+              onHoldReleased={onHoldReleased}
             />
           ))}
 
-          {isStreaming && <ChatMessage role="assistant" blocks={streamingBlocks} isStreaming />}
+          {isStreaming && <ChatMessage role="assistant" blocks={streamingBlocks} isStreaming status={replyStatus} />}
 
           {chatError && (
             <div className="flex justify-center">

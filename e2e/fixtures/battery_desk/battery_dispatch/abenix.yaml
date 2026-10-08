@@ -1,0 +1,15 @@
+input_schema:
+  type: object
+  properties:
+    price_forecast: {type: number, description: "Next-hour power price, EUR/MWh"}
+    soc_pct: {type: number, description: "State of charge now, percent"}
+    capacity_mwh: {type: number, description: "Battery energy capacity, MWh"}
+    max_mw: {type: number, description: "Inverter power limit, MW"}
+    discharge_above: {type: number, description: "Sell at or above this price, EUR/MWh, default 90"}
+    charge_below: {type: number, description: "Buy at or below this price, EUR/MWh, default 45"}
+  required: [price_forecast, soc_pct, capacity_mwh, max_mw]
+example_input:
+  price_forecast: 125.8
+  soc_pct: 60
+  capacity_mwh: 100
+  max_mw: 40

@@ -2,14 +2,14 @@
 
 import { useState, useCallback } from 'react';
 import { useParams } from 'next/navigation';
-import Link from 'next/link';
 import { motion } from 'framer-motion';
 import {
-  ArrowLeft, Brain, Database, Search, Trash2, RefreshCw,
+  Brain, Database, Search, Trash2, RefreshCw,
 } from 'lucide-react';
 import { useApi } from '@/hooks/useApi';
 import { usePageTitle } from '@/hooks/usePageTitle';
 import { toastSuccess, toastError } from '@/stores/toastStore';
+import PageHeader from '@/components/layout/PageHeader';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -79,36 +79,36 @@ export default function AgentMemoriesPage() {
 
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.3 }}>
-      <div className="flex items-center gap-3 mb-6">
-        <Link
-          href={`/agents/${agentId}/info`}
-          className="p-2 rounded-lg hover:bg-slate-800/50 text-slate-400 hover:text-white transition-colors"
-        >
-          <ArrowLeft className="w-5 h-5" />
-        </Link>
-        <div className="flex-1">
-          <h1 className="text-xl font-bold text-white flex items-center gap-2">
-            <Brain className="w-5 h-5 text-purple-400" />
-            Agent Memory Store
-          </h1>
-          <p className="text-sm text-slate-500">
-            Browse and manage persistent memories stored by this agent
-          </p>
-        </div>
-        {memories && memories.length > 0 && (
-          <button
-            onClick={clearAll}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg hover:bg-red-500/20 transition-colors"
-          >
-            <Trash2 className="w-3 h-3" />
-            Clear All
-          </button>
-        )}
-      </div>
+      <PageHeader
+        title="Agent Memory Store"
+        icon={Brain}
+        iconClassName="text-purple-400"
+        purpose="See and remove the facts this agent saved for itself between runs. For the agent's owner."
+        back={{ href: `/agents/${agentId}/info`, label: 'Back to agent' }}
+        primaryAction={{ label: 'Refresh', onClick: () => mutate(), icon: RefreshCw }}
+        secondaryAction={
+          memories && memories.length > 0 ? (
+            <button
+              onClick={clearAll}
+              className="inline-flex min-h-[40px] items-center justify-center gap-1.5 px-3 py-1.5 text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg hover:bg-red-500/20 transition-colors"
+            >
+              <Trash2 className="w-3 h-3" />
+              Clear All
+            </button>
+          ) : undefined
+        }
+        steps={[
+          'An agent with the memory tools saves facts while it runs and recalls them next time.',
+          'Search or filter by kind to find a memory.',
+          'Delete one that is wrong or out of date, or clear them all to start fresh.',
+        ]}
+        storageKey="agent-memories"
+        className="mb-6"
+      />
 
       {/* Filters */}
-      <div className="flex items-center gap-3 mb-4">
-        <div className="relative flex-1 max-w-xs">
+      <div className="flex flex-wrap items-center gap-3 mb-4">
+        <div className="relative flex-1 min-w-0 max-w-xs">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
           <input
             type="text"

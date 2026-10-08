@@ -8,6 +8,8 @@ RUN npm ci --workspace=@abenix/web --include-workspace-root --include=optional
 # @next/swc-linux-x64-musl have no resolved tarball URL. Add them by
 # name at the root so npm fetches the right artifact.
 RUN npm install --no-save --no-package-lock @next/swc-linux-x64-musl
+# npm may nest workspace packages (next) under apps/web/node_modules
+RUN mkdir -p apps/web/node_modules
 
 FROM node:20-alpine AS builder
 WORKDIR /app
@@ -15,6 +17,7 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY --from=deps /app/package.json ./package.json
 RUN mkdir -p packages/shared
 COPY apps/web/ ./apps/web/
+COPY --from=deps /app/apps/web/node_modules ./apps/web/node_modules
 COPY packages/shared/ ./packages/shared/
 COPY turbo.json ./
 ENV NEXT_TELEMETRY_DISABLED=1

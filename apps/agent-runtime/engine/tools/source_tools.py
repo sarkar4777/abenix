@@ -8,7 +8,7 @@ import uuid
 from typing import Any
 
 from engine import credentials
-from engine.tools.base import BaseTool, ConfigField, ToolResult
+from engine.tools.base import READ_ONLY, BaseTool, ConfigField, ToolResult
 
 _SOURCE_ARG = {
     "type": "string",
@@ -461,6 +461,7 @@ class SourceCheckTool(_SourceTool):
     name = "source_check"
     # makes an outbound request and may record a change that starts other work
     risk_tier = "medium"
+    effect = READ_ONLY
     description = (
         "Ask for a watched source to be checked now instead of waiting for its schedule, and wait for "
         "the result: unchanged, changed (with a summary and change_id for source_diff) or an error. "

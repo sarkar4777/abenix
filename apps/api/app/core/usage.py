@@ -98,13 +98,20 @@ async def check_limit(
     )
     today_count = count_result.scalar() or 0
 
+    usage_pct = today_count / daily_limit * 100 if daily_limit > 0 else 100.0
+    if usage_pct >= 80:
+        from app.core.platform_features import monetization_enabled
+
+        # no plan to upgrade to while monetization is off, so no cap or warning
+        if not await monetization_enabled(db):
+            return True, ""
+
     if today_count >= daily_limit:
         return (
             False,
             f"Daily execution limit reached ({daily_limit}/{plan_key} plan). Upgrade for more.",
         )
 
-    usage_pct = today_count / daily_limit * 100
     if user_id and usage_pct >= 80:
         from app.core.notifications import user_wants_notification
 

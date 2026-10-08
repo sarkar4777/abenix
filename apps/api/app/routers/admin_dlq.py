@@ -137,6 +137,8 @@ async def replay_dlq(
         started_at=datetime.now(timezone.utc),
         parent_execution_id=d.execution_id,
         retry_count=(d.replay_count or 0) + 1,
+        trigger_kind="replay",
+        trigger_name="Dead letter replay",
     )
     db.add(new_exec)
     d.replay_count = (d.replay_count or 0) + 1

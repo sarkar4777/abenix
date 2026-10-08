@@ -233,6 +233,15 @@ DATA FLOW BETWEEN NODES:
 - Every tool returns a JSON object. Downstream nodes reference fields via {{{{node_id.field_name}}}}
 - {{{{node_id.__all__}}}} passes the entire output as a string
 - code_executor nodes automatically receive all upstream outputs in a `context` dict (e.g. context["read_pdf"])
+- Use the field names each tool really returns. Only llm_call and agent steps have "response":
+  http_client -> {{"status", "headers", "body"}} (body is the page text, or parsed JSON for a JSON API), so use {{{{fetch.body}}}}
+  document_parser -> {{"text", "char_count", ...}}, so use {{{{parse.text}}}}
+  regex_extractor extract_preset -> {{"extracted": {{"<preset>": {{"count", "values", "unique"}}}}}}; "values" keeps every match in page order, use it for sums and averages, never "unique"
+  regex_extractor extract -> {{"match_count", "matches": [{{"match", ...}}], "unique_values"}}
+  code_executor -> the dict your code prints as JSON or assigns to `result`, e.g. {{{{stats.average}}}}
+  llm_call -> {{"response", "model", ...}}, so use {{{{summary.response}}}}
+  data_exporter -> {{"file_path", "download_url", "filename", ...}}
+- Prices on web pages come in many currencies. Use the regex_extractor preset "currency" ($, £, €, ¥, ₹), not "currency_usd", unless the user says dollars only
 
 FILE GENERATION PATTERNS (IMPORTANT):
 When the user needs file output (Excel, PDF, reports, exports), use these patterns:
@@ -269,12 +278,14 @@ EXAMPLE PIPELINE (PDF analysis → Excel report):
 
 EXAMPLE PIPELINE (parallel branches fan-in via data_merger):
   Node 1: {{"id": "fetch_prices", "tool_name": "http_client", "arguments": {{"url": "{{{{context.price_api_url}}}}", "method": "GET"}}, "depends_on": []}}
-  Node 2: {{"id": "trends", "tool_name": "time_series_analyzer", "arguments": {{"data": "{{{{fetch_prices.response.prices}}}}", "operation": "statistics"}}, "depends_on": ["fetch_prices"]}}
-  Node 3: {{"id": "forecast", "tool_name": "time_series_analyzer", "arguments": {{"data": "{{{{fetch_prices.response.prices}}}}", "operation": "forecast"}}, "depends_on": ["fetch_prices"]}}
+  Node 2: {{"id": "trends", "tool_name": "time_series_analyzer", "arguments": {{"data": "{{{{fetch_prices.body.prices}}}}", "operation": "statistics"}}, "depends_on": ["fetch_prices"]}}
+  Node 3: {{"id": "forecast", "tool_name": "time_series_analyzer", "arguments": {{"data": "{{{{fetch_prices.body.prices}}}}", "operation": "forecast"}}, "depends_on": ["fetch_prices"]}}
   Node 4: {{"id": "combine", "tool_name": "data_merger", "arguments": {{"sources": ["{{{{trends.response}}}}", "{{{{forecast.response}}}}"], "mode": "flat"}}, "depends_on": ["trends", "forecast"]}}
   Node 5: {{"id": "report", "tool_name": "llm_call", "arguments": {{"prompt": "Summarize: {{{{combine.response}}}}"}}, "depends_on": ["combine"]}}
   NOTE: without the `combine` node, `report` only receives `trends`'s output — `forecast` is silently lost. ALWAYS insert a data_merger (or __merge__) whenever 2+ nodes fan in to one node.
 """
+# written with f-string escapes but inserted as a value, so undo them
+PIPELINE_FEATURES = PIPELINE_FEATURES.replace("{{", "{").replace("}}", "}")
 
 
 async def _get_mcp_registry(db: Any = None) -> str:
@@ -542,10 +553,22 @@ async def _get_sandbox_policy_context(tenant_id: str) -> str:
     )
 
 
+# tools that only work when an optional package is installed in this image
+_RUNTIME_DEPS = {"browser_automation": "playwright"}
+
+
+def _missing_runtime_dep(tool_name: str) -> bool:
+    import importlib.util
+
+    dep = _RUNTIME_DEPS.get(tool_name)
+    return bool(dep) and importlib.util.find_spec(dep) is None
+
+
 async def _get_tools_filtered(tenant_id: str) -> list[tuple[str, str]]:
-    """Same as _get_tools() but drops tools the tenant has disabled by policy."""
+    """Same as _get_tools() but drops tools the tenant has disabled by policy
+    and tools this deployment cannot run."""
     policy = await _get_sandbox_policy(tenant_id)
-    catalog = _get_tools()
+    catalog = [(n, d) for (n, d) in _get_tools() if not _missing_runtime_dep(n)]
     if policy["enabled"]:
         return catalog
     return [(name, desc) for (name, desc) in catalog if name != "sandboxed_job"]
@@ -718,7 +741,7 @@ RULES:
 4. For pipelines: include nodes with proper depends_on, conditions, and template variables
 5. For agents: write a detailed system prompt instructing the LLM how to use tools
 6. Always include 2-3 example_prompts showing realistic usage
-7. Always include relevant input_variables with descriptions
+7. Pipelines: declare an input_variable for every value the run needs. Agents: the chat message carries the data, so only declare optional settings, never the data the user pastes or asks about
 8. Use snake_case for node IDs
 9. ONLY use parameter values that are explicitly listed in a tool's enum options. For example, if a tool's format param is enum[json|csv|txt|markdown|html], do NOT use xlsx, pdf, or any value outside that list
 10. Read each tool's parameter list carefully. Do not assume capabilities that are not described. If a tool's description does not mention a feature, assume the tool does not have that feature
@@ -1012,11 +1035,28 @@ be sent back for repair. Before you emit your JSON, MENTALLY CHECK each one:
                 validation_issues.append(f"Orphan nodes (not connected): {orphans}")
         if not config.get("example_prompts"):
             validation_issues.append("Missing example_prompts")
-        if not config.get("input_variables"):
+        if not config.get("input_variables") and config.get("mode") == "pipeline":
             validation_issues.append("Missing input_variables")
 
         # Pass 2: LLM review of the generated config for correctness
         try:
+            is_agent = config.get("mode") != "pipeline"
+            # a chat agent has no nodes or inputs, judge its prompt and tools instead
+            checks = (
+                """Check for:
+1. Does the system prompt tell the agent how to solve the user's request step by step?
+2. Are the tools appropriate and enough? Is any tool unsuited to data that arrives in the chat message?
+3. Does the prompt say what to output and in what format?
+4. Are there logical gaps in the instructions?
+This is a chat agent: the user's data arrives in the chat message. It has no pipeline nodes and needs no input variables. Never list those as issues."""
+                if is_agent
+                else """Check for:
+1. Does the config actually solve the user's request?
+2. Are the tools appropriate for each step? Is any tool being used with parameters or formats it does not support?
+3. Are dependencies between nodes correct (DAG order)?
+4. Are there any logical gaps (missing steps)?
+5. Are template variables like {{node_id.__all__}} used correctly?"""
+            )
             review_prompt = f"""Review this generated agent/pipeline config for correctness.
 Original request: {body.description}
 Generated config (summary):
@@ -1028,12 +1068,9 @@ Generated config (summary):
 
 Custom tools proposed: {[ct.get('name') + ': ' + ct.get('description', '')[:100] for ct in config.get('custom_tools', [])]}
 
-Check for:
-1. Does the config actually solve the user's request?
-2. Are the tools appropriate for each step? Is any tool being used with parameters or formats it does not support?
-3. Are dependencies between nodes correct (DAG order)?
-4. Are there any logical gaps (missing steps)?
-5. Are template variables like {{{{node_id.__all__}}}} used correctly?
+System prompt (start): {(config.get('system_prompt') or '')[:1500]}
+
+{checks}
 
 Respond ONLY with JSON: {{"score": 1-10, "issues": ["issue1", "issue2"], "suggestions": ["suggestion1"]}}"""
 

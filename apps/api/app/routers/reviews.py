@@ -11,6 +11,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, get_db
+from app.core.platform_features import require_marketplace
 from app.core.responses import error, success
 from app.core.sanitize import sanitize_input
 from app.schemas.marketplace import CreateReviewRequest
@@ -21,7 +22,11 @@ from models.agent import Agent, AgentStatus
 from models.marketplace import Review
 from models.user import User
 
-router = APIRouter(prefix="/api/agents", tags=["reviews"])
+router = APIRouter(
+    prefix="/api/agents",
+    tags=["reviews"],
+    dependencies=[Depends(require_marketplace)],
+)
 
 
 def _serialize_review(r: Review, user: User | None = None) -> dict[str, Any]:

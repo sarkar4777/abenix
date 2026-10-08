@@ -36,6 +36,14 @@ class MeetingSession:
     scope_defer: list[str] = field(default_factory=list)
     # Persona KB scope — which persona_scope values this meeting may see.
     persona_scopes: list[str] = field(default_factory=list)
+    # when the last question aimed at the bot arrived, for reply latency
+    last_addressed_ms: int = 0
+    stt_warned: bool = False
+    tts_warned: bool = False
+
+    @property
+    def simulated(self) -> bool:
+        return bool(getattr(self.adapter, "simulated", False))
 
 
 _SESSIONS: dict[str, MeetingSession] = {}
@@ -136,7 +144,12 @@ async def publish_session(sess: MeetingSession) -> None:
 
 
 async def append_transcript(
-    meeting_id: str, participant: str, text: str, *, ts_ms: int = 0
+    meeting_id: str,
+    participant: str,
+    text: str,
+    *,
+    ts_ms: int = 0,
+    extra: dict | None = None,
 ) -> None:
     r = await _redis()
     if r is None:
@@ -148,6 +161,7 @@ async def append_transcript(
                 "participant": participant,
                 "text": text,
                 "ts_ms": ts_ms or int(time.time() * 1000),
+                **(extra or {}),
             }
         )
         await r.rpush(k["transcript"], entry)

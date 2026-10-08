@@ -8,8 +8,10 @@ import {
   HelpCircle, Key, Layers, Library, Link2, Network, Plug, Radio, Route,
   ScanLine, Search, Settings, Shield, ShieldCheck, Sparkles, Store,
   Terminal, Upload, UserCircle2, Users, Wand2, Workflow, Wrench, Zap,
-  Bell, FlaskConical, History, ListChecks, OctagonX, Radar, Scale, ShieldAlert, UserCog,
+  Bell, FlaskConical, History, ListChecks, OctagonX, Radar, Scale, ShieldAlert, UserCog, Milestone,
 } from 'lucide-react';
+import PageHeader from '@/components/layout/PageHeader';
+import { failureTitle } from '@/components/alerts/failureAdvice';
 
 // ─── Types ───────────────────────────────────────────────────────────
 
@@ -91,6 +93,15 @@ function FeatureCard({
 }
 
 const SS = (n: string) => `/docs-screenshots/${n}`;
+
+const FAILURE_REFERENCE: Array<[string, string[]]> = [
+  ['AI model', ['LLM_RATE_LIMIT', 'LLM_PROVIDER_ERROR', 'LLM_INVALID_RESPONSE', 'LLM_AUTH_ERROR', 'CONFIG_UNKNOWN_MODEL']],
+  ['Code sandbox', ['SANDBOX_TIMEOUT', 'SANDBOX_NONZERO_EXIT', 'SANDBOX_OOM', 'SANDBOX_IMAGE_BLOCKED']],
+  ['Tools', ['TOOL_NOT_FOUND', 'TOOL_ERROR']],
+  ['Limits', ['BUDGET_EXCEEDED', 'RATE_LIMITED', 'RUNTIME_TIMEOUT', 'REQUEST_TIMEOUT']],
+  ['Policy', ['MODERATION_BLOCKED', 'KILL_SWITCH', 'MODEL_NOT_ALLOWED']],
+  ['Platform', ['STALE_SWEEP', 'INFRA_CRASH', 'INFRA_AUTH_ERROR', 'UNKNOWN_ERROR']],
+];
 
 // ─── Categories + topics ─────────────────────────────────────────────
 
@@ -210,7 +221,7 @@ bash scripts/deploy-azure.sh all       # AKS + ACR + helm`}</pre>
             <p>The <strong className="text-white">Flight Recorder</strong> is the execution detail page. It replays a run node by node: the input each node received, the output it produced, every tool call with its arguments and result, the model that actually served each call, and a waterfall of where the time went.</p>
             <p><strong className="text-white">Reading a failed run:</strong></p>
             <ul className="list-disc pl-5 space-y-1 text-[13px]">
-              <li>The <code className="text-amber-300">failure_code</code> badge on the row says what class of failure it was. <code className="text-amber-300">SANDBOX_TIMEOUT</code> means the run hit its budget — see Platform settings to raise it.</li>
+              <li>The row says in plain words what kind of failure it was, with a short reference code next to it. A run that ran out of time, for example, shows the reference <code className="text-amber-300">SANDBOX_TIMEOUT</code>. Raise the limit under Platform settings.</li>
               <li>A node whose output is <code className="text-amber-300">[not available]</code> did not run or produced nothing its downstream nodes could read. Look at the node above it, not the one that reports the gap.</li>
               <li>An amber <strong className="text-white">fallback</strong> dot means the requested model was not the one that served the call. Hover it for the reason.</li>
               <li>A node answering in prose where the pipeline expects JSON usually means a tool it needed was unavailable. The tool-call list shows what it actually had.</li>
@@ -263,16 +274,21 @@ bash scripts/deploy-azure.sh all       # AKS + ACR + helm`}</pre>
           <div className="space-y-3 text-[13.5px] text-slate-300 leading-relaxed">
             <p>Failures, grouped by stable <code className="text-cyan-300">failure_code</code>, with one-line remediation hints and direct links to affected agents. The page does what the dashboard alone can&apos;t — it tells you the <em>pattern</em>, not just the count.</p>
             <Hero src={SS('08-alerts-page.png')} alt="Alerts page" />
-            <p><strong className="text-white">Failure code reference:</strong></p>
+            <p><strong className="text-white">Failure code reference:</strong> each group leads with what went wrong, and the code after it is what support and the API use.</p>
             <ul className="list-disc pl-5 space-y-1 text-[12px]">
-              <li><code>LLM_RATE_LIMIT</code> · <code>LLM_PROVIDER_ERROR</code> · <code>LLM_INVALID_RESPONSE</code> — model layer</li>
-              <li><code>SANDBOX_TIMEOUT</code> · <code>SANDBOX_NONZERO_EXIT</code> · <code>SANDBOX_OOM</code> · <code>SANDBOX_IMAGE_BLOCKED</code> — sandbox</li>
-              <li><code>TOOL_NOT_FOUND</code> · <code>TOOL_ERROR</code> — tool layer</li>
-              <li><code>BUDGET_EXCEEDED</code> · <code>RATE_LIMITED</code> — quota</li>
-              <li><code>STALE_SWEEP</code> — owning pod crashed, sweeper marked the run failed</li>
-              <li><code>MODERATION_BLOCKED</code> — moderation gate refused the input/output</li>
-              <li><code>INFRA_CRASH</code> · <code>INFRA_AUTH_ERROR</code> · <code>LLM_AUTH_ERROR</code> (provider rejected the key, re-sync the subscription token or fix it under Tool Configuration) · <code>UNKNOWN_ERROR</code></li>
+              {FAILURE_REFERENCE.map(([layer, codes]) => (
+                <li key={layer} className="break-words">
+                  <span className="text-slate-200">{layer}:</span>{' '}
+                  {codes.map((c, k) => (
+                    <span key={c}>
+                      {k > 0 && ', '}
+                      {failureTitle(c)} <code className="text-[11px] text-slate-400">{c}</code>
+                    </span>
+                  ))}
+                </li>
+              ))}
             </ul>
+            <p className="text-[12px] text-slate-400">When the AI provider sign-in fails, the platform&apos;s key was rejected. An admin re-syncs the subscription token or fixes the key under Tool Configuration.</p>
           </div>
         ),
       },
@@ -570,86 +586,92 @@ bash scripts/deploy-azure.sh all       # AKS + ACR + helm`}</pre>
             <p>Sixteen models ship with the platform. Each one is registered at first startup via <code>seed_ml_models.py</code> which scans <code>&lt;app&gt;/aimodels/</code> for matching <code>.pkl</code> + <code>.meta.json</code> pairs.</p>
 
             <h5 className="text-violet-300 font-semibold pt-3 pb-1">E&C-Copilot (4 models)</h5>
-            <table className="w-full text-[12px] border border-slate-700/40 rounded-md overflow-hidden">
-              <thead className="bg-slate-800/60 text-slate-400 text-[10.5px] uppercase">
-                <tr>
-                  <th className="text-left py-1.5 px-2">Slug</th>
-                  <th className="text-left py-1.5 px-2">Algorithm</th>
-                  <th className="text-left py-1.5 px-2">Inputs</th>
-                  <th className="text-left py-1.5 px-2">Output</th>
-                  <th className="text-left py-1.5 px-2">Holdout</th>
-                  <th className="text-left py-1.5 px-2">Used by</th>
-                </tr>
-              </thead>
-              <tbody className="text-slate-300">
-                <tr className="border-t border-slate-800/40">
-                  <td className="py-1.5 px-2 font-mono">contractiq-clause-classifier</td>
-                  <td className="py-1.5 px-2">TF-IDF + LogReg</td>
-                  <td className="py-1.5 px-2 text-slate-400">clause text</td>
-                  <td className="py-1.5 px-2 text-slate-400">1 of 30 ETRM classes</td>
-                  <td className="py-1.5 px-2 text-emerald-300">100%</td>
-                  <td className="py-1.5 px-2 text-slate-400">extractor</td>
-                </tr>
-                <tr className="border-t border-slate-800/40">
-                  <td className="py-1.5 px-2 font-mono">contractiq-risk-tier-predictor</td>
-                  <td className="py-1.5 px-2">Calibrated GBC</td>
-                  <td className="py-1.5 px-2 text-slate-400">10 deal features</td>
-                  <td className="py-1.5 px-2 text-slate-400">low / medium / high / critical</td>
-                  <td className="py-1.5 px-2 text-emerald-300">92.83%</td>
-                  <td className="py-1.5 px-2 text-slate-400">hedge_advisor</td>
-                </tr>
-                <tr className="border-t border-slate-800/40">
-                  <td className="py-1.5 px-2 font-mono">contractiq-counterparty-default</td>
-                  <td className="py-1.5 px-2">Logistic Regression</td>
-                  <td className="py-1.5 px-2 text-slate-400">11 financial ratios + sector</td>
-                  <td className="py-1.5 px-2 text-slate-400">P(default 12m)</td>
-                  <td className="py-1.5 px-2 text-emerald-300">89.47%</td>
-                  <td className="py-1.5 px-2 text-slate-400">hedge_advisor, credit_risk</td>
-                </tr>
-                <tr className="border-t border-slate-800/40">
-                  <td className="py-1.5 px-2 font-mono">contractiq-price-anomaly</td>
-                  <td className="py-1.5 px-2">IsolationForest</td>
-                  <td className="py-1.5 px-2 text-slate-400">8 deal features</td>
-                  <td className="py-1.5 px-2 text-slate-400">+1 inlier / -1 outlier</td>
-                  <td className="py-1.5 px-2 text-emerald-300">100% recall</td>
-                  <td className="py-1.5 px-2 text-slate-400">portfolio_valuator</td>
-                </tr>
-              </tbody>
-            </table>
+            <div className="overflow-x-auto">
+              <table className="w-full text-[12px] border border-slate-700/40 rounded-md overflow-hidden">
+                <thead className="bg-slate-800/60 text-slate-400 text-[10.5px] uppercase">
+                  <tr>
+                    <th className="text-left py-1.5 px-2">Slug</th>
+                    <th className="text-left py-1.5 px-2">Algorithm</th>
+                    <th className="text-left py-1.5 px-2">Inputs</th>
+                    <th className="text-left py-1.5 px-2">Output</th>
+                    <th className="text-left py-1.5 px-2">Holdout</th>
+                    <th className="text-left py-1.5 px-2">Used by</th>
+                  </tr>
+                </thead>
+                <tbody className="text-slate-300">
+                  <tr className="border-t border-slate-800/40">
+                    <td className="py-1.5 px-2 font-mono">contractiq-clause-classifier</td>
+                    <td className="py-1.5 px-2">TF-IDF + LogReg</td>
+                    <td className="py-1.5 px-2 text-slate-400">clause text</td>
+                    <td className="py-1.5 px-2 text-slate-400">1 of 30 ETRM classes</td>
+                    <td className="py-1.5 px-2 text-emerald-300">100%</td>
+                    <td className="py-1.5 px-2 text-slate-400">extractor</td>
+                  </tr>
+                  <tr className="border-t border-slate-800/40">
+                    <td className="py-1.5 px-2 font-mono">contractiq-risk-tier-predictor</td>
+                    <td className="py-1.5 px-2">Calibrated GBC</td>
+                    <td className="py-1.5 px-2 text-slate-400">10 deal features</td>
+                    <td className="py-1.5 px-2 text-slate-400">low / medium / high / critical</td>
+                    <td className="py-1.5 px-2 text-emerald-300">92.83%</td>
+                    <td className="py-1.5 px-2 text-slate-400">hedge_advisor</td>
+                  </tr>
+                  <tr className="border-t border-slate-800/40">
+                    <td className="py-1.5 px-2 font-mono">contractiq-counterparty-default</td>
+                    <td className="py-1.5 px-2">Logistic Regression</td>
+                    <td className="py-1.5 px-2 text-slate-400">11 financial ratios + sector</td>
+                    <td className="py-1.5 px-2 text-slate-400">P(default 12m)</td>
+                    <td className="py-1.5 px-2 text-emerald-300">89.47%</td>
+                    <td className="py-1.5 px-2 text-slate-400">hedge_advisor, credit_risk</td>
+                  </tr>
+                  <tr className="border-t border-slate-800/40">
+                    <td className="py-1.5 px-2 font-mono">contractiq-price-anomaly</td>
+                    <td className="py-1.5 px-2">IsolationForest</td>
+                    <td className="py-1.5 px-2 text-slate-400">8 deal features</td>
+                    <td className="py-1.5 px-2 text-slate-400">+1 inlier / -1 outlier</td>
+                    <td className="py-1.5 px-2 text-emerald-300">100% recall</td>
+                    <td className="py-1.5 px-2 text-slate-400">portfolio_valuator</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
 
             <h5 className="text-cyan-300 font-semibold pt-3 pb-1">Wingman (5 models for LPG mispricing + freight forecast)</h5>
-            <table className="w-full text-[12px] border border-slate-700/40 rounded-md overflow-hidden">
-              <thead className="bg-slate-800/60 text-slate-400 text-[10.5px] uppercase">
-                <tr>
-                  <th className="text-left py-1.5 px-2">Slug</th>
-                  <th className="text-left py-1.5 px-2">Algorithm</th>
-                  <th className="text-left py-1.5 px-2">Purpose</th>
-                </tr>
-              </thead>
-              <tbody className="text-slate-300">
-                <tr className="border-t border-slate-800/40"><td className="py-1.5 px-2 font-mono">wingman-mispricing-fairvalue</td><td className="py-1.5 px-2">BayesianRidge</td><td className="py-1.5 px-2 text-slate-400">arb fair-value on MEG-FE, USGC-NWE, MB-JPN corridors</td></tr>
-                <tr className="border-t border-slate-800/40"><td className="py-1.5 px-2 font-mono">wingman-mispricing-anomaly</td><td className="py-1.5 px-2">IsolationForest</td><td className="py-1.5 px-2 text-slate-400">corridor spread anomaly flag</td></tr>
-                <tr className="border-t border-slate-800/40"><td className="py-1.5 px-2 font-mono">wingman-scenario-prior</td><td className="py-1.5 px-2">GaussianNB</td><td className="py-1.5 px-2 text-slate-400">5-scenario Bayesian prior (base / bull-geo / bear-glut / bear-demand / tail)</td></tr>
-                <tr className="border-t border-slate-800/40"><td className="py-1.5 px-2 font-mono">wingman-broker-intent-classifier</td><td className="py-1.5 px-2">LR text classifier</td><td className="py-1.5 px-2 text-slate-400">broker message intent (RFQ / FIRM / FYI / SPEC)</td></tr>
-                <tr className="border-t border-slate-800/40"><td className="py-1.5 px-2 font-mono">wingman-freight-forecast</td><td className="py-1.5 px-2">sklearn regression</td><td className="py-1.5 px-2 text-slate-400">BLPG1/2/3 short-term forecast on top of Baltic Exchange</td></tr>
-              </tbody>
-            </table>
+            <div className="overflow-x-auto">
+              <table className="w-full text-[12px] border border-slate-700/40 rounded-md overflow-hidden">
+                <thead className="bg-slate-800/60 text-slate-400 text-[10.5px] uppercase">
+                  <tr>
+                    <th className="text-left py-1.5 px-2">Slug</th>
+                    <th className="text-left py-1.5 px-2">Algorithm</th>
+                    <th className="text-left py-1.5 px-2">Purpose</th>
+                  </tr>
+                </thead>
+                <tbody className="text-slate-300">
+                  <tr className="border-t border-slate-800/40"><td className="py-1.5 px-2 font-mono">wingman-mispricing-fairvalue</td><td className="py-1.5 px-2">BayesianRidge</td><td className="py-1.5 px-2 text-slate-400">arb fair-value on MEG-FE, USGC-NWE, MB-JPN corridors</td></tr>
+                  <tr className="border-t border-slate-800/40"><td className="py-1.5 px-2 font-mono">wingman-mispricing-anomaly</td><td className="py-1.5 px-2">IsolationForest</td><td className="py-1.5 px-2 text-slate-400">corridor spread anomaly flag</td></tr>
+                  <tr className="border-t border-slate-800/40"><td className="py-1.5 px-2 font-mono">wingman-scenario-prior</td><td className="py-1.5 px-2">GaussianNB</td><td className="py-1.5 px-2 text-slate-400">5-scenario Bayesian prior (base / bull-geo / bear-glut / bear-demand / tail)</td></tr>
+                  <tr className="border-t border-slate-800/40"><td className="py-1.5 px-2 font-mono">wingman-broker-intent-classifier</td><td className="py-1.5 px-2">LR text classifier</td><td className="py-1.5 px-2 text-slate-400">broker message intent (RFQ / FIRM / FYI / SPEC)</td></tr>
+                  <tr className="border-t border-slate-800/40"><td className="py-1.5 px-2 font-mono">wingman-freight-forecast</td><td className="py-1.5 px-2">sklearn regression</td><td className="py-1.5 px-2 text-slate-400">BLPG1/2/3 short-term forecast on top of Baltic Exchange</td></tr>
+                </tbody>
+              </table>
+            </div>
 
             <h5 className="text-amber-300 font-semibold pt-3 pb-1">Industrial-IoT + demo</h5>
-            <table className="w-full text-[12px] border border-slate-700/40 rounded-md overflow-hidden">
-              <thead className="bg-slate-800/60 text-slate-400 text-[10.5px] uppercase">
-                <tr>
-                  <th className="text-left py-1.5 px-2">Slug</th>
-                  <th className="text-left py-1.5 px-2">Purpose</th>
-                </tr>
-              </thead>
-              <tbody className="text-slate-300">
-                <tr className="border-t border-slate-800/40"><td className="py-1.5 px-2 font-mono">wind-turbine-failure-classifier</td><td className="py-1.5 px-2 text-slate-400">vibration + temperature features &rarr; 7-class failure type. Used in the Industrial-IoT pump pipeline.</td></tr>
-                <tr className="border-t border-slate-800/40"><td className="py-1.5 px-2 font-mono">iris-species-classifier</td><td className="py-1.5 px-2 text-slate-400">canonical sklearn demo</td></tr>
-                <tr className="border-t border-slate-800/40"><td className="py-1.5 px-2 font-mono">housing-price-predictor</td><td className="py-1.5 px-2 text-slate-400">California housing regression</td></tr>
-                <tr className="border-t border-slate-800/40"><td className="py-1.5 px-2 font-mono">churn-predictor</td><td className="py-1.5 px-2 text-slate-400">SaaS churn binary classifier</td></tr>
-              </tbody>
-            </table>
+            <div className="overflow-x-auto">
+              <table className="w-full text-[12px] border border-slate-700/40 rounded-md overflow-hidden">
+                <thead className="bg-slate-800/60 text-slate-400 text-[10.5px] uppercase">
+                  <tr>
+                    <th className="text-left py-1.5 px-2">Slug</th>
+                    <th className="text-left py-1.5 px-2">Purpose</th>
+                  </tr>
+                </thead>
+                <tbody className="text-slate-300">
+                  <tr className="border-t border-slate-800/40"><td className="py-1.5 px-2 font-mono">wind-turbine-failure-classifier</td><td className="py-1.5 px-2 text-slate-400">vibration + temperature features &rarr; 7-class failure type. Used in the Industrial-IoT pump pipeline.</td></tr>
+                  <tr className="border-t border-slate-800/40"><td className="py-1.5 px-2 font-mono">iris-species-classifier</td><td className="py-1.5 px-2 text-slate-400">canonical sklearn demo</td></tr>
+                  <tr className="border-t border-slate-800/40"><td className="py-1.5 px-2 font-mono">housing-price-predictor</td><td className="py-1.5 px-2 text-slate-400">California housing regression</td></tr>
+                  <tr className="border-t border-slate-800/40"><td className="py-1.5 px-2 font-mono">churn-predictor</td><td className="py-1.5 px-2 text-slate-400">SaaS churn binary classifier</td></tr>
+                </tbody>
+              </table>
+            </div>
 
             <h4 className="text-white font-semibold pt-3">How predictions flow through the tool gate</h4>
             <ol className="list-decimal pl-5 space-y-1 text-[13px]">
@@ -844,18 +866,20 @@ bash scripts/deploy-azure.sh all       # AKS + ACR + helm`}</pre>
 
             <h4 className="text-white font-semibold pt-3 flex items-center gap-2"><Shield className="w-4 h-4 text-cyan-300" /> GDPR cascade purge <Pill tone="cyan">v2.0</Pill></h4>
             <p>The right-to-be-forgotten request used to be a forensic exercise. <code>POST /api/gdpr/users/{`{user_id}`}/purge</code> now runs the five-store cascade in one call. The trigger UI sits at <code>/settings/gdpr</code>:</p>
-            <table className="w-full text-xs my-2">
-              <thead className="text-[10px] uppercase text-slate-500">
-                <tr><th className="text-left py-1">Store</th><th className="text-left py-1">What is purged</th></tr>
-              </thead>
-              <tbody className="text-slate-300 align-top">
-                <tr className="border-t border-slate-800/60"><td className="py-1 font-mono">postgres</td><td className="py-1">The person&apos;s persona items soft-deleted, agent memories soft-deleted only for agents the person created, API keys deactivated and the user row scrubbed to a placeholder. Every message in the person&apos;s conversations, theirs and the replies, is replaced with <code>[erased]</code>, with their blocks, attachments and tool calls cleared, their conversation titles and previews are erased and any share link revoked, and the runs they started lose their input, output, tool calls, node results and trace. Conversations and runs stay linked to the scrubbed user row, so spend history stays whole. Audit rows keep the hash chain: the salted PII digest stays, while the salt, user id, IP and user agent go, so a row can no longer be tied to the person. Rows already erased by an earlier attempt are not counted again</td></tr>
-                <tr className="border-t border-slate-800/60"><td className="py-1 font-mono">pinecone</td><td className="py-1">The person&apos;s persona vectors, retried 3 times</td></tr>
-                <tr className="border-t border-slate-800/60"><td className="py-1 font-mono">neo4j</td><td className="py-1">Cognify entities that name the person in any of the tenant&apos;s collections: the email on any entity, the full name (two or more words) on person entities. The matching graph rows in Postgres go too</td></tr>
-                <tr className="border-t border-slate-800/60"><td className="py-1 font-mono">blob</td><td className="py-1">Code asset archives (every version) and ML model files the person uploaded, deleted on local disk and in object storage, everything under the person&apos;s own storage folder (<code>users/&lt;id&gt;/</code>), and their cloned voice at the voice provider, with the voice link on the user row cleared. Uploads still used by an agent or pipeline, shared, or deployed are kept and logged. The count is the files really deleted, plus one for a deleted voice</td></tr>
-                <tr className="border-t border-slate-800/60"><td className="py-1 font-mono">trajectory</td><td className="py-1">Trajectory records written from the person&apos;s runs, matched by the run&apos;s execution id or a user id on the record, in the tenant&apos;s folder and the <code>shared</code> folder under <code>TRAJECTORY_DIR</code> (<code>/data/trajectories</code>) and <code>WINGMAN_TRAJECTORY_DIR</code> (<code>/data/wingman-trajectories</code>). The count is the records deleted</td></tr>
-              </tbody>
-            </table>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs my-2">
+                <thead className="text-[10px] uppercase text-slate-500">
+                  <tr><th className="text-left py-1">Store</th><th className="text-left py-1">What is purged</th></tr>
+                </thead>
+                <tbody className="text-slate-300 align-top">
+                  <tr className="border-t border-slate-800/60"><td className="py-1 font-mono">postgres</td><td className="py-1">The person&apos;s persona items soft-deleted, agent memories soft-deleted only for agents the person created, API keys deactivated and the user row scrubbed to a placeholder. Every message in the person&apos;s conversations, theirs and the replies, is replaced with <code>[erased]</code>, with their blocks, attachments and tool calls cleared, their conversation titles and previews are erased and any share link revoked, and the runs they started lose their input, output, tool calls, node results and trace. Conversations and runs stay linked to the scrubbed user row, so spend history stays whole. Audit rows keep the hash chain: the salted PII digest stays, while the salt, user id, IP and user agent go, so a row can no longer be tied to the person. Rows already erased by an earlier attempt are not counted again</td></tr>
+                  <tr className="border-t border-slate-800/60"><td className="py-1 font-mono">pinecone</td><td className="py-1">The person&apos;s persona vectors, retried 3 times</td></tr>
+                  <tr className="border-t border-slate-800/60"><td className="py-1 font-mono">neo4j</td><td className="py-1">Cognify entities that name the person in any of the tenant&apos;s collections: the email on any entity, the full name (two or more words) on person entities. The matching graph rows in Postgres go too</td></tr>
+                  <tr className="border-t border-slate-800/60"><td className="py-1 font-mono">blob</td><td className="py-1">Code asset archives (every version) and ML model files the person uploaded, deleted on local disk and in object storage, everything under the person&apos;s own storage folder (<code>users/&lt;id&gt;/</code>), and their cloned voice at the voice provider, with the voice link on the user row cleared. Uploads still used by an agent or pipeline, shared, or deployed are kept and logged. The count is the files really deleted, plus one for a deleted voice</td></tr>
+                  <tr className="border-t border-slate-800/60"><td className="py-1 font-mono">trajectory</td><td className="py-1">Trajectory records written from the person&apos;s runs, matched by the run&apos;s execution id or a user id on the record, in the tenant&apos;s folder and the <code>shared</code> folder under <code>TRAJECTORY_DIR</code> (<code>/data/trajectories</code>) and <code>WINGMAN_TRAJECTORY_DIR</code> (<code>/data/wingman-trajectories</code>). The count is the records deleted</td></tr>
+                </tbody>
+              </table>
+            </div>
             <p>A purge can only target a user in your own tenant. Every per-store attempt writes a <code>gdpr_purge_log</code> row with its status and how many rows, vectors, files or records it really removed. <code>/settings/gdpr</code> shows that count in the <strong>Removed</strong> column, and <code>GET /api/gdpr/users/{`{user_id}`}/receipts</code> returns the same trail.</p>
           </div>
         ),
@@ -1022,18 +1046,20 @@ bash scripts/deploy-azure.sh all       # AKS + ACR + helm`}</pre>
             <p>A typed verb grammar — over 30 verbs across five intents — that drives every aspect of a pipeline. The LLM is only used to translate natural language into a verb invocation (when you type prose), the parser, the dispatcher, and every mutating verb are deterministic.</p>
             <p>Open it from any pipeline agent's <code>/info</code> page via the <strong>Shell</strong> button next to <strong>Healing</strong>. Tab-completion comes from the live verb registry. Up/down recalls history. Mutating verbs draft a Healing patch you Apply or Reject — same ledger as the Surgeon, same one-click rollback.</p>
             <p><strong className="text-white">Five intents, ~30 verbs:</strong></p>
-            <table className="w-full text-xs">
-              <thead className="text-[10px] uppercase text-slate-500">
-                <tr><th className="text-left py-1">Intent</th><th className="text-left py-1">Verbs</th><th className="text-left py-1">Purpose</th></tr>
-              </thead>
-              <tbody className="text-slate-300 align-top">
-                <tr className="border-t border-slate-800/60"><td className="py-1 font-mono text-cyan-300">INSPECT</td><td className="py-1 font-mono text-[11px]">show, describe, diff, why, list</td><td className="py-1">Read the workflow object — DSL, runs, failures, costs, schedule, patches, history.</td></tr>
-                <tr className="border-t border-slate-800/60"><td className="py-1 font-mono text-amber-300">MUTATE</td><td className="py-1 font-mono text-[11px]">add, remove, rename, set, swap-model, add-fallback, attach</td><td className="py-1">Compile to JSON-Patch ops. Always create a draft proposal — never live-edit.</td></tr>
-                <tr className="border-t border-slate-800/60"><td className="py-1 font-mono text-emerald-300">EXECUTE</td><td className="py-1 font-mono text-[11px]">run, replay, simulate, branch, merge, rollback</td><td className="py-1">Drive runs. <code>simulate</code> is idempotent (dry-run). <code>branch</code> creates a sandbox version.</td></tr>
-                <tr className="border-t border-slate-800/60"><td className="py-1 font-mono text-purple-300">GOVERN</td><td className="py-1 font-mono text-[11px]">watch, budget, pin, unpin, approve, reject</td><td className="py-1">Alert thresholds, budgets, model pins, patch decisions.</td></tr>
-                <tr className="border-t border-slate-800/60"><td className="py-1 font-mono text-pink-300">LEARN</td><td className="py-1 font-mono text-[11px]">suggest, diagnose, explain, help</td><td className="py-1">Ask the shell for ideas, run the Surgeon, explain costs/latency/routing.</td></tr>
-              </tbody>
-            </table>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead className="text-[10px] uppercase text-slate-500">
+                  <tr><th className="text-left py-1">Intent</th><th className="text-left py-1">Verbs</th><th className="text-left py-1">Purpose</th></tr>
+                </thead>
+                <tbody className="text-slate-300 align-top">
+                  <tr className="border-t border-slate-800/60"><td className="py-1 font-mono text-cyan-300">INSPECT</td><td className="py-1 font-mono text-[11px]">show, describe, diff, why, list</td><td className="py-1">Read the workflow object — DSL, runs, failures, costs, schedule, patches, history.</td></tr>
+                  <tr className="border-t border-slate-800/60"><td className="py-1 font-mono text-amber-300">MUTATE</td><td className="py-1 font-mono text-[11px]">add, remove, rename, set, swap-model, add-fallback, attach</td><td className="py-1">Compile to JSON-Patch ops. Always create a draft proposal — never live-edit.</td></tr>
+                  <tr className="border-t border-slate-800/60"><td className="py-1 font-mono text-emerald-300">EXECUTE</td><td className="py-1 font-mono text-[11px]">run, replay, simulate, branch, merge, rollback</td><td className="py-1">Drive runs. <code>simulate</code> is idempotent (dry-run). <code>branch</code> creates a sandbox version.</td></tr>
+                  <tr className="border-t border-slate-800/60"><td className="py-1 font-mono text-purple-300">GOVERN</td><td className="py-1 font-mono text-[11px]">watch, budget, pin, unpin, approve, reject</td><td className="py-1">Alert thresholds, budgets, model pins, patch decisions.</td></tr>
+                  <tr className="border-t border-slate-800/60"><td className="py-1 font-mono text-pink-300">LEARN</td><td className="py-1 font-mono text-[11px]">suggest, diagnose, explain, help</td><td className="py-1">Ask the shell for ideas, run the Surgeon, explain costs/latency/routing.</td></tr>
+                </tbody>
+              </table>
+            </div>
             <p><strong className="text-white">Real one-liners:</strong></p>
             <pre className="bg-slate-950/60 border border-slate-800 rounded-md p-3 overflow-x-auto text-[11px] font-mono text-slate-300">
 {`> show failures
@@ -1448,31 +1474,33 @@ if (result.isPaused()) {
             <Callout tone="info">Bundle format, signing math, manifest schema, and failure modes are documented in <code>infra/edge-runtime/AGENT_BUNDLE_FORMAT.md</code>. End-to-end smoke: <code>scripts/edge-smoke.sh</code>. Pick the variant that matches plant hardware — they all interop with the same bundle.</Callout>
 
             <h4 className="text-white font-semibold pt-3">Three secrets every gateway needs</h4>
-            <table className="w-full text-[12px] border border-slate-700/40 rounded-md overflow-hidden">
-              <thead className="bg-slate-800/60 text-slate-400 text-[10.5px] uppercase">
-                <tr><th className="text-left py-1.5 px-2">Env</th><th className="text-left py-1.5 px-2">What it does</th><th className="text-left py-1.5 px-2">Get it from</th><th className="text-left py-1.5 px-2">If missing</th></tr>
-              </thead>
-              <tbody className="text-slate-300">
-                <tr className="border-t border-slate-800/40">
-                  <td className="px-2 py-1.5 font-mono text-cyan-300">PLATFORM_TOKEN</td>
-                  <td className="px-2 py-1.5">af_* API key for /register + heartbeat</td>
-                  <td className="px-2 py-1.5"><a href="/edge" className="text-cyan-300 underline">/edge</a> &rarr; <em>Mint edge token + pubkey</em></td>
-                  <td className="px-2 py-1.5 text-amber-300">runtime logs 401, gateway shows offline</td>
-                </tr>
-                <tr className="border-t border-slate-800/40">
-                  <td className="px-2 py-1.5 font-mono text-cyan-300">SIGNING_PUBKEY</td>
-                  <td className="px-2 py-1.5">RSA-PSS-2048 pub key to verify bundles</td>
-                  <td className="px-2 py-1.5">Same mint dialog returns it</td>
-                  <td className="px-2 py-1.5 text-rose-300">Rust: accepts UNVERIFIED bundles. C: hard-rejects. Real security gap.</td>
-                </tr>
-                <tr className="border-t border-slate-800/40">
-                  <td className="px-2 py-1.5 font-mono text-cyan-300">ANTHROPIC_API_KEY</td>
-                  <td className="px-2 py-1.5">Cloud LLM. Or <code>LOCAL_LLM_URL</code> for air-gapped.</td>
-                  <td className="px-2 py-1.5">helm <code>--set anthropic_api_key=$KEY</code></td>
-                  <td className="px-2 py-1.5 text-slate-400">Execute returns <code>stub: true</code>. Tool-only agents still work.</td>
-                </tr>
-              </tbody>
-            </table>
+            <div className="overflow-x-auto">
+              <table className="w-full text-[12px] border border-slate-700/40 rounded-md overflow-hidden">
+                <thead className="bg-slate-800/60 text-slate-400 text-[10.5px] uppercase">
+                  <tr><th className="text-left py-1.5 px-2">Env</th><th className="text-left py-1.5 px-2">What it does</th><th className="text-left py-1.5 px-2">Get it from</th><th className="text-left py-1.5 px-2">If missing</th></tr>
+                </thead>
+                <tbody className="text-slate-300">
+                  <tr className="border-t border-slate-800/40">
+                    <td className="px-2 py-1.5 font-mono text-cyan-300">PLATFORM_TOKEN</td>
+                    <td className="px-2 py-1.5">af_* API key for /register + heartbeat</td>
+                    <td className="px-2 py-1.5"><a href="/edge" className="text-cyan-300 underline">/edge</a> &rarr; <em>Mint edge token + pubkey</em></td>
+                    <td className="px-2 py-1.5 text-amber-300">runtime logs 401, gateway shows offline</td>
+                  </tr>
+                  <tr className="border-t border-slate-800/40">
+                    <td className="px-2 py-1.5 font-mono text-cyan-300">SIGNING_PUBKEY</td>
+                    <td className="px-2 py-1.5">RSA-PSS-2048 pub key to verify bundles</td>
+                    <td className="px-2 py-1.5">Same mint dialog returns it</td>
+                    <td className="px-2 py-1.5 text-rose-300">Rust: accepts UNVERIFIED bundles. C: hard-rejects. Real security gap.</td>
+                  </tr>
+                  <tr className="border-t border-slate-800/40">
+                    <td className="px-2 py-1.5 font-mono text-cyan-300">ANTHROPIC_API_KEY</td>
+                    <td className="px-2 py-1.5">Cloud LLM. Or <code>LOCAL_LLM_URL</code> for air-gapped.</td>
+                    <td className="px-2 py-1.5">helm <code>--set anthropic_api_key=$KEY</code></td>
+                    <td className="px-2 py-1.5 text-slate-400">Execute returns <code>stub: true</code>. Tool-only agents still work.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
             <p className="text-[12px] text-slate-400">
               <strong>On a fresh Azure deploy</strong>, <code>scripts/deploy-azure.sh</code> mints both token and signing pubkey for every edge runtime variant (Python / Rust / C) automatically and passes them into the helm install. For a gateway you provision manually (a real plant box), open <code>/edge</code>, click <strong>Mint edge token + pubkey</strong>, copy both values into the gateway's helm chart or systemd env file. The token is shown ONCE — store it before closing the dialog.
             </p>
@@ -1723,6 +1751,35 @@ if (result.isPaused()) {
         ),
       },
       {
+        id: 'earned-autonomy',
+        title: 'Earned Autonomy',
+        icon: <Milestone className="w-4 h-4" />,
+        badge: 'new',
+        body: (
+          <div className="space-y-3 text-[13.5px] text-slate-300 leading-relaxed" data-testid="help-earned-autonomy">
+            <p>An agent earns the right to act, one kind of action at a time, from its track record. Open <strong>Monitor &rarr; Autonomy</strong> to see every agent and action, the level each one is at and the evidence behind it.</p>
+            <ul className="list-disc pl-5 space-y-1 text-[13px]">
+              <li><strong className="text-white">Off.</strong> The agent cannot take the action.</li>
+              <li><strong className="text-white">Watching.</strong> It says what it would do and nothing runs. People compare it with what they did.</li>
+              <li><strong className="text-white">Asks first.</strong> It proposes and a person approves, edits or rejects it in Approvals.</li>
+              <li><strong className="text-white">Acts within limits.</strong> It runs alone when inside the limits with a confident prediction. Otherwise it asks first.</li>
+              <li><strong className="text-white">Acts and reports.</strong> It runs and tells you after. Limits and kill switches still apply.</li>
+            </ul>
+            <h4 className="text-white font-semibold pt-3">Try it</h4>
+            <Steps items={[
+              'Open <strong>Autonomy</strong> and click <strong>Try it with the sample plant</strong>. It installs a sample agent that adjusts a simulated pressure setpoint.',
+              'Click <strong>Run the sample agent</strong>. Each run proposes a setpoint and says what pressure it expects.',
+              'Answer its proposals under <strong>Approvals &rarr; Watching reviews</strong>. Press A to agree, D if you did something else, N if you are not sure.',
+              'When every check on its page is green, click <strong>Promote</strong>. Someone who did not build the agent approves the move.',
+              'Flag harm on any action and it drops back to Asks first at once.',
+            ]} />
+            <h4 className="text-white font-semibold pt-3">Your own agents</h4>
+            <p>Click <strong>Enrol an agent</strong>, pick the agent and one of its tools that changes something, then go through three steps: how we judge success, how we predict and the hard limits. The defaults come from the tool, so Next, Next, Start watching is enough. The agent page lists the same actions under <strong>Actions</strong>.</p>
+            <Callout tone="info">Moving up always needs the checks and a sign-off. Moving down or turning off is one click with a confirm and never needs an approval. Hard limits are rules from Decisions and apply at every level.</Callout>
+          </div>
+        ),
+      },
+      {
         id: 'run-provenance',
         title: 'What a run used, and replay',
         icon: <History className="w-4 h-4" />,
@@ -1891,19 +1948,21 @@ if (result.isPaused()) {
             </figure>
 
             <h4 className="text-white font-semibold pt-3">Default sizing</h4>
-            <table className="w-full text-[12px] my-2">
-              <thead className="text-slate-400 border-b border-slate-700">
-                <tr><th className="text-left py-1.5">Tier</th><th className="text-left py-1.5">CPU req</th><th className="text-left py-1.5">Mem req</th><th className="text-left py-1.5">Replicas (default)</th><th className="text-left py-1.5">Replicas (1k tenants)</th></tr>
-              </thead>
-              <tbody className="text-slate-300">
-                <tr className="border-b border-slate-800/60"><td className="py-1.5">Web</td><td>200 m</td><td>256 Mi</td><td>3</td><td>10–30</td></tr>
-                <tr className="border-b border-slate-800/60"><td className="py-1.5">API</td><td>500 m</td><td>1 Gi</td><td>3</td><td>20–50</td></tr>
-                <tr className="border-b border-slate-800/60"><td className="py-1.5">Runtime · chat</td><td>500 m</td><td>1.5 Gi</td><td>2 → 0/burst</td><td>20–100</td></tr>
-                <tr className="border-b border-slate-800/60"><td className="py-1.5">Runtime · default</td><td>500 m</td><td>1.5 Gi</td><td>2 → 0/burst</td><td>50–200</td></tr>
-                <tr className="border-b border-slate-800/60"><td className="py-1.5">Runtime · long-running</td><td>1</td><td>4 Gi</td><td>1</td><td>5–20</td></tr>
-                <tr><td className="py-1.5">Runtime · heavy-reasoning</td><td>2</td><td>8 Gi</td><td>1</td><td>2–10</td></tr>
-              </tbody>
-            </table>
+            <div className="overflow-x-auto">
+              <table className="w-full text-[12px] my-2">
+                <thead className="text-slate-400 border-b border-slate-700">
+                  <tr><th className="text-left py-1.5">Tier</th><th className="text-left py-1.5">CPU req</th><th className="text-left py-1.5">Mem req</th><th className="text-left py-1.5">Replicas (default)</th><th className="text-left py-1.5">Replicas (1k tenants)</th></tr>
+                </thead>
+                <tbody className="text-slate-300">
+                  <tr className="border-b border-slate-800/60"><td className="py-1.5">Web</td><td>200 m</td><td>256 Mi</td><td>3</td><td>10–30</td></tr>
+                  <tr className="border-b border-slate-800/60"><td className="py-1.5">API</td><td>500 m</td><td>1 Gi</td><td>3</td><td>20–50</td></tr>
+                  <tr className="border-b border-slate-800/60"><td className="py-1.5">Runtime · chat</td><td>500 m</td><td>1.5 Gi</td><td>2 → 0/burst</td><td>20–100</td></tr>
+                  <tr className="border-b border-slate-800/60"><td className="py-1.5">Runtime · default</td><td>500 m</td><td>1.5 Gi</td><td>2 → 0/burst</td><td>50–200</td></tr>
+                  <tr className="border-b border-slate-800/60"><td className="py-1.5">Runtime · long-running</td><td>1</td><td>4 Gi</td><td>1</td><td>5–20</td></tr>
+                  <tr><td className="py-1.5">Runtime · heavy-reasoning</td><td>2</td><td>8 Gi</td><td>1</td><td>2–10</td></tr>
+                </tbody>
+              </table>
+            </div>
           </div>
         ),
       },
@@ -1917,27 +1976,29 @@ if (result.isPaused()) {
               The <code className="text-cyan-300">RUNTIME_MODE</code> env var on the API decides where agent code actually executes. Two modes ship:
             </p>
 
-            <table className="w-full text-[12px] my-2">
-              <thead className="text-slate-400 border-b border-slate-700">
-                <tr>
-                  <th className="text-left py-2">Mode</th>
-                  <th className="text-left py-2">Where the agent runs</th>
-                  <th className="text-left py-2">Best for</th>
-                </tr>
-              </thead>
-              <tbody className="text-slate-300">
-                <tr className="border-b border-slate-800/60">
-                  <td className="py-2"><code>embedded</code></td>
-                  <td>Inside the API process</td>
-                  <td>Laptop dev, low-volume self-hosted</td>
-                </tr>
-                <tr>
-                  <td className="py-2"><code>remote</code> <span className="text-emerald-300 text-[10px] uppercase ml-1">production</span></td>
-                  <td>Runtime pods (NATS-routed)</td>
-                  <td>Production · all multi-tenant traffic</td>
-                </tr>
-              </tbody>
-            </table>
+            <div className="overflow-x-auto">
+              <table className="w-full text-[12px] my-2">
+                <thead className="text-slate-400 border-b border-slate-700">
+                  <tr>
+                    <th className="text-left py-2">Mode</th>
+                    <th className="text-left py-2">Where the agent runs</th>
+                    <th className="text-left py-2">Best for</th>
+                  </tr>
+                </thead>
+                <tbody className="text-slate-300">
+                  <tr className="border-b border-slate-800/60">
+                    <td className="py-2"><code>embedded</code></td>
+                    <td>Inside the API process</td>
+                    <td>Laptop dev, low-volume self-hosted</td>
+                  </tr>
+                  <tr>
+                    <td className="py-2"><code>remote</code> <span className="text-emerald-300 text-[10px] uppercase ml-1">production</span></td>
+                    <td>Runtime pods (NATS-routed)</td>
+                    <td>Production · all multi-tenant traffic</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
 
             <h4 className="text-white font-semibold pt-2">embedded mode — what it does</h4>
             <ul className="list-disc pl-5 space-y-1 text-[13px]">
@@ -2173,15 +2234,17 @@ spec:
         body: (
           <div className="space-y-3 text-[13.5px] text-slate-300 leading-relaxed">
             <p>Each collection picks its own vector backend. Mix freely:</p>
-            <table className="w-full text-[12px] my-2">
-              <thead className="text-slate-400 border-b border-slate-700">
-                <tr><th className="text-left py-1.5">Backend</th><th className="text-left py-1.5">Best for</th><th className="text-left py-1.5">Limits</th></tr>
-              </thead>
-              <tbody className="text-slate-300">
-                <tr className="border-b border-slate-800/60"><td className="py-1.5"><strong>pgvector</strong></td><td>Up to ~5M chunks per collection. In-cluster, no extra cost.</td><td>Single primary, vacuum windows can pause ingestion.</td></tr>
-                <tr><td className="py-1.5"><strong>Pinecone</strong></td><td>10M+ chunks, multi-tenant cost amortisation.</td><td>External dep + cost. ~50 ms network round-trip.</td></tr>
-              </tbody>
-            </table>
+            <div className="overflow-x-auto">
+              <table className="w-full text-[12px] my-2">
+                <thead className="text-slate-400 border-b border-slate-700">
+                  <tr><th className="text-left py-1.5">Backend</th><th className="text-left py-1.5">Best for</th><th className="text-left py-1.5">Limits</th></tr>
+                </thead>
+                <tbody className="text-slate-300">
+                  <tr className="border-b border-slate-800/60"><td className="py-1.5"><strong>pgvector</strong></td><td>Up to ~5M chunks per collection. In-cluster, no extra cost.</td><td>Single primary, vacuum windows can pause ingestion.</td></tr>
+                  <tr><td className="py-1.5"><strong>Pinecone</strong></td><td>10M+ chunks, multi-tenant cost amortisation.</td><td>External dep + cost. ~50 ms network round-trip.</td></tr>
+                </tbody>
+              </table>
+            </div>
             <p>Switch by setting <code>collection.vector_backend</code>. Existing chunks aren&apos;t migrated automatically — re-Cognify the collection.</p>
           </div>
         ),
@@ -2545,23 +2608,25 @@ spec:
 
             <h4 className="text-white font-semibold pt-3">2 · Adding users to a tenant</h4>
             <p>Open <code>/settings/team</code> as the tenant admin. Two paths:</p>
-            <table className="w-full text-[12px] my-2">
-              <thead className="text-slate-400 border-b border-slate-700">
-                <tr><th className="text-left py-2">Path</th><th className="text-left py-2">API</th><th className="text-left py-2">When to use</th></tr>
-              </thead>
-              <tbody className="text-slate-300">
-                <tr className="border-b border-slate-800/60">
-                  <td className="py-2"><strong>Invite by email</strong></td>
-                  <td><code>POST /api/team/invite</code></td>
-                  <td>Real users, they accept via emailed link, set their own password.</td>
-                </tr>
-                <tr>
-                  <td className="py-2"><strong>Dev create</strong></td>
-                  <td><code>POST /api/team/dev-create-member</code></td>
-                  <td>E2E tests / immediate provisioning, admin sets the password.</td>
-                </tr>
-              </tbody>
-            </table>
+            <div className="overflow-x-auto">
+              <table className="w-full text-[12px] my-2">
+                <thead className="text-slate-400 border-b border-slate-700">
+                  <tr><th className="text-left py-2">Path</th><th className="text-left py-2">API</th><th className="text-left py-2">When to use</th></tr>
+                </thead>
+                <tbody className="text-slate-300">
+                  <tr className="border-b border-slate-800/60">
+                    <td className="py-2"><strong>Invite by email</strong></td>
+                    <td><code>POST /api/team/invite</code></td>
+                    <td>Real users, they accept via emailed link, set their own password.</td>
+                  </tr>
+                  <tr>
+                    <td className="py-2"><strong>Dev create</strong></td>
+                    <td><code>POST /api/team/dev-create-member</code></td>
+                    <td>E2E tests / immediate provisioning, admin sets the password.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
             <Callout tone="info">
               Both paths require <code>role=admin</code> and hard-scope the new user to the caller&apos;s tenant — <strong>no cross-tenant invites are possible</strong>. The backend enforces the scope on the route, not just the UI.
             </Callout>
@@ -2686,20 +2751,47 @@ export default function HelpPage() {
 
   return (
     <div className="min-h-screen bg-[#0B0F19]">
-      {/* Top header */}
-      <header className="sticky top-0 z-30 backdrop-blur-md bg-[#0B0F19]/80 border-b border-slate-800/60 px-6 py-3 flex items-center gap-3">
-        <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-violet-500/30 to-cyan-500/30 border border-violet-500/40 flex items-center justify-center">
-          <BookOpen className="w-4 h-4 text-violet-300" />
-        </div>
-        <div>
-          <h1 className="text-base font-bold text-white">User guide</h1>
-          <p className="text-[10px] text-slate-500 uppercase tracking-wider">Abenix — every feature, every page, every scaling lever</p>
-        </div>
-      </header>
+      <div className="border-b border-slate-800/60 px-1 py-4 sm:px-6">
+        <PageHeader
+          className="mx-auto max-w-[1600px]"
+          title="User guide"
+          purpose="Plain explanations of every feature and page, with what each one is for and how to use it. For everyone."
+          icon={BookOpen}
+          iconClassName="text-violet-300"
+          storageKey="help"
+          docSlug="08-howto/07-finding-your-way-around"
+          primaryAction={{ label: 'Developer docs', icon: Code2, href: '/docs' }}
+          steps={[
+            'Pick a topic from the topic list, or just scroll. The list follows where you are.',
+            'Each topic says what the feature does, who it is for and where to find it.',
+            'Need the technical detail? Developer docs covers the APIs, the SDK and deployment.',
+          ]}
+        />
+      </div>
+
+      {/* phones get a picker, the side list needs the width */}
+      <div className="border-b border-slate-800/60 px-1 py-3 lg:hidden">
+        <label htmlFor="help-topic" className="mb-1 block text-xs text-slate-400">Jump to a topic</label>
+        <select
+          id="help-topic"
+          value={active}
+          onChange={(e) => scrollTo(e.target.value)}
+          className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-200"
+          data-testid="help-topic-picker"
+        >
+          {categories.map((cat) => (
+            <optgroup key={cat.id} label={cat.label}>
+              {cat.topics.map((t) => (
+                <option key={t.id} value={t.id}>{t.title}</option>
+              ))}
+            </optgroup>
+          ))}
+        </select>
+      </div>
 
       <div className="flex max-w-[1600px] mx-auto">
         {/* Sticky sidebar TOC */}
-        <aside className="w-64 shrink-0 border-r border-slate-800/60 sticky top-[57px] h-[calc(100vh-57px)] overflow-y-auto p-4">
+        <aside className="hidden lg:block w-64 shrink-0 border-r border-slate-800/60 sticky top-0 h-screen overflow-y-auto p-4">
           <nav className="space-y-5">
             {categories.map(cat => (
               <div key={cat.id}>
@@ -2728,7 +2820,7 @@ export default function HelpPage() {
         </aside>
 
         {/* Main content */}
-        <main className="flex-1 min-w-0 px-8 py-8 max-w-4xl">
+        <main className="flex-1 min-w-0 px-1 py-6 sm:px-8 sm:py-8 max-w-4xl break-words [&_code]:break-words [&_pre]:overflow-x-auto [&_img]:max-w-full">
           {categories.map((cat) => (
             <div key={cat.id} className="mb-12">
               <header className="mb-6 pb-3 border-b border-slate-800/60">
@@ -2743,9 +2835,9 @@ export default function HelpPage() {
                     ref={(el) => { if (el) sectionsRef.current.set(t.id, el); }}
                     className="scroll-mt-24"
                   >
-                    <div className="flex items-center gap-3 mb-3">
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mb-3">
                       {t.icon && <span className="text-violet-300">{t.icon}</span>}
-                      <h2 className="text-xl font-bold text-white">{t.title}</h2>
+                      <h2 className="min-w-0 text-xl font-bold text-white">{t.title}</h2>
                       {t.badge && <Pill tone={t.badge === 'admin' ? 'amber' : t.badge === 'flagship' ? 'violet' : 'cyan'}>{t.badge}</Pill>}
                     </div>
                     {t.body}

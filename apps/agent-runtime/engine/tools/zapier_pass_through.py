@@ -21,7 +21,7 @@ from typing import Any
 
 import httpx
 
-from engine.tools.base import BaseTool, ConfigField, ToolResult
+from engine.tools.base import READ_ONLY, BaseTool, ConfigField, Effect, ToolResult
 
 _NLA_BASE = "https://nla.zapier.com/api/v1"
 
@@ -29,6 +29,9 @@ _NLA_BASE = "https://nla.zapier.com/api/v1"
 class ZapierPassThroughTool(BaseTool):
     name = "zapier_pass_through"
     risk_tier = "high"
+    effect = Effect(
+        kind="external", label="Run a Zapier action", target_param="action_id"
+    )
     config_fields = (
         ConfigField(
             "ZAPIER_NLA_KEY",
@@ -76,6 +79,15 @@ class ZapierPassThroughTool(BaseTool):
         },
         "required": ["operation"],
     }
+
+    @classmethod
+    def effect_for(cls, arguments: dict[str, Any]) -> Effect | None:
+        op = arguments.get("operation")
+        if op == "fire_webhook":
+            return Effect(
+                kind="send", label="Fire a Zapier webhook", target_param="webhook_url"
+            )
+        return cls.effect if op == "run_action" else READ_ONLY
 
     async def execute(self, arguments: dict[str, Any]) -> ToolResult:
         op = arguments.get("operation", "list_actions")

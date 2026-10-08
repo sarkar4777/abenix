@@ -45,6 +45,7 @@ from app.routers import (
     governance,
     decisions,
     public_settings,
+    platform_features,
     agent_comments,
     agent_favorites,
     agent_sharing,
@@ -288,6 +289,7 @@ app.include_router(governance.router)
 app.include_router(decisions.router)
 app.include_router(decisions.refs_router)
 app.include_router(public_settings.router)
+app.include_router(platform_features.router)
 app.include_router(admin_pricing.router)
 app.include_router(admin_model_availability.router)
 app.include_router(llm_models.router)
@@ -402,6 +404,18 @@ app.include_router(admin_alerts_router.router)
 from app.routers import sources as sources_router
 
 app.include_router(sources_router.router)
+
+from app.routers import autonomy as autonomy_router
+
+app.include_router(autonomy_router.router)
+
+from app.routers import journey as journey_router
+
+app.include_router(journey_router.router)
+
+from app.routers import inbox as inbox_router
+
+app.include_router(inbox_router.router)
 
 # ContractIQ has been extracted to /contractiq/ as a standalone application.
 # It uses the Abenix SDK for AI features via the actAs delegation pattern.

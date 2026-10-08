@@ -10,6 +10,12 @@ from sqlalchemy import cast, Date, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, get_db
+from app.core.permissions import features_for
+from app.core.platform_features import (
+    monetization_enabled,
+    require_marketplace,
+    require_monetization,
+)
 from app.core.responses import error, success
 from app.core.stripe import (
     create_connect_account,
@@ -22,15 +28,19 @@ from app.schemas.creator import OnboardCreatorRequest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "packages" / "db"))
 
-from models.agent import Agent, AgentStatus
-from models.marketplace import Subscription
+from models.agent import Agent, AgentStatus, AgentType
+from models.execution import Execution
+from models.marketplace import Review, Subscription
 from models.payout import Payout
 from models.user import User, UserRole
 
 router = APIRouter(prefix="/api/creator", tags=["creator"])
 
+# Stripe Connect, revenue and payouts
+_PAID = [Depends(require_monetization)]
 
-@router.post("/onboard")
+
+@router.post("/onboard", dependencies=_PAID)
 async def onboard_creator(
     body: OnboardCreatorRequest,
     user: User = Depends(get_current_user),
@@ -66,7 +76,7 @@ async def onboard_creator(
     )
 
 
-@router.get("/status")
+@router.get("/status", dependencies=_PAID)
 async def creator_status(
     user: User = Depends(get_current_user),
 ) -> JSONResponse:
@@ -94,7 +104,7 @@ async def creator_status(
     )
 
 
-@router.get("/dashboard")
+@router.get("/dashboard", dependencies=_PAID)
 async def creator_dashboard(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -223,7 +233,7 @@ async def creator_dashboard(
     )
 
 
-@router.get("/login-link")
+@router.get("/login-link", dependencies=_PAID)
 async def creator_login_link(
     user: User = Depends(get_current_user),
 ) -> JSONResponse:
@@ -232,3 +242,120 @@ async def creator_login_link(
 
     result = await create_connect_login_link(user.stripe_connect_id)
     return success(result)
+
+
+def _listing_state(a: Agent) -> str | None:
+    if a.status == AgentStatus.PENDING_REVIEW:
+        return "pending"
+    if a.status == AgentStatus.REJECTED:
+        return "rejected"
+    if a.status == AgentStatus.ACTIVE and a.is_published:
+        return "live"
+    return None
+
+
+@router.get("/listings", dependencies=[Depends(require_marketplace)])
+async def creator_listings(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """The caller's marketplace listings with installs and usage, no money."""
+    paid = await monetization_enabled(db)
+    agents = (
+        (
+            await db.execute(
+                select(Agent)
+                .where(
+                    Agent.creator_id == user.id,
+                    Agent.tenant_id == user.tenant_id,
+                    Agent.agent_type != AgentType.OOB,
+                    Agent.status != AgentStatus.ARCHIVED,
+                )
+                .order_by(Agent.updated_at.desc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+    listed = [a for a in agents if _listing_state(a)]
+    ids = [a.id for a in listed]
+
+    installs: dict = {}
+    runs: dict = {}
+    users: dict = {}
+    ratings: dict = {}
+    if ids:
+        since = datetime.now(timezone.utc) - timedelta(days=30)
+        for agent_id, n in (
+            await db.execute(
+                select(Subscription.agent_id, func.count(Subscription.id))
+                .where(Subscription.agent_id.in_(ids), Subscription.status == "active")
+                .group_by(Subscription.agent_id)
+            )
+        ).all():
+            installs[agent_id] = int(n or 0)
+        for agent_id, n, u in (
+            await db.execute(
+                select(
+                    Execution.agent_id,
+                    func.count(Execution.id),
+                    func.count(Execution.user_id.distinct()),
+                )
+                .where(Execution.agent_id.in_(ids), Execution.created_at >= since)
+                .group_by(Execution.agent_id)
+            )
+        ).all():
+            runs[agent_id] = int(n or 0)
+            users[agent_id] = int(u or 0)
+        for agent_id, avg, n in (
+            await db.execute(
+                select(Review.agent_id, func.avg(Review.rating), func.count(Review.id))
+                .where(Review.agent_id.in_(ids))
+                .group_by(Review.agent_id)
+            )
+        ).all():
+            ratings[agent_id] = (round(float(avg or 0), 1), int(n or 0))
+
+    rows = []
+    for a in listed:
+        avg, n_reviews = ratings.get(a.id, (0, 0))
+        row = {
+            "id": str(a.id),
+            "name": a.name,
+            "description": a.description,
+            "category": a.category,
+            "state": _listing_state(a),
+            "rejection_reason": a.rejection_reason,
+            "installs": installs.get(a.id, 0),
+            "runs_30d": runs.get(a.id, 0),
+            "users_30d": users.get(a.id, 0),
+            "avg_rating": avg,
+            "review_count": n_reviews,
+            "updated_at": a.updated_at.isoformat() if a.updated_at else None,
+        }
+        if paid:
+            row["price"] = float(a.marketplace_price or 0)
+        rows.append(row)
+
+    eligible = [
+        {"id": str(a.id), "name": a.name, "category": a.category}
+        for a in agents
+        if not _listing_state(a)
+        and a.status in (AgentStatus.DRAFT, AgentStatus.ACTIVE)
+        and a.name
+    ]
+
+    return success(
+        {
+            "can_list": bool(features_for(user).get("publish_to_marketplace")),
+            "monetization": paid,
+            "listings": rows,
+            "eligible": eligible,
+            "totals": {
+                "live": sum(1 for r in rows if r["state"] == "live"),
+                "pending": sum(1 for r in rows if r["state"] == "pending"),
+                "installs": sum(r["installs"] for r in rows),
+                "runs_30d": sum(r["runs_30d"] for r in rows),
+            },
+        }
+    )

@@ -446,6 +446,9 @@ async def list_agents(
     mode: str = Query("", description="Filter by mode: agent, pipeline"),
     sort: str = Query("newest", description="Sort: newest, oldest, name"),
     scope: str = Query("all", description="Visibility scope: all|mine|shared|tenant"),
+    published: bool | None = Query(
+        None, description="Only agents listed (or not) in the marketplace"
+    ),
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
     user: User = Depends(get_current_user),
@@ -525,7 +528,12 @@ async def list_agents(
     if category:
         query = query.where(Agent.category == category)
     if status:
-        query = query.where(Agent.status == status)
+        try:
+            query = query.where(Agent.status == AgentStatus(status.lower()))
+        except ValueError:
+            return error(f"Unknown status '{status}'", 400)
+    if published is not None:
+        query = query.where(Agent.is_published.is_(published))
     if mode:
         # mode is stored in model_config JSONB — skip for now
         pass
@@ -1658,11 +1666,32 @@ async def publish_agent(
     allowed, why = can_publish_agent(agent, user, visibility)
     if not allowed:
         return error(why, 400 if why.startswith("visibility") else 403)
+    paid = True
+    if visibility == "public":
+        from app.core.platform_features import (
+            MARKETPLACE_OFF,
+            MONETIZATION_OFF,
+            read_features,
+        )
+
+        switches = await read_features(db)
+        if not switches["marketplace"]:
+            return error(MARKETPLACE_OFF, 409, error_code="MARKETPLACE_OFF")
+        paid = bool(switches["monetization"])
+        if not paid and body and (body.marketplace_price or 0) > 0:
+            return error(
+                f"{MONETIZATION_OFF} Listings are free, remove the price.",
+                409,
+                error_code="MONETIZATION_OFF",
+            )
     if body:
         if body.marketplace_price is not None:
             if body.marketplace_price < 0:
                 return error("marketplace_price cannot be negative", 400)
             agent.marketplace_price = body.marketplace_price
+    if not paid:
+        # a free listing, whatever price it carried before
+        agent.marketplace_price = None
         if body.category is not None:
             agent.category = sanitize_input(body.category)
 
@@ -1726,6 +1755,12 @@ async def review_agent(
         return error("Agent is not pending review", 400)
 
     if body.action == "approve":
+        from app.core.platform_features import MARKETPLACE_OFF, marketplace_enabled
+
+        if not await marketplace_enabled(db):
+            return error(MARKETPLACE_OFF, 409, error_code="MARKETPLACE_OFF")
+
+    if body.action == "approve":
         agent.status = AgentStatus.ACTIVE
         agent.is_published = True
         agent.rejection_reason = None
@@ -1745,6 +1780,28 @@ async def review_agent(
         {"agent_id": str(agent.id), "action": body.action},
     )
     await db.commit()
+
+    try:
+        from app.core.notifications import create_notification
+
+        approved = body.action == "approve"
+        await create_notification(
+            db,
+            tenant_id=agent.tenant_id,
+            user_id=agent.creator_id,
+            type="listing_reviewed",
+            title="Listing approved" if approved else "Listing not approved",
+            message=(
+                f"{agent.name} is live in the Marketplace."
+                if approved
+                else f"{agent.name} was not approved. {body.reason or ''}".strip()
+            ),
+            link=f"/marketplace/{agent.id}" if approved else "/creator",
+            metadata={"agent_id": str(agent.id), "action": body.action},
+        )
+        await db.commit()
+    except Exception as exc:  # noqa: BLE001 — the review itself is saved
+        logger.debug("listing review notification skipped: %s", exc)
 
     return success(_serialize_agent(agent))
 
@@ -2340,6 +2397,28 @@ async def execute_agent(
         started_at=datetime.now(timezone.utc),
         parent_execution_id=parent_execution_id,
     )
+    from app.core import run_origin
+
+    _origin = run_origin.from_request(request)
+    if _origin:
+        run_origin.stamp(
+            execution,
+            _origin["kind"],
+            trigger_id=_origin.get("trigger_id"),
+            name=_origin.get("name"),
+        )
+    elif parent_execution_id:
+        _pkind, _pname = await run_origin.parent_origin(db, parent_execution_id)
+        run_origin.stamp(execution, _pkind, name=_pname)
+    else:
+        run_origin.stamp(
+            execution,
+            run_origin.for_execute(
+                api_key=run_origin.is_api_key(user),
+                source=body.source,
+                conversation_id=body.conversation_id,
+            ),
+        )
     db.add(execution)
     await db.commit()
     await db.refresh(execution)
@@ -2396,6 +2475,7 @@ async def execute_agent(
                 ),
                 "delegation_depth": delegation_depth,
                 "model_override": _model_override,
+                "conversation_id": body.conversation_id or "",
             }
             task_id = await backend.submit(agent_pool, payload)
 
@@ -2638,6 +2718,14 @@ async def execute_agent(
                     ),
                     "node_results": _summary.get("node_results") or {},
                     "summary": summary,
+                    "trigger_kind": execution.trigger_kind,
+                    "trigger_id": (
+                        str(execution.trigger_id) if execution.trigger_id else None
+                    ),
+                    "trigger_name": execution.trigger_name,
+                    "started_by": run_origin.started_by(
+                        execution.trigger_kind, execution.trigger_name
+                    ),
                 }
                 if idempotency_key:
                     try:
@@ -2775,6 +2863,8 @@ async def execute_agent(
     # Surface the agent's model_config so tools that need its keys
     # (e.g. atlas_*: model_config.atlas_graphs allow-list) can read it.
     _enterprise_ctx["model_config"] = model_cfg or {}
+    # a held chat message is swapped for a review card in this thread
+    _enterprise_ctx["conversation_id"] = getattr(body, "conversation_id", None) or ""
 
     # Inject per-tool instructions from tool_config into system prompt
     effective_system_prompt = _build_effective_system_prompt(
@@ -3401,7 +3491,12 @@ async def _moderate_pipeline_input(
     """The tenant moderation gate on a pipeline's message and text inputs. Returns redacted text, a refusal, or None."""
     from app.core.moderation_glue import build_gate_context, persist_events
     from engine.moderation_client import ACTION_REDACT
-    from engine.moderation_gate import ModerationBlocked, check
+    from engine.moderation_gate import (
+        ModerationBlocked,
+        ModerationHeld,
+        check,
+        held_message,
+    )
 
     try:
         ctx = await build_gate_context(db, user.tenant_id, user.id)
@@ -3431,6 +3526,15 @@ async def _moderate_pipeline_input(
                     fields[k], source="pre_llm", config=ctx.gate
                 )
             body.context = context
+    except ModerationHeld as mh:
+        await _save()
+        return error(
+            held_message("pre_llm", mh.timeout_minutes, mh.timeout_action)
+            + " Send it again once a reviewer releases it.",
+            409,
+            error_code="MODERATION_HELD",
+            details={"source": "pre_llm", "review_id": mh.review_id},
+        )
     except ModerationBlocked as mb:
         reason = getattr(mb.decision, "reason", None)
         cats = getattr(mb.decision, "acted_categories", None)
@@ -3599,6 +3703,8 @@ async def _stream_execution(
                     db,
                     uuid.UUID(tenant_id),
                     uuid.UUID(_user_id_str),
+                    conversation_id=enterprise_ctx.get("conversation_id"),
+                    agent_id=agent_id,
                 )
         except Exception as _mod_exc:
             import logging as _log
@@ -3704,6 +3810,9 @@ async def _stream_execution(
                 yield f"event: moderation\ndata: {json.dumps(event_data, default=str)}\n\n"
             elif event_type == "tool_result":
                 yield f"event: tool_result\ndata: {json.dumps(event_data, default=str)}\n\n"
+            elif event_type == "reply_checking":
+                # the reply is held back until the output check decides
+                yield f"event: reply_checking\ndata: {json.dumps(event_data, default=str)}\n\n"
             elif event_type == "node_trace":
                 if isinstance(event_data, dict):
                     _merge_tool_trace(all_tool_calls, event_data)
@@ -3734,8 +3843,9 @@ async def _stream_execution(
                 # `done` so the UI can render a policy banner without
                 # parsing the done payload. The done event still fires
                 # for back-compat with existing clients.
-                if final_data.get("moderation_blocked") or (
-                    final_data.get("error") == "moderation_blocked"
+                if not final_data.get("moderation_held") and (
+                    final_data.get("moderation_blocked")
+                    or final_data.get("error") == "moderation_blocked"
                 ):
                     yield (
                         "event: moderation_block\n"
@@ -3796,7 +3906,11 @@ async def _stream_execution(
                 from app.core.failure_codes import emit_outcome_metric
 
                 execution.status = ExecutionStatus.FAILED
-                execution.failure_code = "MODERATION_BLOCKED"
+                execution.failure_code = (
+                    "MODERATION_HELD"
+                    if final_data.get("moderation_held")
+                    else "MODERATION_BLOCKED"
+                )
                 execution.error_message = (
                     full_output or "Moderation policy blocked the request"
                 )[:2000]
@@ -4140,6 +4254,8 @@ async def _non_stream_execution(
         db,
         execution.tenant_id,
         execution.user_id,
+        conversation_id=enterprise_ctx.get("conversation_id"),
+        agent_id=execution.agent_id,
     )
 
     # Resolve asset input_schemas async, matching the streaming path.
@@ -4240,7 +4356,11 @@ async def _non_stream_execution(
             from app.core.failure_codes import emit_outcome_metric
 
             execution.status = ExecutionStatus.FAILED
-            execution.failure_code = "MODERATION_BLOCKED"
+            execution.failure_code = (
+                "MODERATION_HELD"
+                if getattr(result, "moderation_held", False)
+                else "MODERATION_BLOCKED"
+            )
             execution.error_message = (
                 result.output[:2000]
                 if result.output

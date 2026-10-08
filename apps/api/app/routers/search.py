@@ -273,8 +273,16 @@ async def search(
     out: list[dict[str, Any]] = []
 
     # 1. Pages — substring on label + keywords
+    market_on: bool | None = None
     for row in _ROUTES:
         hay = f"{row['label']} {row.get('keywords', '')}".lower()
+        if needle in hay and row["href"] in ("/marketplace", "/creator"):
+            if market_on is None:
+                from app.core.platform_features import marketplace_enabled
+
+                market_on = await marketplace_enabled(db)
+            if not market_on:
+                continue
         if needle in hay:
             out.append(
                 {

@@ -350,7 +350,17 @@ _build_app_image() { # _build_app_image <name> <dockerfile> <context> <tag> [<ta
   local tags=() t log
   for t in "$@"; do tags+=(-t "${t}"); done
   log="$(mktemp)"
-  if ! docker build "${tags[@]}" -f "${df}" "${ctx}" >"${log}" 2>&1; then
+  # a stalled build step (seen in vaadinBuildFrontend) must fail, not hang the deploy
+  local limit="${APP_BUILD_TIMEOUT:-1800}" rc=0
+  timeout "${limit}" docker build "${tags[@]}" -f "${df}" "${ctx}" >"${log}" 2>&1 || rc=$?
+  if [ "${rc}" -eq 124 ]; then
+    err "${name}: build did not finish within ${limit}s and was stopped — last 25 lines:"
+    tail -25 "${log}" | sed 's/^/      /'
+    err "  Retry, raise APP_BUILD_TIMEOUT, or leave this app out with APPS=..."
+    rm -f "${log}"
+    return 1
+  fi
+  if [ "${rc}" -ne 0 ]; then
     err "${name}: build FAILED — last 25 lines:"
     tail -25 "${log}" | sed 's/^/      /'
     rm -f "${log}"

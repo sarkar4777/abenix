@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { usePageTitle } from '@/hooks/usePageTitle';
 import { useApi } from '@/hooks/useApi';
+import PageHeader from '@/components/layout/PageHeader';
 
 interface Session {
   id: string;
@@ -169,12 +170,19 @@ export default function SecurityPage() {
       transition={{ duration: 0.4 }}
       className="space-y-6 max-w-3xl"
     >
-      <div>
-        <h1 className="text-2xl font-bold text-white">Security</h1>
-        <p className="text-sm text-slate-500 mt-1">
-          Recent sign-ins to your account and a log of changes made in this workspace.
-        </p>
-      </div>
+      <PageHeader
+        title="Security"
+        icon={Lock}
+        purpose="Recent sign-ins to your account and a log of changes made in this workspace. For everyone."
+        primaryAction={{ label: 'Change password', icon: Key, href: '/settings/profile' }}
+        steps={[
+          'Check the recent sign-ins. The top one is you, right now.',
+          'If a sign-in looks wrong, change your password and revoke your API keys.',
+          'The activity list shows the last 25 changes, with repeats folded together.',
+        ]}
+        docSlug="01-architecture/07-governance"
+        storageKey="settings-security"
+      />
 
       {/* Recent Sessions */}
       {sessionsList.length > 0 && (

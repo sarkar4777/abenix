@@ -155,9 +155,10 @@ async def test_claimed_run_is_acked_after_it_finishes_with_parent_trace():
     qm, msg = _qm(
         {"execution_id": str(uuid.uuid4())}, trace={"traceparent": TRACEPARENT}
     )
-    with patch.object(
-        consumer, "_claim", AsyncMock(return_value=("claimed", 0.0))
-    ), patch.object(consumer, "_run_one", fake_run):
+    with (
+        patch.object(consumer, "_claim", AsyncMock(return_value=("claimed", 0.0))),
+        patch.object(consumer, "_run_one", fake_run),
+    ):
         await consumer._handle_delivery(qm, asyncio.Semaphore(1))
     assert seen == {"trace": TRACE_ID, "acked_before_end": False}
     assert msg.calls == ["ack"]
@@ -167,9 +168,10 @@ async def test_claimed_run_is_acked_after_it_finishes_with_parent_trace():
 async def test_run_held_by_a_live_owner_is_redelivered_after_its_lease():
     qm, msg = _qm({"execution_id": str(uuid.uuid4())}, delivered=2)
     run = AsyncMock()
-    with patch.object(
-        consumer, "_claim", AsyncMock(return_value=("owned", 12.5))
-    ), patch.object(consumer, "_run_one", run):
+    with (
+        patch.object(consumer, "_claim", AsyncMock(return_value=("owned", 12.5))),
+        patch.object(consumer, "_run_one", run),
+    ):
         await consumer._handle_delivery(qm, asyncio.Semaphore(1))
     run.assert_not_awaited()
     assert msg.calls == [("nak", 13.5)]
@@ -179,9 +181,10 @@ async def test_run_held_by_a_live_owner_is_redelivered_after_its_lease():
 async def test_finished_run_duplicate_is_dropped():
     qm, msg = _qm({"execution_id": str(uuid.uuid4())}, delivered=3)
     run = AsyncMock()
-    with patch.object(
-        consumer, "_claim", AsyncMock(return_value=("done", 0.0))
-    ), patch.object(consumer, "_run_one", run):
+    with (
+        patch.object(consumer, "_claim", AsyncMock(return_value=("done", 0.0))),
+        patch.object(consumer, "_run_one", run),
+    ):
         await consumer._handle_delivery(qm, asyncio.Semaphore(1))
     run.assert_not_awaited()
     assert msg.calls == ["ack"]
@@ -192,10 +195,10 @@ async def test_exhausted_attempts_fail_the_run_once():
     eid = str(uuid.uuid4())
     qm, msg = _qm({"execution_id": eid, "trigger_id": "tr"}, delivered=4)
     done = AsyncMock()
-    with patch.object(
-        consumer, "_claim", AsyncMock(return_value=("exhausted", 0.0))
-    ), patch.object(consumer, "_mark_done", done), patch.object(
-        consumer, "_publish", AsyncMock()
+    with (
+        patch.object(consumer, "_claim", AsyncMock(return_value=("exhausted", 0.0))),
+        patch.object(consumer, "_mark_done", done),
+        patch.object(consumer, "_publish", AsyncMock()),
     ):
         await consumer._handle_delivery(qm, asyncio.Semaphore(1))
     args, kwargs = done.call_args
@@ -224,10 +227,10 @@ async def test_heartbeat_keeps_delivery_alive_and_stops_on_takeover(monkeypatch)
 
     qm, msg = _qm({"execution_id": str(uuid.uuid4())})
     renew = AsyncMock(side_effect=[True, False])
-    with patch.object(
-        consumer, "_claim", AsyncMock(return_value=("claimed", 0.0))
-    ), patch.object(consumer, "_run_one", slow_run), patch.object(
-        consumer, "_renew", renew
+    with (
+        patch.object(consumer, "_claim", AsyncMock(return_value=("claimed", 0.0))),
+        patch.object(consumer, "_run_one", slow_run),
+        patch.object(consumer, "_renew", renew),
     ):
         await asyncio.wait_for(
             consumer._handle_delivery(qm, asyncio.Semaphore(1)), timeout=2
@@ -247,9 +250,10 @@ async def test_shutdown_cancel_leaves_message_unacked():
         await asyncio.sleep(5)
 
     qm, msg = _qm({"execution_id": str(uuid.uuid4())})
-    with patch.object(
-        consumer, "_claim", AsyncMock(return_value=("claimed", 0.0))
-    ), patch.object(consumer, "_run_one", slow_run):
+    with (
+        patch.object(consumer, "_claim", AsyncMock(return_value=("claimed", 0.0))),
+        patch.object(consumer, "_run_one", slow_run),
+    ):
         t = asyncio.create_task(consumer._handle_delivery(qm, asyncio.Semaphore(1)))
         await started.wait()
         t.cancel()

@@ -4,9 +4,10 @@ import { useEffect, useState } from 'react';
 import { Globe, Loader2, Lock, Rocket, Shield, Users, X } from 'lucide-react';
 import ResponsiveModal from '@/components/ui/ResponsiveModal';
 import { useApi } from '@/hooks/useApi';
+import { toastSuccess } from '@/stores/toastStore';
+import { usePlatformFeatures } from '@/hooks/usePlatformFeatures';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-const MONETIZATION_ENABLED = process.env.NEXT_PUBLIC_ENABLE_MONETIZATION !== 'false';
 
 const CATEGORIES = [
   'productivity',
@@ -61,6 +62,11 @@ export default function PublishDialog({
   const [publishedWithIssues, setPublishedWithIssues] = useState(false);
   const { data: perms } = useApi<{ features?: Record<string, boolean> }>(open ? '/api/me/permissions' : null);
   const canPublishPublic = perms?.features?.publish_to_marketplace !== false;
+  const { marketplace: MARKETPLACE_ON, monetization: MONETIZATION_ENABLED } = usePlatformFeatures();
+
+  useEffect(() => {
+    if (!MARKETPLACE_ON && visibility === 'public') setVisibility('tenant');
+  }, [MARKETPLACE_ON, visibility]);
 
   useEffect(() => {
     if (!canPublishPublic && visibility === 'public') setVisibility('tenant');
@@ -150,6 +156,9 @@ export default function PublishDialog({
         }
       }
 
+      if (visibility === 'public') {
+        toastSuccess('Submitted for review', 'An admin approves it, then it shows in the Marketplace. Track it in Creator Hub.');
+      }
       onPublished();
       onClose();
     } catch {
@@ -172,7 +181,7 @@ export default function PublishDialog({
       description: 'Only people you explicitly share with can execute this agent',
       icon: Users,
     },
-    ...(MONETIZATION_ENABLED ? [{
+    ...(MARKETPLACE_ON ? [{
       value: 'public' as Visibility,
       label: 'Marketplace (Public)',
       description: 'Anyone can discover this agent on the marketplace',
@@ -184,7 +193,7 @@ export default function PublishDialog({
     <ResponsiveModal
       open={open}
       onClose={onClose}
-      title={MONETIZATION_ENABLED ? 'Publish to Marketplace' : 'Publish Agent'}
+      title={MARKETPLACE_ON ? 'Publish to Marketplace' : 'Publish Agent'}
       icon={<Rocket className="w-4 h-4" />}
       maxWidth="max-w-lg"
     >
@@ -315,7 +324,8 @@ export default function PublishDialog({
             {visibility === 'public' && (
               <>
                 Your agent will be submitted for review before going live on the marketplace.
-                {pricingMode === 'paid' && ' A 20% platform fee applies to all paid subscriptions.'}
+                {!MONETIZATION_ENABLED && ' Listings are free to install.'}
+                {MONETIZATION_ENABLED && pricingMode === 'paid' && ' A 20% platform fee applies to all paid subscriptions.'}
               </>
             )}
           </p>

@@ -24,6 +24,8 @@ import { useModels } from '@/lib/models';
 import { pickRunnableModel } from '@/components/atlas/runnableModel';
 import OwnerBadge from '@/components/OwnerBadge';
 import ResourceShareDialog, { type Shareable } from '@/components/share/ResourceShareDialog';
+import PageHeader from '@/components/layout/PageHeader';
+import NextSteps from '@/components/shared/NextSteps';
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -217,6 +219,7 @@ export default function AtlasPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const rfRef = useRef<ReactFlowInstance | null>(null);
   const [shareOpen, setShareOpen] = useState(false);
+  const [createdId, setCreatedId] = useState<string | null>(null);
   const canEdit = graph ? graph.can_edit !== false : true;
 
   // ─── In-app modal + toast plumbing (replaces native prompt/confirm/alert)
@@ -368,6 +371,7 @@ export default function AtlasPage() {
     if (r.data?.graph) {
       setGraphs(g => [r.data.graph, ...g]);
       setActiveId(r.data.graph.id);
+      setCreatedId(r.data.graph.id);
       toast('success', `Atlas “${finalName}” created`);
     } else {
       toast('error', `Could not create atlas: ${r.error || 'unknown'}`);
@@ -777,7 +781,92 @@ export default function AtlasPage() {
 
   // ─── Render ──────────────────────────────────────────────────────
   return (
-    <div className="relative -m-3 md:-m-6 h-[calc(100%+1.5rem)] md:h-[calc(100%+3rem)] bg-[#0B0F19] flex overflow-hidden" data-testid="atlas-root">
+    <div className="relative -m-3 md:-m-6 h-[calc(100%+1.5rem)] md:h-[calc(100%+3rem)] bg-[#0B0F19] flex flex-col overflow-hidden" data-testid="atlas-root">
+      {/* header spans the page, the rail, canvas and inspector share the row below */}
+      <div className="shrink-0 border-b border-slate-800/50 px-3 sm:px-4 py-2.5" data-testid="atlas-header">
+        <button type="button" onClick={() => setRailOpen(true)} className="lg:hidden mb-2 inline-flex items-center gap-1.5 px-2 py-1.5 rounded-lg border border-slate-700 text-slate-300 text-xs" aria-label="Show atlas list">
+          <PanelLeft className="w-3.5 h-3.5" /> Atlases
+        </button>
+        <PageHeader
+          compact
+          title={<span className="block truncate">{graph?.name || (activeId ? 'Loading…' : 'Atlas')}</span>}
+          purpose="Map the things in your domain and how they relate, so agents can reason over them. For analysts and agent builders."
+          icon={Network}
+          iconClassName="text-violet-300"
+          storageKey="atlas"
+          docSlug="01-architecture/06-atlas-knowledge-engine"
+          steps={[
+            'Create an atlas, then add concepts and draw the links between them.',
+            'Type a sentence or drop a file and Atlas proposes nodes for you to accept.',
+            'Bind a knowledge base to pull in the things its documents mention.',
+            'Use in an agent gives the agent tools to search and explain this map.',
+          ]}
+          meta={graph ? (
+            <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-slate-400">
+              <OwnerBadge ownership={graph.ownership} ownerName={graph.owner_name} />
+              <span className="px-1.5 py-0.5 rounded bg-slate-800/80 border border-slate-700/50 font-mono" title="Version, goes up with every change">v{graph.version}</span>
+              <span className="text-slate-600">·</span>
+              <span data-testid="atlas-node-count" data-count={nodeCount}><span className="text-slate-200 font-semibold">{nodeCount}</span> node{nodeCount === 1 ? '' : 's'}</span>
+              <span className="text-slate-600">·</span>
+              <span data-testid="atlas-edge-count" data-count={edgeCount}><span className="text-slate-200 font-semibold">{edgeCount}</span> edge{edgeCount === 1 ? '' : 's'}</span>
+              {graph.kb_id && (
+                <span className="ml-1 px-1.5 py-0.5 rounded text-[10px] bg-emerald-500/10 border border-emerald-500/40 text-emerald-200 inline-flex items-center gap-1">
+                  <Link2 className="w-2.5 h-2.5" /> KB linked
+                </span>
+              )}
+            </div>
+          ) : undefined}
+          primaryAction={graph
+            ? { label: 'Use in an agent', icon: Bot, href: `/builder?atlas=${graph.id}${graph.kb_id ? `&kb=${graph.kb_id}` : ''}`, testId: 'atlas-use-in-agent' }
+            : { label: 'Create atlas', icon: Plus, onClick: () => { void createGraph(); } }}
+          extraActions={
+            <>
+              {graph && graph.can_delete && (
+                <button
+                  onClick={() => setShareOpen(true)}
+                  data-testid="atlas-share"
+                  className="shrink-0 inline-flex items-center justify-center gap-1.5 px-2.5 py-2 rounded-lg border border-cyan-500/40 bg-cyan-500/10 text-cyan-200 hover:bg-cyan-500/20 text-xs font-semibold"
+                >
+                  <Share2 className="w-3.5 h-3.5" /> Share
+                </button>
+              )}
+              {graph && canEdit && (
+                <div className="shrink-0 w-full sm:w-auto sm:min-w-[200px] sm:max-w-[280px]" title="Model used to read sentences and dropped files">
+                  <ModelPicker value={model} onChange={setModel} />
+                </div>
+              )}
+              {activeId && (
+                <button type="button" onClick={() => setInspectorOpen(true)}
+                  className={`xl:hidden shrink-0 inline-flex items-center justify-center gap-1.5 px-2 py-2 rounded-lg border text-xs ${selectedNodeId || selectedEdgeId ? 'border-violet-500/50 bg-violet-500/15 text-violet-200' : 'border-slate-700 text-slate-300'}`}
+                  aria-label="Show inspector" data-testid="atlas-open-inspector">
+                  <PanelRight className="w-3.5 h-3.5" /> Inspect
+                </button>
+              )}
+            </>
+          }
+        />
+        {graph && createdId === graph.id && (
+          <NextSteps
+            className="mt-3"
+            title={`${graph.name} is ready. What next?`}
+            testId="atlas-next-steps"
+            onDismiss={() => setCreatedId(null)}
+            steps={[
+              ...(canEdit ? [
+                { id: 'starter', label: 'Start from a kit', hint: 'Load a ready made set of concepts and links.', icon: LibraryBig, onClick: () => { setCreatedId(null); void openStarters(); } },
+                { id: 'kb', label: 'Bind a knowledge base', hint: 'Pull in the things its documents mention.', icon: Link2, onClick: () => { setCreatedId(null); void openKbPicker(); } },
+              ] : []),
+              { id: 'agent', label: 'Use in an agent', hint: 'Give an agent tools to search this map.', icon: Bot, href: `/builder?atlas=${graph.id}${graph.kb_id ? `&kb=${graph.kb_id}` : ''}` },
+            ]}
+          />
+        )}
+        {graph && !canEdit && (
+          <p data-testid="atlas-read-only" className="mt-2 text-[11px] text-amber-300 inline-flex items-center gap-1.5">
+            <Lock className="w-3 h-3" /> View only. {graph.owner_name || 'The owner'} shared this atlas with you, ask them for edit access to change it.
+          </p>
+        )}
+      </div>
+      <div className="relative flex-1 min-h-0 flex overflow-hidden">
       {railOpen && <button type="button" aria-label="Close atlas list" onClick={() => setRailOpen(false)} className="lg:hidden absolute inset-0 z-30 bg-black/50" />}
       {/* ── Left rail: graph list ─────────────────────────────────── */}
       <aside className={`${railOpen ? 'flex' : 'hidden'} lg:flex absolute lg:static inset-y-0 left-0 z-40 w-72 max-w-[85%] lg:w-64 bg-[#0B0F19] border-r border-slate-800/50 flex-col shrink-0 shadow-2xl lg:shadow-none`}>
@@ -840,62 +929,10 @@ export default function AtlasPage() {
 
       {/* ── Canvas + overlays ─────────────────────────────────────── */}
       <main className="flex-1 flex flex-col min-w-0 min-h-0 relative">
-        <header className="shrink-0 border-b border-slate-800/50 px-3 sm:px-4 py-2.5">
-          <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
-            <div className="min-w-0 flex-1 flex items-center gap-x-3 gap-y-1 flex-wrap">
-              <button type="button" onClick={() => setRailOpen(true)} className="lg:hidden shrink-0 inline-flex items-center gap-1.5 px-2 py-1.5 rounded-lg border border-slate-700 text-slate-300 text-xs" aria-label="Show atlas list">
-                <PanelLeft className="w-3.5 h-3.5" /> Atlases
-              </button>
-              <h1 className="text-base font-bold text-white flex items-center gap-2 min-w-0">
-                <Network className="w-4 h-4 text-violet-300 shrink-0" />
-                <span className="truncate">{graph?.name || (activeId ? 'Loading…' : 'Atlas')}</span>
-              </h1>
-              {graph && (
-                <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-slate-400">
-                  <OwnerBadge ownership={graph.ownership} ownerName={graph.owner_name} />
-                  <span className="px-1.5 py-0.5 rounded bg-slate-800/80 border border-slate-700/50 font-mono" title="Version, goes up with every change">v{graph.version}</span>
-                  <span className="text-slate-600">·</span>
-                  <span data-testid="atlas-node-count" data-count={nodeCount}><span className="text-slate-200 font-semibold">{nodeCount}</span> node{nodeCount === 1 ? '' : 's'}</span>
-                  <span className="text-slate-600">·</span>
-                  <span data-testid="atlas-edge-count" data-count={edgeCount}><span className="text-slate-200 font-semibold">{edgeCount}</span> edge{edgeCount === 1 ? '' : 's'}</span>
-                  {graph.kb_id && (
-                    <span className="ml-1 px-1.5 py-0.5 rounded text-[10px] bg-emerald-500/10 border border-emerald-500/40 text-emerald-200 inline-flex items-center gap-1">
-                      <Link2 className="w-2.5 h-2.5" /> KB linked
-                    </span>
-                  )}
-                </div>
-              )}
-            </div>
-            {graph && graph.can_delete && (
-              <button
-                onClick={() => setShareOpen(true)}
-                data-testid="atlas-share"
-                className="shrink-0 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-cyan-500/40 bg-cyan-500/10 text-cyan-200 hover:bg-cyan-500/20 text-xs font-semibold"
-              >
-                <Share2 className="w-3.5 h-3.5" /> Share
-              </button>
-            )}
-            {graph && canEdit && (
-              <div className="shrink-0 w-full sm:w-auto sm:min-w-[200px] sm:max-w-[280px]" title="Model used to read sentences and dropped files">
-                <ModelPicker value={model} onChange={setModel} />
-              </div>
-            )}
-            {activeId && (
-              <button type="button" onClick={() => setInspectorOpen(true)}
-                className={`xl:hidden shrink-0 inline-flex items-center gap-1.5 px-2 py-1.5 rounded-lg border text-xs ${selectedNodeId || selectedEdgeId ? 'border-violet-500/50 bg-violet-500/15 text-violet-200' : 'border-slate-700 text-slate-300'}`}
-                aria-label="Show inspector" data-testid="atlas-open-inspector">
-                <PanelRight className="w-3.5 h-3.5" /> Inspect
-              </button>
-            )}
-          </div>
-          {graph && !canEdit && (
-            <p data-testid="atlas-read-only" className="mt-2 text-[11px] text-amber-300 inline-flex items-center gap-1.5">
-              <Lock className="w-3 h-3" /> View only. {graph.owner_name || 'The owner'} shared this atlas with you, ask them for edit access to change it.
-            </p>
-          )}
-          {/* Toolbar row — wraps on narrow screens instead of overflowing */}
-          {graph && (
-            <div className="mt-2 -mx-3 px-3 sm:mx-0 sm:px-0 flex items-center gap-1.5 flex-nowrap overflow-x-auto sm:flex-wrap sm:overflow-visible pb-1 sm:pb-0">
+        {graph && (
+          <div className="shrink-0 border-b border-slate-800/50 px-3 sm:px-4 py-2">
+            {/* Toolbar row — wraps on narrow screens instead of overflowing */}
+            <div className="-mx-3 px-3 sm:mx-0 sm:px-0 flex items-center gap-1.5 flex-nowrap overflow-x-auto sm:flex-wrap sm:overflow-visible pb-1 sm:pb-0">
               {canEdit && (<>
               <ToolbarGroup label="Add">
                 <ToolbarBtn onClick={() => addNodeAtCenter('concept')} icon={Plus} accent="violet">Concept</ToolbarBtn>
@@ -914,11 +951,6 @@ export default function AtlasPage() {
                 )}
               </ToolbarGroup>
               </>)}
-              <ToolbarGroup label="Use">
-                <ToolbarBtn onClick={() => { window.location.href = `/builder?atlas=${graph.id}${graph.kb_id ? `&kb=${graph.kb_id}` : ''}`; }} icon={Network} accent="violet">
-                  <span data-testid="atlas-use-in-agent">Use in an agent</span>
-                </ToolbarBtn>
-              </ToolbarGroup>
               <ToolbarGroup label="Explore">
                 <ToolbarBtn onClick={() => setShowQuery(s => !s)} icon={Search} accent="violet" active={showQuery}>Query</ToolbarBtn>
                 {canEdit && <div className="inline-flex items-center bg-slate-800/60 border border-slate-700 rounded-lg overflow-hidden">
@@ -941,11 +973,8 @@ export default function AtlasPage() {
                 accept="application/pdf,image/*,audio/*,video/*,.docx,.txt,.md,.csv,text/plain,text/markdown,text/csv"
                 onChange={e => e.target.files && submitFile(e.target.files[0])} />
             </div>
-          )}
-          <p className="mt-1.5 text-[11px] text-slate-500 leading-snug">
-            Map the things in your domain and how they relate. Agents read this graph with the Atlas tools, click Use in an agent to wire one up.
-          </p>
-        </header>
+          </div>
+        )}
 
         {!activeId && (
           <div className="flex-1 min-h-0 overflow-y-auto flex items-center justify-center p-6 sm:p-12">
@@ -1585,6 +1614,8 @@ export default function AtlasPage() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      </div>
 
       {/* ── Toast stack (replaces native window.alert) ──────────── */}
       <div className="fixed bottom-6 left-4 right-4 sm:left-auto sm:right-6 z-[60] flex flex-col items-end gap-2 pointer-events-none">

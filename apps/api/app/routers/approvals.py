@@ -217,6 +217,12 @@ async def _expire_stale(db: AsyncSession, tenant_id: uuid.UUID) -> None:
             row = await db.get(Approval, aid)
             if row is not None:
                 await on_approval_resolved(db, row)
+        elif gate_kind and (
+            gate_kind.startswith("action:") or gate_kind == "autonomy.promote"
+        ):
+            row = await db.get(Approval, aid)
+            if row is not None:
+                await _autonomy_resolved(db, row, None)
 
 
 @router.post("")
@@ -635,9 +641,31 @@ async def sign_off(
     if a.status != ApprovalStatus.pending:
         return error(f"Approval is already {a.status.value}", 409)
 
+    edited = body.edited_arguments
+    if edited is not None:
+        if not (a.gate_kind or "").startswith("action:"):
+            return error("Only action approvals take edited arguments.", 400)
+        if body.decision != "approve":
+            return error("Edited arguments go with an approval, not a rejection.", 400)
+    if a.gate_kind == "autonomy.promote":
+        from app.services.autonomy import promotion_denial
+
+        refused = await promotion_denial(db, user, a)
+        if refused:
+            return error(refused, 403, error_code="AUTHOR_CANNOT_GRANT")
+
     denial = await approver_denial(db, user, a.requested_by, a.policy, a.gate_kind)
     if denial:
         return error(denial, 403)
+
+    if edited is not None:
+        from app.services.autonomy import validate_edited_arguments
+
+        merged, problem = validate_edited_arguments(a.payload or {}, edited)
+        if problem:
+            return error(problem, 400, error_code="BAD_EDITED_ARGUMENTS")
+        # the runtime reads payload.edited_arguments when the gate opens
+        a.payload = {**(a.payload or {}), "edited_arguments": merged}
 
     signoffs = list(a.signoffs or [])
     if any(s.get("user_id") == str(user.id) for s in signoffs):
@@ -680,8 +708,26 @@ async def sign_off(
             from app.routers.decisions import on_approval_resolved
 
             await on_approval_resolved(db, a)
+        await _autonomy_resolved(db, a, user)
         await _notify_resolved(db, a, decider=user)
     return success(_serialize(a))
+
+
+async def _autonomy_resolved(db: AsyncSession, a: Approval, decider: Any) -> None:
+    """Promotions change the level, action gates update their ledger row."""
+    kind = a.gate_kind or ""
+    if not (kind.startswith("action:") or kind == "autonomy.promote"):
+        return
+    from app.services import autonomy as autonomy_svc
+
+    try:
+        if kind == "autonomy.promote":
+            await autonomy_svc.on_promotion_resolved(db, a, decider)
+        else:
+            await autonomy_svc.on_action_gate_resolved(db, a, decider)
+    except Exception:
+        logger.exception("autonomy follow-up for approval %s failed", a.id)
+        await db.rollback()
 
 
 async def _tenant_settings(db: AsyncSession, tenant_id: uuid.UUID) -> dict[str, Any]:

@@ -46,10 +46,10 @@ async def test_after_terminal_calls_both_hooks():
     record = AsyncMock(return_value=[])
     writer = AsyncMock(return_value=True)
     tid = str(uuid.uuid4())
-    with patch.object(
-        consumer, "_get_session_factory", AsyncMock(return_value=factory)
-    ), patch("app.services.execution_hooks.record_terminal_by_id", record), patch(
-        "app.routers.triggers.write_trigger_outcome", writer
+    with (
+        patch.object(consumer, "_get_session_factory", AsyncMock(return_value=factory)),
+        patch("app.services.execution_hooks.record_terminal_by_id", record),
+        patch("app.routers.triggers.write_trigger_outcome", writer),
     ):
         await consumer._after_terminal("ex-1", "failed", "boom", tid)
     record.assert_awaited_once_with(factory, "ex-1")
@@ -61,10 +61,10 @@ async def test_after_terminal_without_trigger_skips_trigger_write():
     factory = _factory(FakeSession())
     record = AsyncMock(return_value=[])
     writer = AsyncMock()
-    with patch.object(
-        consumer, "_get_session_factory", AsyncMock(return_value=factory)
-    ), patch("app.services.execution_hooks.record_terminal_by_id", record), patch(
-        "app.routers.triggers.write_trigger_outcome", writer
+    with (
+        patch.object(consumer, "_get_session_factory", AsyncMock(return_value=factory)),
+        patch("app.services.execution_hooks.record_terminal_by_id", record),
+        patch("app.routers.triggers.write_trigger_outcome", writer),
     ):
         await consumer._after_terminal("ex-1", "completed", None, None)
     record.assert_awaited_once()
@@ -77,9 +77,10 @@ async def test_after_terminal_falls_back_when_api_package_is_missing():
     factory = _factory(session)
     tid = str(uuid.uuid4())
     missing = {"app.services.execution_hooks": None, "app.routers.triggers": None}
-    with patch.object(
-        consumer, "_get_session_factory", AsyncMock(return_value=factory)
-    ), patch.dict(sys.modules, missing):
+    with (
+        patch.object(consumer, "_get_session_factory", AsyncMock(return_value=factory)),
+        patch.dict(sys.modules, missing),
+    ):
         await consumer._after_terminal("ex-1", "completed", None, tid)
     assert len(session.statements) == 1
     stmt, params = session.statements[0]
@@ -94,13 +95,41 @@ async def test_hook_failure_does_not_block_trigger_write():
     factory = _factory(FakeSession())
     writer = AsyncMock(return_value=True)
     tid = str(uuid.uuid4())
-    with patch.object(
-        consumer, "_get_session_factory", AsyncMock(return_value=factory)
-    ), patch(
-        "app.services.execution_hooks.record_terminal_by_id",
-        AsyncMock(side_effect=RuntimeError("redis down")),
-    ), patch(
-        "app.routers.triggers.write_trigger_outcome", writer
+    with (
+        patch.object(consumer, "_get_session_factory", AsyncMock(return_value=factory)),
+        patch(
+            "app.services.execution_hooks.record_terminal_by_id",
+            AsyncMock(side_effect=RuntimeError("redis down")),
+        ),
+        patch("app.routers.triggers.write_trigger_outcome", writer),
     ):
         await consumer._after_terminal("ex-1", "completed", None, tid)
     writer.assert_awaited_once()
+
+
+class RowSession(FakeSession):
+    def __init__(self, trigger_id) -> None:
+        super().__init__()
+        self.trigger_id = trigger_id
+
+    async def execute(self, stmt, params=None):
+        self.statements.append((stmt, params))
+        return SimpleNamespace(rowcount=1, scalar=lambda: self.trigger_id)
+
+
+@pytest.mark.asyncio
+async def test_trigger_comes_from_the_row_when_the_message_has_none():
+    tid = uuid.uuid4()
+    factory = _factory(RowSession(tid))
+    writer = AsyncMock(return_value=True)
+    ex = str(uuid.uuid4())
+    with (
+        patch.object(consumer, "_get_session_factory", AsyncMock(return_value=factory)),
+        patch(
+            "app.services.execution_hooks.record_terminal_by_id",
+            AsyncMock(return_value=[]),
+        ),
+        patch("app.routers.triggers.write_trigger_outcome", writer),
+    ):
+        await consumer._after_terminal(ex, "completed", None, None)
+    writer.assert_awaited_once_with(factory, ex, "completed", None, trigger_id=str(tid))

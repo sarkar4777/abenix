@@ -6,9 +6,11 @@ import ReactMarkdown from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
 import remarkGfm from 'remark-gfm';
 import 'highlight.js/styles/atom-one-dark.css';
-import { ChevronDown, ChevronUp, User, Bot, Wrench, AlertCircle, GitBranch, Check, XCircle, SkipForward } from 'lucide-react';
+import { ChevronDown, ChevronUp, User, Bot, Wrench, AlertCircle, GitBranch, Check, XCircle, SkipForward, ShieldCheck } from 'lucide-react';
 import type { ContentBlock, ToolBlock, PipelineNodeBlock } from '@/stores/chatStore';
 import { renderRich } from './RichRenderer';
+import ActionBadge from '@/components/autonomy/ActionBadge';
+import HeldNotice, { type HoldView } from '@/components/moderation/HeldNotice';
 
 function ToolCallCard({ block }: { block: ToolBlock }) {
   const [expanded, setExpanded] = useState(false);
@@ -23,9 +25,13 @@ function ToolCallCard({ block }: { block: ToolBlock }) {
           <Wrench className="w-4 h-4 text-cyan-400" />
           <span className="text-sm font-mono text-cyan-400">{block.name}</span>
           {block.result !== undefined && (
-            <span className="text-xs text-emerald-400/70">completed</span>
+            block.isError ? (
+              <span className="text-xs text-red-400/80" data-testid="tool-call-failed">failed</span>
+            ) : (
+              <span className="text-xs text-emerald-400/70">completed</span>
+            )
           )}
-          {block.result === undefined && (
+          {block.result === undefined && !block.autonomy && (
             <span className="flex items-center gap-1 text-xs text-amber-400/70">
               <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
               running
@@ -38,6 +44,11 @@ function ToolCallCard({ block }: { block: ToolBlock }) {
           <ChevronDown className="w-4 h-4 text-slate-500" />
         )}
       </button>
+      {block.autonomy && (
+        <div className="mt-2">
+          <ActionBadge meta={block.autonomy} testId="chat-autonomy-badge" />
+        </div>
+      )}
 
       {expanded && (
         <div className="mt-2 space-y-2">
@@ -127,11 +138,17 @@ interface ChatMessageProps {
   requestedModel?: string;
   fallbackReason?: string;
   executionId?: string;
+  // a held message of theirs a reviewer released, the chat sends it on
+  onHoldReleased?: (view: HoldView) => void;
+  // shown while the reply is withheld for the moderation check
+  status?: string | null;
 }
 
-export default function ChatMessage({ role, blocks, isStreaming, model, requestedModel, fallbackReason, executionId }: ChatMessageProps) {
+export default function ChatMessage({ role, blocks, isStreaming, model, requestedModel, fallbackReason, executionId, onHoldReleased, status }: ChatMessageProps) {
   const isUser = role === 'user';
   const hasFallback = !!(model && requestedModel && model !== requestedModel);
+  // a hold card is its own panel, it does not sit inside a chat bubble
+  const onlyHold = !isStreaming && blocks.length === 1 && blocks[0].type === 'moderation_hold';
 
   return (
     <div data-testid="chat-message" data-role={isUser ? 'user' : 'assistant'} className={`flex gap-3 ${isUser ? 'justify-end' : 'justify-start'}`}>
@@ -142,11 +159,15 @@ export default function ChatMessage({ role, blocks, isStreaming, model, requeste
       )}
 
       <div
-        className={`${
-          isUser
-            ? 'bg-cyan-600/20 border border-cyan-500/20 rounded-2xl rounded-br-sm max-w-[70%]'
-            : 'bg-slate-800/50 border border-slate-700/50 rounded-2xl rounded-bl-sm max-w-[80%]'
-        } p-4`}
+        className={
+          onlyHold
+            ? `${isUser ? 'max-w-[85%] sm:max-w-[70%]' : 'max-w-[85%] sm:max-w-[80%]'} min-w-0`
+            : `${
+                isUser
+                  ? 'bg-cyan-600/20 border border-cyan-500/20 rounded-2xl rounded-br-sm max-w-[70%]'
+                  : 'bg-slate-800/50 border border-slate-700/50 rounded-2xl rounded-bl-sm max-w-[80%]'
+              } p-4`
+        }
       >
         {blocks.map((block, i) => {
           if (block.type === 'text') {
@@ -220,10 +241,20 @@ export default function ChatMessage({ role, blocks, isStreaming, model, requeste
           if (block.type === 'pipeline_node') {
             return <PipelineNodeCard key={i} block={block} />;
           }
+          if (block.type === 'moderation_hold') {
+            return <HeldNotice key={block.review_id} block={block} onReleased={onHoldReleased} />;
+          }
           return null;
         })}
 
-        {isStreaming && blocks.length === 0 && (
+        {isStreaming && status && (
+          <div data-testid="chat-reply-checking" role="status" className={`flex items-center gap-2 text-sm text-slate-300 ${blocks.length ? 'mt-2' : ''}`}>
+            <ShieldCheck className="w-4 h-4 text-sky-300 animate-pulse shrink-0" />
+            <span>{status}</span>
+          </div>
+        )}
+
+        {isStreaming && !status && blocks.length === 0 && (
           <div className="flex items-center gap-1.5 text-sm text-slate-400">
             <span>Agent is thinking</span>
             <span className="flex gap-0.5">

@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { Search, Bot, AlertTriangle, ChevronDown, ChevronRight } from 'lucide-react';
+import { Search, Bot, AlertTriangle, ChevronDown, ChevronRight, Plus, Wrench } from 'lucide-react';
+import PageHeader from '@/components/layout/PageHeader';
 import { apiFetch } from '@/lib/api-client';
 import { getToolDoc } from '@/lib/tool-docs';
 import ToolDetails from '@/components/tools-catalogue/ToolDetails';
@@ -124,22 +125,20 @@ export default function ToolsCataloguePage() {
 
   return (
     <div className="max-w-6xl mx-auto px-4 sm:px-6 py-8">
-      <header className="mb-8">
-        <h1 className="text-2xl sm:text-3xl font-semibold text-white mb-2">Tools catalogue</h1>
-        <p className="text-slate-400 max-w-3xl">
-          Browse the {tools.length || 'available'} built-in tools your agents
-          can call. Click any tool to see its arguments, an example call and a
-          shortcut to add it to an agent. You can also wire tools in{' '}
-          <Link href="/agents/new" className="text-cyan-400 hover:underline">
-            New agent
-          </Link>{' '}
-          or the visual{' '}
-          <Link href="/builder" className="text-cyan-400 hover:underline">
-            Builder
-          </Link>
-          .
-        </p>
-      </header>
+      <PageHeader
+        title="Tools catalogue"
+        icon={Wrench}
+        purpose={`Browse the ${tools.length || 'available'} built-in tools your agents can call and see what each one needs. For builders.`}
+        primaryAction={{ label: 'Build an agent', href: '/builder', icon: Plus }}
+        steps={[
+          'Search by name or open a category to find a tool.',
+          'Click a tool to see its arguments, an example call and a shortcut to add it to an agent.',
+          'A "needs key" badge means the tool needs a credential before it works. Admins set it with Configure.',
+        ]}
+        docSlug="02-runtime/02-tools"
+        storageKey="tools"
+        className="mb-8"
+      />
 
       <div className="mb-6 relative">
         <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />

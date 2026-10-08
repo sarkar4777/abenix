@@ -61,6 +61,51 @@ On the streamed path the tokens have already reached the client when the post-LL
 
 All decisions emit a `ModerationEvent` row with `outcome ∈ {allowed, masked, blocked}` and the matching categories + scores. The `/moderation` page is the audit surface — filter by event type, by user, by category.
 
+## Hold for review
+
+`hold` is a fourth action next to allow, flag, redact and block. A held message or reply waits in the review inbox at `/review-queue` until a person releases it, redacts and releases it, or rejects it with a reason. Block still outranks hold when both match.
+
+```mermaid
+flowchart LR
+  G[Gate: hold] --> R[moderation_reviews row<br/>full text encrypted]
+  G --> C[Chat shows waiting card]
+  R --> N[Reviewers notified<br/>moderation.review]
+  N --> D{Decision}
+  D -->|release or redact| OUT[Message goes to the agent<br/>or reply to the person]
+  D -->|reject with reason| NO[Person sees the reason]
+  R -->|time limit| T[Policy timeout:<br/>auto-reject or auto-release]
+```
+
+What happens when the gate holds:
+
+- The gate raises `ModerationHeld`, a subclass of `ModerationBlocked`. Code that only knows blocks still refuses the content, so no path can leak it.
+- The stream sends a `moderation` event with `outcome: "held"` and the `review_id`, then `done` with `moderation_held: true`. The run ends `failed` with `failure_code = MODERATION_HELD`.
+- The review row keeps the full text, encrypted with `app/core/crypto.py` when `ABENIX_DATA_KEY_KEK_BASE64` is set. The chat message and the run record get a stand-in, so the raw text never sits in `messages` or `executions` and never reaches the model as history.
+- Reviewers are everyone holding `moderation.review` (admins hold it). They get one notification per batch, filtered by their `moderation_reviews` preference, and the sidebar count updates over the existing WebSocket. Nothing polls.
+
+Deciding:
+
+- Release a user message and the chat sends it on to the agent. The gate lets that exact text through once, for 24 hours, by content hash.
+- Release a reply and the stand-in message becomes the reply, the run flips to `completed`.
+- Redact writes the reviewer's edited text instead of the original.
+- Reject needs a reason. The person sees it in the chat and the run becomes `MODERATION_REJECTED`.
+- A claim stops two reviewers working on the same item. Admins can take an item over or unassign it.
+- Every step is in the review history, the tenant activity log (`moderation_review_*`) and the platform events `moderation.held` and `moderation.decided`.
+
+The policy sets the time limit with `hold_timeout_minutes` (1 to 10080, default 60) and `hold_timeout_action` (`reject` by default, or `release`). A scheduler job applies it every 15 seconds under an advisory lock.
+
+## What we keep and for how long
+
+Matched spans are masked in every preview, event and log for all categories. Custom patterns mask the exact match. Provider categories have no offsets, so the whole text is masked, and a hold asks the provider about each sentence so the reviewer sees which one matched.
+
+| Data | Kept | Setting | Default |
+|---|---|---|---|
+| Full held text | while pending, then this long after the decision | `held_content_days` (0 to 365) | 30 days |
+| Decision record with masked text | this long after the decision | `decision_record_days` (30 to 3650) | 365 days |
+| Event previews | this long after the event | `event_preview_days` (1 to 365) | 30 days |
+
+Admins set these on the moderation page under What we keep and for how long. They are stored in `tenants.settings.moderation_retention` with who changed them and when, and every change is in the activity log. An hourly job purges in batches of 5000 under an advisory lock. GDPR erasure closes the person's pending reviews and clears their held text, released text and event previews straight away.
+
 ## The custom-pattern slot
 
 This is the slot a developer most often extends. The two big use cases:

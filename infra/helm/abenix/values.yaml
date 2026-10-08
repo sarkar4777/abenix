@@ -471,6 +471,12 @@ secrets:
   edgeSigningKeyPem: ""
   edgeSigningPubkeyPem: ""
 
+# Defaults for the two product switches. Admins change them at runtime on
+# Admin > Marketplace, the stored value wins over these.
+features:
+  marketplace: true
+  monetization: false
+
 # Edge gateway signing policy. allowUnsigned lets a gateway load bundles with
 # no signature, local development only, never true on a shared cluster.
 edge:
@@ -493,6 +499,20 @@ ingress:
 
 networkPolicy:
   enabled: false
+
+# Admin cluster view at /admin/cluster. Installs a read-only ClusterRole
+# (nodes, namespaces, node metrics) and a namespace Role (pods, logs, events,
+# workloads, autoscalers). No secrets and no writes. Off, the page still loads
+# and says which reads are missing.
+clusterView:
+  rbac:
+    enabled: true
+    # ServiceAccount the API pod runs as
+    serviceAccount: default
+    # "true" forces the metrics.k8s.io and keda.sh rules when helm cannot
+    # see those APIs at render time (helm template, or installed later)
+    metrics: ""
+    keda: ""
 
 backup:
   enabled: false

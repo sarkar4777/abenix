@@ -93,6 +93,8 @@ interface ExecuteOptions {
 
 Unlike Python, the TS client does not poll. If the server hands back an async response, `output` is empty and you poll `client.executions.get(executionId)` yourself. `maxTokens` and `temperature` are sent in the body but the execute endpoint ignores them. Use `stream()` rather than `stream: true` here.
 
+Results carry `triggerKind`, `triggerId`, `triggerName` and `startedBy`. `client.executions.list({ triggerKind: ['schedule', 'webhook'] })` and `list({ triggerId })` filter past runs by what started them.
+
 ---
 
 ## Streaming
@@ -184,7 +186,7 @@ class AbenixError extends Error {
 class AbenixDecisionError extends Error { /* same fields */ }
 ```
 
-`AbenixDecisionError` does not extend `AbenixError`, so check for both if you need to. Decision calls throw `AbenixDecisionError`. `permissions()`, `sources` and `events` throw `AbenixError`. The older `execute`, `approvals` and `knowledge` methods still throw a plain `Error`.
+`AbenixDecisionError` does not extend `AbenixError`, so check for both if you need to. Decision calls throw `AbenixDecisionError`. `permissions()`, `sources`, `events`, `actions` and `autonomy` throw `AbenixError`. The older `execute`, `approvals` and `knowledge` methods still throw a plain `Error`.
 
 ```ts
 try {
@@ -333,6 +335,51 @@ await client.approvals.returnForChanges(approvalId, "Cap should be 200k, not 250
 
 Rejects when `reason` is blank. It calls `signoff(approvalId, "return", ...)` and resolves to the updated `Approval`.
 
+### Actions
+
+Earned autonomy for actions your app takes itself. Act only when the decision is `run`. See [08-howto/13-earned-autonomy](../08-howto/13-earned-autonomy.md#8-drive-it-from-a-standalone-app).
+
+```ts
+const d = await client.actions.propose('trade.execute', { symbol: 'TTF', lots: 5 }, {
+  target: 'TTF-Q1',
+  intent: 'Spread is two sigma under fair value',
+  prediction: { metric: 'pnl_eur', value: 12000, low: 4000, high: 20000 },
+});
+let go = d.decision === 'run';
+let args: Record<string, unknown> = { symbol: 'TTF', lots: 5 };
+if (d.decision === 'wait') {
+  const w = await client.actions.wait(d.action_id, { timeoutSeconds: 1800 });
+  go = w.decision === 'run';
+  args = w.arguments ?? args;   // a reviewer may have edited them
+}
+if (go) {
+  await placeOrder(args);
+  await client.actions.executed(d.action_id, true, { resultPreview: 'filled' });
+  await client.actions.reportOutcome(d.action_id, 9800);
+}
+```
+
+| Method | Calls |
+|---|---|
+| `propose(actionKey, args?, opts?: { agentId, target, intent, prediction })` | `POST /api/autonomy/actions/propose`, resolves `ProposeResult` `{ action_id, decision, approval_id, message }` |
+| `wait(actionId, opts?: { timeoutSeconds })` | Long-polls `/api/autonomy/actions/{id}/wait` in chunks of up to 120 s, default 60 s total. Resolves `ActionWaitResult` with the final `arguments` |
+| `executed(actionId, ok = true, opts?: { resultPreview })` | `POST /api/autonomy/actions/{id}/executed` |
+| `reportOutcome(actionId, value, opts?: { note })` | `POST /api/autonomy/actions/{id}/outcome` with `source: 'api'`. Needs `actions.review` |
+| `flagHarm(actionId, note)` | `POST /api/autonomy/actions/{id}/harm`. Rejects on a blank note. Needs `actions.review` |
+| `get(actionId)` | `GET /api/autonomy/actions/{id}`. Needs `autonomy.view` |
+
+`ActionDecision` is `'run' | 'wait' | 'watching' | 'blocked'`. Response fields stay snake_case as the API sends them.
+
+### Autonomy
+
+| Method | Calls |
+|---|---|
+| `overview()` | `GET /api/autonomy/overview` |
+| `grant(grantId)` | `GET /api/autonomy/grants/{id}` |
+| `grantActions(grantId, opts?: { status, limit, before })` | `GET /api/autonomy/grants/{id}/actions`, resolves `{ items, next_before }` |
+
+All need `autonomy.view`.
+
 ---
 
 ## Other sub-clients
@@ -348,7 +395,7 @@ Every call resolves to an `Approval` (camelCase: `id`, `agentId`, `agentExecutio
 | `list(opts?: { status, executionId, agentId, kind, limit })` | `GET /api/approvals`, `limit` defaults to 200 |
 | `get(approvalId)` | `GET /api/approvals/{id}` |
 | `create(title, payload, opts?: { requiredSignoffs, expiresSeconds, gateKind, agentId, agentExecutionId, clientToken })` | `POST /api/approvals`. Defaults are 1 signoff and 86400 s |
-| `signoff(approvalId, decision, opts?: { reason, clientToken })` | `decision` is `"approve"`, `"deny"` or `"return"` |
+| `signoff(approvalId, decision, opts?: { reason, clientToken, editedArguments })` | `decision` is `"approve"`, `"deny"` or `"return"`. `editedArguments` only on an `action:*` approval with `approve` |
 | `approve(approvalId, opts?)` / `deny(approvalId, opts?)` | `signoff` with that decision |
 | `returnForChanges(approvalId, reason, opts?: { clientToken })` | see above |
 | `waitFor(approvalId, opts?: { timeoutSeconds, pollSeconds })` | Long-polls `/wait` in chunks of up to 120 s, default 60 s total |

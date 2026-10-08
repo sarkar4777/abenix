@@ -1,6 +1,6 @@
 # Data model overview
 
-> 109 platform tables in one Postgres database. 107 are SQLAlchemy models under [`packages/db/models/`](../../packages/db/models/), two more are raw SQL. This page covers the conventions, how tables get created, the top-level ERD and a list of every table.
+> 113 platform tables in one Postgres database. 111 are SQLAlchemy models under [`packages/db/models/`](../../packages/db/models/), two more are raw SQL. This page covers the conventions, how tables get created, the top-level ERD and a list of every table.
 
 ---
 
@@ -140,6 +140,15 @@ Grouped by area. The source column is the model file under `packages/db/models/`
 | `moderation_policies` | `moderation_policy.py` | Per-tenant moderation rules and thresholds, `fail_closed` flag | this page |
 | `moderation_events` | `moderation_policy.py` | One row per moderation verdict, content stored as SHA-256 plus preview | this page |
 
+### Earned autonomy
+
+| Table | Source | What it holds | Page |
+|---|---|---|---|
+| `action_types` | `autonomy.py` | A kind of action: tool, argument match, world model, outcome probe, limits key, ladder policy | [08](08-autonomy.md) |
+| `autonomy_grants` | `autonomy.py` | One agent's level (0 to 4) for one action type, with scope, ceiling and state | [08](08-autonomy.md) |
+| `autonomy_changes` | `autonomy.py` | Append-only level history with the evidence at the time | [08](08-autonomy.md) |
+| `agent_actions` | `autonomy.py` | The action ledger: every effect call or SDK proposal, its prediction, decision, outcome and score | [08](08-autonomy.md) |
+
 ### Evals, sources, events
 
 | Table | Source | What it holds | Page |
@@ -275,3 +284,4 @@ flowchart LR
 - [05-governance-decisions](05-governance-decisions.md) — capabilities, risk tiers, kill switches, audit chain, approvals, decisions
 - [06-evals-sources-events](06-evals-sources-events.md) — eval suites, Source Watch, the outbox and webhooks
 - [07-tools-and-operations](07-tools-and-operations.md) — tool credentials and config, code assets, MCP, models, archives
+- [08-autonomy](08-autonomy.md) — action types, grants, level history and the action ledger

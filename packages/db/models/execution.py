@@ -110,6 +110,17 @@ class Execution(UUIDMixin, TenantMixin, Base):
     delivery_attempts: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, server_default="0"
     )
+    # what started the run, the name is a snapshot so it survives a deleted trigger
+    trigger_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("agent_triggers.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    trigger_kind: Mapped[str | None] = mapped_column(
+        String(32), nullable=True, index=True
+    )
+    trigger_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     agent: Mapped["Agent"] = relationship(back_populates="executions")
     user: Mapped["User"] = relationship(back_populates="executions")

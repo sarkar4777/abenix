@@ -6,7 +6,7 @@ from typing import Any
 
 import httpx
 
-from engine.tools.base import BaseTool, ConfigField, ToolResult
+from engine.tools.base import BaseTool, ConfigField, Effect, ToolResult
 
 _BASE = "https://api.twilio.com/2010-04-01"
 
@@ -14,6 +14,9 @@ _BASE = "https://api.twilio.com/2010-04-01"
 class TwilioSmsTool(BaseTool):
     name = "twilio_sms"
     risk_tier = "high"
+    effect = Effect(
+        kind="send", label="Send an SMS or WhatsApp message", target_param="to"
+    )
     config_fields = (
         ConfigField(
             "TWILIO_ACCOUNT_SID",

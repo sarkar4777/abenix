@@ -10,7 +10,7 @@ from typing import Any
 
 import httpx
 
-from engine.tools.base import BaseTool, ConfigField, ToolResult
+from engine.tools.base import READ_ONLY, BaseTool, ConfigField, ToolResult
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +38,7 @@ def _fmt(value: float | None, decimals: int = 4) -> float | None:
 class CreditRiskTool(BaseTool):
     name = "credit_risk"
     risk_tier = "medium"
+    effect = READ_ONLY
     config_fields = (
         ConfigField(
             "FMP_API_KEY",

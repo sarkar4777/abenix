@@ -12,7 +12,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from engine.tools.base import BaseTool, ToolResult
+from engine.tools.base import BaseTool, Effect, ToolResult
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +88,9 @@ def _valid_env_name(k: str) -> bool:
 class SandboxedJobTool(BaseTool):
     name = "sandboxed_job"
     risk_tier = "medium"
+    effect = Effect(
+        kind="external", label="Run a sandboxed container job", target_param="image"
+    )
     description = (
         "Run a one-shot command in an isolated container. Auto-selects "
         "Kubernetes Jobs when running inside a cluster, or local Docker "

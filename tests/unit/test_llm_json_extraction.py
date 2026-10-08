@@ -66,7 +66,9 @@ def test_extract_skips_leading_prose() -> None:
     assert got == {"a": 1}
 
 
-@pytest.mark.parametrize("text", ["", "no braces here", "just prose, nothing structured"])
+@pytest.mark.parametrize(
+    "text", ["", "no braces here", "just prose, nothing structured"]
+)
 def test_extract_returns_none_without_json(text: str) -> None:
     assert loop_extract(text) is None
 
@@ -90,3 +92,33 @@ def test_builder_parser_still_rejects_all_prose() -> None:
 
     with pytest.raises(ValueError, match="all prose"):
         _parse_builder_json("I cannot help with that request.")
+
+
+def test_normalize_config_agent_inputs_are_optional():
+    from engine.ai_builder_loop import normalize_config
+
+    cfg = normalize_config(
+        {
+            "mode": "agent",
+            "tools": ["csv_analyzer"],
+            "input_variables": [
+                {"name": "csv_data", "type": "string", "required": True}
+            ],
+        }
+    )
+    assert cfg["input_variables"][0]["required"] is False
+
+
+def test_normalize_config_pipeline_inputs_keep_required():
+    from engine.ai_builder_loop import normalize_config
+
+    cfg = normalize_config(
+        {
+            "mode": "pipeline",
+            "tools": [],
+            "input_variables": [{"name": "url", "type": "url", "required": True}],
+            "pipeline_config": {"nodes": [{"id": "fetch", "tool_name": "http_client"}]},
+        }
+    )
+    assert cfg["input_variables"][0]["required"] is True
+    assert cfg["tools"] == ["http_client"]

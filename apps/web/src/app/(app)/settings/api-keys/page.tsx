@@ -2,8 +2,10 @@
 
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Check, Copy, Key, Loader2, Plus, Trash2, X } from 'lucide-react';
+import { BookOpen, Check, Copy, FileCode2, Key, Loader2, Plus, TerminalSquare, Trash2, X } from 'lucide-react';
 import { usePageTitle } from '@/hooks/usePageTitle';
+import PageHeader from '@/components/layout/PageHeader';
+import NextSteps from '@/components/shared/NextSteps';
 import { useApi } from '@/hooks/useApi';
 import { apiFetch } from '@/lib/api-client';
 import { toastSuccess, toastError } from '@/stores/toastStore';
@@ -33,6 +35,7 @@ export default function ApiKeysPage() {
   const [copied, setCopied] = useState(false);
   const [revoking, setRevoking] = useState<string | null>(null);
   const [confirmRevoke, setConfirmRevoke] = useState<ApiKeyData | null>(null);
+  const [showNext, setShowNext] = useState(false);
 
   const handleCreate = async () => {
     if (!newKeyName.trim()) return;
@@ -45,6 +48,7 @@ export default function ApiKeysPage() {
       });
       if (res.data) {
         setNewKey(res.data);
+        setShowNext(true);
         setNewKeyName('');
         setShowCreate(false);
         mutateKeys();
@@ -119,22 +123,20 @@ export default function ApiKeysPage() {
       transition={{ duration: 0.4 }}
       className="space-y-6 max-w-2xl"
     >
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0">
-          <h1 className="text-2xl font-bold text-white">API Keys</h1>
-          <p className="text-sm text-slate-500 mt-1">
-            Keys let your scripts and apps call the Abenix API as you. Send one in the X-API-Key header.
-          </p>
-        </div>
-        <button
-          onClick={() => setShowCreate(true)}
-          data-testid="apikey-generate"
-          className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-cyan-500 to-purple-600 text-white text-sm font-medium rounded-lg hover:from-cyan-400 hover:to-purple-500 shadow-lg shadow-cyan-500/25 transition-all"
-        >
-          <Plus className="w-4 h-4" />
-          Generate Key
-        </button>
-      </div>
+      <PageHeader
+        title="API Keys"
+        icon={Key}
+        purpose="Keys let your scripts and apps call the Abenix API as you. For developers wiring Abenix into their own code."
+        primaryAction={{ label: 'Generate Key', icon: Plus, onClick: () => setShowCreate(true), testId: 'apikey-generate' }}
+        steps={[
+          'Generate a key and name it after the app that will use it.',
+          'Copy it right away. The full key is shown only once.',
+          'Send it in the X-API-Key header, or pass it to the SDK.',
+          'Revoke a key the moment it leaks or the app is retired.',
+        ]}
+        docSlug="03-sdk/00-overview"
+        storageKey="settings-api-keys"
+      />
 
       <AnimatePresence>
         {newKey?.raw_key && (
@@ -180,6 +182,19 @@ export default function ApiKeysPage() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {showNext && (
+        <NextSteps
+          title="Key ready. What next?"
+          testId="apikey-next-steps"
+          onDismiss={() => setShowNext(false)}
+          steps={[
+            { id: 'playground', label: 'Try it in the playground', hint: 'Run SDK calls in the browser with your new key.', icon: TerminalSquare, href: '/sdk-playground' },
+            { id: 'sdk-docs', label: 'Read the SDK docs', hint: 'Install the SDK and make your first call.', icon: BookOpen, href: '/docs?doc=03-sdk/00-overview' },
+            { id: 'rest-docs', label: 'See the REST API', hint: 'Every endpoint you can call with this key.', icon: FileCode2, href: '/docs?doc=09-reference/00-rest-api' },
+          ]}
+        />
+      )}
 
       <AnimatePresence>
         {showCreate && (

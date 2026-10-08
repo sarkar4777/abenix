@@ -28,15 +28,25 @@ MAX_INPUT_CHARS = 30_000
 ACTION_ALLOW = "allow"
 ACTION_FLAG = "flag"
 ACTION_REDACT = "redact"
+ACTION_HOLD = "hold"
 ACTION_BLOCK = "block"
 
 # Severity order — most severe wins when multiple categories trigger.
-_SEVERITY = {ACTION_ALLOW: 0, ACTION_FLAG: 1, ACTION_REDACT: 2, ACTION_BLOCK: 3}
+_SEVERITY = {
+    ACTION_ALLOW: 0,
+    ACTION_FLAG: 1,
+    ACTION_REDACT: 2,
+    ACTION_HOLD: 3,
+    ACTION_BLOCK: 4,
+}
+
+# provider categories carry no offsets, a hold asks the provider about each sentence
+MAX_LOCATE_SENTENCES = 40
 
 
 @dataclass
 class ModerationDecision:
-    outcome: str = "allowed"  # allowed|flagged|redacted|blocked|error
+    outcome: str = "allowed"  # allowed|flagged|redacted|held|blocked|error
     action: str = ACTION_ALLOW
     triggered_categories: list[str] = field(default_factory=list)
     category_scores: dict[str, float] = field(default_factory=dict)
@@ -46,6 +56,8 @@ class ModerationDecision:
     latency_ms: int = 0
     provider_response: dict[str, Any] = field(default_factory=dict)
     error: str | None = None
+    # [{"start", "end", "category"}] over the evaluated text
+    spans: list[dict[str, Any]] = field(default_factory=list)
 
 
 def _pick_action(
@@ -65,12 +77,18 @@ def _pick_action(
 
 
 async def _call_openai(
-    content: str, model: str, timeout_s: float = 10.0
+    content: str | list[str], model: str, timeout_s: float = 10.0
 ) -> dict[str, Any]:
     api_key = os.environ.get("OPENAI_API_KEY", "").strip()
     if not api_key:
         raise RuntimeError("OPENAI_API_KEY not configured")
-    payload = {"input": content[:MAX_INPUT_CHARS], "model": model}
+    clipped: Any
+    if isinstance(content, list):
+        each = MAX_INPUT_CHARS // max(1, len(content))
+        clipped = [c[:each] for c in content]
+    else:
+        clipped = content[:MAX_INPUT_CHARS]
+    payload = {"input": clipped, "model": model}
     async with httpx.AsyncClient(timeout=timeout_s) as client:
         r = await client.post(
             OPENAI_MODERATION_URL,
@@ -127,6 +145,111 @@ def _redact(content: str, patterns: list[Any], mask: str) -> str:
     return out
 
 
+def pattern_spans(content: str, patterns: list[Any]) -> list[dict[str, Any]]:
+    """Where each custom pattern matched, labelled custom:<pattern index>."""
+    out: list[dict[str, Any]] = []
+    for i, pat in enumerate(patterns or []):
+        pat = pat.get("pattern") if isinstance(pat, dict) else pat
+        if not isinstance(pat, str):
+            continue
+        try:
+            for m in _real_matches(pat, content):
+                if m.end() > m.start():
+                    out.append(
+                        {"start": m.start(), "end": m.end(), "category": f"custom:{i}"}
+                    )
+        except re.error:
+            continue
+    return out
+
+
+def merge_spans(spans: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Sorted spans with overlaps joined, categories kept."""
+    ordered = sorted(
+        (s for s in spans if int(s.get("end", 0)) > int(s.get("start", 0))),
+        key=lambda s: (int(s["start"]), int(s["end"])),
+    )
+    merged: list[dict[str, Any]] = []
+    for s in ordered:
+        start, end = int(s["start"]), int(s["end"])
+        cats = [c for c in str(s.get("category") or "").split(",") if c]
+        if merged and start <= merged[-1]["end"]:
+            last = merged[-1]
+            last["end"] = max(last["end"], end)
+            last["cats"].extend(c for c in cats if c not in last["cats"])
+            continue
+        merged.append({"start": start, "end": end, "cats": list(cats)})
+    return [
+        {"start": m["start"], "end": m["end"], "category": ",".join(m["cats"])}
+        for m in merged
+    ]
+
+
+def mask_spans(content: str, spans: list[dict[str, Any]], mask: str) -> str:
+    """The text with every span replaced by the mask."""
+    if not content or not spans:
+        return content or ""
+    out = content
+    for s in reversed(merge_spans(spans)):
+        start = max(0, min(len(out), int(s["start"])))
+        end = max(start, min(len(out), int(s["end"])))
+        out = out[:start] + mask + out[end:]
+    return out
+
+
+_SENTENCE = re.compile(r"[^.!?\n]+[.!?]*\s*")
+
+
+def _sentences(content: str) -> list[tuple[int, int]]:
+    found = [
+        (m.start(), m.end())
+        for m in _SENTENCE.finditer(content)
+        if content[m.start() : m.end()].strip()
+    ]
+    return found or [(0, len(content))]
+
+
+async def locate_provider_spans(
+    content: str,
+    categories: list[str],
+    *,
+    thresholds: dict[str, float],
+    default_threshold: float,
+    model: str,
+    localize: bool,
+) -> list[dict[str, Any]]:
+    """Spans for provider categories, the whole text unless a per-sentence check narrows it."""
+    if not categories:
+        return []
+    whole = [{"start": 0, "end": len(content), "category": ",".join(categories)}]
+    if not localize:
+        return whole
+    parts = _sentences(content)
+    if len(parts) < 2 or len(parts) > MAX_LOCATE_SENTENCES:
+        return whole
+    try:
+        body = await _call_openai([content[a:b] for a, b in parts], model=model)
+        results = body.get("results") or []
+    except Exception as e:  # noqa: BLE001
+        logger.warning("moderation span lookup failed: %s", type(e).__name__)
+        return whole
+    if len(results) != len(parts):
+        return whole
+    found: list[dict[str, Any]] = []
+    for (a, b), r in zip(parts, results):
+        scores = r.get("category_scores") or {}
+        flags = r.get("categories") or {}
+        hit = [
+            c
+            for c in categories
+            if flags.get(c)
+            or float(scores.get(c, 0.0)) >= thresholds.get(c, default_threshold)
+        ]
+        if hit:
+            found.append({"start": a, "end": b, "category": ",".join(hit)})
+    return found or whole
+
+
 def _custom_pattern_hit(content: str, patterns: list[Any]) -> list[str]:
     """Return the list of patterns that matched the content."""
     hits = []
@@ -170,7 +293,11 @@ async def evaluate(
     # 1. Custom-pattern check runs FIRST and is always authoritative.
     # A pattern match triggers default_action at 1.0 confidence.
     pattern_hits = _custom_pattern_hit(content, custom_patterns)
-    pattern_triggered_categories = [f"custom:{i}" for i in range(len(pattern_hits))]
+    found_spans = pattern_spans(content, custom_patterns)
+    # custom:N is the policy's Nth pattern, the index /moderation labels it by
+    pattern_triggered_categories = list(
+        dict.fromkeys(s["category"] for s in found_spans)
+    )
 
     # 2. Provider check.
     provider_body: dict[str, Any] = {}
@@ -226,6 +353,8 @@ async def evaluate(
             decision.redacted_content = _redact(
                 content, custom_patterns, redaction_mask
             )
+        elif action == ACTION_HOLD:
+            decision.outcome = "held"
         elif action == ACTION_BLOCK:
             decision.outcome = "blocked"
         reasons = []
@@ -234,6 +363,19 @@ async def evaluate(
         if provider_triggered:
             reasons.append(f"provider[{','.join(provider_triggered[:3])}]")
         decision.reason = " ".join(reasons) or "policy_triggered"
+        if action != ACTION_ALLOW:
+            provider_acted = [c for c in acted if not c.startswith("custom:")]
+            decision.spans = merge_spans(
+                [s for s in found_spans if s["category"] in acted]
+                + await locate_provider_spans(
+                    content,
+                    provider_acted,
+                    thresholds=thresholds,
+                    default_threshold=default_threshold,
+                    model=model,
+                    localize=action == ACTION_HOLD,
+                )
+            )
 
     decision.latency_ms = int((time.monotonic() - start) * 1000)
     return decision

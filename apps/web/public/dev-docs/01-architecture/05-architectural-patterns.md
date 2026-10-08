@@ -302,6 +302,16 @@ Per-app caches only hold values that came from a real platform call. Every cache
 
 ---
 
+## Autonomy patterns
+
+### 46. Declare the effect, gate in one hook, earn the level
+
+A tool that changes the world says so on its class with `effect` (or `effect_for` per call), next to `risk_tier`. One hook in `BaseTool._govern` ([`engine/tools/base.py`](../../apps/agent-runtime/engine/tools/base.py)) checks kill switches, then the agent's autonomy level from an in-memory snapshot ([`engine/autonomy.py`](../../apps/agent-runtime/engine/autonomy.py)), then the tier policy. Every built-in, MCP, dynamic and pipeline call passes through it, so no call site knows about autonomy. The level only moves on the scored record in `agent_actions`, promotion needs a person who did not build the agent, and demotion is automatic. See [02-runtime/21-earned-autonomy](../02-runtime/21-earned-autonomy.md).
+
+**Violation symptom**: a write tool with no `effect` never reaches the ledger, so its agent can never earn or lose autonomy on it. `scripts/check-tool-config.py` fails at medium tier and above. A tool that gates itself instead of using the hook skips kill switches and limits.
+
+---
+
 ## When you should break these
 
 Most of these patterns earn their keep most of the time. Two situations where the pattern is *not* the right answer.

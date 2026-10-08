@@ -32,54 +32,28 @@ class ScopeGateTool(BaseTool):
         self._execution_id = execution_id
 
     async def execute(self, arguments: dict[str, Any]) -> ToolResult:
-        q = (arguments.get("question") or "").strip().lower()
+        q = (arguments.get("question") or "").strip()
         sess = sessmod.get(self._execution_id)
-        (arguments.get("meeting_id") or "").strip()
         if not sess:
-            commitment_markers = (
-                "by friday",
-                "by monday",
-                "by tuesday",
-                "by wednesday",
-                "by thursday",
-                "by next",
-                "by end of",
-                "can you commit",
-                "will you ",
-                "promise",
-                "signed off",
-                "approve ",
-                "approved",
-                "sign this",
-                "authorize",
-                "budget",
-                "how much",
-                "contract value",
-                "pricing",
-            )
-            for m in commitment_markers:
-                if m in q:
-                    return ToolResult(
-                        content=json.dumps(
-                            {
-                                "decision": "defer",
-                                "reason": f"no_session_plus_commitment_shape:{m}",
-                            }
-                        ),
-                        metadata={
+            hit = _commitment(q.lower())
+            if hit:
+                return ToolResult(
+                    content=json.dumps(
+                        {
                             "decision": "defer",
-                            "matched": m,
-                            "no_session": True,
-                        },
-                    )
+                            "reason": f"no_session_plus_commitment_shape:{hit}",
+                        }
+                    ),
+                    metadata={"decision": "defer", "matched": hit, "no_session": True},
+                )
             return ToolResult(
                 content=json.dumps(
                     {
                         "decision": "answer",
                         "reason": "no_active_session_default_answer",
                         "hint": (
-                            "No live session context available — the pod may have "
-                            "restarted. Use persona_rag; if nothing relevant, "
+                            "No live session context available, the pod may have "
+                            "restarted. Use persona_rag. If nothing relevant, "
                             "politely say you don't have specifics and offer to "
                             "follow up."
                         ),
@@ -87,90 +61,80 @@ class ScopeGateTool(BaseTool):
                 ),
                 metadata={"decision": "answer", "no_session": True},
             )
-
-        # Tokenize the question into words for keyword matching. Whole-
-        # phrase substring matching ("candidate background" must appear
-        # verbatim) was too strict — "what is your background?" never
-        # matched any allow-list topic, so every question deferred.
-        q_words = set(_tokenize(q))
-
-        # Defer-list wins: these topics MUST always defer even if they
-        # also happen to appear in the allow-list.
-        for topic in sess.scope_defer:
-            tw = set(_tokenize(topic))
-            if topic.lower() in q or (tw & q_words):
-                return ToolResult(
-                    content=json.dumps(
-                        {
-                            "decision": "defer",
-                            "reason": f"topic_in_defer_list:{topic}",
-                        }
-                    ),
-                    metadata={"decision": "defer", "matched": topic},
-                )
-
-        for topic in sess.scope_allow:
-            tw = set(_tokenize(topic))
-            if topic.lower() in q or (tw & q_words):
-                return ToolResult(
-                    content=json.dumps(
-                        {
-                            "decision": "answer",
-                            "reason": f"topic_in_allow_list:{topic}",
-                        }
-                    ),
-                    metadata={"decision": "answer", "matched": topic},
-                )
-
-        # Commitment-shaped heuristics — ALWAYS defer
-        commitment_markers = (
-            "by friday",
-            "by monday",
-            "by tuesday",
-            "by wednesday",
-            "by thursday",
-            "by next",
-            "by end of",
-            "can you commit",
-            "will you ",
-            "promise",
-            "signed off",
-            "approve ",
-            "approved",
-            "sign this",
-            "authorize",
-            "budget",
-            "how much",
-            "contract value",
-            "pricing",
-        )
-        for m in commitment_markers:
-            if m in q:
-                return ToolResult(
-                    content=json.dumps(
-                        {
-                            "decision": "defer",
-                            "reason": f"commitment_shape:{m}",
-                        }
-                    ),
-                    metadata={"decision": "defer", "matched": m},
-                )
-
+        d = decide(q, sess.scope_allow, sess.scope_defer)
         return ToolResult(
-            content=json.dumps(
-                {
-                    "decision": "answer",
-                    "reason": "no_allow_match_default_answer",
-                    "hint": (
-                        "No allow-list topic matched the question, but it's also "
-                        "not a defer-list topic or commitment. Try persona_rag "
-                        "first; if no relevant context found, politely tell the "
-                        "asker you don't have specifics on that topic."
-                    ),
-                }
-            ),
-            metadata={"decision": "answer"},
+            content=json.dumps({k: v for k, v in d.items() if k != "matched"}),
+            metadata={"decision": d["decision"], "matched": d.get("matched")},
         )
+
+
+COMMITMENT_MARKERS = (
+    "by friday",
+    "by monday",
+    "by tuesday",
+    "by wednesday",
+    "by thursday",
+    "by next",
+    "by end of",
+    "can you commit",
+    "will you ",
+    "promise",
+    "signed off",
+    "approve ",
+    "approved",
+    "sign this",
+    "authorize",
+    "budget",
+    "how much",
+    "contract value",
+    "pricing",
+)
+
+SCOPE_LABEL = {
+    "answer": "inside the topics you allowed",
+    "defer": "hand back to you",
+    "decline": "outside the topics you allowed, will decline",
+}
+
+
+def _commitment(q: str) -> str | None:
+    return next((m for m in COMMITMENT_MARKERS if m in q), None)
+
+
+def decide(question: str, allow: list[str], defer: list[str]) -> dict[str, Any]:
+    """The scope rule: defer list and commitments hand back, allowed topics answer, the rest declines."""
+    q = (question or "").strip().lower()
+    q_words = set(_tokenize(q))
+    for topic in defer or []:
+        if topic.lower() in q or (set(_tokenize(topic)) & q_words):
+            return {
+                "decision": "defer",
+                "reason": f"topic_in_defer_list:{topic}",
+                "matched": topic,
+            }
+    hit = _commitment(q)
+    if hit:
+        return {
+            "decision": "defer",
+            "reason": f"commitment_shape:{hit}",
+            "matched": hit,
+        }
+    for topic in allow or []:
+        if topic.lower() in q or (set(_tokenize(topic)) & q_words):
+            return {
+                "decision": "answer",
+                "reason": f"topic_in_allow_list:{topic}",
+                "matched": topic,
+            }
+    # ring-fenced: anything the user did not authorize is politely declined
+    return {
+        "decision": "decline",
+        "reason": "not_in_allow_list" if allow else "no_topics_authorized",
+        "hint": (
+            "The question is outside the topics the user authorized. "
+            "Politely say you can't speak to that and offer to pass it on."
+        ),
+    }
 
 
 # Stop-words that shouldn't count as "topic keywords" — otherwise every

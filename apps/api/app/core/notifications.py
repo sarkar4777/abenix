@@ -31,6 +31,12 @@ PREF_FOR_TYPE: dict[str, str] = {
     "agent_comment": "team_updates",
     "agent_modified": "team_updates",
     "new_subscriber": "team_updates",
+    "listing_reviewed": "team_updates",
+    "autonomy_recommended": "autonomy_updates",
+    "autonomy_demoted": "autonomy_updates",
+    "action_pending_review": "autonomy_updates",
+    "action_reported": "autonomy_updates",
+    "moderation_review_requested": "moderation_reviews",
 }
 
 

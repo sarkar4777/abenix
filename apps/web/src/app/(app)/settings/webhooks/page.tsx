@@ -2,13 +2,17 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import {
-  Bell, Bot, Check, ChevronDown, ChevronRight, Copy, Globe, Loader2, Pause, Play, Plus, RotateCcw, Send, Trash2, Workflow, X,
+  Bell, BookOpen, Bot, Check, ChevronDown, ChevronRight, Copy, Globe, ListChecks, Loader2, Pause, Play, Plus, RotateCcw, Send, Trash2, Workflow, X,
 } from 'lucide-react';
 import { apiFetch } from '@/lib/api-client';
 import { useApi } from '@/hooks/useApi';
 import { holds, useMyPermissions } from '@/lib/capabilities';
 import { fetchAllAgents } from '@/lib/fetch-all-agents';
 import ConfirmModal from '@/components/ui/ConfirmModal';
+import PageHeader from '@/components/layout/PageHeader';
+import NoAccess from '@/components/layout/NoAccess';
+import NextSteps from '@/components/shared/NextSteps';
+import { toastError, toastSuccess } from '@/stores/toastStore';
 
 interface CatalogItem { type: string; description: string; sample: Record<string, unknown> }
 interface Sub {
@@ -139,8 +143,11 @@ function Deliveries({ sub, canManage }: { sub: Sub; canManage: boolean }) {
   );
 }
 
-function SubCard({ sub, catalog, agents, canManage, onChanged }: { sub: Sub; catalog: CatalogItem[]; agents: Map<string, string>; canManage: boolean; onChanged: () => void }) {
+function SubCard({ sub, catalog, agents, canManage, onChanged, logOpen }: { sub: Sub; catalog: CatalogItem[]; agents: Map<string, string>; canManage: boolean; onChanged: () => void; logOpen?: number }) {
   const [open, setOpen] = useState(false);
+  useEffect(() => {
+    if (logOpen) setOpen(true);
+  }, [logOpen]);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [confirmDel, setConfirmDel] = useState(false);
@@ -203,7 +210,7 @@ function SubCard({ sub, catalog, agents, canManage, onChanged }: { sub: Sub; cat
   );
 }
 
-function CreateDialog({ catalog, agents, onClose, onCreated }: { catalog: CatalogItem[]; agents: { id: string; name: string; mode: string }[]; onClose: () => void; onCreated: (secret: string | null) => void }) {
+function CreateDialog({ catalog, agents, onClose, onCreated }: { catalog: CatalogItem[]; agents: { id: string; name: string; mode: string }[]; onClose: () => void; onCreated: (secret: string | null, sub: Sub | null) => void }) {
   const [name, setName] = useState('');
   const [targetType, setTargetType] = useState<'webhook' | 'agent' | 'pipeline'>('webhook');
   const [url, setUrl] = useState('');
@@ -229,14 +236,14 @@ function CreateDialog({ catalog, agents, onClose, onCreated }: { catalog: Catalo
     setBusy(true);
     setErr(null);
     const filter = Object.fromEntries(filters.filter((f) => f.k.trim() && f.v.trim()).map((f) => [f.k.trim(), f.v.includes(',') ? f.v.split(',').map((s) => s.trim()) : f.v.trim()]));
-    const r = await apiFetch<{ signing_secret?: string }>('/api/webhooks', {
+    const r = await apiFetch<Sub & { signing_secret?: string }>('/api/webhooks', {
       method: 'POST',
       body: JSON.stringify({ name, target_type: targetType, url: url.trim(), target: { agent_id: agentId, message }, events, filter }),
       throwOnError: false,
     });
     setBusy(false);
     if (r.error) setErr(r.error);
-    else onCreated(r.data?.signing_secret ?? null);
+    else onCreated(r.data?.signing_secret ?? null, r.data?.id ? r.data : null);
   }
 
   return (
@@ -336,12 +343,30 @@ export default function EventsSettingsPage() {
   const [creating, setCreating] = useState(false);
   const [secret, setSecret] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [justMade, setJustMade] = useState<Sub | null>(null);
+  const [logFor, setLogFor] = useState<{ id: string; n: number } | null>(null);
 
   useEffect(() => {
     if (!canManage) return;
     fetchAllAgents<any>().then(({ agents }) => setAgents(agents.map((a) => ({ id: String(a.id), name: a.name, mode: (a.model_config?.mode || 'agent') === 'pipeline' ? 'pipeline' : 'agent' })))).catch(() => {});
   }, [canManage]);
   const names = useMemo(() => new Map(agents.map((a) => [a.id, a.name])), [agents]);
+
+  const showLog = (s: Sub) => {
+    setLogFor((prev) => ({ id: s.id, n: (prev?.n || 0) + 1 }));
+    // the card may not be rendered yet right after the list refreshes
+    setTimeout(() => document.querySelector(`[data-testid="sub-${CSS.escape(s.name || s.id)}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 100);
+  };
+
+  const sendFirstTest = async (s: Sub) => {
+    const r = await apiFetch<{ event: string }>(`/api/webhooks/${s.id}/test`, { method: 'POST', throwOnError: false });
+    if (r.error) {
+      toastError('The test was not sent', r.error);
+      return;
+    }
+    toastSuccess('Test event sent', 'It shows in the delivery log within a few seconds');
+    showLog(s);
+  };
 
   if (permsLoading && !perms) {
     return (
@@ -353,25 +378,35 @@ export default function EventsSettingsPage() {
 
   if (!canManage) {
     return (
-      <div className="max-w-3xl mx-auto px-6 py-16 text-center" data-testid="events-no-access">
-        <Bell className="w-10 h-10 text-slate-500 mx-auto mb-3" aria-hidden="true" />
-        <h1 className="text-xl font-semibold text-white">Events</h1>
-        <p className="text-slate-400 mt-2">Event subscriptions need the events.manage capability. An admin can grant it under Admin, Permissions.</p>
-      </div>
+      <NoAccess
+        testId="events-no-access"
+        title="Events"
+        purpose="Call your own system, or start an agent or pipeline, when something happens on the platform. For builders and admins wiring up automation."
+        icon={Bell}
+        need={{ capability: 'events.manage', label: 'Manage events' }}
+        role={perms?.role}
+        instead={{ text: 'Triggers can still start your agents on a schedule or from a webhook.', href: '/triggers', label: 'Open Triggers' }}
+      />
     );
   }
 
   return (
     <div className="max-w-5xl mx-auto sm:px-6 py-2 sm:py-8">
-      <header className="mb-6 flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2 mb-2"><Bell className="w-6 h-6 text-cyan-400" /><h1 className="text-3xl font-semibold text-white">Events</h1></div>
-          <p className="text-slate-400 max-w-3xl">
-            React to what happens on the platform: call your system, or start an agent or pipeline, when a run finishes, a rule is published, an approval is decided or something is stopped. Events are recorded with the change itself, so none are lost, and failed deliveries retry on their own.
-          </p>
-        </div>
-        {canManage && <button type="button" onClick={() => setCreating(true)} className="inline-flex items-center gap-1.5 px-4 py-2 rounded-md text-sm font-medium bg-cyan-500 text-white" data-testid="sub-new"><Plus className="w-4 h-4" /> New subscription</button>}
-      </header>
+      <PageHeader
+        className="mb-6"
+        title="Events"
+        icon={Bell}
+        purpose="Call your own system, or start an agent or pipeline, when something happens on the platform. For builders and admins wiring up automation."
+        primaryAction={canManage ? { label: 'New subscription', icon: Plus, onClick: () => setCreating(true), testId: 'sub-new' } : undefined}
+        steps={[
+          'Pick the events to listen for, such as a run finishing or a rule being published.',
+          'Choose what happens: call a URL, or run an agent or pipeline with the event in its message.',
+          'Calls to a URL are signed. Copy the signing secret when it is shown, it appears only once.',
+          'Failed deliveries retry on their own for about eight hours. Check the delivery log on each card.',
+        ]}
+        docSlug="02-runtime/19-outbound-events"
+        storageKey="settings-events"
+      />
 
       {secret && (
         <div className="mb-4 rounded-xl border border-amber-500/40 bg-amber-500/10 p-4" role="status" data-testid="sub-secret">
@@ -384,6 +419,20 @@ export default function EventsSettingsPage() {
         </div>
       )}
 
+      {justMade && (
+        <NextSteps
+          className="mb-4"
+          title="Subscription created. What next?"
+          testId="sub-next-steps"
+          onDismiss={() => setJustMade(null)}
+          steps={[
+            { id: 'send-test', label: 'Send a test event', hint: 'A sample event goes out now so you can check the receiver.', icon: Send, onClick: () => sendFirstTest(justMade) },
+            { id: 'deliveries', label: 'See the delivery log', hint: 'Every call, its answer and any retries.', icon: ListChecks, onClick: () => showLog(justMade) },
+            { id: 'docs', label: 'Read about events', hint: 'Event types, signatures and retries.', icon: BookOpen, href: '/docs?doc=02-runtime/19-outbound-events' },
+          ]}
+        />
+      )}
+
       {isLoading && !subs ? (
         <div className="space-y-3">{[0, 1].map((i) => <div key={i} className="h-24 rounded-xl bg-slate-800/40 animate-pulse" />)}</div>
       ) : !subs?.length ? (
@@ -393,11 +442,11 @@ export default function EventsSettingsPage() {
           <p className="text-sm text-slate-500 mt-1">For example, run an impact pipeline whenever a decision is published, or tell your ticketing system when a run fails.</p>
         </div>
       ) : (
-        <div className="space-y-3">{subs.map((s) => <SubCard key={s.id} sub={s} catalog={catalog || []} agents={names} canManage={canManage} onChanged={mutate} />)}</div>
+        <div className="space-y-3">{subs.map((s) => <SubCard key={s.id} sub={s} catalog={catalog || []} agents={names} canManage={canManage} onChanged={mutate} logOpen={logFor?.id === s.id ? logFor.n : undefined} />)}</div>
       )}
 
       {creating && (
-        <CreateDialog catalog={catalog || []} agents={agents} onClose={() => setCreating(false)} onCreated={(s) => { setCreating(false); setSecret(s); setCopied(false); mutate(); }} />
+        <CreateDialog catalog={catalog || []} agents={agents} onClose={() => setCreating(false)} onCreated={(s, sub) => { setCreating(false); setSecret(s); setCopied(false); setJustMade(sub); mutate(); }} />
       )}
     </div>
   );

@@ -7,8 +7,9 @@ import {
   RefreshCw, Activity,
 } from 'lucide-react';
 import { useApi } from '@/hooks/useApi';
+import PageHeader from '@/components/layout/PageHeader';
 import { fetchAllAgents } from '@/lib/fetch-all-agents';
-import { LLM_AUTH_FOR_USERS, adviceCode } from '@/components/alerts/failureAdvice';
+import { LLM_AUTH_FOR_USERS, adviceCode, failureTitle } from '@/components/alerts/failureAdvice';
 
 const GRAFANA_URL = (process.env.NEXT_PUBLIC_GRAFANA_URL || 'http://localhost:3010').replace(/\/$/, '');
 
@@ -88,6 +89,13 @@ const CODE_DESCRIPTIONS: Record<string, string> = {
   MODERATION_BLOCKED: 'Tenant moderation policy blocked the request or response. Check /moderation for policy + recent events.',
   KILL_SWITCH: 'A kill switch stopped the agent, pipeline, tool or model. Resume it under Admin, Risk and Controls.',
   MODEL_NOT_ALLOWED: 'The model is not on the allowed list for the run\u2019s risk tier. Change the model or the tier policy under Admin, Risk and Controls.',
+  PIPELINE_NODE_FAILED: 'A pipeline step failed and stopped the run. Open the run to see which step, then use Diagnose and fix on the agent\u2019s Healing page.',
+  REQUIRED_TOOLS_VIOLATION: 'The agent finished without calling a tool it is required to use. Check its prompt asks for the tool, or remove the requirement in the agent settings.',
+  GROUNDING_REQUIRED_VIOLATION: 'The agent answered without searching its knowledge base, which it is required to do. Check the knowledge base is bound to the agent and the prompt asks it to search first.',
+  CLIENT_DISCONNECTED: 'The browser or caller left before the run finished. The run stopped with it. Retry, or run it in the background from the SDK or a trigger.',
+  VALIDATION_FAILED: 'The output did not match the agent\u2019s output schema. Open the run to see which field failed, then adjust the prompt or the schema.',
+  RUNTIME_TIMEOUT: 'The run took longer than its time limit. Raise the limit under Settings, Sandbox, or split the work into smaller steps.',
+  REQUEST_TIMEOUT: 'A call the run made did not answer in time. Often a slow external service. Retry, or raise that tool\u2019s timeout.',
   UNKNOWN_ERROR: 'Couldn\u2019t classify this exception. Open the execution to see the raw error.',
 };
 
@@ -111,6 +119,13 @@ const CODE_SEVERITY: Record<string, 'high' | 'med' | 'low'> = {
   KILL_SWITCH: 'med',
   MODEL_NOT_ALLOWED: 'low',
   CONFIG_UNKNOWN_MODEL: 'med',
+  PIPELINE_NODE_FAILED: 'med',
+  REQUIRED_TOOLS_VIOLATION: 'med',
+  GROUNDING_REQUIRED_VIOLATION: 'med',
+  CLIENT_DISCONNECTED: 'low',
+  VALIDATION_FAILED: 'low',
+  RUNTIME_TIMEOUT: 'med',
+  REQUEST_TIMEOUT: 'med',
   UNKNOWN_ERROR: 'med',
 };
 
@@ -173,27 +188,24 @@ export default function AlertsPage() {
   return (
     <div className="min-h-screen bg-[#0B0F19] p-4 sm:p-6">
       <div className="max-w-7xl mx-auto space-y-6">
-        {/* Header */}
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-3 min-w-0">
-            <div className="w-10 h-10 shrink-0 rounded-xl bg-red-500/10 flex items-center justify-center">
-              <AlertTriangle className="w-5 h-5 text-red-400" />
-            </div>
-            <div>
-              <h1 className="text-xl font-bold text-white">Alerts</h1>
-              <p className="text-sm text-slate-400">
-                Failed runs grouped by cause so you can spot bursts and fix the
-                root cause once. Click a cause to see a sample error and the
-                agents it hit.
-              </p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
+        <PageHeader
+          title="Alerts"
+          purpose="Failed runs grouped by cause, so you can spot a burst and fix the root cause once. For builders and admins."
+          icon={AlertTriangle}
+          iconClassName="text-red-400"
+          storageKey="alerts"
+          docSlug="06-deployment/04-observability"
+          primaryAction={{
+            label: 'Refresh',
+            icon: RefreshCw,
+            onClick: () => { refreshStats(); refreshGroups(); refreshPlatform(); },
+          }}
+          extraActions={
             <select
               aria-label="Time window"
               value={hours}
               onChange={e => setHours(parseInt(e.target.value))}
-              className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white"
+              className="min-h-[40px] bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white"
             >
               <option value="1">Last hour</option>
               <option value="6">Last 6h</option>
@@ -201,15 +213,13 @@ export default function AlertsPage() {
               <option value="72">Last 3 days</option>
               <option value="168">Last week</option>
             </select>
-            <button
-              type="button"
-              onClick={() => { refreshStats(); refreshGroups(); refreshPlatform(); }}
-              className="px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-xs text-slate-300 hover:text-white flex items-center gap-1.5"
-            >
-              <RefreshCw className="w-3.5 h-3.5" /> Refresh
-            </button>
-          </div>
-        </div>
+          }
+          steps={[
+            'Pick a time window. The cards and the cause list follow it.',
+            'Click a cause to see a sample error, what usually fixes it and the agents it hit.',
+            'Admins also see platform alerts, the same ones sent to Slack as they fire and clear.',
+          ]}
+        />
 
         {/* Summary cards */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
@@ -355,14 +365,16 @@ export default function AlertsPage() {
                   {isOpen ? <ChevronDown className="w-4 h-4 shrink-0" /> : <ChevronRight className="w-4 h-4 shrink-0" />}
                   <div className="flex-1 min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className="font-mono text-sm font-semibold break-all">{g.failure_code}</span>
+                      <span className="text-sm font-semibold" data-testid="failure-title">{failureTitle(code)}</span>
                       <span className="text-xs px-2 py-0.5 rounded-full bg-white/10 uppercase tracking-wider">
                         {sev}
                       </span>
                     </div>
                     <p className="text-xs text-slate-400 mt-0.5">
-                      {code !== g.failure_code && 'The sample error is an AI model sign-in failure. '}
                       {describeCode(code, isAdmin)}
+                    </p>
+                    <p className="mt-1 text-[10px] text-slate-500">
+                      Reference <code className="break-all font-mono text-slate-400" data-testid="failure-code">{g.failure_code}</code>
                     </p>
                   </div>
                   <div className="text-right shrink-0">

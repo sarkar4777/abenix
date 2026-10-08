@@ -118,6 +118,8 @@ export default function PipelineCanvas({
         }}
         proOptions={{ hideAttribution: true }}
         fitView
+        // the default 0.5 floor leaves the ends of a long pipeline off screen
+        minZoom={0.2}
         deleteKeyCode={['Backspace', 'Delete']}
         style={{ background: '#0B0F19' }}
       >

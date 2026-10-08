@@ -16,7 +16,8 @@ Create `apps/web/src/app/(app)/widgets/page.tsx`:
 'use client';
 
 import { useState } from 'react';
-import { Sparkles } from 'lucide-react';
+import { Plus, Sparkles } from 'lucide-react';
+import PageHeader from '@/components/layout/PageHeader';
 import { useApi } from '@/hooks/useApi';
 import { apiFetch } from '@/lib/api-client';
 import { holds, useMyPermissions } from '@/lib/capabilities';
@@ -53,13 +54,15 @@ export default function WidgetsPage() {
 
   return (
     <div className="max-w-6xl mx-auto px-6 py-8 space-y-6">
-      <header className="flex items-center gap-3">
-        <Sparkles className="w-5 h-5 text-cyan-400" />
-        <div>
-          <h1 className="text-xl font-bold text-white">Widgets</h1>
-          <p className="text-sm text-slate-400">All your widgets in one place.</p>
-        </div>
-      </header>
+      <PageHeader
+        title="Widgets"
+        icon={Sparkles}
+        storageKey="widgets"
+        purpose="Keep track of every widget your agents use. For builders."
+        primaryAction={{ label: 'New widget', href: '/widgets/new', icon: Plus, disabled: !canManage }}
+        steps={['Create a widget', 'Pick it on the left to see its detail', 'Archive it when you no longer need it']}
+        docSlug="08-howto/03-add-a-page"
+      />
 
       <div className="grid grid-cols-12 gap-6">
         <aside className="col-span-4 space-y-2">
@@ -111,14 +114,15 @@ Use `<section>` or `<div>` for the page body, not `<main>`. The shell already re
 Every page in `(app)/` should:
 
 1. **Sit under `(app)/`** so it gets `AuthGuard`, the sidebar and the top bar from `(app)/layout.tsx`.
-2. **Use `useApi` for reads.** Pass `null` as the key to skip a fetch you aren't allowed to make.
-3. **Use `apiFetch` for writes.** It handles auth, refresh and the error envelope. See [05-ui/02-api-client](../05-ui/02-api-client.md).
-4. **Show feedback on every write.** A toast, an inline notice or a field error. Never silent.
-5. **Render a skeleton while loading**, not blank space.
-6. **Render an empty state with a next step**, never just "0 results".
-7. **Check capabilities on the page** when it has one, and swap the controls for a "needs X" note.
-8. **Use the design tokens.** slate-900/800 backgrounds, slate-300/400 text, cyan-500 for primary actions.
-9. **Add a sidebar entry** if people should find it there (below).
+2. **Start with `PageHeader`.** Title, one plain line on what the page is for and who it is for, the primary action, two to four How this works steps and a Docs link. See [05-ui/00-app-shell](../05-ui/00-app-shell.md#page-header-start-here-and-next-steps).
+3. **Use `useApi` for reads.** Pass `null` as the key to skip a fetch you aren't allowed to make.
+4. **Use `apiFetch` for writes.** It handles auth, refresh and the error envelope. See [05-ui/02-api-client](../05-ui/02-api-client.md).
+5. **Show feedback on every write.** A toast, an inline notice or a field error. Never silent.
+6. **Render a skeleton while loading**, not blank space.
+7. **Render an empty state with a next step**, never just "0 results".
+8. **Check capabilities on the page** when it has one, and swap the controls for a "needs X" note.
+9. **Use the design tokens.** slate-900/800 backgrounds, slate-300/400 text, cyan-500 for primary actions.
+10. **Add a sidebar entry** if people should find it there (below).
 
 ---
 

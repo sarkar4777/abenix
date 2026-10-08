@@ -15,7 +15,7 @@ from xml.etree import ElementTree as ET
 
 import httpx
 
-from engine.tools.base import BaseTool, ToolResult
+from engine.tools.base import READ_ONLY, BaseTool, ToolResult
 
 logger = logging.getLogger(__name__)
 
@@ -425,6 +425,7 @@ def _match_against_list(
 class SanctionsScreeningTool(BaseTool):
     name = "sanctions_screening"
     risk_tier = "medium"
+    effect = READ_ONLY
     description = (
         "Screen a person or company name against the world's major sanctions "
         "lists — OFAC SDN, OFAC Consolidated (non-SDN), EU Consolidated, "

@@ -4,9 +4,11 @@ import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import {
-  AlertTriangle, ArrowLeft, Database, Download, ExternalLink, FileDiff, FileText, History, Loader2, OctagonX,
+  AlertTriangle, ArrowLeft, Bell, Bot, Database, Download, ExternalLink, FileDiff, FileText, History, Loader2, OctagonX,
   PauseCircle, Pencil, PlayCircle, Radar, RefreshCw, Trash2, X,
 } from 'lucide-react';
+import PageHeader from '@/components/layout/PageHeader';
+import NextSteps from '@/components/shared/NextSteps';
 import { apiFetch } from '@/lib/api-client';
 import { useApi } from '@/hooks/useApi';
 import { holds, useMyPermissions } from '@/lib/capabilities';
@@ -57,6 +59,9 @@ export default function SourceDetailPage() {
   const search = useSearchParams();
   const { perms } = useMyPermissions();
   const canManage = holds(perms?.capabilities, 'sources.manage');
+  const canEvents = holds(perms?.capabilities, 'events.manage');
+  // arrived straight after adding this source
+  const [justAdded, setJustAdded] = useState(search.get('new') === '1');
   const { data: source, error, isLoading, mutate } = useApi<Source>(`/api/sources/${id}`, { refreshInterval: 30000 });
   const { data: changes, isLoading: changesLoading, mutate: refreshChanges } = useApi<ChangeSummary[]>(`/api/sources/${id}/changes`);
   const { data: snapshots, isLoading: snapsLoading, mutate: refreshSnaps } = useApi<Snapshot[]>(`/api/sources/${id}/snapshots`);
@@ -109,6 +114,11 @@ export default function SourceDetailPage() {
   function pickChange(cid: string) {
     setChangeId(cid);
     syncUrl({ change: cid });
+  }
+
+  function dismissAdded() {
+    setJustAdded(false);
+    syncUrl({ new: null });
   }
 
   function openSnapshot(sid: string | null) {
@@ -194,51 +204,79 @@ export default function SourceDetailPage() {
   const baseline = (snapshots || []).length ? (snapshots || [])[(snapshots || []).length - 1] : null;
 
   return (
-    <div className="max-w-7xl mx-auto px-6 py-8">
-      <Link href="/sources" className="inline-flex items-center gap-1.5 text-sm text-slate-400 hover:text-white mb-4"><ArrowLeft className="w-4 h-4" /> Source Watch</Link>
-
-      <header className="flex flex-wrap items-start justify-between gap-4 mb-5">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <h1 className="text-2xl font-semibold text-white" data-testid="source-title">{source.name}</h1>
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
+      <PageHeader
+        className="mb-5"
+        back={{ href: '/sources', label: 'Source Watch' }}
+        title={source.name}
+        titleTestId="source-title"
+        purpose="Every check of this source is kept as a copy, and each change is shown as a diff you can open and cite."
+        icon={Radar}
+        storageKey="source-detail"
+        docSlug="02-runtime/17-source-watch"
+        meta={
+          <>
             <span className={`inline-flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-full border ${hs.chip}`} data-testid="source-detail-health"><span className={`w-1.5 h-1.5 rounded-full ${hs.dot}`} /> {hs.label}</span>
             <span className={`text-[11px] px-1.5 py-0.5 rounded border ${TIER_STYLE[source.risk_tier]?.chip}`}>{TIER_STYLE[source.risk_tier]?.label} risk</span>
-          </div>
-          <a href={source.url} target="_blank" rel="noopener noreferrer" className="mt-1 inline-flex items-center gap-1 text-sm text-cyan-300 hover:underline break-all">
+          </>
+        }
+        steps={[
+          'The first check saves a baseline copy. Later checks compare against the newest copy.',
+          'Changes lists each difference with a diff. Snapshot timeline shows every copy kept.',
+          'Each change sends an event that can start a pipeline or notify a reviewer.',
+        ]}
+        primaryAction={canManage
+          ? { label: busy === 'check' ? 'Checking…' : 'Check now', icon: busy === 'check' ? Loader2 : RefreshCw, busy: busy === 'check', disabled: !!busy, onClick: () => { void checkNow(); }, testId: 'source-check-now' }
+          : { label: 'Refresh', icon: RefreshCw, onClick: refreshAll }}
+        extraActions={canManage ? (
+          <>
+            {source.active ? (
+              <button type="button" onClick={() => setPausing(true)} disabled={!!busy} className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-md text-sm text-slate-200 border border-slate-700 hover:bg-slate-800 disabled:opacity-40" data-testid="source-pause">
+                <PauseCircle className="w-4 h-4" /> Pause
+              </button>
+            ) : (
+              <button type="button" onClick={() => setActive(true)} disabled={!!busy} className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-md text-sm text-emerald-200 border border-emerald-500/40 hover:bg-emerald-500/10 disabled:opacity-40" data-testid="source-resume">
+                {busy === 'resume' ? <Loader2 className="w-4 h-4 animate-spin" /> : <PlayCircle className="w-4 h-4" />} Resume
+              </button>
+            )}
+            <button type="button" onClick={() => setEditing(true)} className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-md text-sm text-slate-200 border border-slate-700 hover:bg-slate-800" data-testid="source-edit">
+              <Pencil className="w-4 h-4" /> Edit
+            </button>
+            <button type="button" onClick={() => setDeleting(true)} aria-label="Delete source" className="inline-flex items-center justify-center p-2 rounded-md text-slate-400 border border-slate-700 hover:text-rose-300 hover:border-rose-500/40">
+              <Trash2 className="w-4 h-4" />
+            </button>
+          </>
+        ) : undefined}
+      >
+        <div className="min-w-0">
+          <a href={source.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-sm text-cyan-300 hover:underline break-all">
             {source.url} <ExternalLink className="w-3.5 h-3.5 shrink-0" />
           </a>
           <div className="flex flex-wrap items-center gap-1.5 mt-2 text-xs text-slate-400">
             <span className="px-1.5 py-0.5 rounded border border-slate-700">{KIND_LABEL[source.kind]}</span>
             <span>{cadenceLabel(source.cadence_minutes)}</span>
-            {source.selector && <span className="font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-300" title="Only this part is watched">{source.selector}</span>}
+            {source.selector && <span className="font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 break-all" title="Only this part is watched">{source.selector}</span>}
             {source.jurisdiction && <span className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300">{source.jurisdiction}</span>}
             {source.tags.map((t) => <span key={t} className="px-1.5 py-0.5 rounded bg-slate-800/60 text-slate-400">#{t}</span>)}
           </div>
           {source.description && <p className="text-sm text-slate-400 mt-2 max-w-3xl">{source.description}</p>}
         </div>
-        {canManage && (
-          <div className="flex flex-wrap items-center gap-2">
-            <button type="button" onClick={checkNow} disabled={!!busy} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-sm font-medium bg-cyan-500 text-white hover:bg-cyan-400 disabled:opacity-40" data-testid="source-check-now">
-              {busy === 'check' ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />} {busy === 'check' ? 'Checking…' : 'Check now'}
-            </button>
-            {source.active ? (
-              <button type="button" onClick={() => setPausing(true)} disabled={!!busy} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-sm text-slate-200 border border-slate-700 hover:bg-slate-800 disabled:opacity-40" data-testid="source-pause">
-                <PauseCircle className="w-4 h-4" /> Pause
-              </button>
-            ) : (
-              <button type="button" onClick={() => setActive(true)} disabled={!!busy} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-sm text-emerald-200 border border-emerald-500/40 hover:bg-emerald-500/10 disabled:opacity-40" data-testid="source-resume">
-                {busy === 'resume' ? <Loader2 className="w-4 h-4 animate-spin" /> : <PlayCircle className="w-4 h-4" />} Resume
-              </button>
-            )}
-            <button type="button" onClick={() => setEditing(true)} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-sm text-slate-200 border border-slate-700 hover:bg-slate-800" data-testid="source-edit">
-              <Pencil className="w-4 h-4" /> Edit
-            </button>
-            <button type="button" onClick={() => setDeleting(true)} aria-label="Delete source" className="p-2 rounded-md text-slate-400 border border-slate-700 hover:text-rose-300 hover:border-rose-500/40">
-              <Trash2 className="w-4 h-4" />
-            </button>
-          </div>
-        )}
-      </header>
+      </PageHeader>
+
+      {justAdded && (
+        <NextSteps
+          className="mb-4"
+          title="Source added. What next?"
+          testId="source-next-steps"
+          onDismiss={dismissAdded}
+          steps={[
+            ...(canManage ? [{ id: 'check', label: 'Check it now', hint: 'Save the baseline copy right away.', icon: RefreshCw, onClick: () => { dismissAdded(); void checkNow(); } }] : []),
+            { id: 'snapshots', label: 'See the snapshots', hint: 'Every copy kept, starting with the baseline.', icon: History, onClick: () => { dismissAdded(); setTab('snapshots'); } },
+            ...(canEvents ? [{ id: 'events', label: 'React to changes', hint: 'Start a pipeline or agent when it changes.', icon: Bell, href: '/settings/webhooks' }] : []),
+            { id: 'agent', label: 'Use in an agent', hint: 'Let an agent explain what changed.', icon: Bot, href: '/builder?tool=source_diff' },
+          ]}
+        />
+      )}
 
       {notice && (
         <div role="status" className={`mb-4 flex items-start justify-between gap-3 rounded-xl border px-4 py-3 text-sm ${notice.tone === 'bad' ? 'border-rose-500/30 bg-rose-500/5 text-rose-200' : notice.tone === 'change' ? 'border-amber-500/30 bg-amber-500/5 text-amber-100' : 'border-emerald-500/30 bg-emerald-500/5 text-emerald-200'}`} data-testid="source-notice">

@@ -6,7 +6,7 @@ import json
 from typing import Any
 
 from engine import credentials
-from engine.tools.base import BaseTool, ToolResult
+from engine.tools.base import BaseTool, Effect, ToolResult
 
 
 class _DecisionTool(BaseTool):
@@ -538,6 +538,12 @@ class DecisionProposeTool(_DecisionTool):
     name = "decision_propose"
     # writes a proposal that people must approve, it never publishes
     risk_tier = "medium"
+    effect = Effect(
+        kind="write",
+        label="Propose a rule change for people to approve",
+        target_param="decision",
+        reversible=True,
+    )
     description = (
         "Propose new or changed business rules for a decision, as typed JSON rules with ruleKey, requiresFacts, "
         'when (all/any conditions such as {"gte": [{"fact": "shipment.date"}, "2026-01-01"]}), then and '

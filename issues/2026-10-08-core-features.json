@@ -1,0 +1,156 @@
+[
+  {
+    "title": "AI Chat forgets earlier turns in the same conversation",
+    "area": "chat",
+    "problem": "Each message ran as a fresh execution, so a follow-up question had no context and a reload lost it too.",
+    "fix": "Execute takes conversation_id, checks the thread belongs to the caller and sends its earlier turns, trimmed to about 8k tokens, inline, queued and on the runtime pod. Runs with history skip the response cache.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 198
+  },
+  {
+    "title": "Inline non-streaming execute fails with a TypeError on require_tools",
+    "area": "chat",
+    "problem": "The execute route passed require_tools to functions that did not accept it, so every inline non-streaming run and every remote-mode stream failed before starting.",
+    "fix": "Both paths accept and forward require_tools.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 199
+  },
+  {
+    "title": "AI Chat model chip empty for queued runs",
+    "area": "chat",
+    "problem": "The queued done event carried no model, so the chip never showed which model answered.",
+    "fix": "The consumer adds model and duration to the done event.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 200
+  },
+  {
+    "title": "AI Chat picker misses agents and does not work on phones",
+    "area": "chat",
+    "problem": "The picker showed one page of agents, had no search, deleted chats without asking and scrolled sideways at 390 px.",
+    "fix": "All agents with search, Code Assistant default, delete confirmation, history drawer on phones, text attachments read into the message.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 201
+  },
+  {
+    "title": "Corrupt ML model file is stored as ready",
+    "area": "ml-models",
+    "problem": "A file that could not be loaded was saved active, so agents and deploys used a broken model.",
+    "fix": "The upload loads the file first. A failure is stored as error with the reason, answers 422 MODEL_LOAD_FAILED and predict, deploy and activate refuse it with 409 MODEL_NOT_READY.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 202
+  },
+  {
+    "title": "ML model detail panel shows stale state after an action",
+    "area": "ml-models",
+    "problem": "Deactivate and undeploy left the panel showing the old state until a reload.",
+    "fix": "The page reads the selected model from fresh list data and waits for the refetch after every action.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 203
+  },
+  {
+    "title": "ML deploy creates duplicates and wrong input counts give a cryptic error",
+    "area": "ml-models",
+    "problem": "Clicking deploy twice created two deployments, and sending the wrong number of features returned a numpy error.",
+    "fix": "Deploy is idempotent per model and target. A wrong count answers 422 naming the inputs expected in order. Every API prediction is recorded.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 204
+  },
+  {
+    "title": "BPM Analyzer threads visible to other users in the tenant",
+    "area": "bpm",
+    "problem": "Thread list and thread reads were scoped to the tenant only.",
+    "fix": "Threads are filtered on the owner for list, read, follow-up and delete.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 205
+  },
+  {
+    "title": "BPM Analyzer ignores the Claude subscription and has no sample",
+    "area": "bpm",
+    "problem": "With only a subscription configured the analyzer failed, a thread link did not reopen the thread and a new user had nothing to try.",
+    "fix": "Routes through the effective model, reports fallbacks honestly, restores ?thread= links and ships a vendor invoice sample.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 206
+  },
+  {
+    "title": "Persona search can return another user's items",
+    "area": "persona",
+    "problem": "Vector search filtered on the tenant and scope but not on the owner.",
+    "fix": "Persona chunks live in Postgres with pgvector and every search filters on tenant, owner and scope. GDPR erase deletes the chunks and content.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 207
+  },
+  {
+    "title": "Persona items fail silently and voice cloning points at a Kubernetes secret",
+    "area": "persona",
+    "problem": "An item that failed to embed showed nothing, and the voice panel told the user to edit abenix-secrets and roll the deployment.",
+    "fix": "Each item shows its status and error with reindex. The ElevenLabs key is read through Tool Configuration and the panel links there.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 208
+  },
+  {
+    "title": "Portfolio schemas cannot be filled from a spreadsheet",
+    "area": "portfolio",
+    "problem": "A schema had no way to load rows except SQL, and portfolio tools only worked for actAs subjects.",
+    "fix": "CSV and Excel import with preview and mapping, a sample trading book, rows view, delete with table, and portfolio tools in the palette for any agent scoped to the running user.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 209
+  },
+  {
+    "title": "Notification preferences not honoured and no profile picture upload",
+    "area": "settings",
+    "problem": "Turning a notification type off still sent it, the profile only took a URL and settings had no navigation on phones.",
+    "fix": "create_notification checks the user's preference for every type, avatars upload and remove, and settings has a section menu below md.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 210
+  },
+  {
+    "title": "Tool descriptions cut at 400 characters in the catalogue",
+    "area": "tools",
+    "problem": "Long tool descriptions were truncated, so the full usage notes were not visible.",
+    "fix": "Full descriptions and inputs show in an expandable row.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 211
+  }
+]

@@ -1,13 +1,14 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import {
-  Brain, Cpu, RefreshCw, AlertTriangle, ExternalLink, Cloud, Sparkles,
+  Brain, Cpu, RefreshCw, AlertTriangle, Cloud, Sparkles,
   CheckCircle2, XCircle, Loader2, Trash2, Play,
 } from 'lucide-react';
 import { apiFetch } from '@/lib/api-client';
 import { toastSuccess, toastError } from '@/stores/toastStore';
+import PageHeader from '@/components/layout/PageHeader';
+import { AccessGate } from '@/components/layout/NoAccess';
 
 interface MLModel {
   id: string;
@@ -87,8 +88,7 @@ function capList(caps: Record<string, boolean> | undefined): string[] {
   return Object.entries(caps).filter(([, v]) => v).map(([k]) => k);
 }
 
-export default function AdminModelsPage() {
-  const router = useRouter();
+function AdminModelsPage() {
   const [mlModels, setMlModels] = useState<MLModel[]>([]);
   const [llmModels, setLlmModels] = useState<LlmModel[]>([]);
   const [loading, setLoading] = useState(true);
@@ -110,8 +110,8 @@ export default function AdminModelsPage() {
       if (ml.error && llm.error) {
         const lower = (ml.error || '').toLowerCase();
         if (lower.includes('403') || lower.includes('forbid')) {
-          toastError('Admin role required', 'You do not have permission to view models.');
-          router.push('/dashboard');
+          setErr('Only admins can see the models catalogue. Ask an admin if you need this.');
+          setLoading(false);
           return;
         }
         setErr(ml.error || llm.error || 'Could not load models');
@@ -126,7 +126,7 @@ export default function AdminModelsPage() {
     })();
 
     return () => { cancelled = true; };
-  }, [refreshKey, router]);
+  }, [refreshKey]);
 
   const mlCounts = useMemo(() => {
     const c = { total: mlModels.length, deployed: 0, ready: 0, error: 0 };
@@ -170,33 +170,28 @@ export default function AdminModelsPage() {
 
   return (
     <div className="max-w-6xl mx-auto p-6" data-testid="admin-models">
-      <header className="mb-6 flex items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-amber-500/10 ring-1 ring-amber-500/40 flex items-center justify-center">
-            <Brain className="w-5 h-5 text-amber-300" />
-          </div>
-          <div>
-            <p className="text-[10px] uppercase tracking-wider text-slate-500">Admin · platform</p>
-            <h1 className="text-2xl font-bold text-white">Models</h1>
-            <p className="text-sm text-slate-400">ML models registered for this tenant plus LLM model catalog with provider, pricing and capabilities.</p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => setRefreshKey((k) => k + 1)}
-            className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-slate-700/60 bg-slate-900/40 text-slate-300 hover:bg-slate-800/60"
-            data-testid="models-refresh"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} /> Refresh
-          </button>
-          <a
-            href="/ml-models"
-            className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-amber-500/40 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20"
-          >
-            Upload model <ExternalLink className="w-3 h-3" />
-          </a>
-        </div>
-      </header>
+      <PageHeader
+        className="mb-6"
+        title="Models"
+        purpose="See every trained model in this workspace and every AI model the platform can call, and start or stop model deployments. For admins."
+        icon={Brain}
+        iconClassName="text-amber-300"
+        storageKey="admin-models"
+        docSlug="02-runtime/12-ml-models"
+        primaryAction={{ label: 'Upload model', icon: Cloud, href: '/ml-models' }}
+        secondaryAction={{
+          label: 'Refresh',
+          icon: RefreshCw,
+          busy: loading,
+          onClick: () => setRefreshKey((k) => k + 1),
+          testId: 'models-refresh',
+        }}
+        steps={[
+          'Trained models are uploaded on the ML Models page and listed here with their status.',
+          'Deploy starts a model so agents can ask it for predictions. Disable shuts the deployment down.',
+          'The AI model list shows each provider model with its price, abilities and whether it is still supported.',
+        ]}
+      />
 
       {err && (
         <div className="mb-4 p-4 rounded-xl border border-red-500/40 bg-red-500/10 text-red-300 text-sm flex items-start gap-3">
@@ -427,5 +422,19 @@ export default function AdminModelsPage() {
         change defaults in <a className="text-cyan-300 hover:underline" href="/admin/llm-settings">Model Selection</a>.
       </p>
     </div>
+  );
+}
+
+export default function AdminModelsPageGated() {
+  return (
+    <AccessGate
+      title="Models"
+      purpose="See every trained model in this workspace and every AI model the platform can call, and start or stop model deployments. For admins."
+      icon={Brain}
+      need={{ admin: true }}
+      instead={{ text: 'You can train and deploy your own models on ML Models.', href: '/ml-models', label: 'Open ML Models' }}
+    >
+      <AdminModelsPage />
+    </AccessGate>
   );
 }

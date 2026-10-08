@@ -12,6 +12,8 @@ import {
 import { apiFetch } from '@/lib/api-client';
 import { useAuth } from '@/contexts/AuthContext';
 import VisionModelPicker from '@/components/bpm-analyzer/VisionModelPicker';
+import PageHeader from '@/components/layout/PageHeader';
+import NextSteps from '@/components/shared/NextSteps';
 
 type ThreadStatus = 'empty' | 'analyzing' | 'stalled' | 'failed' | 'ready';
 
@@ -403,6 +405,8 @@ export default function BPMAnalyzerPage() {
   const wizardCache = useRef<Map<string, WizardState>>(new Map());
   const [wizardOpen, setWizardOpen] = useState(false);
   const [downloadingPdf, setDownloadingPdf] = useState(false);
+  // the analysis that just finished from an upload, for the next steps card
+  const [freshId, setFreshId] = useState<string | null>(null);
   const uploading = uploadingName !== null;
 
   const pushBanner = useCallback((kind: Banner['kind'], text: string) => {
@@ -536,6 +540,7 @@ export default function BPMAnalyzerPage() {
         if (tid) setActiveId(tid);
       } else {
         const tid = j.data.thread.id as string;
+        setFreshId(tid);
         for (const n of (j.data.notices || []) as string[]) pushBanner('warning', n);
         await refreshThreads();
         if (activeRef.current === tid) void loadThread(tid, true);
@@ -742,49 +747,37 @@ export default function BPMAnalyzerPage() {
 
       {/* Main */}
       <main className="flex-1 flex flex-col min-w-0 min-h-0">
-        <header className="border-b border-slate-800/50 px-4 md:px-6 py-3 md:py-4 flex items-center justify-between gap-3 flex-wrap shrink-0">
-          <div className="flex items-start gap-2 min-w-0 flex-1">
-            <button
-              onClick={() => setDrawerOpen(true)}
-              className="md:hidden mt-0.5 p-1.5 rounded-lg border border-slate-700 text-slate-300 hover:text-white"
-              aria-label="Show analyses"
-              data-testid="open-drawer"
-            >
-              <PanelLeft className="w-4 h-4" />
-            </button>
-            <div className="min-w-0">
-              <h1 className="text-base md:text-lg font-bold text-white flex items-center gap-2 truncate">
-                <Workflow className="w-5 h-5 text-violet-300 shrink-0" />
-                <span className="truncate">{threadMeta?.title || 'BPM Process Analyst'}</span>
-              </h1>
-              <p className="hidden md:block text-xs text-slate-400 mt-0.5">
-                Drop a process artifact in any format. The analyst reads it, returns a deep agentification report, and can build and test the suggested agents.
-              </p>
-            </div>
-          </div>
-          {activeId && hasReport && (
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => void downloadPdf()}
-                disabled={downloadingPdf}
-                className="px-3 py-2 rounded-lg bg-slate-800/60 border border-slate-700 hover:border-violet-500/50 hover:bg-slate-800 text-slate-200 text-xs font-semibold transition-all inline-flex items-center gap-2 disabled:opacity-50"
-                data-testid="download-pdf"
-                title="Download the full analysis as a PDF"
-              >
-                {downloadingPdf ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
-                {downloadingPdf ? 'Building PDF…' : 'Download PDF'}
-              </button>
-              <button
-                onClick={() => setWizardOpen(true)}
-                disabled={pending}
-                className="px-3 py-2 rounded-lg bg-gradient-to-r from-violet-500 to-cyan-500 text-white text-xs font-semibold hover:shadow-lg hover:shadow-violet-500/30 transition-all inline-flex items-center gap-2 disabled:opacity-50"
-                data-testid="open-wizard"
-              >
-                <Wand2 className="w-3.5 h-3.5" /> Build Agents
-              </button>
-            </div>
-          )}
-        </header>
+        <div className="border-b border-slate-800/50 px-4 md:px-6 py-3 md:py-4 shrink-0">
+          <button
+            onClick={() => setDrawerOpen(true)}
+            className="md:hidden mb-2 inline-flex items-center gap-1.5 p-1.5 rounded-lg border border-slate-700 text-slate-300 hover:text-white text-xs"
+            aria-label="Show analyses"
+            data-testid="open-drawer"
+          >
+            <PanelLeft className="w-4 h-4" /> Analyses
+          </button>
+          <PageHeader
+            compact
+            title={<span className="block truncate">{threadMeta?.title || 'BPM Process Analyst'}</span>}
+            purpose="Upload how a business process works and find out which steps an AI agent should handle. For process owners and builders."
+            icon={Workflow}
+            iconClassName="text-violet-300"
+            storageKey="bpm-analyzer"
+            docSlug="05-ui/03-page-catalogue"
+            steps={[
+              'Upload a diagram, a written procedure, or a recorded walkthrough.',
+              'The analyst reads it and writes a report in 1 to 3 minutes.',
+              'Ask follow up questions about any step in the chat.',
+              'Build Agents turns the suggestions into draft agents, each tested once.',
+            ]}
+            primaryAction={activeId && hasReport
+              ? { label: 'Build Agents', icon: Wand2, onClick: () => setWizardOpen(true), disabled: pending, testId: 'open-wizard' }
+              : { label: uploading ? 'Analyzing…' : 'Upload a process', icon: uploading ? Loader2 : Upload, busy: uploading, onClick: () => fileInputRef.current?.click(), testId: 'bpm-upload-primary' }}
+            secondaryAction={activeId && hasReport
+              ? { label: downloadingPdf ? 'Building PDF…' : 'Download PDF', icon: downloadingPdf ? Loader2 : Download, busy: downloadingPdf, onClick: () => void downloadPdf(), title: 'Download the full analysis as a PDF', testId: 'download-pdf' }
+              : undefined}
+          />
+        </div>
 
         {(banners.length > 0 || notices.length > 0) && (
           <div className="px-4 md:px-6 pt-3 space-y-2 shrink-0" data-testid="bpm-banners">
@@ -811,6 +804,21 @@ export default function BPMAnalyzerPage() {
                 <span>{n}</span>
               </div>
             ))}
+          </div>
+        )}
+
+        {activeId && freshId === activeId && hasReport && (
+          <div className="px-4 md:px-6 pt-3 shrink-0">
+            <NextSteps
+              title="Your analysis is ready. What next?"
+              testId="bpm-next-steps"
+              onDismiss={() => setFreshId(null)}
+              steps={[
+                { id: 'build', label: 'Build the agents', hint: 'Turn the suggested agents into tested drafts.', icon: Wand2, onClick: () => { setFreshId(null); setWizardOpen(true); } },
+                { id: 'ask', label: 'Ask a follow up', hint: 'Question any step or lane in the chat.', icon: MessagesSquare, onClick: () => { setFreshId(null); inputRef.current?.focus(); } },
+                { id: 'pdf', label: 'Download the PDF', hint: 'Share the full report with your team.', icon: Download, onClick: () => { setFreshId(null); void downloadPdf(); } },
+              ]}
+            />
           </div>
         )}
 

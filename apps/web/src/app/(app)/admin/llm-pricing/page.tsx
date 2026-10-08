@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { DollarSign, Loader2, Plus, RefreshCw, Save, Trash2 } from 'lucide-react';
 import { apiFetch, API_URL } from '@/lib/api-client';
+import PageHeader from '@/components/layout/PageHeader';
+import { AccessGate } from '@/components/layout/NoAccess';
 
 type PricingRow = {
   id: string;
@@ -28,7 +30,7 @@ const PROVIDER_COLOR: Record<string, string> = {
   other:     'text-slate-300',
 };
 
-export default function LlmPricingPage() {
+function LlmPricingPage() {
   const [data, setData] = useState<ApiResp | null>(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
@@ -87,7 +89,7 @@ export default function LlmPricingPage() {
 
   async function createRow() {
     if (!newRow.model || newRow.input_per_m == null || newRow.output_per_m == null) {
-      setErr('model, input_per_m, and output_per_m are required'); return;
+      setErr('Enter a model id, an input price and an output price.'); return;
     }
     setAdding(true); setErr(null);
     try {
@@ -121,6 +123,12 @@ export default function LlmPricingPage() {
     finally { setSeeding(false); }
   }
 
+  const focusAddRow = () => {
+    const el = document.querySelector<HTMLInputElement>('[data-testid="add-pricing-row"] input');
+    el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    el?.focus();
+  };
+
   if (loading) return <div className="p-6 text-slate-400">Loading pricing…</div>;
   if (err && !data) {
     return (
@@ -138,27 +146,27 @@ export default function LlmPricingPage() {
 
   return (
     <div className="p-6 space-y-6" data-testid="admin-llm-pricing">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <p className="text-[10px] uppercase tracking-wider text-slate-500">Admin · platform</p>
-          <h1 className="text-2xl font-semibold text-white flex items-center gap-2">
-            <DollarSign className="w-6 h-6 text-emerald-400" />
-            LLM Pricing
-          </h1>
-          <p className="text-sm text-slate-400 mt-1">
-            Per-model $/1M token rates. The runtime reads this table on every LLM call
-            (cached 60s); edits propagate without a redeploy.
-          </p>
-        </div>
-        <div className="flex gap-2">
-          <button onClick={reseed} className="px-3 py-2 rounded-lg border border-slate-700/60 bg-slate-800/30 text-slate-300 text-sm hover:bg-slate-800/60 inline-flex items-center gap-2">
-            <RefreshCw className="w-4 h-4" /> Re-seed baseline
-          </button>
-          <button onClick={load} className="px-3 py-2 rounded-lg border border-slate-700/60 bg-slate-800/30 text-slate-300 text-sm hover:bg-slate-800/60 inline-flex items-center gap-2">
+      <PageHeader
+        title="LLM Pricing"
+        purpose="Set what each AI model costs per million tokens so spend and billing numbers are right. For admins."
+        icon={DollarSign}
+        iconClassName="text-emerald-400"
+        storageKey="admin-llm-pricing"
+        docSlug="09-reference/04-platform-settings"
+        primaryAction={{ label: 'Add model pricing', icon: Plus, onClick: focusAddRow }}
+        secondaryAction={{ label: 'Re-seed baseline', icon: RefreshCw, onClick: reseed }}
+        extraActions={
+          <button onClick={load} className="inline-flex min-h-[40px] items-center justify-center gap-2 rounded-lg border border-slate-700/60 bg-slate-800/30 px-3 py-2 text-sm text-slate-300 hover:bg-slate-800/60">
             <RefreshCw className="w-4 h-4" /> Refresh
           </button>
-        </div>
-      </div>
+        }
+        steps={[
+          'Every model call is costed with the rates on this page, so spend and billing follow them.',
+          'Edit a price and click Save. The new rate is used within a minute, with no redeploy.',
+          'Add a row for a model that is missing, or re-seed to bring back any default models you deleted.',
+          'Models with no row here fall back to the built in default prices.',
+        ]}
+      />
 
       {msg && <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3 text-sm text-emerald-200">{msg}</div>}
       {err && <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-sm text-rose-200">{err}</div>}
@@ -194,19 +202,19 @@ export default function LlmPricingPage() {
           <Plus className="w-4 h-4 text-emerald-400" /> Add model pricing
         </h2>
         <div className="grid grid-cols-12 gap-3">
-          <input placeholder="model id (e.g. gpt-5)" className="col-span-3 bg-slate-900/50 border border-slate-700/50 rounded px-3 py-2 text-sm text-white placeholder-slate-500"
+          <input aria-label="Model id" placeholder="model id (e.g. gpt-5)" className="col-span-3 bg-slate-900/50 border border-slate-700/50 rounded px-3 py-2 text-sm text-white placeholder-slate-500"
             value={newRow.model || ''} onChange={(e) => setNewRow({ ...newRow, model: e.target.value })} />
-          <select className="col-span-2 bg-slate-900/50 border border-slate-700/50 rounded px-3 py-2 text-sm text-white"
+          <select aria-label="Provider" className="col-span-2 bg-slate-900/50 border border-slate-700/50 rounded px-3 py-2 text-sm text-white"
             value={newRow.provider} onChange={(e) => setNewRow({ ...newRow, provider: e.target.value as any })}>
             {(data?.providers || ['anthropic', 'openai', 'google', 'other']).map((p) => <option key={p} value={p}>{p}</option>)}
           </select>
-          <input type="number" step="0.0001" placeholder="input $/M" className="col-span-2 bg-slate-900/50 border border-slate-700/50 rounded px-3 py-2 text-sm text-white placeholder-slate-500"
+          <input type="number" step="0.0001" aria-label="Price per million input tokens ($)" placeholder="input $/M" className="col-span-2 bg-slate-900/50 border border-slate-700/50 rounded px-3 py-2 text-sm text-white placeholder-slate-500"
             value={newRow.input_per_m ?? ''} onChange={(e) => setNewRow({ ...newRow, input_per_m: Number(e.target.value) })} />
-          <input type="number" step="0.0001" placeholder="output $/M" className="col-span-2 bg-slate-900/50 border border-slate-700/50 rounded px-3 py-2 text-sm text-white placeholder-slate-500"
+          <input type="number" step="0.0001" aria-label="Price per million output tokens ($)" placeholder="output $/M" className="col-span-2 bg-slate-900/50 border border-slate-700/50 rounded px-3 py-2 text-sm text-white placeholder-slate-500"
             value={newRow.output_per_m ?? ''} onChange={(e) => setNewRow({ ...newRow, output_per_m: Number(e.target.value) })} />
-          <input type="number" step="0.0001" placeholder="cached (opt)" className="col-span-2 bg-slate-900/50 border border-slate-700/50 rounded px-3 py-2 text-sm text-white placeholder-slate-500"
+          <input type="number" step="0.0001" aria-label="Price per million cached input tokens ($), optional" placeholder="cached (opt)" className="col-span-2 bg-slate-900/50 border border-slate-700/50 rounded px-3 py-2 text-sm text-white placeholder-slate-500"
             value={newRow.cached_input_per_m ?? ''} onChange={(e) => setNewRow({ ...newRow, cached_input_per_m: e.target.value === '' ? null : Number(e.target.value) })} />
-          <button onClick={createRow} disabled={adding} className="col-span-1 bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-sm font-semibold rounded-lg disabled:opacity-50 inline-flex items-center justify-center gap-1">
+          <button onClick={createRow} disabled={adding} aria-label="Add pricing" data-testid="add-pricing-submit" className="col-span-1 bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-sm font-semibold rounded-lg disabled:opacity-50 inline-flex items-center justify-center gap-1">
             {adding ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
           </button>
         </div>
@@ -244,15 +252,15 @@ export default function LlmPricingPage() {
                     <tr key={r.id} className="border-b border-slate-800/60 hover:bg-slate-800/30" data-testid={`row-${r.model}`}>
                       <td className="py-2 px-3 font-mono text-white text-xs">{r.model}</td>
                       <td className="py-2 px-3 text-right">
-                        <input type="number" step="0.0001" className="w-24 text-right bg-slate-900/50 border border-slate-700/40 rounded px-2 py-1 text-xs text-white font-mono"
+                        <input type="number" step="0.0001" aria-label={`Input price for ${r.model}`} className="w-24 text-right bg-slate-900/50 border border-slate-700/40 rounded px-2 py-1 text-xs text-white font-mono"
                           value={show('input_per_m')} onChange={(e) => markEdit(r.id, { input_per_m: Number(e.target.value) })} />
                       </td>
                       <td className="py-2 px-3 text-right">
-                        <input type="number" step="0.0001" className="w-24 text-right bg-slate-900/50 border border-slate-700/40 rounded px-2 py-1 text-xs text-white font-mono"
+                        <input type="number" step="0.0001" aria-label={`Output price for ${r.model}`} className="w-24 text-right bg-slate-900/50 border border-slate-700/40 rounded px-2 py-1 text-xs text-white font-mono"
                           value={show('output_per_m')} onChange={(e) => markEdit(r.id, { output_per_m: Number(e.target.value) })} />
                       </td>
                       <td className="py-2 px-3 text-right">
-                        <input type="number" step="0.0001" placeholder="—" className="w-24 text-right bg-slate-900/50 border border-slate-700/40 rounded px-2 py-1 text-xs text-white font-mono placeholder-slate-600"
+                        <input type="number" step="0.0001" placeholder="—" aria-label={`Cached input price for ${r.model}`} className="w-24 text-right bg-slate-900/50 border border-slate-700/40 rounded px-2 py-1 text-xs text-white font-mono placeholder-slate-600"
                           value={show('cached_input_per_m', '') ?? ''} onChange={(e) => markEdit(r.id, { cached_input_per_m: e.target.value === '' ? null : Number(e.target.value) })} />
                       </td>
                       <td className="py-2 px-3 text-right text-slate-400 font-mono text-xs">{r.batch_input_per_m ?? '—'}</td>
@@ -261,11 +269,12 @@ export default function LlmPricingPage() {
                         {dirty && (
                           <button onClick={() => saveRow(r.id)} disabled={saving === r.id}
                             data-testid={`save-${r.model}`}
+                            aria-label={`Save pricing for ${r.model}`}
                             className="p-1.5 rounded bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30">
                             {saving === r.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
                           </button>
                         )}
-                        <button onClick={() => deleteRow(r.id, r.model)} className="p-1.5 rounded text-slate-500 hover:text-rose-400 hover:bg-rose-500/10">
+                        <button onClick={() => deleteRow(r.id, r.model)} aria-label={`Delete pricing for ${r.model}`} className="p-1.5 rounded text-slate-500 hover:text-rose-400 hover:bg-rose-500/10">
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
                       </td>
@@ -279,14 +288,24 @@ export default function LlmPricingPage() {
       })}
 
       <div className="rounded-lg border border-slate-700/40 bg-slate-900/30 p-4 text-xs text-slate-400">
-        <strong className="text-slate-200">How this is used:</strong> every LLM call resolved by
-        <code className="px-1 py-0.5 bg-slate-800/60 text-cyan-300 rounded mx-1">_calc_cost(model, tokens_in, tokens_out)</code>
-        looks up the model in this table. Unknown models fall back to the hardcoded <code className="text-cyan-300">PRICING</code>
-        dict in <code className="text-cyan-300">apps/agent-runtime/engine/llm_router.py</code>, then to a conservative
-        default ($3 / $15 per M). Per-provider spend is rolled up onto the <code className="text-cyan-300">executions</code>
-        and <code className="text-cyan-300">cognify_jobs</code> rows (<code>anthropic_cost</code>, <code>openai_cost</code>,
-        <code>google_cost</code>, <code>other_cost</code>).
+        <strong className="text-slate-200">How this is used:</strong> every model call is priced from this table, so run costs on
+        Executions and Analytics use these rates. A model missing here is priced from the built-in list, and failing that at a
+        cautious $3 input and $15 output per million tokens. Calls made on a Claude subscription are recorded at $0.
       </div>
     </div>
+  );
+}
+
+export default function LlmPricingPageGated() {
+  return (
+    <AccessGate
+      title="LLM Pricing"
+      purpose="Set what each AI model costs per million tokens so spend and billing numbers are right. For admins."
+      icon={DollarSign}
+      need={{ feature: 'manage_settings' }}
+      instead={{ text: 'Your own usage and spend are on Analytics.', href: '/analytics', label: 'Open Analytics' }}
+    >
+      <LlmPricingPage />
+    </AccessGate>
   );
 }

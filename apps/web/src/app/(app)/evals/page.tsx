@@ -2,7 +2,9 @@
 
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
-import { FlaskConical, Loader2, Lock, Plus, Search } from 'lucide-react';
+import { FlaskConical, History, Loader2, Lock, Plus, Search } from 'lucide-react';
+import PageHeader from '@/components/layout/PageHeader';
+import NoAccess from '@/components/layout/NoAccess';
 import { useApi } from '@/hooks/useApi';
 import { holds, useMyPermissions } from '@/lib/capabilities';
 import { TIER_STYLE } from '@/components/governance/TierPolicies';
@@ -25,33 +27,37 @@ export default function EvalsPage() {
 
   if (perms && !canRun) {
     return (
-      <div className="max-w-3xl mx-auto px-6 py-16 text-center">
-        <FlaskConical className="w-10 h-10 text-slate-500 mx-auto mb-3" />
-        <h1 className="text-xl font-semibold text-white">Evaluations</h1>
-        <p className="text-slate-400 mt-2">Evaluations need the evals.run capability. An admin can grant it under Admin, Permissions.</p>
-      </div>
+      <NoAccess
+        testId="evals-no-access"
+        title="Evaluations"
+        purpose="Golden cases that check an agent or pipeline still answers right after every change. For the people who build and own agents."
+        icon={FlaskConical}
+        need={{ capability: 'evals.run', label: 'Run evaluations' }}
+        role={perms.role}
+        instead={{ text: 'You can still try an agent by hand from My Agents.', href: '/agents', label: 'Open My Agents' }}
+      />
     );
   }
 
   return (
     <div className="max-w-6xl mx-auto px-6 py-8">
-      <header className="mb-6 flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2 mb-2">
-            <FlaskConical className="w-6 h-6 text-cyan-400" />
-            <h1 className="text-3xl font-semibold text-white">Evaluations</h1>
-          </div>
-          <p className="text-slate-400 max-w-3xl">
-            Golden cases for an agent or pipeline, each with checks on its answer. Run them on every change, compare
-            versions and models, and let high risk agents publish only when their gating suite passes.
-          </p>
-        </div>
-        {canManage && (
-          <button type="button" onClick={() => setCreating(true)} className="inline-flex items-center gap-1.5 px-4 py-2 rounded-md text-sm font-medium bg-cyan-500 text-white hover:bg-cyan-400" data-testid="eval-new-suite">
-            <Plus className="w-4 h-4" /> New suite
-          </button>
-        )}
-      </header>
+      <PageHeader
+        className="mb-6"
+        title="Evaluations"
+        purpose="Golden cases that check an agent or pipeline still answers right after every change. For the people who build and own agents."
+        icon={FlaskConical}
+        storageKey="evals"
+        docSlug="08-howto/10-evals"
+        primaryAction={canManage
+          ? { label: 'New suite', onClick: () => setCreating(true), icon: Plus, testId: 'eval-new-suite' }
+          : { label: 'Browse runs', href: '/executions', icon: History }}
+        steps={[
+          'Create a suite for one agent or pipeline.',
+          'Add cases by hand, or open a past run under Executions and choose Save as eval case.',
+          'Run the suite. Each case runs for real and is scored against its checks.',
+          'Compare versions and models. High risk agents can publish only when their gating suite passes.',
+        ]}
+      />
 
       {(data || []).length > 0 && (
         <div className="flex items-center gap-2 rounded-md border border-slate-700 bg-slate-950 px-3 mb-4 max-w-md">

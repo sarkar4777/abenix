@@ -6,9 +6,53 @@ import Link from 'next/link';
 import {
   Activity, Radio, Cpu, Clock, DollarSign, Hash,
   Wrench, CheckCircle2, XCircle, Loader2, RefreshCw,
-  ChevronRight, Zap,
+  ChevronRight, Zap, Play,
 } from 'lucide-react';
 import { usePageTitle } from '@/hooks/usePageTitle';
+import { CostValue } from '@/components/shared/CostValue';
+import PageHeader from '@/components/layout/PageHeader';
+import { failureLabel } from '@/lib/monitor-format';
+import { startedByText } from '@/lib/run-origin';
+
+// runs that ended this long ago still show, so a run shorter than one poll is not missed
+const RECENT_SECONDS = 120;
+
+interface RecentRun {
+  execution_id: string;
+  agent_id: string;
+  agent_name?: string | null;
+  status: string;
+  duration_ms?: number | null;
+  completed_at?: string | null;
+  failure_code?: string | null;
+  trigger_kind?: string | null;
+  trigger_name?: string | null;
+  trigger_id?: string | null;
+}
+
+function RecentRunRow({ run }: { run: RecentRun }) {
+  const ok = run.status === 'completed';
+  const ago = run.completed_at ? Math.max(0, Math.round((Date.now() - new Date(run.completed_at).getTime()) / 1000)) : null;
+  return (
+    <li data-testid="live-recent-run" data-agent-id={run.agent_id} data-kind={run.trigger_kind || 'unknown'} data-status={run.status}>
+      <Link
+        href={`/executions/${run.execution_id}`}
+        className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 rounded-lg hover:bg-slate-800/40 text-xs"
+      >
+        {ok ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" /> : <XCircle className="w-3.5 h-3.5 text-red-400 shrink-0" />}
+        <span className="text-slate-200 font-medium min-w-0 break-words">{run.agent_name || 'Agent'}</span>
+        <span className={ok ? 'text-emerald-300' : 'text-red-300'}>
+          {ok ? 'completed' : run.failure_code ? failureLabel(run.failure_code) : run.status}
+        </span>
+        {typeof run.duration_ms === 'number' && (
+          <span className="text-slate-500">{run.duration_ms >= 1000 ? `${(run.duration_ms / 1000).toFixed(1)}s` : `${run.duration_ms}ms`}</span>
+        )}
+        <span className="text-slate-500">Started by {startedByText(run)}</span>
+        {ago != null && <span className="text-slate-600 sm:ml-auto">{ago < 60 ? `${ago}s ago` : `${Math.round(ago / 60)} min ago`}</span>}
+      </Link>
+    </li>
+  );
+}
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -41,7 +85,7 @@ function LiveExecutionCard({ exec }: { exec: LiveExecution }) {
     : 0;
 
   return (
-    <div className="bg-slate-800/30 border border-slate-700/50 rounded-xl p-4 hover:border-cyan-500/30 transition-colors">
+    <div className="bg-slate-800/30 border border-slate-700/50 rounded-xl p-4 hover:border-cyan-500/30 transition-colors" data-testid="live-running-run" data-agent-id={exec.agent_id}>
       <div className="flex items-start gap-3">
         {/* Pulsing indicator */}
         <div className="relative mt-1 shrink-0">
@@ -143,7 +187,7 @@ function LiveExecutionCard({ exec }: { exec: LiveExecution }) {
             {exec.cost !== undefined && exec.cost > 0 && (
               <span className="flex items-center gap-1">
                 <DollarSign className="w-3 h-3" />
-                ${exec.cost.toFixed(4)}
+                <CostValue cost={exec.cost} />
               </span>
             )}
             {exec.iteration !== undefined && (
@@ -201,6 +245,7 @@ function LiveExecutionCard({ exec }: { exec: LiveExecution }) {
 export default function LiveDebugPage() {
   usePageTitle('Live Executions');
   const [executions, setExecutions] = useState<LiveExecution[]>([]);
+  const [recent, setRecent] = useState<RecentRun[]>([]);
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
@@ -216,17 +261,26 @@ export default function LiveDebugPage() {
     // SSE doesn't support auth headers natively, fall back to polling
     const poll = async () => {
       try {
-        const res = await fetch(`${API_URL}/api/executions/live`, {
+        const res = await fetch(`${API_URL}/api/executions/live?recent_seconds=${RECENT_SECONDS}`, {
           headers: { Authorization: `Bearer ${token}` },
         });
+        if (!res.ok) {
+          setConnected(false);
+          setError(res.status === 401 ? 'Your session has ended. Sign in again to keep watching.' : `The live feed is not answering (HTTP ${res.status}). Retrying every 2 seconds.`);
+          return;
+        }
         const json = await res.json();
         if (json.data) {
-          setExecutions(Array.isArray(json.data) ? json.data : []);
+          const running: LiveExecution[] = Array.isArray(json.data) ? json.data : [];
+          setExecutions(running);
+          const ids = new Set(running.map((r) => r.execution_id));
+          const ended: RecentRun[] = Array.isArray(json.meta?.recent) ? json.meta.recent : [];
+          setRecent(ended.filter((r) => !ids.has(r.execution_id)));
           setConnected(true);
           setError(null);
         }
       } catch (err) {
-        setError('Connection failed');
+        setError('Cannot reach the server. Retrying every 2 seconds.');
         setConnected(false);
       }
     };
@@ -249,45 +303,44 @@ export default function LiveDebugPage() {
 
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.3 }}>
-      {/* Header */}
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-bold text-white">Live Debug</h1>
-            <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${
-              connected
-                ? runningCount > 0
-                  ? 'bg-cyan-500/10 text-cyan-400'
-                  : 'bg-emerald-500/10 text-emerald-400'
-                : 'bg-red-500/10 text-red-400'
-            }`}>
-              <Radio className={`w-3 h-3 ${connected ? 'animate-pulse' : ''}`} />
-              {connected ? (runningCount > 0 ? 'Tracking' : 'Listening') : 'Disconnected'}
-            </div>
+      <PageHeader
+        className="mb-6"
+        title="Live Debug"
+        purpose="Watch agent and pipeline runs while they happen, step by step. For anyone testing an agent or checking a trigger fired."
+        icon={Radio}
+        storageKey="executions-live"
+        docSlug="02-runtime/04-streaming-tracing"
+        meta={
+          <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${
+            connected
+              ? runningCount > 0
+                ? 'bg-cyan-500/10 text-cyan-400'
+                : 'bg-emerald-500/10 text-emerald-400'
+              : 'bg-red-500/10 text-red-400'
+          }`}>
+            <Radio className={`w-3 h-3 ${connected ? 'animate-pulse' : ''}`} />
+            {connected ? (runningCount > 0 ? 'Tracking' : 'Listening') : 'Disconnected'}
           </div>
-          <p className="text-sm text-slate-400 mt-1">
-            Monitor agent and pipeline executions in real-time
-          </p>
-        </div>
-
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2 px-3 py-2 bg-slate-800/50 border border-slate-700 rounded-lg">
+        }
+        primaryAction={{ label: 'Run an agent', href: '/agents', icon: Play }}
+        secondaryAction={{ label: 'View History', href: '/executions' }}
+        extraActions={
+          <div className="flex items-center justify-center gap-2 px-3 py-2 bg-slate-800/50 border border-slate-700 rounded-lg">
             <Activity className="w-4 h-4 text-cyan-400" />
             <span className="text-sm font-mono text-white">{runningCount}</span>
             <span className="text-xs text-slate-500">running</span>
           </div>
-          <Link
-            href="/executions"
-            className="px-3 py-2 text-xs text-slate-400 hover:text-white bg-slate-800/50 border border-slate-700 rounded-lg hover:border-slate-600 transition-colors"
-          >
-            View History
-          </Link>
-        </div>
-      </div>
+        }
+        steps={[
+          'Start a run from chat, a trigger or a pipeline. It shows up here within two seconds.',
+          'Each card shows the current step, the tool in use, tokens and cost so far.',
+          'Runs that just ended stay under Just finished for two minutes. Click one to open its full record.',
+        ]}
+      />
 
       {/* Error state */}
       {error && (
-        <div className="bg-red-500/10 border border-red-500/20 text-red-400 text-sm rounded-xl px-4 py-3 mb-4">
+        <div role="alert" className="bg-red-500/10 border border-red-500/20 text-red-400 text-sm rounded-xl px-4 py-3 mb-4">
           {error}
         </div>
       )}
@@ -325,6 +378,17 @@ export default function LiveDebugPage() {
           <LiveExecutionCard key={exec.execution_id} exec={exec} />
         ))}
       </div>
+
+      {recent.length > 0 && (
+        <section className="mt-6 bg-slate-800/20 border border-slate-700/30 rounded-xl p-3" data-testid="live-recent">
+          <h2 className="text-xs font-semibold text-slate-300 px-3 pt-1 pb-2">
+            Just finished <span className="font-normal text-slate-500">in the last {RECENT_SECONDS / 60} minutes</span>
+          </h2>
+          <ul className="space-y-0.5">
+            {recent.map((r) => <RecentRunRow key={r.execution_id} run={r} />)}
+          </ul>
+        </section>
+      )}
 
       {/* Auto-refresh indicator */}
       {connected && (

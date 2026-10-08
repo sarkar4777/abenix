@@ -14,7 +14,13 @@ from models.execution import Execution, ExecutionStatus
 
 
 def open_run(
-    *, agent: Any, user: Any, message: str, model: str, subject: tuple
+    *,
+    agent: Any,
+    user: Any,
+    message: str,
+    model: str,
+    subject: tuple,
+    kind: str | None = None,
 ) -> Execution:
     """A RUNNING row, the insert trigger stamps provenance, revision and prompt hash."""
     sid, stype = subject
@@ -31,6 +37,7 @@ def open_run(
         model_requested=model,
         model_used=model,
         started_at=now,
+        trigger_kind=kind,
     )
 
 
@@ -47,6 +54,8 @@ def failure_code_for(result: Any) -> str | None:
     refusal = getattr(result, "governance_refusal", None)
     if refusal:
         return refusal.get("code") or "KILL_SWITCH"
+    if getattr(result, "moderation_held", False):
+        return "MODERATION_HELD"
     if getattr(result, "moderation_blocked", False):
         return "MODERATION_BLOCKED"
     if getattr(result, "budget_exceeded", False):

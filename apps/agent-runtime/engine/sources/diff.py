@@ -237,7 +237,9 @@ def summarize(diff: dict[str, Any]) -> str:
     )
     if sample:
         verb = "Now reads" if diff.get("added") else "Removed"
-        text += f'. {verb}: "{_clip(sample)}"'
+        line = _clip(sample.strip())
+        # a line that already opens with a quote reads badly wrapped in another
+        text += f". {verb}: {line}" if line.startswith('"') else f'. {verb}: "{line}"'
     return text + "."
 
 

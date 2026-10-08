@@ -14,7 +14,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from engine import credentials, governance, risk
+from engine import autonomy, credentials, governance, risk
 from engine.tools.base import ToolRegistry
 
 logger = logging.getLogger(__name__)
@@ -259,7 +259,7 @@ def _extract_field(data: Any, field_path: str) -> Any:
         if parsed is not None:
             data = parsed
         else:
-            return data if not field_path else None
+            return data if field_path in ("", "response") else None
 
     # Path-walk helper kept inline so we can re-try on a nested response.
     def _walk(obj: Any, path: str) -> Any:
@@ -292,7 +292,61 @@ def _extract_field(data: Any, field_path: str) -> Any:
         if resp is not None:
             return _walk(resp, field_path)
 
+    # builders write {{step.response}} for every tool, so read it as the step's main output
+    head, _, rest = field_path.partition(".")
+    if head == "response" and isinstance(data, dict) and "response" not in data:
+        main = _main_output(data)
+        if not rest:
+            return main
+        found = _walk(data, rest)
+        if found is None and main is not data:
+            inner = _try_parse_json_ish(main) if isinstance(main, str) else main
+            found = _walk(inner, rest) if inner is not None else None
+        return found
+
     return None
+
+
+# where a tool keeps its payload: http_client body, document_parser text, ...
+_MAIN_OUTPUT_KEYS = ("body", "text", "result", "output", "content", "data")
+
+
+def _main_output(data: dict[str, Any]) -> Any:
+    for key in _MAIN_OUTPUT_KEYS:
+        if data.get(key) is not None:
+            return data[key]
+    return data
+
+
+def _answer_with_saved_file(
+    final_output: Any, execution_path: list[str], results: dict[str, Any]
+) -> Any:
+    """A run that ends by saving a file still answers with the text it wrote.
+
+    The export keys stay, a "response" is added from the latest written answer
+    so chat shows the summary and where the file went, not the file metadata.
+    """
+    if not isinstance(final_output, dict) or "response" in final_output:
+        return final_output
+    if not (final_output.get("download_url") or final_output.get("file_path")):
+        return final_output
+    text = None
+    for nid in reversed(execution_path[:-1]):
+        r = results.get(nid)
+        if r is None or r.status != "completed":
+            continue
+        out = r.output
+        if isinstance(out, dict) and isinstance(out.get("response"), str):
+            text = out["response"].strip()
+        elif isinstance(out, str) and r.tool_name in ("llm_call", "agent_step"):
+            text = out.strip()
+        if text:
+            break
+    if not text:
+        return final_output
+    where = final_output.get("download_url") or final_output.get("file_path")
+    name = final_output.get("filename") or str(where).rsplit("/", 1)[-1]
+    return {**final_output, "response": f"{text}\n\nSaved {name}: {where}"}
 
 
 def _topological_sort(nodes: list[PipelineNode]) -> list[list[str]]:
@@ -402,6 +456,11 @@ def _resolve_templates(
         return pattern.sub(_replacer, value)
 
     return {key: _resolve(value) for key, value in arguments.items()}
+
+
+def _skipped_by_failure(result: Any) -> bool:
+    err = getattr(result, "error", None) or ""
+    return err.startswith("Dependency '") and err.endswith("' failed")
 
 
 _NUM_RE = __import__("re").compile(r"^-?\d+(\.\d+)?([eE][-+]?\d+)?$")
@@ -610,6 +669,7 @@ class PipelineExecutor:
         context: dict[str, Any] | None = None,
     ) -> PipelineResult:
         await governance.ensure_fresh()
+        await autonomy.ensure_fresh()
         parent = governance.current()
         base = risk.highest(
             [governance.agent_tier(self._agent_id), parent.tier if parent else "low"]
@@ -623,6 +683,13 @@ class PipelineExecutor:
             scope="pipeline",
             subject_id=str(self._agent_id or ""),
             parent=parent,
+            agent_id=str(self._agent_id or ""),
+            user_id=str(
+                getattr(self.tool_registry, "run_user_id", "")
+                or (parent.user_id if parent else "")
+                or ""
+            ),
+            agent_config_hash=autonomy.config_hash(self._agent_id),
         )
         if base != "low":
             ctx.reasons.append({"tier": base, "source": "pipeline", "detail": ""})
@@ -880,6 +947,7 @@ class PipelineExecutor:
             if results[nid].status == "completed":
                 final_output = results[nid].output
                 break
+        final_output = _answer_with_saved_file(final_output, execution_path, results)
 
         status = "completed"
         if failed_nodes:
@@ -991,6 +1059,15 @@ class PipelineExecutor:
                     node_id=node.id,
                     status="skipped",
                     error=f"Dependency '{dep_id}' failed",
+                    tool_name=node.tool_name,
+                    duration_ms=int((time.monotonic() - node_start) * 1000),
+                )
+            # skipped because something upstream failed, so this has no input either
+            if dep_result.status == "skipped" and _skipped_by_failure(dep_result):
+                return NodeResult(
+                    node_id=node.id,
+                    status="skipped",
+                    error=dep_result.error,
                     tool_name=node.tool_name,
                     duration_ms=int((time.monotonic() - node_start) * 1000),
                 )
@@ -1376,6 +1453,10 @@ class PipelineExecutor:
                 )
             if notes and isinstance(parsed, dict):
                 parsed.setdefault("_warnings", notes)
+            # a watching action did not run, downstream reads it like an approval status
+            auto = md.get("autonomy")
+            if isinstance(auto, dict) and auto.get("status") == "watching":
+                parsed = {"status": "watching", "proposed": auto.get("proposed") or {}}
 
             return NodeResult(
                 node_id=node.id,

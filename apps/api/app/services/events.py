@@ -100,6 +100,78 @@ CATALOG: dict[str, dict[str, Any]] = {
         "description": "An evaluation suite run finished",
         "sample": {"suite_id": "…", "passed": 18, "failed": 2},
     },
+    "action.proposed": {
+        "description": "An agent declared an action and the autonomy gate decided what happens",
+        "sample": {
+            "action_id": "…",
+            "agent_id": "…",
+            "action_key": "sample_plant.set_setpoint",
+            "level": 2,
+            "decision": "wait",
+        },
+    },
+    "action.executed": {
+        "description": "A governed action ran",
+        "sample": {
+            "action_id": "…",
+            "action_key": "sample_plant.set_setpoint",
+            "ok": True,
+            "mode": "auto",
+        },
+    },
+    "action.outcome_recorded": {
+        "description": "What actually happened after an action was recorded and scored",
+        "sample": {
+            "action_id": "…",
+            "metric": "pressure_bar",
+            "value": 4.35,
+            "within_band": True,
+            "source": "tool",
+        },
+    },
+    "moderation.held": {
+        "description": "A moderation policy held a message or reply for a person to review",
+        "sample": {
+            "review_id": "…",
+            "source": "pre_llm",
+            "priority": 2,
+            "categories": ["custom:0"],
+            "expires_at": "2026-01-01T10:00:00+00:00",
+        },
+    },
+    "moderation.decided": {
+        "description": "Held content was released, redacted, rejected or timed out",
+        "sample": {
+            "review_id": "…",
+            "status": "redacted",
+            "source": "pre_llm",
+            "execution_id": "…",
+            "automatic": False,
+        },
+    },
+    "autonomy.recommended": {
+        "description": "An agent met the bar for the next autonomy level",
+        "sample": {"grant_id": "…", "from_level": 1, "to_level": 2},
+    },
+    "autonomy.promoted": {
+        "description": "A person approved an agent moving up a level",
+        "sample": {
+            "grant_id": "…",
+            "from_level": 2,
+            "to_level": 3,
+            "approved_by": "…",
+        },
+    },
+    "autonomy.demoted": {
+        "description": "An agent moved down a level, by a person or automatically",
+        "sample": {
+            "grant_id": "…",
+            "from_level": 3,
+            "to_level": 2,
+            "reason": "Harm was flagged on one of its actions",
+            "actor": "system",
+        },
+    },
 }
 
 MAX_ATTEMPTS = 8
@@ -426,8 +498,17 @@ async def _deliver_run(
                 for k, v in (target.get("context") or {}).items()
             },
         }
+        from app.core.run_origin import event_origin
+
+        kind, name = event_origin(sub, envelope)
         execution, dispatched = await dispatch_execution(
-            db, agent=agent, user=owner, message=message, context=context
+            db,
+            agent=agent,
+            user=owner,
+            message=message,
+            context=context,
+            trigger_kind=kind,
+            trigger_name=name,
         )
         if not dispatched:
             return (
@@ -451,7 +532,7 @@ async def deliver_due(limit: int = 100) -> int:
                 await db.execute(
                     text(
                         "SELECT d.id, d.webhook_id, d.request_payload, d.attempts, w.url, w.target_type, w.target, "
-                        "w.signing_secret, w.created_by, w.is_active FROM webhook_deliveries d JOIN webhooks w ON w.id = d.webhook_id "
+                        "w.signing_secret, w.created_by, w.is_active, w.name FROM webhook_deliveries d JOIN webhooks w ON w.id = d.webhook_id "
                         "WHERE d.status IN ('pending', 'retrying') AND d.next_attempt_at <= now() "
                         "ORDER BY d.next_attempt_at LIMIT :n FOR UPDATE OF d SKIP LOCKED"
                     ),

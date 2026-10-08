@@ -7,6 +7,12 @@ import { useParams } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { usePageTitle } from '@/hooks/usePageTitle';
 import { useApi } from '@/hooks/useApi';
+import { failureLabel } from '@/lib/monitor-format';
+import { originHref, originNote, startedByText } from '@/lib/run-origin';
+import { CostValue } from '@/components/shared/CostValue';
+import PageHeader from '@/components/layout/PageHeader';
+import NextSteps, { type NextStep } from '@/components/shared/NextSteps';
+import { useCapability } from '@/lib/capabilities';
 import {
   Activity,
   ArrowLeft,
@@ -25,12 +31,16 @@ import {
   MessageSquare,
   GitBranch,
   ArrowRight,
+  FlaskConical,
+  Star,
 } from 'lucide-react';
 import Link from 'next/link';
 import { LiveDagView } from '@/components/shared/LiveDagView';
 import { FallbackBadge } from '@/components/FallbackBadge';
 import DecisionRunCard from '@/components/decisions/DecisionRunCard';
 import type { DecisionRecord } from '@/lib/decisions';
+import ActionBadge from '@/components/autonomy/ActionBadge';
+import { autonomyMetaOf } from '@/lib/autonomy';
 
 interface ChildExecution {
   id: string;
@@ -72,6 +82,10 @@ interface ExecutionDetail {
   confidence_score?: number;
   failure_code?: string | null;
   parent_execution_id?: string | null;
+  trigger_id?: string | null;
+  trigger_kind?: string | null;
+  trigger_name?: string | null;
+  flat_rate_billing?: boolean;
   // a dict keyed by node id on the wire
   node_results?: Record<string, { node_id: string; label?: string; tool_name: string; status: string; duration_ms?: number; output?: unknown; error?: string }> | Array<{ node_id: string; label?: string; tool_name: string; status: string; duration_ms?: number; output?: unknown; error?: string }>;
   execution_trace?: {
@@ -460,7 +474,7 @@ export default function ExecutionDetailPage() {
   const executionId = params.id as string;
   usePageTitle('Execution Detail');
 
-  const { data: execution, isLoading, mutate } = useApi<ExecutionDetail>(
+  const { data: execution, isLoading, error: loadError, mutate } = useApi<ExecutionDetail>(
     executionId ? `/api/executions/${executionId}` : null,
   );
   // children persist parent_execution_id, so this works after the live tree has expired
@@ -499,6 +513,68 @@ export default function ExecutionDetailPage() {
     const interval = setInterval(poll, 2000);
     return () => { clearInterval(interval); mutate(); };
   }, [isRunning, executionId, mutate]);
+
+  const { allowed: canSaveCase } = useCapability('evals.manage');
+  const succeeded = s === 'completed';
+  // shown once per agent, on the first successful run this browser opens
+  const [showNext, setShowNext] = useState(false);
+  useEffect(() => {
+    if (!succeeded || !execution?.agent_id) return;
+    const key = `runNextSteps.${execution.agent_id}`;
+    try {
+      if (localStorage.getItem(key)) return;
+      localStorage.setItem(key, '1');
+    } catch {
+      return;
+    }
+    setShowNext(true);
+  }, [succeeded, execution?.agent_id]);
+  // reviews only exist for agents listed in the marketplace
+  const { data: listing } = useApi<{ id: string }>(
+    showNext && execution?.agent_id ? `/api/marketplace/${execution.agent_id}` : null,
+  );
+  const nextSteps: NextStep[] = [];
+  if (showNext && execution) {
+    if (canSaveCase) {
+      nextSteps.push({
+        id: 'save-case',
+        label: 'Save as eval case',
+        hint: 'Keep this run as a test the agent must keep passing.',
+        icon: FlaskConical,
+        onClick: () => document.querySelector<HTMLButtonElement>('[data-testid="execution-save-eval-case"]')?.click(),
+      });
+    }
+    if (listing?.id) {
+      nextSteps.push({
+        id: 'feedback',
+        label: 'Rate this agent',
+        hint: 'Leave a review on its marketplace page, under Reviews.',
+        icon: Star,
+        href: `/marketplace/${execution.agent_id}`,
+      });
+    }
+    nextSteps.push({
+      id: 'run-again',
+      label: 'Try another input',
+      hint: 'Chat with the agent and see how it handles a new case.',
+      icon: MessageSquare,
+      href: `/agents/${execution.agent_id}/chat`,
+    });
+  }
+
+  if (!isLoading && !execution) {
+    return (
+      <div className="p-6 max-w-xl space-y-3" data-testid="execution-not-found">
+        <h1 className="text-lg font-bold text-white">This run could not be opened</h1>
+        <p className="text-sm text-slate-400">
+          {loadError && !/not found/i.test(loadError) ? loadError : 'It may have been deleted, archived, or it belongs to someone else.'}
+        </p>
+        <Link href="/executions" className="inline-flex items-center gap-1.5 text-sm text-cyan-300 hover:underline">
+          <ArrowLeft className="w-4 h-4" /> Back to all runs
+        </Link>
+      </div>
+    );
+  }
 
   if (isLoading || !execution) {
     return (
@@ -547,71 +623,105 @@ export default function ExecutionDetailPage() {
       animate={{ opacity: 1, y: 0 }}
       className="p-6 space-y-6 max-w-6xl"
     >
-      {/* Header */}
-      <div className="flex items-center gap-4">
-        <Link href="/executions" className="p-2 rounded-lg hover:bg-slate-800/50 text-slate-400 hover:text-white transition-colors">
-          <ArrowLeft className="w-5 h-5" />
-        </Link>
-        <div className="flex-1">
-          <div className="flex items-center gap-3">
-            <h1 className="text-lg font-bold text-white">Execution Flight Recorder</h1>
+      <PageHeader
+        title="Execution Flight Recorder"
+        purpose="Everything one agent run did, step by step, with its cost and result. For anyone checking why a run went the way it did."
+        icon={Activity}
+        storageKey="execution-run"
+        docSlug="02-runtime/04-streaming-tracing"
+        back={{ href: '/executions', label: 'All runs' }}
+        meta={
+          <>
             <StatusBadge status={execution.status} />
             {execution.failure_code && (
-              <span className="px-2 py-0.5 text-[10px] font-mono rounded-full border border-amber-500/30 bg-amber-500/10 text-amber-300" data-testid="execution-failure-code">
-                {execution.failure_code}
+              <span className="px-2 py-0.5 text-[10px] rounded-full border border-amber-500/30 bg-amber-500/10 text-amber-300" data-testid="execution-failure-code" title={execution.failure_code}>
+                {failureLabel(execution.failure_code)}
               </span>
             )}
-          </div>
-          <p className="text-xs text-slate-500 mt-0.5 font-mono flex items-center gap-2 flex-wrap">
-            <span>{executionId.slice(0, 12)}... | {execution.model_used} | {new Date(execution.created_at).toLocaleString()}</span>
-            <FallbackBadge
-              actual_model={execution.actual_model || execution.model_used || ''}
-              requested_model={execution.model_requested || ''}
-              reason={execution.fallback_reason}
-            />
-          </p>
-        </div>
-        {execution.trace_id && (() => {
-          const grafanaBase = (process.env.NEXT_PUBLIC_GRAFANA_URL || "http://localhost:3010").replace(/\/$/, "");
-          const left = JSON.stringify({datasource:'tempo',queries:[{query:execution.trace_id,queryType:'traceql'}],range:{from:'now-1h',to:'now'}});
-          return (
-            <a
-              href={`${grafanaBase}/explore?orgId=1&left=${encodeURIComponent(left)}`}
-              target="_blank" rel="noreferrer"
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-cyan-500/40 bg-cyan-500/10 text-cyan-300 text-xs font-semibold hover:bg-cyan-500/20"
-              title={`Open trace ${execution.trace_id.slice(0,12)}… in Grafana Tempo`}
-              data-testid="execution-view-trace"
-            >
-              <GitBranch className="w-3.5 h-3.5" /> View Trace
-            </a>
-          );
-        })()}
-        <Link
-          href={`/agents/${execution.agent_id}/chat?prefill=${encodeURIComponent(execution.input_message || '')}`}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-600/60 bg-slate-800/40 text-slate-200 text-xs font-semibold hover:bg-slate-700/60"
-          title="Open the agent with this run's input filled in"
-          data-testid="execution-rerun"
-        >
-          <RotateCcw className="w-3.5 h-3.5" /> Re-run
-        </Link>
-        <SaveAsEvalCase executionId={executionId} agentId={execution.agent_id} agentName={(execution as any).agent_name} />
-        {execution.confidence_score != null && (
-          <ConfidenceRing score={execution.confidence_score} />
-        )}
-      </div>
-      {execution.parent_execution_id && (
-        <p className="text-xs text-slate-400 flex items-center gap-1.5">
-          <GitBranch className="w-3.5 h-3.5 text-purple-400" />
-          Started by
-          <Link
-            href={`/executions/${execution.parent_execution_id}`}
-            className="font-mono text-cyan-300 hover:text-cyan-200 underline-offset-2 hover:underline"
-            data-testid="execution-parent-link"
-          >
-            {execution.parent_execution_id.slice(0, 12)}...
-          </Link>
+          </>
+        }
+        primaryAction={{
+          label: 'Re-run',
+          href: `/agents/${execution.agent_id}/chat?prefill=${encodeURIComponent(execution.input_message || '')}`,
+          icon: RotateCcw,
+          title: "Open the agent with this run's input filled in",
+          testId: 'execution-rerun',
+        }}
+        secondaryAction={<SaveAsEvalCase executionId={executionId} agentId={execution.agent_id} agentName={execution.agent_name} />}
+        extraActions={
+          <>
+            {execution.confidence_score != null && <ConfidenceRing score={execution.confidence_score} />}
+            {execution.trace_id && (() => {
+              const grafanaBase = (process.env.NEXT_PUBLIC_GRAFANA_URL || "http://localhost:3010").replace(/\/$/, "");
+              const left = JSON.stringify({datasource:'tempo',queries:[{query:execution.trace_id,queryType:'traceql'}],range:{from:'now-1h',to:'now'}});
+              return (
+                <a
+                  href={`${grafanaBase}/explore?orgId=1&left=${encodeURIComponent(left)}`}
+                  target="_blank" rel="noreferrer"
+                  className="flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg border border-cyan-500/40 bg-cyan-500/10 text-cyan-300 text-xs font-semibold hover:bg-cyan-500/20"
+                  title={`Open trace ${execution.trace_id.slice(0,12)}… in Grafana Tempo`}
+                  data-testid="execution-view-trace"
+                >
+                  <GitBranch className="w-3.5 h-3.5" /> View Trace
+                </a>
+              );
+            })()}
+          </>
+        }
+        steps={[
+          'The top cards show how long the run took, the tokens it used and what it cost.',
+          'The waterfall and lineage graph show each tool call in order. Click a step to see its input and output.',
+          'Re-run opens the agent with the same input. Save as eval case keeps this run as a test the agent must keep passing.',
+        ]}
+      >
+        <p className="text-xs text-slate-500 font-mono flex items-center gap-2 flex-wrap break-all">
+          <span>{executionId.slice(0, 12)}... | {execution.model_used} | {new Date(execution.created_at).toLocaleString()}</span>
+          <FallbackBadge
+            actual_model={execution.actual_model || execution.model_used || ''}
+            requested_model={execution.model_requested || ''}
+            reason={execution.fallback_reason}
+          />
         </p>
+      </PageHeader>
+      {nextSteps.length > 0 && (
+        <NextSteps
+          title="This run worked. What next?"
+          steps={nextSteps}
+          onDismiss={() => setShowNext(false)}
+          testId="run-next-steps"
+        />
       )}
+      {(() => {
+        const href = originHref(execution);
+        const note = originNote(execution);
+        const text = startedByText(execution);
+        return (
+          <p className="text-xs text-slate-400 flex items-center gap-1.5 flex-wrap" data-testid="execution-started-by" data-kind={execution.trigger_kind || 'unknown'}>
+            <GitBranch className="w-3.5 h-3.5 text-purple-400" />
+            <span>Started by{' '}</span>
+            {href ? (
+              <Link href={href} className="text-cyan-300 hover:text-cyan-200 underline-offset-2 hover:underline" data-testid="execution-started-by-link">
+                {text}
+              </Link>
+            ) : (
+              <span className={execution.trigger_kind ? 'text-slate-200' : 'text-slate-500'}>{text}</span>
+            )}
+            {execution.parent_execution_id && (
+              <>
+                <span className="text-slate-600">{' '}from run{' '}</span>
+                <Link
+                  href={`/executions/${execution.parent_execution_id}`}
+                  className="font-mono text-cyan-300 hover:text-cyan-200 underline-offset-2 hover:underline"
+                  data-testid="execution-parent-link"
+                >
+                  {execution.parent_execution_id.slice(0, 12)}...
+                </Link>
+              </>
+            )}
+            {note && <span className="text-slate-500">{' '}{note}</span>}
+          </p>
+        );
+      })()}
       {Array.isArray(childRuns) && childRuns.length > 0 && (
         <div className="bg-slate-800/30 backdrop-blur-xl border border-slate-700/50 rounded-xl p-4" data-testid="execution-children">
           <h3 className="text-sm font-semibold text-white mb-3 flex items-center gap-2">
@@ -667,7 +777,7 @@ export default function ExecutionDetailPage() {
           <DollarSign className="w-4 h-4 text-emerald-400 shrink-0" />
           <div>
             <p className="text-[10px] text-slate-500">Cost</p>
-            <p className="text-sm font-bold text-white">${(execution.cost || 0).toFixed(4)}</p>
+            <p className="text-sm font-bold text-white"><CostValue cost={execution.cost || 0} flatRate={execution.flat_rate_billing} testId="execution-detail-cost" /></p>
           </div>
         </div>
         <div className="bg-slate-800/30 backdrop-blur-xl border border-slate-700/50 rounded-lg p-3 flex items-center gap-3">
@@ -681,7 +791,7 @@ export default function ExecutionDetailPage() {
           <Activity className="w-4 h-4 text-cyan-400 shrink-0" />
           <div>
             <p className="text-[10px] text-slate-500">Confidence</p>
-            <p className="text-sm font-bold text-white">{execution.confidence_score != null ? `${Math.round(execution.confidence_score * 100)}%` : '--'}</p>
+            {execution.confidence_score != null ? <p className="text-sm font-bold text-white">{Math.round(execution.confidence_score * 100)}%</p> : <p className="text-xs text-slate-500">Not scored</p>}
           </div>
         </div>
       </div>
@@ -901,6 +1011,26 @@ export default function ExecutionDetailPage() {
         />
       )}
 
+      {/* Actions that went through the autonomy gate */}
+      {(() => {
+        const acted = toolCalls.map((tc) => ({ tc, am: autonomyMetaOf(tc) })).filter((x) => x.am);
+        if (acted.length === 0) return null;
+        return (
+          <div className="bg-slate-800/30 backdrop-blur-xl border border-slate-700/50 rounded-xl p-4" data-testid="execution-autonomy-actions">
+            <h3 className="text-xs font-semibold text-slate-400 uppercase mb-3">Actions in this run</h3>
+            <ul className="space-y-2">
+              {acted.map(({ tc, am }, i) => (
+                <li key={i} className="flex flex-wrap items-center gap-2 text-xs">
+                  <span className="font-mono text-cyan-300">{tc.name}</span>
+                  {am && <ActionBadge meta={am} />}
+                  {am?.action_id && <span className="text-slate-600 font-mono">{am.action_id.slice(0, 8)}</span>}
+                </li>
+              ))}
+            </ul>
+          </div>
+        );
+      })()}
+
       {/* Step replay: every node in the order it ran */}
       {steps.length > 0 && (
         <div className="bg-slate-800/30 backdrop-blur-xl border border-slate-700/50 rounded-xl p-4" data-testid="execution-steps">
@@ -920,6 +1050,10 @@ export default function ExecutionDetailPage() {
                       {st.node_id && st.tool && <span className="text-slate-600 font-mono">{st.node_id}</span>}
                       {typeof st.duration_ms === 'number' && <span className="text-slate-600">{st.duration_ms}ms</span>}
                       {failed && <span className="text-[10px] px-1.5 rounded bg-red-500/10 text-red-300">failed</span>}
+                      {(() => {
+                        const am = autonomyMetaOf(st) || autonomyMetaOf(st.output);
+                        return am ? <ActionBadge meta={am} /> : null;
+                      })()}
                     </div>
                     {st.node_type === 'pipeline_node' && st.metadata?.decision_record && (
                       <DecisionRunCard record={st.metadata.decision_record} args={st.input && typeof st.input === 'object' ? (st.input as Record<string, unknown>) : undefined} />

@@ -29,7 +29,10 @@ import { fetchAllAgents } from '@/lib/fetch-all-agents';
 import { SkeletonAgentCard } from '@/components/ui/Skeleton';
 import EmptyState from '@/components/ui/EmptyState';
 import DeleteWithDependents from '@/components/ui/DeleteWithDependents';
+import DeletedAgents from '@/components/agent/DeletedAgents';
+import { usePlatformFeatures } from '@/hooks/usePlatformFeatures';
 import { toastError, toastSuccess } from '@/stores/toastStore';
+import PageHeader from '@/components/layout/PageHeader';
 
 interface Agent {
   id: string;
@@ -78,7 +81,8 @@ const statusStyles: Record<string, string> = {
   archived: 'text-red-400 bg-red-500/10 border border-red-500/20',
 };
 
-type Tab = 'my' | 'prebuilt' | 'marketplace';
+type Tab = 'my' | 'all' | 'prebuilt' | 'marketplace';
+const TABS: Tab[] = ['my', 'all', 'prebuilt', 'marketplace'];
 
 const container = {
   hidden: {},
@@ -92,8 +96,14 @@ const item = {
 
 export default function AgentsPage() {
   usePageTitle('My Agents');
+  const { marketplace: marketplaceOn } = usePlatformFeatures();
   const [search, setSearch] = useState('');
   const [tab, setTab] = useState<Tab>('my');
+  // ?tab=all from the dashboard card opens the matching list
+  useEffect(() => {
+    const t = new URLSearchParams(window.location.search).get('tab') as Tab | null;
+    if (t && TABS.includes(t)) setTab(t);
+  }, []);
   const [category, setCategory] = useState('');
   const [sortBy, setSortBy] = useState('newest');
   const [viewMode, setViewMode] = useState<'grid' | 'grouped'>('grouped');
@@ -105,7 +115,7 @@ export default function AgentsPage() {
   // rendered. Without this, the first page of "prebuilt" was all custom
   // agents (sorted newest-first) which the client-side filter removed
   // → empty list despite "94 agents available" in the footer.
-  const typeParam = tab === 'prebuilt' ? '&scope=prebuilt' : tab === 'my' ? '&scope=mine' : '';
+  const typeParam = tab === 'prebuilt' ? '&scope=prebuilt' : tab === 'my' ? '&scope=mine' : tab === 'marketplace' ? '&published=true' : '';
   const apiUrl = `/api/agents?search=${encodeURIComponent(search)}&category=${encodeURIComponent(category)}&sort=${sortBy}&limit=${LIMIT}&offset=${page * LIMIT}${typeParam}`;
   const { data: agents, isLoading: loading, meta, mutate } = useApi<Agent[]>(apiUrl);
 
@@ -119,7 +129,8 @@ export default function AgentsPage() {
   // independent of the paginated visible slice. Without this the header
   // showed the global total ("162 agents available") while the My Agents
   // tab rendered a single card — clients clicked thinking it was broken.
-  const [tabCounts, setTabCounts] = useState<Record<Tab, number>>({ my: 0, prebuilt: 0, marketplace: 0 });
+  const [tabCounts, setTabCounts] = useState<Record<Tab, number>>({ my: 0, all: 0, prebuilt: 0, marketplace: 0 });
+  const [categories, setCategories] = useState<string[]>([]);
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -130,7 +141,8 @@ export default function AgentsPage() {
         : 0;
       const prebuiltCount = all.filter((a) => a.agent_type === 'oob').length;
       const marketplaceCount = all.filter((a) => a.is_published === true).length;
-      setTabCounts({ my: myCount, prebuilt: prebuiltCount, marketplace: marketplaceCount });
+      setTabCounts({ my: myCount, all: all.length, prebuilt: prebuiltCount, marketplace: marketplaceCount });
+      setCategories(Array.from(new Set(all.map((a) => a.category).filter((c): c is string => !!c))).sort());
     })();
     return () => { cancelled = true; };
   }, [currentUserId, agents]);
@@ -145,8 +157,9 @@ export default function AgentsPage() {
 
   const tabs: { key: Tab; label: string }[] = [
     { key: 'my', label: 'My Agents' },
+    { key: 'all', label: 'All' },
     { key: 'prebuilt', label: 'Pre-Built' },
-    { key: 'marketplace', label: 'Marketplace' },
+    ...(marketplaceOn ? [{ key: 'marketplace' as Tab, label: 'Marketplace' }] : []),
   ];
 
   return (
@@ -156,28 +169,34 @@ export default function AgentsPage() {
       transition={{ duration: 0.4 }}
       className="space-y-6 max-w-[1400px]"
     >
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-white">Agents</h1>
-          <p className="text-sm text-slate-500 mt-1">
+      <PageHeader
+        title="Agents"
+        icon={Bot}
+        purpose="Find, chat with and edit the agents you can use, your own and the built-in ones. For everyone who runs or builds agents."
+        meta={
+          <span className="rounded-full border border-slate-700/50 bg-slate-800/50 px-2 py-0.5 text-xs text-slate-400">
             {total} agent{total !== 1 ? 's' : ''} available
-          </p>
-        </div>
-        <Link
-          href="/builder"
-          className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-cyan-500 to-purple-600 text-white text-sm font-medium rounded-lg hover:from-cyan-400 hover:to-purple-500 shadow-lg shadow-cyan-500/25 transition-all"
-        >
-          <Plus className="w-4 h-4" />
-          New Agent
-        </Link>
-      </div>
+          </span>
+        }
+        primaryAction={{ label: 'New Agent', href: '/builder', icon: Plus }}
+        steps={[
+          'Pick a tab to see your own agents, all agents or the built-in ones.',
+          'Open Chat to talk to an agent, or Docs to see how to call it from your code.',
+          'Use Edit to change its instructions, tools or knowledge in the builder.',
+          'Deleted agents stay in Recently deleted at the bottom so you can bring them back.',
+        ]}
+        docSlug="08-howto/02-add-an-agent"
+        storageKey="agents"
+      />
 
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div className="flex bg-slate-800/50 rounded-lg p-1 border border-slate-700/50 overflow-x-auto">
           {tabs.map((t) => (
             <button
               key={t.key}
-              onClick={() => setTab(t.key)}
+              data-testid={`agents-tab-${t.key}`}
+              aria-pressed={tab === t.key}
+              onClick={() => { setTab(t.key); setPage(0); }}
               className={`px-4 py-1.5 text-sm rounded-md transition-colors ${
                 tab === t.key
                   ? 'bg-cyan-500/10 text-cyan-400 font-medium'
@@ -188,40 +207,40 @@ export default function AgentsPage() {
             </button>
           ))}
         </div>
-        <div className="flex items-center gap-2 flex-1 md:max-w-2xl">
-          <div className="relative flex-1">
+        <div className="flex flex-wrap items-center gap-2 flex-1 min-w-0 md:max-w-2xl">
+          <div className="relative basis-full sm:basis-auto flex-1 min-w-0 sm:min-w-[12rem]">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
             <input
               type="text"
               value={search}
               onChange={(e) => { setSearch(e.target.value); setPage(0); }}
               placeholder="Search agents..."
+              aria-label="Search agents"
               className="w-full pl-10 pr-4 py-2 bg-slate-800/50 border border-slate-700 rounded-lg text-sm text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500"
             />
           </div>
           <select
+            aria-label="Filter by category"
             value={category}
             onChange={(e) => { setCategory(e.target.value); setPage(0); }}
-            className="bg-slate-800/50 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:border-cyan-500 focus:outline-none"
+            className="min-w-0 flex-1 sm:flex-none bg-slate-800/50 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:border-cyan-500 focus:outline-none"
           >
             <option value="">All Categories</option>
-            <option value="research">Research</option>
-            <option value="engineering">Engineering</option>
-            <option value="finance">Finance</option>
-            <option value="strategy">Strategy</option>
-            <option value="analytics">Analytics</option>
-            <option value="communication">Communication</option>
+            {categories.map((c) => (
+              <option key={c} value={c}>{c.charAt(0).toUpperCase() + c.slice(1)}</option>
+            ))}
           </select>
           <select
+            aria-label="Sort agents"
             value={sortBy}
             onChange={(e) => setSortBy(e.target.value)}
-            className="bg-slate-800/50 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:border-cyan-500 focus:outline-none"
+            className="min-w-0 flex-1 sm:flex-none bg-slate-800/50 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:border-cyan-500 focus:outline-none"
           >
             <option value="newest">Newest First</option>
             <option value="oldest">Oldest First</option>
             <option value="name">Name A-Z</option>
           </select>
-          <div className="flex items-center bg-slate-800/50 rounded-lg border border-slate-700 p-0.5">
+          <div className="flex shrink-0 items-center bg-slate-800/50 rounded-lg border border-slate-700 p-0.5">
             <button onClick={() => setViewMode('grid')} className={`px-2 py-1 rounded text-xs transition-colors ${viewMode === 'grid' ? 'bg-slate-700 text-white' : 'text-slate-400 hover:text-white'}`}>Grid</button>
             <button onClick={() => setViewMode('grouped')} className={`px-2 py-1 rounded text-xs transition-colors ${viewMode === 'grouped' ? 'bg-slate-700 text-white' : 'text-slate-400 hover:text-white'}`}>Grouped</button>
           </div>
@@ -237,10 +256,10 @@ export default function AgentsPage() {
       ) : filtered.length === 0 ? (
         <EmptyState
           icon={Bot}
-          title={tab === 'my' ? 'No custom agents yet' : 'No agents found'}
-          description={tab === 'my' ? 'Create your first agent to get started.' : 'Try adjusting your search or filters.'}
-          actionLabel={tab === 'my' ? 'Create Agent' : undefined}
-          actionHref={tab === 'my' ? '/builder' : undefined}
+          title={search || category ? 'No agents match' : tab === 'my' ? 'No custom agents yet' : tab === 'marketplace' ? 'Nothing listed in the marketplace yet' : 'No agents found'}
+          description={search || category ? 'Try another search or clear the category filter.' : tab === 'my' ? 'Create your first agent to get started.' : tab === 'marketplace' ? 'Publish an agent with marketplace visibility from the builder to list it here.' : 'Try adjusting your search or filters.'}
+          actionLabel={!search && !category && tab === 'my' ? 'Create Agent' : undefined}
+          actionHref={!search && !category && tab === 'my' ? '/builder' : undefined}
         />
       ) : viewMode === 'grouped' && !category ? (
         <div className="space-y-4">
@@ -432,18 +451,19 @@ export default function AgentsPage() {
         resource={`/api/agents/${deleting?.id}`}
         name={deleting?.name || ''}
         what="agent"
-        note="Its run history stays. An admin can restore it."
+        note="Its run history stays. You can restore it from Recently deleted at the bottom of this page."
         onConfirm={async (force) => {
           if (!deleting) return;
           try {
             await apiFetch(`/api/agents/${deleting.id}${force ? '?force=true' : ''}`, { method: 'DELETE' });
-            toastSuccess(`${deleting.name} deleted`);
+            toastSuccess(`${deleting.name} deleted`, 'Restore it from Recently deleted below.');
             mutate();
           } catch (e: any) {
             toastError('Delete failed', e?.message || 'Unknown error');
           }
         }}
       />
+      <DeletedAgents refreshKey={agents} onRestored={() => mutate()} />
     </motion.div>
   );
 }

@@ -5,8 +5,9 @@ import { motion } from 'framer-motion';
 import {
   Activity, Bot, Copy, Check, Play, Loader2, AlertCircle, Gauge, Zap, Sparkles, Terminal,
 } from 'lucide-react';
-import { useApi } from '@/hooks/useApi';
 import { apiFetch } from '@/lib/api-client';
+import { fetchAllAgents } from '@/lib/fetch-all-agents';
+import PageHeader from '@/components/layout/PageHeader';
 
 interface Agent {
   id: string;
@@ -30,8 +31,18 @@ const SCENARIOS: Scenario[] = [
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 export default function LoadPlaygroundPage() {
-  const { data: agentsResp } = useApi<Agent[]>('/api/agents?limit=100');
-  const agents = agentsResp || [];
+  const [agents, setAgents] = useState<Agent[]>([]);
+  const [agentsState, setAgentsState] = useState<'loading' | 'ready' | 'error'>('loading');
+
+  // the list API pages at 100, older agents were missing from the picker
+  useEffect(() => {
+    fetchAllAgents<Agent>()
+      .then(({ agents: all }) => {
+        setAgents([...all].sort((a, b) => a.name.localeCompare(b.name)));
+        setAgentsState('ready');
+      })
+      .catch(() => setAgentsState('error'));
+  }, []);
 
   const [agentId, setAgentId] = useState<string>('');
   const [scenario, setScenario] = useState<string>('steady_burst');
@@ -100,7 +111,13 @@ export default function LoadPlaygroundPage() {
         body: JSON.stringify({ code }),
       });
       if (!resp.ok || !resp.body) {
-        throw new Error(`HTTP ${resp.status}`);
+        let msg = resp.status === 403 ? 'Only admins can run load tests.' : `The run could not start (HTTP ${resp.status}).`;
+        try {
+          const j = await resp.json();
+          const m = j?.error?.message || j?.error || j?.detail;
+          if (typeof m === 'string' && m) msg = m;
+        } catch { /* not json */ }
+        throw new Error(msg);
       }
       const reader = resp.body.getReader();
       const dec = new TextDecoder();
@@ -152,17 +169,20 @@ export default function LoadPlaygroundPage() {
       transition={{ duration: 0.3 }}
       className="space-y-6"
     >
-      <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold text-white flex items-center gap-2">
-            <Gauge className="w-6 h-6 text-cyan-400" /> Load Test Playground
-          </h1>
-          <p className="text-sm text-slate-500 mt-1">
-            Pick an agent, describe the load shape, get an AI-generated Python script, then run it live.
-            Reports p50/p95/p99 + throughput + failure buckets.
-          </p>
-        </div>
-      </div>
+      <PageHeader
+        title="Load Test Playground"
+        purpose="Send many requests at an agent at once to see how fast it stays and where it breaks before real traffic does. For builders and admins."
+        icon={Gauge}
+        storageKey="load-playground"
+        docSlug="06-deployment/load-test-baseline"
+        primaryAction={{ label: 'Open Live Debug', icon: Activity, href: '/executions/live' }}
+        steps={[
+          'Pick an agent and a load shape, like a steady stream or everything at once.',
+          'Set how many requests and how many at a time, then generate the script.',
+          'Run it here. Only admins can run load tests.',
+          'Read the report: typical and slowest response times, requests per second and what failed.',
+        ]}
+      />
 
       {/* Config */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -171,8 +191,10 @@ export default function LoadPlaygroundPage() {
             <Bot className="w-4 h-4 text-cyan-400" /> Target
           </h2>
           <div>
-            <label className="text-xs text-slate-400 block mb-1">Agent / Pipeline</label>
+            <label htmlFor="lp-target" className="text-xs text-slate-400 block mb-1">Agent / Pipeline</label>
             <select
+              id="lp-target"
+              disabled={agentsState !== 'ready' || agents.length === 0}
               value={agentId}
               onChange={(e) => setAgentId(e.target.value)}
               className="w-full bg-slate-800/50 border border-slate-700/50 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-cyan-500"
@@ -183,13 +205,19 @@ export default function LoadPlaygroundPage() {
                 </option>
               ))}
             </select>
+            {agentsState === 'loading' && <p className="text-[11px] text-slate-500 mt-1">Loading your agents…</p>}
+            {agentsState === 'error' && <p className="text-[11px] text-red-300 mt-1" role="alert">Could not load your agents. Refresh the page to try again.</p>}
+            {agentsState === 'ready' && agents.length === 0 && (
+              <p className="text-[11px] text-slate-500 mt-1">No agents yet. Build one in the Agent Builder first.</p>
+            )}
             {selectedAgent?.description && (
               <p className="text-[11px] text-slate-500 mt-1 line-clamp-2">{selectedAgent.description}</p>
             )}
           </div>
           <div>
-            <label className="text-xs text-slate-400 block mb-1">Message sample (what every request sends)</label>
+            <label htmlFor="lp-sample" className="text-xs text-slate-400 block mb-1">Message sample (what every request sends)</label>
             <input
+              id="lp-sample"
               type="text"
               value={sample}
               onChange={(e) => setSample(e.target.value)}
@@ -198,8 +226,9 @@ export default function LoadPlaygroundPage() {
             />
           </div>
           <div>
-            <label className="text-xs text-slate-400 block mb-1">Extra instructions (optional)</label>
+            <label htmlFor="lp-extra" className="text-xs text-slate-400 block mb-1">Extra instructions (optional)</label>
             <textarea
+              id="lp-extra"
               rows={2}
               value={userPrompt}
               onChange={(e) => setUserPrompt(e.target.value)}
@@ -214,8 +243,9 @@ export default function LoadPlaygroundPage() {
             <Activity className="w-4 h-4 text-cyan-400" /> Load Shape
           </h2>
           <div>
-            <label className="text-xs text-slate-400 block mb-1">Scenario</label>
+            <label htmlFor="lp-scenario" className="text-xs text-slate-400 block mb-1">Scenario</label>
             <select
+              id="lp-scenario"
               value={scenario}
               onChange={(e) => setScenario(e.target.value)}
               className="w-full bg-slate-800/50 border border-slate-700/50 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-cyan-500"
@@ -228,8 +258,9 @@ export default function LoadPlaygroundPage() {
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="text-xs text-slate-400 block mb-1">Total requests</label>
+              <label htmlFor="lp-requests" className="text-xs text-slate-400 block mb-1">Total requests</label>
               <input
+                id="lp-requests"
                 type="number"
                 min={1} max={2000}
                 value={requests}
@@ -238,8 +269,9 @@ export default function LoadPlaygroundPage() {
               />
             </div>
             <div>
-              <label className="text-xs text-slate-400 block mb-1">Concurrency</label>
+              <label htmlFor="lp-concurrency" className="text-xs text-slate-400 block mb-1">Concurrency</label>
               <input
+                id="lp-concurrency"
                 type="number"
                 min={1} max={200}
                 value={concurrency}
@@ -307,7 +339,7 @@ export default function LoadPlaygroundPage() {
             <h2 className="text-sm font-semibold text-white">Live output</h2>
             {executing && <Loader2 className="w-3 h-3 animate-spin text-slate-500 ml-auto" />}
           </div>
-          <pre className="bg-slate-950/70 text-slate-200 text-[11.5px] font-mono px-5 py-4 overflow-x-auto max-h-[420px]">
+          <pre className="bg-slate-950/70 text-slate-200 text-[11.5px] font-mono px-5 py-4 overflow-x-auto max-h-[420px]" data-testid="lp-output">
 {output.join('\n')}
           </pre>
         </div>

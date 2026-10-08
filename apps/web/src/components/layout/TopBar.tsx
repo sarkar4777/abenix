@@ -32,6 +32,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useApi } from '@/hooks/useApi';
+import { usePlatformFeatures } from '@/hooks/usePlatformFeatures';
 import { useAuth } from '@/contexts/AuthContext';
 import { useSidebar } from '@/stores/sidebar';
 import CognifyIndicator from './CognifyIndicator';
@@ -273,6 +274,7 @@ export default function TopBar() {
   const pathname = usePathname();
   const router = useRouter();
   const { user, logout } = useAuth();
+  const { monetization: monetizationOn } = usePlatformFeatures();
   const { setMobileOpen } = useSidebar();
   const [showDropdown, setShowDropdown] = useState(false);
   const [useCasesOpen, setUseCasesOpen] = useState(false);
@@ -535,7 +537,7 @@ export default function TopBar() {
                     {[
                       { icon: User, label: 'Profile', href: '/settings/profile' },
                       { icon: Settings, label: 'Settings', href: '/settings' },
-                      ...(process.env.NEXT_PUBLIC_ENABLE_MONETIZATION !== 'false'
+                      ...(monetizationOn
                         ? [{ icon: CreditCard, label: 'Billing', href: '/settings/billing' }]
                         : []),
                     ].map((item) => (

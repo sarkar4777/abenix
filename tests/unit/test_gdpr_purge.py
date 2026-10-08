@@ -346,3 +346,20 @@ async def test_trajectory_step_with_no_store_is_zero(tmp_path, monkeypatch):
     rows.all.return_value = []
     db.execute = AsyncMock(return_value=rows)
     assert await gdpr_purge._purge_trajectory(db, _subject()) == 0
+
+
+@pytest.mark.asyncio
+async def test_postgres_step_only_sets_user_columns_that_exist():
+    import re
+
+    from models.user import User
+
+    db = _counting_db({})
+    with patch("app.services.audit_chain.maintenance", AsyncMock()):
+        await gdpr_purge._purge_postgres(db, _subject())
+    users_sql = next(s for s in _sql(db) if s.lstrip().startswith("UPDATE users SET"))
+    set_clause = users_sql.split(" SET ", 1)[1].split(" WHERE ", 1)[0]
+    cols = re.findall(r"(\w+)\s*=", set_clause)
+    assert cols and "password_hash" in cols
+    missing = [c for c in cols if c not in User.__table__.columns]
+    assert not missing, missing

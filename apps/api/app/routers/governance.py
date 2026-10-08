@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -27,6 +28,7 @@ from models.governance import (
 from models.user import User
 
 router = APIRouter(prefix="/api/governance", tags=["governance"])
+logger = logging.getLogger(__name__)
 
 
 @router.get("/capabilities")
@@ -805,6 +807,8 @@ async def replay_run(
         status=ExecutionStatus.RUNNING,
         parent_execution_id=ex.id,
         model_requested=model,
+        trigger_kind="replay",
+        trigger_name="Pinned replay" if body.mode == "pinned" else "Replay",
         provenance=(
             {**prov, "replay_of": str(ex.id), "replay_mode": "pinned"}
             if body.mode == "pinned"
@@ -816,6 +820,23 @@ async def replay_run(
     db.add(new)
     await db.commit()
     await db.refresh(new)
+    from app.core.execution_state import complete_state, fail_state, publish_state
+
+    live_ids = (str(new.id), str(user.tenant_id))
+    # Live Debug lists runs from this state, without it replays never show there
+    try:
+        await publish_state(
+            live_ids[0],
+            live_ids[1],
+            str(agent.id),
+            agent.name,
+            "running",
+            current_step="Replaying",
+            max_iterations=mc.get("max_iterations", 10),
+            parent_execution_id=str(ex.id),
+        )
+    except Exception:  # noqa: BLE001
+        logger.debug("live state for replay %s not published", live_ids[0])
     registry = build_tool_registry(
         list(mc.get("tools") or []),
         agent_id=str(agent.id),
@@ -853,6 +874,13 @@ async def replay_run(
             fail_code, err_msg = result.failure_code, result.output[-2000:]
     except Exception as e:  # noqa: BLE001
         result, failed, err_msg = None, True, str(e)[:1000]
+    try:
+        if failed:
+            await fail_state(*live_ids, err_msg or "Replay failed")
+        else:
+            await complete_state(*live_ids)
+    except Exception:  # noqa: BLE001
+        logger.debug("live state for replay %s not cleared", live_ids[0])
     from app.core.deps import async_session
 
     async with async_session() as s:

@@ -101,13 +101,18 @@ Roles give everyone a baseline. Capabilities add specific abilities without maki
 | `events.manage` | Subscribe endpoints and triggers to platform events |
 | `permissions.manage` | Create permission sets and assign people |
 | `runs.replay` | See a run's provenance and re-run it against its recorded inputs |
+| `autonomy.view` | See what each agent may do alone, its track record and the action ledger |
+| `autonomy.manage` | Enrol actions, set how success is judged and predicted, demote or turn off |
+| `autonomy.grant` | Approve an agent moving up a level, never for an agent you built |
+| `actions.review` | Answer watching reviews, record outcomes and flag harm |
+| `moderation.review` | Release, redact or reject content a moderation policy held for review. Admins only by default |
 
 Role defaults (`ROLE_DEFAULTS`):
 
 | Role | Gets |
 |---|---|
-| `user` | `decisions.view`, `decisions.evaluate`, `risk.view`, `evals.run`, `runs.replay` |
-| `creator` | everything a user gets, plus `decisions.author`, `evals.manage`, `sources.manage`, `events.manage` |
+| `user` | `decisions.view`, `decisions.evaluate`, `risk.view`, `evals.run`, `runs.replay`, `autonomy.view`, `actions.review` |
+| `creator` | everything a user gets, plus `decisions.author`, `evals.manage`, `sources.manage`, `events.manage`, `autonomy.manage` |
 | `admin` | `*`, every capability |
 
 A grant covers more than its exact key. `approvals.sign` covers every `approvals.sign:<group>`, and a group wildcard such as `decisions.*` covers every `decisions.` capability. **Admin -> Permissions** creates named sets, such as "Decision reviewers", and assigns them to people (`permission_sets`, `permission_assignments`). A user's capabilities are cached for ten seconds, so grants apply within that. `GET /api/me/permissions` returns the caller's role and capabilities, and the sidebar shows only what the caller can use.
@@ -115,6 +120,8 @@ A grant covers more than its exact key. `approvals.sign` covers every `approvals
 ## Separation of duties
 
 An approval created under a tier policy carries the policy with it: the capability signers need and whether the requester may sign. The sign-off endpoint enforces both. Only admins hold `approvals.sign` by default, so non-admin signers on a tiered gate need it from a permission set. Signing a decision version also needs `decisions.review`. Approvals without a policy keep the older rule, where an admin or creator signs and a self-approval is recorded as such, so single-admin tenants are not locked out.
+
+Autonomy promotions (`gate_kind = autonomy.promote`) need `autonomy.grant` and refuse the agent's author, both when requesting and when signing. The author may self-approve only the sample, or when nobody else in the tenant holds `autonomy.grant`, and the change is recorded as self-approved. Demotions never need an approval. See [Earned autonomy](../02-runtime/21-earned-autonomy.md).
 
 ## Tamper-evident audit log
 

@@ -1,5 +1,48 @@
 # Changelog
 
+## v2.5.4 — 2026-10-08
+
+### Added
+
+- Hold for review. A moderation policy can hold a message or reply until a person releases, redacts or rejects it. The chat shows that it is waiting and then the outcome, and the policy sets what happens when time runs out.
+- One review inbox at /review-queue with Held content and Marketplace submissions tabs. Claiming, time limits, priority by severity, bulk actions, keyboard shortcuts, highlighted matches, a redaction editor, full history and a live count in the sidebar for people with the new moderation.review permission.
+- Moderation retention. Matched parts are masked everywhere for every category, held text is encrypted and kept only while pending plus a window, and admins set the windows on the moderation page. GDPR erasure covers all of it.
+
+- Every run records what started it, a schedule, webhook, Run now, chat, API call, event, source watch or parent run. Executions shows a Started by line and filter, the run page links back to the trigger, and each trigger lists its recent runs.
+- On a Claude subscription every cost says so: executions, the run page, analytics, the dashboard, chat and the SDK playground.
+
+- Earned autonomy. Agents earn the right to act one action type at a time, across five levels from Off to Acts and reports, based on a scored track record of predictions, reviews and outcomes.
+- New Autonomy page with the ladder, a next-step checklist, a track record chart and the action ledger. Try it with the built-in sample plant in a few minutes.
+- Approvals gains a Watching reviews tab with keyboard shortcuts, and action cards you can approve, edit or reject. Promotions need someone who did not build the agent, apart from a labelled self-approval for the sample and solo builders. Harm flags and agent changes demote at once.
+- SDK `actions` and `autonomy` clients in Python, TypeScript and Java so standalone apps can propose actions, wait for approval and report outcomes.
+- Meeting rehearsal. Press Rehearse on a meeting and play the other participants. The bot answers with the same agent, scope and persona knowledge as live and shows its scope decisions, citations, hand-backs and reply latency, without joining a room or spending voice credits.
+- Join a meeting's LiveKit room from the browser, with the participant list, a mic toggle and room chat. End meeting has the bot write a summary, and the transcript and summary are kept on the meeting.
+- Free marketplace listing, separate from monetization. Creators list an agent from Creator Hub, an admin approves it and anyone can install it. Creator Hub shows listings, installs and runs.
+
+- Cluster Health is rebuilt. It opens with a health verdict and plain reasons, then node cards with CPU, memory and pressure, services grouped as Core, Runtime pools, Data and Apps with ready counts, image, restarts and KEDA or HPA state, a pod drawer with events and the log tail, and a warnings timeline.
+- The chart installs a read-only cluster view role (`clusterView.rbac.enabled`, on by default) so the page can read nodes, workloads and events. Without it the page says what is missing and which value turns it on.
+
+- Every page opens with the same header: what the page is for and who it is for, the main action up top on phones too, a short How this works panel and a link to the matching docs. After something works, a Next steps card says where to go.
+- Start here on the dashboard. A checklist for your role (admin, builder or member) that ticks itself off from your real data, with a progress bar, a hide button that you can undo and a short celebration when you finish.
+
+- Needs you at /inbox. One place for everything waiting on you, with tabs for approvals you can sign, watching reviews, held content, marketplace submissions and alerts that are new or rising. Act inline, or open the full page. The sidebar shows the live total.
+- The sidebar opens in Essentials mode with the few pages most people need, plus Agent Builder and Autonomy for builders and Admin for admins. Show all tools brings back the full list, and the choice is saved to your account.
+- A lostness gate and timed first-use tasks in the browser suite. Every sidebar page is checked as admin, creator, member and viewer at phone width, and three new-user tasks are timed from the first screen.
+
+### Changed
+
+- Marketplace and monetization are two runtime switches on Admin > Marketplace & Billing, with helm defaults. With monetization off there are no prices, Stripe, payouts, Billing page or plan caps, and the API answers those routes with a plain 404.
+
+### Fixed
+
+- Executions no longer shows runs from the last filter while the next one loads, so Failed shows only failed runs.
+
+- Meetings: the bot's room chat works again (consent notice and replies), the scope check runs in code on every question instead of relying on the model, and the page says when the bot has dropped out of the room.
+- Meetings: the live view now updates while the bot runs, questions the bot hands back show up while it waits, and off-topic questions are declined instead of answered. Missing LiveKit, speech to text or voice keys are explained on the page.
+
+### Security
+- Next.js 15.5.27, sharp 0.35.5 and PostCSS 8.5.28 in the platform and every standalone app, clearing the Next.js cache poisoning and sharp librsvg advisories. The Tailwind braces advisory has no fixed release yet and only affects building the CSS
+
 ## v2.5.3 — 2026-10-06
 
 ### Added

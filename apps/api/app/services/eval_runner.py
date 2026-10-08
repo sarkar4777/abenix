@@ -233,7 +233,10 @@ def _scope(agent_id: Any, body: dict[str, Any], model: str | None) -> Any:
         "headers": [(b"content-type", b"application/json")],
         "client": ("127.0.0.1", 0),
         "server": ("evals", 0),
-        "state": {"eval_model": model} if model else {},
+        "state": {
+            **({"eval_model": model} if model else {}),
+            "run_origin": {"kind": "eval"},
+        },
     }
     return Request(scope, receive)
 

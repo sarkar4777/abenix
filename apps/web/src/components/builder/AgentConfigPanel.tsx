@@ -129,7 +129,7 @@ interface AgentConfigPanelProps {
   onAddTools?: (toolIds: string[]) => void;
 }
 
-const CATEGORIES = [
+export const AGENT_CATEGORIES = [
   'productivity', 'development', 'research', 'creative',
   'customer-support', 'data-analysis', 'education',
   'compliance', 'kyc-aml', 'finance', 'energy', 'legal',
@@ -757,7 +757,7 @@ export default function AgentConfigPanel({
                 className="w-full px-3 py-2 bg-slate-800/50 border border-slate-700 rounded-lg text-sm text-white focus:outline-none focus:border-cyan-500"
               >
                 <option value="">Select category</option>
-                {CATEGORIES.map((c) => (
+                {AGENT_CATEGORIES.map((c) => (
                   <option key={c} value={c}>{c.replace('-', ' ')}</option>
                 ))}
               </select>

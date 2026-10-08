@@ -78,6 +78,7 @@ from models.moderation_policy import (
     ModerationEvent,
     ModerationEventOutcome,
     ModerationPolicy,
+    ModerationReview,
 )
 from models.pipeline_healing import (
     PipelinePatchProposal,
@@ -119,6 +120,7 @@ from models.governance import (
     RiskPolicy,
 )
 from models.source_watch import SourceChange, SourceSnapshot, WatchSource
+from models.autonomy import ActionType, AgentAction, AutonomyChange, AutonomyGrant
 
 __all__ = [
     "Base",
@@ -210,6 +212,7 @@ __all__ = [
     "DeploymentType",
     "DeploymentStatus",
     "ModerationPolicy",
+    "ModerationReview",
     "ModerationAction",
     "ModerationEvent",
     "ModerationEventOutcome",
@@ -257,4 +260,8 @@ __all__ = [
     "EvalCase",
     "EvalRun",
     "EvalResult",
+    "ActionType",
+    "AutonomyGrant",
+    "AutonomyChange",
+    "AgentAction",
 ]

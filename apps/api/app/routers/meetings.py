@@ -14,7 +14,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse, StreamingResponse
-from sqlalchemy import desc, select
+from sqlalchemy import delete, desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, get_db
@@ -195,17 +195,86 @@ async def list_meetings(
     return success([_meeting_dict(m) for m in result.scalars().all()])
 
 
+LIVEKIT_KEYS = ("LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET")
+LIVEKIT_MISSING = (
+    "Live audio needs a LiveKit server. An admin sets the server URL, API key "
+    "and API secret under Admin, Tool configuration, LiveKit."
+)
+
+
+VOICE_KEYS = ("OPENAI_API_KEY", "ELEVENLABS_API_KEY")
+STT_MISSING = (
+    "The bot cannot hear speech yet: speech to text needs an OpenAI API key. "
+    "Typed chat in the room still reaches it."
+)
+TTS_MISSING = (
+    "The bot cannot speak aloud yet: voice needs an OpenAI or ElevenLabs API key. "
+    "It posts its replies in the room chat instead."
+)
+REHEARSAL_TTL = 2 * 3600
+
+
+async def _livekit_settings(tenant_id: Any) -> dict[str, str]:
+    """The LiveKit and voice keys as the meeting tools see them, tenant row first."""
+    from engine import credentials
+
+    try:
+        await credentials.ensure_fresh()
+    except Exception:
+        pass  # env and file defaults still answer
+    tid = str(tenant_id or "")
+    return {k: credentials.get(k, tenant_id=tid) for k in LIVEKIT_KEYS + VOICE_KEYS}
+
+
+def readiness_report(values: dict[str, str], is_admin: bool) -> dict[str, Any]:
+    missing = [k for k in LIVEKIT_KEYS if not values.get(k)]
+    stt = bool(values.get("OPENAI_API_KEY"))
+    tts = stt or bool(values.get("ELEVENLABS_API_KEY"))
+    return {
+        "livekit_ready": not missing,
+        "missing": missing,
+        "message": None if not missing else LIVEKIT_MISSING,
+        "configure_url": "/admin/tool-config#LIVEKIT_URL" if is_admin else None,
+        "stt_ready": stt,
+        "stt_message": None if stt else STT_MISSING,
+        "tts_ready": tts,
+        "tts_message": None if tts else TTS_MISSING,
+        "voice_configure_url": (
+            "/admin/tool-config#OPENAI_API_KEY" if is_admin else None
+        ),
+        "rehearsal_ready": bool(os.environ.get("REDIS_URL", "").strip()),
+        "works_without_keys": [
+            "create a meeting",
+            "set the topics the bot may answer and the ones it must hand back to you",
+            "rehearse with typed turns",
+        ],
+    }
+
+
+@router.get("/readiness")
+async def meetings_readiness(
+    user: User = Depends(get_current_user),
+) -> JSONResponse:
+    """What live meetings need that is not set yet. Booleans only, never values."""
+    from app.core.permissions import is_admin
+
+    return success(
+        readiness_report(await _livekit_settings(user.tenant_id), is_admin(user))
+    )
+
+
 @router.get("/livekit-token")
 async def mint_livekit_token(
     room: str,
     user: User = Depends(get_current_user),
 ) -> JSONResponse:
     """Mint a token for the HUMAN user to join the same LiveKit room as"""
-    api_key = os.environ.get("LIVEKIT_API_KEY", "").strip()
-    api_secret = os.environ.get("LIVEKIT_API_SECRET", "").strip()
-    url = os.environ.get("LIVEKIT_URL", "").strip()
+    lk = await _livekit_settings(user.tenant_id)
+    api_key = lk["LIVEKIT_API_KEY"]
+    api_secret = lk["LIVEKIT_API_SECRET"]
+    url = lk["LIVEKIT_URL"]
     if not (api_key and api_secret and url):
-        return error("LiveKit server not configured on this deployment", 400)
+        return error(LIVEKIT_MISSING, 400)
     browser_url = os.environ.get(
         "LIVEKIT_PUBLIC_URL", ""
     ).strip() or _browser_url_from_internal(url)
@@ -283,18 +352,30 @@ async def get_meeting(
     if not m:
         return error("not found", 404)
     transcript, decisions, deferrals = [], [], []
+    live_deferrals: list[dict] = []
+    bot_status = None
     r = await _redis()
     if r:
         try:
             transcript_raw = await r.lrange(f"meeting:{meeting_id}:transcript", 0, -1)
             decisions_raw = await r.lrange(f"meeting:{meeting_id}:decisions", 0, -1)
-            transcript = [json.loads(x) for x in transcript_raw]
-            decisions = [json.loads(x) for x in decisions_raw]
+            transcript = _loads_all(transcript_raw)
+            decisions = _loads_all(decisions_raw)
+            live_deferrals = await _redis_deferrals(r, meeting_id)
+            bot_status = await r.hget(f"meeting:{meeting_id}:session", "status")
+        except Exception:
+            pass
         finally:
             try:
                 await r.aclose()
             except Exception:
                 pass
+    # Redis keeps history for a week, the row keeps it after that
+    notes = m.notes or {}
+    if not transcript:
+        transcript = list(notes.get("transcript") or [])
+    if not decisions:
+        decisions = list(notes.get("decisions") or [])
     # Always include db-persisted deferrals so the history view survives Redis eviction
     q = await db.execute(
         select(MeetingDeferral)
@@ -313,12 +394,16 @@ async def get_meeting(
                 "answered_at": d.answered_at.isoformat() if d.answered_at else None,
             }
         )
+    known = {d["id"] for d in deferrals}
+    deferrals.extend(d for d in live_deferrals if d["id"] not in known)
     return success(
         {
             **_meeting_dict(m),
             "transcript": transcript,
             "decisions": decisions,
             "deferrals": deferrals,
+            "bot_status": bot_status,
+            "finalized": bool(notes.get("finalized_at")),
         }
     )
 
@@ -396,6 +481,15 @@ async def start_meeting(
     over = await _meeting_budget_error(db, m, user)
     if over is not None:
         return over
+    # without a server the bot cannot join, so do not leave a fake live meeting
+    if getattr(m, "provider", None) == MeetingProvider.LIVEKIT.value:
+        lk = await _livekit_settings(user.tenant_id)
+        if not all(lk[k] for k in LIVEKIT_KEYS):
+            return error(LIVEKIT_MISSING, 400)
+    if not (m.scope_allow or []):
+        return error(
+            "Add at least one topic the bot may answer before starting it.", 400
+        )
     m.status = MeetingStatus.LIVE.value
     m.started_at = datetime.now(timezone.utc)
     await db.commit()
@@ -517,6 +611,379 @@ async def inject_turn(
     return success({"injected": True, "speaker": speaker, "text": text})
 
 
+@router.delete("/{meeting_id}")
+async def delete_meeting(
+    meeting_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """Remove a meeting that is not live, with its deferrals and transcript."""
+    m = await _load(meeting_id, user, db)
+    if not m:
+        return error("Meeting not found", 404)
+    if m.status == MeetingStatus.LIVE.value:
+        return error("The bot is still in this meeting. Kick it out first.", 409)
+    await db.execute(delete(MeetingDeferral).where(MeetingDeferral.meeting_id == m.id))
+    await db.delete(m)
+    await db.commit()
+    r = await _redis()
+    if r is not None:
+        try:
+            await r.delete(
+                *(
+                    f"meeting:{meeting_id}:{k}"
+                    for k in (
+                        "transcript",
+                        "decisions",
+                        "scope",
+                        "rehearsal",
+                        "deferrals",
+                    )
+                )
+            )
+        except Exception:
+            pass
+        finally:
+            try:
+                await r.aclose()
+            except Exception:
+                pass
+    return success({"id": meeting_id, "deleted": True})
+
+
+@router.post("/{meeting_id}/end")
+async def end_meeting(
+    meeting_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """Wrap up: the bot writes its summary and leaves, the meeting is done."""
+    m = await _load(meeting_id, user, db)
+    if not m:
+        return error("Meeting not found", 404)
+    if m.status != MeetingStatus.LIVE.value:
+        return error(f"This meeting is {m.status}, so there is nothing to end.", 409)
+    transcript, decisions = await _redis_history(meeting_id)
+    apply_snapshot(m, transcript, decisions, None)
+    await db.commit()
+    r = await _redis()
+    if r is not None:
+        try:
+            # the listen loop sees this, and the bot leaves with a summary
+            await r.set(f"meeting:{meeting_id}:kill", "1", ex=3600)
+            await r.publish(
+                f"meeting:{meeting_id}:events",
+                json.dumps({"type": "kill", "meeting_id": meeting_id}),
+            )
+        finally:
+            try:
+                await r.aclose()
+            except Exception:
+                pass
+    return success(_meeting_dict(m))
+
+
+@router.get("/{meeting_id}/participants")
+async def room_participants(
+    meeting_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """Who is in the LiveKit room right now, straight from the server."""
+    m = await _load(meeting_id, user, db)
+    if not m:
+        return error("Meeting not found", 404)
+    if m.provider != MeetingProvider.LIVEKIT.value:
+        return success({"available": False, "participants": [], "message": None})
+    lk = await _livekit_settings(user.tenant_id)
+    if not all(lk[k] for k in LIVEKIT_KEYS):
+        return success(
+            {"available": False, "participants": [], "message": LIVEKIT_MISSING}
+        )
+    try:
+        from livekit import api
+
+        lkapi = api.LiveKitAPI(
+            _http_url(lk["LIVEKIT_URL"]),
+            lk["LIVEKIT_API_KEY"],
+            lk["LIVEKIT_API_SECRET"],
+        )
+        try:
+            res = await asyncio.wait_for(
+                lkapi.room.list_participants(api.ListParticipantsRequest(room=m.room)),
+                timeout=5,
+            )
+        finally:
+            await lkapi.aclose()
+    except Exception as e:
+        return success(
+            {
+                "available": False,
+                "participants": [],
+                "message": f"Could not ask the LiveKit server who is in the room ({str(e)[:160] or type(e).__name__}).",
+            }
+        )
+    people = [
+        {
+            "identity": p.identity,
+            "name": p.name or p.identity,
+            "is_bot": p.identity.startswith("bot-"),
+            "is_you": p.identity == f"user-{user.id}",
+        }
+        for p in getattr(res, "participants", []) or []
+    ]
+    return success({"available": True, "participants": people, "message": None})
+
+
+def _http_url(url: str) -> str:
+    if url.startswith("wss://"):
+        return "https://" + url[6:]
+    if url.startswith("ws://"):
+        return "http://" + url[5:]
+    return url
+
+
+# Rehearsal: the same agent, tools and scope, with typed turns and no room.
+
+
+def _rehearsal_ptr(meeting_id: str) -> str:
+    return f"meeting:{meeting_id}:rehearsal"
+
+
+async def _rehearsal_id(r: Any, meeting_id: str) -> str | None:
+    rid = await r.get(_rehearsal_ptr(meeting_id))
+    return rid or None
+
+
+async def _rehearsal_status(r: Any, rid: str) -> str:
+    status = await r.hget(f"meeting:{rid}:session", "status") or "starting"
+    if status != "closed" and await r.get(f"meeting:{rid}:kill"):
+        return "ending"
+    return status
+
+
+async def _rehearsal_state(r: Any, rid: str) -> dict[str, Any]:
+    t = await r.lrange(f"meeting:{rid}:transcript", 0, -1)
+    dl = await r.lrange(f"meeting:{rid}:decisions", 0, -1)
+    queued = await r.llen(f"meeting:{rid}:rehearsal:turns")
+    return {
+        "active": True,
+        "rehearsal_id": rid,
+        "status": await _rehearsal_status(r, rid),
+        "transcript": _loads_all(t),
+        "decisions": _loads_all(dl),
+        "deferrals": await _redis_deferrals(r, rid),
+        "queued_turns": int(queued or 0),
+    }
+
+
+def _redis_missing() -> JSONResponse:
+    return error(
+        "Rehearsal needs Redis, and this deployment has no REDIS_URL set. "
+        "Ask an admin to configure it.",
+        503,
+    )
+
+
+@router.post("/{meeting_id}/rehearsal")
+async def start_rehearsal(
+    meeting_id: str,
+    body: dict | None = None,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """Start a rehearsal: the meeting agent runs exactly as live, minus the room."""
+    m = await _load(meeting_id, user, db)
+    if not m:
+        return error("Meeting not found", 404)
+    if m.status == MeetingStatus.LIVE.value:
+        return error(
+            "The bot is in the live meeting right now. Rehearse before or after it.",
+            409,
+        )
+    if not (m.scope_allow or []):
+        return error(
+            "Add at least one topic the bot may answer, then rehearse. "
+            "Use Edit under Bot scope.",
+            400,
+        )
+    over = await _meeting_budget_error(db, m, user)
+    if over is not None:
+        return over
+    r = await _redis()
+    if r is None:
+        return _redis_missing()
+    try:
+        old = await _rehearsal_id(r, meeting_id)
+        if old and await _rehearsal_status(r, old) in ("starting", "live"):
+            if not (body or {}).get("restart"):
+                return success(await _rehearsal_state(r, old))
+            await r.set(f"meeting:{old}:kill", "1", ex=3600)
+        rid = f"rehearsal-{uuid.uuid4().hex[:12]}"
+        await r.hset(
+            f"meeting:{rid}:scope",
+            mapping={
+                "authorized": "1",
+                "allow": "|".join(m.scope_allow or []),
+                "defer": "|".join(m.scope_defer or []),
+                "persona_scopes": "|".join(m.persona_scopes or ["self"]),
+                "user_id": str(user.id),
+                "tenant_id": str(user.tenant_id),
+                "room": rid,
+                "provider": "rehearsal",
+                "display_name": m.display_name or "Abenix Assistant",
+                "rehearsal_of": str(m.id),
+            },
+        )
+        await r.hset(f"meeting:{rid}:session", mapping={"status": "starting"})
+        for k in ("scope", "session"):
+            await r.expire(f"meeting:{rid}:{k}", REHEARSAL_TTL)
+        await r.set(_rehearsal_ptr(meeting_id), rid, ex=REHEARSAL_TTL)
+    finally:
+        try:
+            await r.aclose()
+        except Exception:
+            pass
+    asyncio.create_task(_run_meeting_agent(m, user, {}, key=rid, rehearsal=True))
+    return success(
+        {
+            "active": True,
+            "rehearsal_id": rid,
+            "status": "starting",
+            "transcript": [],
+            "decisions": [],
+            "deferrals": [],
+            "queued_turns": 0,
+        }
+    )
+
+
+@router.get("/{meeting_id}/rehearsal")
+async def get_rehearsal(
+    meeting_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    m = await _load(meeting_id, user, db)
+    if not m:
+        return error("Meeting not found", 404)
+    r = await _redis()
+    if r is None:
+        return success({"active": False, "available": False})
+    try:
+        rid = await _rehearsal_id(r, meeting_id)
+        if not rid:
+            return success({"active": False, "available": True})
+        return success(await _rehearsal_state(r, rid))
+    finally:
+        try:
+            await r.aclose()
+        except Exception:
+            pass
+
+
+@router.post("/{meeting_id}/rehearsal/turn")
+async def rehearsal_turn(
+    meeting_id: str,
+    body: dict,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """Say something in the rehearsal as another participant."""
+    m = await _load(meeting_id, user, db)
+    if not m:
+        return error("Meeting not found", 404)
+    text = str(body.get("text") or "").strip()
+    speaker = str(body.get("speaker") or "").strip()[:80] or "Participant"
+    if not text:
+        return error("Type what the participant says.", 400)
+    if len(text) > 1000:
+        return error("Keep a turn under 1000 characters.", 400)
+    r = await _redis()
+    if r is None:
+        return _redis_missing()
+    try:
+        rid = await _rehearsal_id(r, meeting_id)
+        if not rid or await _rehearsal_status(r, rid) not in ("starting", "live"):
+            return error("This rehearsal has ended. Start a new one.", 409)
+        ts = int(time.time() * 1000)
+        key = f"meeting:{rid}:rehearsal:turns"
+        await r.rpush(key, json.dumps({"speaker": speaker, "text": text, "ts_ms": ts}))
+        await r.expire(key, REHEARSAL_TTL)
+    finally:
+        try:
+            await r.aclose()
+        except Exception:
+            pass
+    return success({"queued": True, "speaker": speaker, "text": text, "ts_ms": ts})
+
+
+@router.post("/{meeting_id}/rehearsal/deferrals/{deferral_id}/answer")
+async def rehearsal_answer(
+    meeting_id: str,
+    deferral_id: str,
+    body: dict,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """Answer a question the rehearsal bot handed back to you."""
+    m = await _load(meeting_id, user, db)
+    if not m:
+        return error("Meeting not found", 404)
+    answer_text = str(body.get("answer") or "").strip()
+    if not answer_text:
+        return error("Type the answer the bot should give.", 400)
+    r = await _redis()
+    if r is None:
+        return _redis_missing()
+    try:
+        rid = await _rehearsal_id(r, meeting_id)
+        if not rid:
+            return error("No rehearsal is running for this meeting.", 409)
+        h = f"meeting:{rid}:deferral:{deferral_id}"
+        if not await r.exists(h):
+            return error("That question is no longer waiting on you.", 404)
+        await r.publish(
+            f"deferral:{deferral_id}:answer",
+            json.dumps({"answer": answer_text, "user_id": str(user.id)}),
+        )
+        await r.hset(h, mapping={"status": "answered", "answer": answer_text})
+    finally:
+        try:
+            await r.aclose()
+        except Exception:
+            pass
+    return success({"deferral_id": deferral_id, "status": "answered"})
+
+
+@router.post("/{meeting_id}/rehearsal/end")
+async def end_rehearsal(
+    meeting_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    m = await _load(meeting_id, user, db)
+    if not m:
+        return error("Meeting not found", 404)
+    r = await _redis()
+    if r is None:
+        return _redis_missing()
+    try:
+        rid = await _rehearsal_id(r, meeting_id)
+        if not rid:
+            return error("No rehearsal is running for this meeting.", 409)
+        await r.set(f"meeting:{rid}:kill", "1", ex=3600)
+        await r.publish(
+            f"meeting:{rid}:events", json.dumps({"type": "kill", "meeting_id": rid})
+        )
+        return success(await _rehearsal_state(r, rid))
+    finally:
+        try:
+            await r.aclose()
+        except Exception:
+            pass
+
+
 @router.post("/{meeting_id}/kill")
 async def kill_meeting(
     meeting_id: str,
@@ -528,6 +995,8 @@ async def kill_meeting(
         return error("not found", 404)
     m.status = MeetingStatus.KILLED.value
     m.ended_at = datetime.now(timezone.utc)
+    transcript, decisions = await _redis_history(meeting_id)
+    apply_snapshot(m, transcript, decisions, None)
     await db.commit()
     r = await _redis()
     if r:
@@ -682,13 +1151,29 @@ async def answer_deferral(
         .first()
     )
     if existing is None:
+        raised: dict = {}
+        r2 = await _redis()
+        if r2 is not None:
+            try:
+                raised = await r2.hgetall(
+                    f"meeting:{meeting_id}:deferral:{deferral_id}"
+                )
+            except Exception:
+                raised = {}
+            finally:
+                try:
+                    await r2.aclose()
+                except Exception:
+                    pass
         existing = MeetingDeferral(
             id=did,
             tenant_id=user.tenant_id,
             meeting_id=m.id,
             user_id=user.id,
-            question=body.get("question") or "(see live transcript)",
-            context=body.get("context"),
+            question=body.get("question")
+            or (raised or {}).get("question")
+            or "(see live transcript)",
+            context=body.get("context") or (raised or {}).get("context"),
         )
         db.add(existing)
     existing.answer = answer_text
@@ -739,11 +1224,20 @@ async def _meeting_budget_error(
     return await budget_error(db, agent, user.tenant_id)
 
 
-async def _run_meeting_agent(m: Meeting, user: User, body: dict) -> None:
-    """Run the Meeting Representative agent in-process for this meeting."""
+async def _run_meeting_agent(
+    m: Meeting,
+    user: User,
+    body: dict,
+    *,
+    key: str | None = None,
+    rehearsal: bool = False,
+) -> None:
+    """Run the meeting agent in-process. A rehearsal runs the same agent under its own key."""
     import logging as _logging
 
     log = _logging.getLogger(__name__)
+    mid = key or str(m.id)
+    leave_summary = ""
 
     # Lazy imports to avoid import-time loops
     sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "packages" / "db"))
@@ -766,7 +1260,7 @@ async def _run_meeting_agent(m: Meeting, user: User, body: dict) -> None:
     db_url = os.environ.get("DATABASE_URL", "").strip()
     if not db_url:
         await sessmod.append_decision(
-            str(m.id), "leave", "Bot startup failed: no DATABASE_URL"
+            mid, "leave", "Bot startup failed: no DATABASE_URL"
         )
         return
 
@@ -777,7 +1271,7 @@ async def _run_meeting_agent(m: Meeting, user: User, body: dict) -> None:
         Session = async_sessionmaker(engine, expire_on_commit=False)
     except Exception as e:
         await sessmod.append_decision(
-            str(m.id), "leave", f"Bot startup: DB engine failed ({e})"
+            mid, "leave", f"Bot startup: DB engine failed ({e})"
         )
         return
 
@@ -802,7 +1296,7 @@ async def _run_meeting_agent(m: Meeting, user: User, body: dict) -> None:
                 )
             if not agent:
                 await sessmod.append_decision(
-                    str(m.id),
+                    mid,
                     "leave",
                     "Bot startup failed: no agent found. Run packages/db/seeds/seed_agents.py to install the OOB Meeting Representative.",
                 )
@@ -813,7 +1307,7 @@ async def _run_meeting_agent(m: Meeting, user: User, body: dict) -> None:
             breach = await budget_breach(db2, agent, user.tenant_id)
             if breach is not None:
                 await sessmod.append_decision(
-                    str(m.id), "leave", f"Bot not started: {breach.message}"
+                    mid, "leave", f"Bot not started: {breach.message}"
                 )
                 await engine.dispose()
                 return
@@ -836,8 +1330,9 @@ async def _run_meeting_agent(m: Meeting, user: User, body: dict) -> None:
                 user_id=user.id,
                 subject_id=_sid,
                 subject_type=_stype,
-                input_message=f"meeting_id={m.id}",
+                input_message=f"meeting_id={mid}",
                 status=ExecutionStatus.RUNNING,
+                trigger_kind="meeting",
                 model_used=model,
             )
             db2.add(execution)
@@ -846,18 +1341,19 @@ async def _run_meeting_agent(m: Meeting, user: User, body: dict) -> None:
             execution_id = str(execution.id)
     except Exception as e:
         log.warning("meeting agent: agent lookup failed — %s", e)
-        await sessmod.append_decision(str(m.id), "leave", f"Bot startup failed: {e}")
+        await sessmod.append_decision(mid, "leave", f"Bot startup failed: {e}")
         await engine.dispose()
         return
 
     await sessmod.append_decision(
-        str(m.id),
+        mid,
         "join",
         f"Bot dispatched: agent={agent.name}, tools={len(tool_names)}",
         detail={"execution_id": execution_id, "model": model},
     )
 
     final_done: dict[str, Any] = {}
+    steps_after_kill = 0
     try:
         tool_registry = build_tool_registry(
             tool_names,
@@ -882,72 +1378,35 @@ async def _run_meeting_agent(m: Meeting, user: User, body: dict) -> None:
             tenant_id=str(user.tenant_id),
             cost_limit=cost_limit,
         )
-        # Run the agent — will block until it terminates (leave or kill).
-        # We mirror EVERY tool call + tool result into the decision log so
-        # the /meetings/<id> live view shows exactly what the agent did,
-        # not just a "Bot dispatched" line followed by silence.
-        async for evt in executor.stream(f"meeting_id={m.id}"):
+        # every step the agent takes lands in the decision log, so the live
+        # view and the rehearsal show exactly what it did
+        async for evt in executor.stream(f"meeting_id={mid}"):
             try:
                 if evt.event == "tool_call":
                     d = evt.data if isinstance(evt.data, dict) else {}
-                    name = d.get("name", "?")
-                    args_preview = json.dumps(d.get("arguments") or {})[:120]
-                    await sessmod.append_decision(
-                        str(m.id),
-                        "answer",
-                        f"→ {name}({args_preview})",
-                        detail={"tool": name, "args": d.get("arguments")},
-                    )
-                elif evt.event == "tool_result":
-                    d = evt.data if isinstance(evt.data, dict) else {}
-                    is_err = d.get("is_error") or d.get("isError")
-                    name = d.get("name", "?")
-                    content = str(d.get("content") or d.get("result") or "")[:200]
-                    if is_err:
-                        await sessmod.append_decision(
-                            str(m.id),
-                            "leave",
-                            f"✗ {name} failed: {content}",
-                            detail={"tool": name, "is_error": True, "result": content},
-                        )
-                    else:
-                        await sessmod.append_decision(
-                            str(m.id),
-                            "answer",
-                            f"✓ {name} → {content[:120]}",
-                            detail={"tool": name, "result": content},
-                        )
-                elif evt.event == "error":
-                    em = (
-                        evt.data
-                        if isinstance(evt.data, dict)
-                        else {"message": str(evt.data)}
-                    )
-                    await sessmod.append_decision(
-                        str(m.id),
-                        "leave",
-                        f"Agent error: {str(em.get('message') or em)[:200]}",
-                    )
+                    if d.get("name") == "meeting_leave":
+                        leave_summary = str(
+                            (d.get("arguments") or {}).get("summary") or ""
+                        ).strip()
                 elif evt.event == "done":
                     d = evt.data if isinstance(evt.data, dict) else {}
                     final_done.update(d)
-                    if d.get("failure_code") == "BUDGET_EXCEEDED":
-                        await sessmod.append_decision(
-                            str(m.id), "leave", str(d.get("error") or "")[:300]
-                        )
-                    out = (d.get("output") or "")[:200]
-                    if out:
-                        await sessmod.append_decision(
-                            str(m.id),
-                            "leave",
-                            f"Agent finished. Final output: {out}",
-                        )
+                for kind, text, detail in meeting_decisions(evt.event, evt.data):
+                    await sessmod.append_decision(mid, kind, text, detail=detail)
             except Exception as _e:
                 # Don't let logging break the agent
                 log.warning("decision log mirror failed: %s", _e)
+            # after an end or kill the bot gets a few steps to say goodbye and summarise, no more
+            if evt.event == "tool_result" and await sessmod.is_killed(mid):
+                steps_after_kill += 1
+                if steps_after_kill > 5:
+                    await sessmod.append_decision(
+                        mid, "leave", "Stopped the bot after it was asked to leave"
+                    )
+                    break
     except Exception as e:
         log.warning("meeting agent execution failed: %s", e)
-        await sessmod.append_decision(str(m.id), "leave", f"Agent crashed: {e}")
+        await sessmod.append_decision(mid, "error", f"Agent crashed: {e}")
         # Persist the failure on the execution row so the dashboard
         # stops showing this as "active", AND so a notification fires
         # via _notify_execution_failure below.
@@ -984,6 +1443,29 @@ async def _run_meeting_agent(m: Meeting, user: User, body: dict) -> None:
                     await db3.commit()
         except Exception:
             pass
+        # a bot that stopped without meeting_leave must still leave the room
+        sess = sessmod.get(execution_id)
+        if sess is not None:
+            try:
+                if sess.adapter is not None:
+                    await sess.adapter.leave(reason="agent_stopped")
+            except Exception:
+                pass
+            sess.status = "closed"
+            try:
+                await sessmod.publish_session(sess)
+            except Exception:
+                pass
+            sessmod.drop(execution_id)
+        if rehearsal:
+            await sessmod.append_decision(mid, "leave", "Rehearsal ended")
+            await _mark_session_closed(mid)
+        else:
+            summary = leave_summary or str(final_done.get("output") or "").strip()
+            try:
+                await _finalize_meeting(Session, m.id, mid, summary)
+            except Exception as e:
+                log.warning("meeting finalize failed: %s", e)
         try:
             await engine.dispose()
         except Exception:
@@ -1007,3 +1489,229 @@ def _record_meeting_done(ex: Any, done: dict[str, Any]) -> None:
         ex.failure_code = code
         ex.error_message = str(done.get("error") or code)[:2000]
         ex.completed_at = datetime.now(timezone.utc)
+
+
+# tools that write their own decision line, so their results are not repeated
+_SELF_LOGGING = {
+    "meeting_join",
+    "meeting_speak",
+    "meeting_post_chat",
+    "meeting_leave",
+    "defer_to_human",
+}
+
+
+def _json_or_none(text: Any) -> dict | None:
+    try:
+        v = json.loads(text) if isinstance(text, str) else None
+    except Exception:
+        return None
+    return v if isinstance(v, dict) else None
+
+
+def meeting_decisions(event: str, data: Any) -> list[tuple[str, str, dict]]:
+    """Decision-log lines for one executor event."""
+    d = data if isinstance(data, dict) else {}
+    name = str(d.get("name") or "?")
+    if event == "tool_call":
+        if name in ("meeting_listen", "scope_gate", "persona_rag"):
+            return []
+        args = d.get("arguments") or {}
+        return [
+            (
+                "step",
+                f"→ {name}({json.dumps(args)[:120]})",
+                {"tool": name, "args": args},
+            )
+        ]
+    if event == "tool_result":
+        content = d.get("content") or d.get("result") or ""
+        payload = _json_or_none(content) or {}
+        if d.get("is_error") or d.get("isError"):
+            # leaving after End or Kick is the expected way out, not a failure
+            if "Kill-switch active" in str(content):
+                return []
+            if payload.get("scope_denied"):
+                return [
+                    (
+                        "decline",
+                        f"Persona scope '{payload.get('requested_scope')}' is not "
+                        "authorized for this meeting",
+                        {"tool": name, **payload},
+                    )
+                ]
+            return [
+                (
+                    "error",
+                    f"{name} failed: {str(content)[:200]}",
+                    {"tool": name, "is_error": True, "result": str(content)[:500]},
+                )
+            ]
+        # meeting_listen logs the scope decision for every question itself
+        if name == "scope_gate":
+            return []
+        if name == "persona_rag":
+            results = payload.get("results") or []
+            citations = [
+                {
+                    "title": r.get("title") or r.get("source") or "untitled",
+                    "source": r.get("source") or "",
+                    "score": r.get("score"),
+                    "snippet": str(r.get("text") or "")[:240],
+                }
+                for r in results[:5]
+                if isinstance(r, dict)
+            ]
+            n = len(citations)
+            text = (
+                f"Persona search found {n} source{'s' if n != 1 else ''}"
+                if n
+                else "Persona search found nothing on this"
+            )
+            return [
+                (
+                    "cite",
+                    text,
+                    {
+                        "tool": name,
+                        "scope": payload.get("scope"),
+                        "query": payload.get("query"),
+                        "citations": citations,
+                        "warnings": payload.get("warnings") or [],
+                    },
+                )
+            ]
+        if name == "meeting_listen" or name in _SELF_LOGGING:
+            return []
+        return [
+            (
+                "step",
+                f"✓ {name} → {str(content)[:120]}",
+                {"tool": name, "result": str(content)[:200]},
+            )
+        ]
+    if event == "error":
+        msg = d.get("message") if d else str(data)
+        return [("error", f"Agent error: {str(msg or data)[:200]}", {})]
+    if event == "done":
+        out: list[tuple[str, str, dict]] = []
+        if d.get("failure_code") == "BUDGET_EXCEEDED":
+            out.append(("leave", str(d.get("error") or "")[:300], {}))
+        elif d.get("error"):
+            out.append(("error", f"Agent stopped: {str(d.get('error'))[:200]}", {}))
+        o = str(d.get("output") or "")[:200]
+        if o:
+            out.append(("leave", f"Agent finished. Final output: {o}", {}))
+        return out
+    return []
+
+
+async def _redis_history(mid: str) -> tuple[list[dict], list[dict]]:
+    r = await _redis()
+    if r is None:
+        return [], []
+    try:
+        t = await r.lrange(f"meeting:{mid}:transcript", 0, -1)
+        dl = await r.lrange(f"meeting:{mid}:decisions", 0, -1)
+    except Exception:
+        return [], []
+    finally:
+        try:
+            await r.aclose()
+        except Exception:
+            pass
+    return _loads_all(t), _loads_all(dl)
+
+
+def _loads_all(raw: list[str]) -> list[dict]:
+    out = []
+    for x in raw or []:
+        v = _json_or_none(x)
+        if v is not None:
+            out.append(v)
+    return out
+
+
+async def _redis_deferrals(r: Any, mid: str) -> list[dict]:
+    """Deferrals the bot raised, straight from the defer_to_human records."""
+    out: list[dict] = []
+    try:
+        ids = await r.lrange(f"meeting:{mid}:deferrals", 0, -1)
+        for did in ids or []:
+            h = await r.hgetall(f"meeting:{mid}:deferral:{did}")
+            if not h:
+                continue
+            created = int(h.get("created_at_ms") or 0)
+            out.append(
+                {
+                    "id": did,
+                    "question": h.get("question") or "",
+                    "context": h.get("context") or None,
+                    "answer": h.get("answer") or None,
+                    "status": h.get("status") or "pending",
+                    "created_at": (
+                        datetime.fromtimestamp(created / 1000, timezone.utc).isoformat()
+                        if created
+                        else None
+                    ),
+                    "created_at_ms": created,
+                    "answered_at": None,
+                }
+            )
+    except Exception:
+        return out
+    return out
+
+
+def apply_snapshot(
+    m: Any,
+    transcript: list[dict],
+    decisions: list[dict],
+    summary: str | None,
+) -> None:
+    """Copy the meeting's history onto its row so it outlives Redis."""
+    if transcript or decisions:
+        notes = dict(m.notes or {})
+        notes["transcript"] = transcript[-2000:]
+        notes["decisions"] = decisions[-500:]
+        m.notes = notes
+        m.transcript_count = len(transcript)
+        m.decision_count = len(decisions)
+    if summary and not m.summary:
+        m.summary = summary[:4000]
+    if m.status == MeetingStatus.LIVE.value:
+        m.status = MeetingStatus.DONE.value
+        m.ended_at = datetime.now(timezone.utc)
+
+
+async def _finalize_meeting(
+    session_factory: Any, meeting_id: Any, mid: str, summary: str | None
+) -> None:
+    transcript, decisions = await _redis_history(mid)
+    async with session_factory() as db:
+        m = await db.get(Meeting, meeting_id)
+        if m is None:
+            return
+        apply_snapshot(m, transcript, decisions, summary)
+        # the bot is done, so the page can stop waiting for a summary
+        m.notes = {
+            **(m.notes or {}),
+            "finalized_at": datetime.now(timezone.utc).isoformat(),
+        }
+        await db.commit()
+
+
+async def _mark_session_closed(mid: str) -> None:
+    r = await _redis()
+    if r is None:
+        return
+    try:
+        await r.hset(f"meeting:{mid}:session", mapping={"status": "closed"})
+        await r.expire(f"meeting:{mid}:session", REHEARSAL_TTL)
+    except Exception:
+        pass
+    finally:
+        try:
+            await r.aclose()
+        except Exception:
+            pass

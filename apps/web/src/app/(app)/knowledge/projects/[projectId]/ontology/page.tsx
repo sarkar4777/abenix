@@ -1,11 +1,12 @@
 'use client';
 
 import { useEffect, useMemo, useState, use } from 'react';
-import Link from 'next/link';
 import {
-  ArrowLeft, Brain, Loader2, Network, Plus, Save, Sparkles, Trash2,
+  Brain, FolderOpen, Loader2, Network, Plus, Save, Sparkles, Trash2,
 } from 'lucide-react';
 
+import PageHeader from '@/components/layout/PageHeader';
+import NextSteps from '@/components/shared/NextSteps';
 import { useApi } from '@/hooks/useApi';
 import { API_URL } from '@/lib/api-client';
 import { toastSuccess, toastError } from '@/stores/toastStore';
@@ -451,6 +452,7 @@ export default function OntologyPage(props: { params: Promise<{ projectId: strin
   const { projectId } = params;
   usePageTitle('Ontology');
   const [tab, setTab] = useState<Tab>('schema');
+  const [firstSaved, setFirstSaved] = useState(false);
 
   const { data: project } = useApi<KProject>(`/api/knowledge-projects/${projectId}`);
   const { data: active, mutate: mutateActive } = useApi<OntologySchema | null>(
@@ -465,28 +467,45 @@ export default function OntologyPage(props: { params: Promise<{ projectId: strin
 
   return (
     <div className="p-8 max-w-7xl mx-auto">
-      <div className="flex items-start justify-between gap-4 mb-6">
-        <div className="min-w-0">
-          <Link
-            href="/knowledge/projects"
-            className="text-xs text-slate-500 hover:text-slate-300 inline-flex items-center gap-1 mb-3"
-          >
-            <ArrowLeft className="w-3 h-3" /> Back to projects
-          </Link>
-          <h1 className="text-2xl font-semibold text-white flex items-center gap-2">
-            <Brain className="w-6 h-6 text-emerald-400 shrink-0" />
-            <span>Ontology</span>
-          </h1>
-          <p className="text-sm text-slate-400 mt-1 truncate">
-            {project ? <>For project <span className="font-mono text-slate-300">{project.slug}</span> · {project.name}</> : 'Loading…'}
-          </p>
-        </div>
-        {active && (
-          <div className="shrink-0 text-xs text-slate-400 bg-slate-800/50 border border-slate-700/50 rounded-lg px-3 py-1.5">
+      <PageHeader
+        className="mb-6"
+        back={{ href: '/knowledge/projects', label: 'Back to projects' }}
+        title="Ontology"
+        purpose={project ? <>Define the kinds of things and links that matter in <span className="text-slate-300">{project.name}</span>, so agents can follow connections across its documents.</> : 'Loading…'}
+        icon={Brain}
+        iconClassName="text-emerald-400"
+        storageKey="knowledge-ontology"
+        docSlug="01-architecture/06-atlas-knowledge-engine"
+        meta={active ? (
+          <span className="text-xs text-slate-400 bg-slate-800/50 border border-slate-700/50 rounded-lg px-3 py-1.5">
             Active: <span className="text-emerald-300 font-mono">{active.name} v{active.version}</span>
-          </div>
-        )}
-      </div>
+          </span>
+        ) : undefined}
+        steps={[
+          'List the kinds of things your documents talk about, like Customer, Contract or Product.',
+          'Add the links between them, like Customer SIGNED Contract.',
+          'Save. Each save is a new version and the newest one is used.',
+          'Open Correlations to see which things show up across many knowledge bases.',
+        ]}
+        primaryAction={
+          tab === 'schema'
+            ? { label: 'See correlations', icon: Network, onClick: () => setTab('correlations') }
+            : { label: 'Edit schema', icon: Sparkles, onClick: () => setTab('schema') }
+        }
+      />
+
+      {firstSaved && (
+        <NextSteps
+          className="mb-6"
+          title="First ontology saved. What next?"
+          testId="ontology-next-steps"
+          onDismiss={() => setFirstSaved(false)}
+          steps={[
+            { id: 'correlations', label: 'See correlations', hint: 'Find things that show up in many knowledge bases.', icon: Network, onClick: () => { setTab('correlations'); setFirstSaved(false); } },
+            { id: 'project', label: 'Back to the project', hint: 'Open its knowledge bases and set who can read them.', icon: FolderOpen, href: '/knowledge/projects' },
+          ]}
+        />
+      )}
 
       <div className="flex gap-2 border-b border-slate-800 mb-6">
         <button
@@ -508,7 +527,7 @@ export default function OntologyPage(props: { params: Promise<{ projectId: strin
           projectId={projectId}
           active={active ?? null}
           canEdit={canEdit}
-          onSaved={() => mutateActive()}
+          onSaved={() => { if (!active) setFirstSaved(true); mutateActive(); }}
         />
       ) : (
         <CorrelationsView projectId={projectId} />

@@ -69,6 +69,8 @@ also from a `.env` at the repo root when one exists.
 | `OTEL_ENABLED` / `OTEL_EXPORTER` / `OTEL_ENDPOINT` | `false` / `stdout` / `http://localhost:4317` | FastAPI auto-instrumentation in `app/core/telemetry.py` |
 | `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `GOOGLE_API_KEY` | empty | A warning logs when all three are empty |
 | `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` / `STRIPE_CONNECT_CLIENT_ID` | empty | Billing |
+| `MARKETPLACE_ENABLED` | `true` | Default for the marketplace switch. An admin value on Admin, Marketplace & Billing wins. Chart from `features.marketplace` |
+| `MONETIZATION_ENABLED` | `false` | Default for the monetization switch. An admin value wins. Chart from `features.monetization` |
 | `STRIPE_PRO_PRICE_ID` / `STRIPE_BUSINESS_PRICE_ID` | empty | Stripe price ids for the Pro and Business plans, read in `app/core/stripe.py` |
 | `SCALING_EXEC_REMOTE` | `false` | `true` queues executions whose agent pool is not `inline` instead of running them in the API. Chart from `scaling.execRemote` |
 | `QUEUE_BACKEND` | `celery` | See above |
@@ -96,7 +98,9 @@ also from a `.env` at the repo root when one exists.
 | `SENTRY_TRACES_SAMPLE_RATE` | `0.1` | |
 | `IMAGE_TAG` | `dev` | Sentry release |
 | `ALLOW_DEV_CREATE_MEMBER` | `false` | `true` enables the admin-only synchronous member create endpoint |
-| `KUBERNETES_NAMESPACE` | `abenix` | Namespace the cluster page reads |
+| `KUBERNETES_NAMESPACE` | the pod's own namespace, else `abenix` | Namespace the cluster page reads |
+| `HELM_RELEASE` | `abenix`, set by the chart | Release prefix the cluster page strips from service names |
+| `CLUSTER_VIEW_RBAC` | `true`, set by the chart from `clusterView.rbac.enabled` | Lets the cluster page name the helm value when a read is refused |
 | `GRAFANA_URL` | empty | Grafana link the cluster page returns |
 
 Request bodies are capped at 10 MB and uploads at 50 MB in
@@ -211,6 +215,14 @@ Read by abenix-api. Details in [outbound events](../02-runtime/19-outbound-event
 |---|---|---|
 | `EVENTS_ALLOWED_INTERNAL_HOSTS` | empty | Comma-separated host names a webhook may be saved with and call even though they are cluster-internal or resolve to private addresses. Exact match only, no suffixes, so a lookalike host cannot slip through. Chart from `eventsAllowedInternalHosts` |
 | `EVENTS_ALLOW_PRIVATE_TARGETS` | empty | `1`, `true` or `yes` lets every webhook call private and loopback addresses. Local dev only |
+
+### Connectors
+
+Read by abenix-api and agent-runtime. Details in [connectors](../02-runtime/14-connectors-and-triggers.md).
+
+| Variable | Default | Notes |
+|---|---|---|
+| `CONNECTORS_ALLOW_PRIVATE_TARGETS` | empty | `1`, `true` or `yes` lets connectors save and call private, loopback and cluster-internal addresses. For dev clusters that point a connector at an in-cluster service. Set it on both pods |
 
 Events also go to NATS when `NATS_URL` is set, logging in with `NATS_USER` and
 `NATS_PASSWORD`.
@@ -555,7 +567,7 @@ Changing them on a running pod does nothing.
 | `NEXT_PUBLIC_API_URL` | `http://localhost:8000` | API base the browser calls |
 | `NEXT_PUBLIC_APP_URL` | `http://localhost:3000` | `metadataBase` for page metadata |
 | `NEXT_PUBLIC_GRAFANA_URL` | `http://localhost:3010` (alerts, observability, execution trace link), empty (cluster page) | |
-| `NEXT_PUBLIC_ENABLE_MONETIZATION` | on | Only the literal `false` hides Marketplace, Creator Hub and Billing |
+| `NEXT_PUBLIC_ENABLE_MONETIZATION` | ignored | No longer read. The web asks `GET /api/platform/features` at runtime, see `MARKETPLACE_ENABLED` and `MONETIZATION_ENABLED` |
 | `NEXT_PUBLIC_AUDIT_NATIVE` | off | `true` makes the audit page try `/api/admin/audit-log` first |
 | `NEXT_PUBLIC_ORACLENET_API_KEY` | empty | Key the public OracleNet page sends |
 

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import {
   CheckCircle,
   XCircle,
@@ -11,6 +12,7 @@ import {
   X,
   ChevronDown,
   ChevronUp,
+  Sparkles,
 } from 'lucide-react';
 
 // Data interfaces
@@ -37,6 +39,10 @@ interface PipelineExecutionViewerProps {
   nodeResults: Record<string, NodeResultData>;
   executionPath: string[];
   totalDurationMs: number;
+  // run-level error, shown when no step carries it
+  error?: string | null;
+  // saved pipeline id, links a failed run to Healing
+  agentId?: string | null;
   onReset: () => void;
   onClose: () => void;
 }
@@ -89,6 +95,8 @@ export default function PipelineExecutionViewer({
   nodeResults,
   executionPath,
   totalDurationMs,
+  error,
+  agentId,
   onReset,
   onClose,
 }: PipelineExecutionViewerProps) {
@@ -113,7 +121,7 @@ export default function PipelineExecutionViewer({
   // Determine overall pipeline status for the summary label
   const overallStatus: 'running' | 'completed' | 'failed' = isRunning
     ? 'running'
-    : failedCount > 0
+    : failedCount > 0 || error
       ? 'failed'
       : 'completed';
 
@@ -171,7 +179,12 @@ export default function PipelineExecutionViewer({
       {expanded && (
         <div className="pointer-events-auto bg-slate-900/95 backdrop-blur border-t border-slate-700 max-h-[50vh] overflow-y-auto">
           <div className="px-4 py-3 space-y-1">
-            {executionPath.length === 0 && (
+            {error && (
+              <p className="text-xs text-red-300 bg-red-900/20 rounded px-2 py-1.5 mb-1" data-testid="pipeline-run-error">
+                {error}
+              </p>
+            )}
+            {executionPath.length === 0 && !error && (
               <p className="text-xs text-slate-500">
                 No execution data available.
               </p>
@@ -218,6 +231,11 @@ export default function PipelineExecutionViewer({
                       <ChevronDown className="w-3.5 h-3.5 text-slate-500 shrink-0" />
                     )}
                   </button>
+                  {status === 'failed' && result?.error && !isNodeExpanded && (
+                    <p className="px-3 pb-2 text-[11px] text-red-300 line-clamp-2" data-testid="pipeline-step-error">
+                      {result.error}
+                    </p>
+                  )}
 
                   {/* Expanded detail */}
                   {isNodeExpanded && result && (
@@ -337,7 +355,7 @@ export default function PipelineExecutionViewer({
           <OverallIcon
             className={`w-4 h-4 ${overallIconColor} ${isRunning ? 'animate-spin' : ''}`}
           />
-          <span className="text-sm font-medium text-slate-200 whitespace-nowrap">
+          <span className="text-sm font-medium text-slate-200 whitespace-nowrap" data-testid="pipeline-run-status">
             {overallLabel}
           </span>
         </div>
@@ -368,6 +386,18 @@ export default function PipelineExecutionViewer({
               <ChevronUp className="w-4 h-4" />
             )}
           </button>
+
+          {overallStatus === 'failed' && agentId && (
+            <Link
+              href={`/agents/${agentId}/healing`}
+              data-testid="pipeline-run-heal"
+              title="Diagnose the failure and review a proposed fix"
+              className="flex items-center gap-1 text-xs text-cyan-300 hover:text-cyan-200 bg-cyan-500/10 border border-cyan-500/30 rounded px-2 py-1 transition-colors"
+            >
+              <Sparkles className="w-3 h-3" />
+              <span>Diagnose and fix</span>
+            </Link>
+          )}
 
           {/* Clear Results */}
           {!isRunning && (

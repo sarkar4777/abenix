@@ -137,7 +137,7 @@ export default function AIBuilderDialog({ open, onClose, onApply }: Props) {
         }
       }
     } catch (err: any) {
-      if (err?.name !== 'AbortError') setError(err?.message || 'Stream error');
+      if (err?.name !== 'AbortError') setError(err instanceof TypeError ? 'Lost the connection to the server during the build, try again.' : err?.message || 'Stream error');
     } finally {
       setGenerating(false);
       abortRef.current = null;
@@ -175,7 +175,7 @@ export default function AIBuilderDialog({ open, onClose, onApply }: Props) {
         setError(body.error?.message || 'Failed to generate config');
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Network error');
+      setError(err instanceof TypeError ? 'Could not reach the server. Your description is still here, try again.' : err instanceof Error ? err.message : 'Network error');
     } finally {
       setGenerating(false);
     }
@@ -375,6 +375,17 @@ export default function AIBuilderDialog({ open, onClose, onApply }: Props) {
                   })}
                 </div>
               </div>
+
+              {config.mode !== 'pipeline' && config.system_prompt && (
+                <details data-testid="ai-builder-system-prompt">
+                  <summary className="text-[10px] text-slate-500 cursor-pointer hover:text-slate-300">
+                    System prompt ({config.system_prompt.length} chars)
+                  </summary>
+                  <pre className="mt-1 text-[10px] text-slate-300 bg-slate-900/80 rounded-lg p-3 max-h-48 overflow-auto whitespace-pre-wrap">
+                    {config.system_prompt}
+                  </pre>
+                </details>
+              )}
 
               {/* Auto-repair status */}
               {(config as any).auto_repair?.attempted && (

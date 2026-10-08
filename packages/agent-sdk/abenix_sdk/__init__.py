@@ -74,6 +74,11 @@ class ExecutionResult:
     execution_id: str | None = None
     status: str = "completed"               # completed | failed | paused | running
     paused_at: ApprovalRef | None = None    # set when status == "paused"
+    # what started the run: schedule, webhook, manual, event, source_watch, chat, api ...
+    trigger_kind: str | None = None
+    trigger_id: str | None = None
+    trigger_name: str | None = None
+    started_by: str | None = None
 
 
 @dataclass
@@ -124,6 +129,33 @@ class ExecutionsClient:
 
     async def get(self, execution_id: str) -> dict[str, Any]:
         return await self._client._get(f"/api/executions/{execution_id}")
+
+    async def list(
+        self,
+        *,
+        agent_id: str | None = None,
+        status: str | None = None,
+        trigger_kind: str | list[str] | None = None,
+        trigger_id: str | None = None,
+        search: str = "",
+        limit: int = 20,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        """Past runs, each with trigger_kind, trigger_id, trigger_name and started_by."""
+        if isinstance(trigger_kind, (list, tuple)):
+            trigger_kind = ",".join(trigger_kind)
+        params = {
+            "agent_id": agent_id,
+            "status": status,
+            "trigger_kind": trigger_kind,
+            "trigger_id": trigger_id,
+            "search": search or None,
+            "limit": limit,
+            "offset": offset,
+        }
+        return await self._client._get(
+            "/api/executions", {k: v for k, v in params.items() if v is not None}
+        ) or []
 
     async def replay(self, execution_id: str) -> dict[str, Any]:
         return await self._client._get(f"/api/executions/{execution_id}/replay")
@@ -1277,8 +1309,12 @@ class Abenix:
             model=data.get("model", "") or "",
             tool_calls=data.get("tool_calls", []) or [],
             confidence_score=data.get("confidence_score"),
-            execution_id=data.get("execution_id"),
+            execution_id=data.get("execution_id") or data.get("id"),
             status=(data.get("status") or "completed"),
+            trigger_kind=data.get("trigger_kind"),
+            trigger_id=data.get("trigger_id"),
+            trigger_name=data.get("trigger_name"),
+            started_by=data.get("started_by"),
         )
 
     async def _poll_execution(

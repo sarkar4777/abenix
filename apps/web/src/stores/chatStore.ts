@@ -1,12 +1,16 @@
 import { create } from 'zustand';
 import {
   connectToAgentStream,
+  errorRepeatsReply,
   type DoneData,
   type ToolCallData,
   type ToolResultData,
+  type ToolAutonomyData,
   type PipelineNodeStartData,
   type PipelineNodeCompleteData,
+  type ModerationData,
 } from '@/lib/chat';
+import { autonomyMetaOf, type AutonomyMeta } from '@/lib/autonomy';
 
 export interface TextBlock {
   type: 'text';
@@ -19,6 +23,7 @@ export interface ToolBlock {
   arguments: Record<string, unknown>;
   result?: string;
   isError?: boolean;
+  autonomy?: AutonomyMeta | null;
 }
 
 export interface PipelineNodeBlock {
@@ -31,7 +36,30 @@ export interface PipelineNodeBlock {
   error?: string;
 }
 
-export type ContentBlock = TextBlock | ToolBlock | PipelineNodeBlock;
+// content a moderation policy held for a person to review, shown as a live card
+export interface HoldBlock {
+  type: 'moderation_hold';
+  review_id: string;
+  source: string;
+  // the sender's own words, shown while they wait
+  text?: string;
+  timeout_minutes?: number;
+  timeout_action?: 'reject' | 'release';
+}
+
+export type ContentBlock = TextBlock | ToolBlock | PipelineNodeBlock | HoldBlock;
+
+export function holdBlockFrom(data: ModerationData, text?: string): HoldBlock | null {
+  if (data.outcome !== 'held' || !data.review_id) return null;
+  return {
+    type: 'moderation_hold',
+    review_id: data.review_id,
+    source: data.source,
+    text,
+    timeout_minutes: data.timeout_minutes,
+    timeout_action: data.timeout_action,
+  };
+}
 
 export interface ChatMessage {
   id: string;
@@ -70,6 +98,8 @@ interface ChatState {
   error: string | null;
   // what the moderation policy did to the last exchange, shown above the composer
   moderationNotice: string | null;
+  // set while the server holds the reply back for the moderation check
+  replyStatus: string | null;
   abortController: AbortController | null;
 
   sendMessage: (agentId: string, message: string, context?: Record<string, unknown>) => void;
@@ -95,6 +125,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   agentInfo: null,
   error: null,
   moderationNotice: null,
+  replyStatus: null,
   abortController: null,
 
   sendMessage: (agentId: string, message: string, context?: Record<string, unknown>) => {
@@ -111,13 +142,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
       streamingBlocks: [],
       error: null,
       moderationNotice: null,
+      replyStatus: null,
     });
 
+    let held = false;
     const controller = connectToAgentStream(agentId, message, {
       onToken: (text: string) => {
         // A token event carrying no text used to push content: undefined,
         // which then crashed the whole chat page when it rendered.
         if (typeof text !== 'string' || text === '') return;
+        // the hold card already says what happens next
+        if (held) return;
+        if (get().replyStatus) set({ replyStatus: null });
         const blocks = [...get().streamingBlocks];
         const last = blocks[blocks.length - 1];
         if (last && last.type === 'text') {
@@ -145,10 +181,24 @@ export const useChatStore = create<ChatState>((set, get) => ({
           const b = blocks[i];
           if (b.type === 'tool' && b.name === tr.name && b.result === undefined) {
             b.result = tr.result;
+            b.isError = Boolean(tr.is_error);
+            b.autonomy = autonomyMetaOf(tr) ?? b.autonomy;
             break;
           }
         }
         set({ streamingBlocks: [...blocks] });
+      },
+
+      onToolAutonomy: (ta: ToolAutonomyData) => {
+        const blocks = [...get().streamingBlocks];
+        for (let i = blocks.length - 1; i >= 0; i--) {
+          const b = blocks[i];
+          if (b.type === 'tool' && b.name === ta.name && b.result === undefined) {
+            blocks[i] = { ...b, autonomy: ta.autonomy };
+            break;
+          }
+        }
+        set({ streamingBlocks: blocks });
       },
 
       onNodeStart: (data: PipelineNodeStartData) => {
@@ -181,7 +231,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
         set({ streamingBlocks: [...blocks] });
       },
 
+      onReplyChecking: () => set({ replyStatus: 'Checking the reply before it is shown…' }),
+
       onModeration: (data) => {
+        set({ replyStatus: null });
+        const hold = holdBlockFrom(data, data.source === 'pre_llm' ? message : undefined);
+        if (hold) {
+          held = true;
+          set({ streamingBlocks: [hold], moderationNotice: null });
+          return;
+        }
+        if (held) return;
         const cats = data.categories && data.categories.length ? ` (${data.categories.join(', ')})` : '';
         if (data.source === 'post_llm' && data.outcome === 'blocked') {
           // the streamed text must not stay on screen
@@ -195,6 +255,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       },
 
       onDone: (data: DoneData) => {
+        set({ replyStatus: null });
         const assistantMsg: ChatMessage = {
           id: uid(),
           role: 'assistant',
@@ -220,6 +281,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
       },
 
       onError: (message: string) => {
+        set({ replyStatus: null });
+        if (held) {
+          // the hold card already explains why the run stopped
+          const hb = get().streamingBlocks;
+          set((s) => ({
+            messages: [...s.messages, { id: uid(), role: 'assistant', blocks: hb, timestamp: new Date() }],
+            isStreaming: false,
+            streamingBlocks: [],
+            abortController: null,
+          }));
+          return;
+        }
         const blocks = get().streamingBlocks;
         if (blocks.length > 0) {
           const assistantMsg: ChatMessage = {
@@ -234,7 +307,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
           isStreaming: false,
           streamingBlocks: [],
           abortController: null,
-          error: get().moderationNotice && /moderation policy/i.test(message) ? null : message,
+          error:
+            (get().moderationNotice && /moderation policy/i.test(message)) || errorRepeatsReply(message, blocks)
+              ? null
+              : message,
         });
       },
     }, context);

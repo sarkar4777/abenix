@@ -46,12 +46,12 @@ class TestAgentStepTool:
         """Basic agent execution returns a response from the mocked executor."""
         mock_result = MockExecutionResult(output="The answer is 42.")
 
-        with patch("engine.agent_executor.AgentExecutor") as MockExecutor, patch(
-            "engine.agent_executor.build_tool_registry"
-        ) as mock_build, patch("engine.llm_router.LLMRouter"), patch(
-            "engine.sandbox.ExecutionSandbox"
-        ), patch(
-            "engine.sandbox.SandboxPolicy"
+        with (
+            patch("engine.agent_executor.AgentExecutor") as MockExecutor,
+            patch("engine.agent_executor.build_tool_registry") as mock_build,
+            patch("engine.llm_router.LLMRouter"),
+            patch("engine.sandbox.ExecutionSandbox"),
+            patch("engine.sandbox.SandboxPolicy"),
         ):
             mock_instance = AsyncMock()
             mock_instance.invoke = AsyncMock(return_value=mock_result)
@@ -74,12 +74,12 @@ class TestAgentStepTool:
         """Verify build_tool_registry is called with the provided tools list."""
         mock_result = MockExecutionResult()
 
-        with patch("engine.agent_executor.AgentExecutor") as MockExecutor, patch(
-            "engine.agent_executor.build_tool_registry"
-        ) as mock_build, patch("engine.llm_router.LLMRouter"), patch(
-            "engine.sandbox.ExecutionSandbox"
-        ), patch(
-            "engine.sandbox.SandboxPolicy"
+        with (
+            patch("engine.agent_executor.AgentExecutor") as MockExecutor,
+            patch("engine.agent_executor.build_tool_registry") as mock_build,
+            patch("engine.llm_router.LLMRouter"),
+            patch("engine.sandbox.ExecutionSandbox"),
+            patch("engine.sandbox.SandboxPolicy"),
         ):
             mock_instance = AsyncMock()
             mock_instance.invoke = AsyncMock(return_value=mock_result)
@@ -102,12 +102,12 @@ class TestAgentStepTool:
         """Verify max_iterations is forwarded to the executor."""
         mock_result = MockExecutionResult()
 
-        with patch("engine.agent_executor.AgentExecutor") as MockExecutor, patch(
-            "engine.agent_executor.build_tool_registry"
-        ) as mock_build, patch("engine.llm_router.LLMRouter"), patch(
-            "engine.sandbox.ExecutionSandbox"
-        ), patch(
-            "engine.sandbox.SandboxPolicy"
+        with (
+            patch("engine.agent_executor.AgentExecutor") as MockExecutor,
+            patch("engine.agent_executor.build_tool_registry") as mock_build,
+            patch("engine.llm_router.LLMRouter"),
+            patch("engine.sandbox.ExecutionSandbox"),
+            patch("engine.sandbox.SandboxPolicy"),
         ):
             mock_instance = AsyncMock()
             mock_instance.invoke = AsyncMock(return_value=mock_result)
@@ -131,12 +131,12 @@ class TestAgentStepTool:
         """Verify model is forwarded to the executor."""
         mock_result = MockExecutionResult(model="claude-opus-4-20250514")
 
-        with patch("engine.agent_executor.AgentExecutor") as MockExecutor, patch(
-            "engine.agent_executor.build_tool_registry"
-        ) as mock_build, patch("engine.llm_router.LLMRouter"), patch(
-            "engine.sandbox.ExecutionSandbox"
-        ), patch(
-            "engine.sandbox.SandboxPolicy"
+        with (
+            patch("engine.agent_executor.AgentExecutor") as MockExecutor,
+            patch("engine.agent_executor.build_tool_registry") as mock_build,
+            patch("engine.llm_router.LLMRouter"),
+            patch("engine.sandbox.ExecutionSandbox"),
+            patch("engine.sandbox.SandboxPolicy"),
         ):
             mock_instance = AsyncMock()
             mock_instance.invoke = AsyncMock(return_value=mock_result)
@@ -159,12 +159,12 @@ class TestAgentStepTool:
         """Verify temperature is forwarded to the executor."""
         mock_result = MockExecutionResult()
 
-        with patch("engine.agent_executor.AgentExecutor") as MockExecutor, patch(
-            "engine.agent_executor.build_tool_registry"
-        ) as mock_build, patch("engine.llm_router.LLMRouter"), patch(
-            "engine.sandbox.ExecutionSandbox"
-        ), patch(
-            "engine.sandbox.SandboxPolicy"
+        with (
+            patch("engine.agent_executor.AgentExecutor") as MockExecutor,
+            patch("engine.agent_executor.build_tool_registry") as mock_build,
+            patch("engine.llm_router.LLMRouter"),
+            patch("engine.sandbox.ExecutionSandbox"),
+            patch("engine.sandbox.SandboxPolicy"),
         ):
             mock_instance = AsyncMock()
             mock_instance.invoke = AsyncMock(return_value=mock_result)
@@ -198,12 +198,12 @@ class TestAgentStepTool:
     @pytest.mark.asyncio
     async def test_agent_timeout(self, tool: AgentStepTool) -> None:
         """AgentExecutor raising TimeoutError should return an error result."""
-        with patch("engine.agent_executor.AgentExecutor") as MockExecutor, patch(
-            "engine.agent_executor.build_tool_registry"
-        ) as mock_build, patch("engine.llm_router.LLMRouter"), patch(
-            "engine.sandbox.ExecutionSandbox"
-        ), patch(
-            "engine.sandbox.SandboxPolicy"
+        with (
+            patch("engine.agent_executor.AgentExecutor") as MockExecutor,
+            patch("engine.agent_executor.build_tool_registry") as mock_build,
+            patch("engine.llm_router.LLMRouter"),
+            patch("engine.sandbox.ExecutionSandbox"),
+            patch("engine.sandbox.SandboxPolicy"),
         ):
             mock_instance = AsyncMock()
             mock_instance.invoke = AsyncMock(
@@ -238,12 +238,12 @@ class TestAgentStepTool:
             node_traces=[MagicMock(), MagicMock(), MagicMock()],
         )
 
-        with patch("engine.agent_executor.AgentExecutor") as MockExecutor, patch(
-            "engine.agent_executor.build_tool_registry"
-        ) as mock_build, patch("engine.llm_router.LLMRouter"), patch(
-            "engine.sandbox.ExecutionSandbox"
-        ), patch(
-            "engine.sandbox.SandboxPolicy"
+        with (
+            patch("engine.agent_executor.AgentExecutor") as MockExecutor,
+            patch("engine.agent_executor.build_tool_registry") as mock_build,
+            patch("engine.llm_router.LLMRouter"),
+            patch("engine.sandbox.ExecutionSandbox"),
+            patch("engine.sandbox.SandboxPolicy"),
         ):
             mock_instance = AsyncMock()
             mock_instance.invoke = AsyncMock(return_value=mock_result)
@@ -285,13 +285,13 @@ async def test_tool_call_budget_follows_max_iterations(
     args = {"input_message": "plan", "system_prompt": "planner"}
     if iterations is not None:
         args["max_iterations"] = iterations
-    with patch("engine.agent_executor.AgentExecutor") as MockExecutor, patch(
-        "engine.agent_executor.build_tool_registry"
-    ) as mock_build, patch("engine.llm_router.LLMRouter"), patch(
-        "engine.sandbox.ExecutionSandbox"
-    ), patch(
-        "engine.sandbox.SandboxPolicy"
-    ) as MockPolicy:
+    with (
+        patch("engine.agent_executor.AgentExecutor") as MockExecutor,
+        patch("engine.agent_executor.build_tool_registry") as mock_build,
+        patch("engine.llm_router.LLMRouter"),
+        patch("engine.sandbox.ExecutionSandbox"),
+        patch("engine.sandbox.SandboxPolicy") as MockPolicy,
+    ):
         mock_instance = AsyncMock()
         mock_instance.invoke = AsyncMock(return_value=MockExecutionResult())
         MockExecutor.return_value = mock_instance

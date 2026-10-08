@@ -119,7 +119,7 @@ Keys saved with the scope on "This tenant" live in `tenant_tool_credentials`, on
 | Who writes | `PATCH /api/admin/tool-config/{KEY}` with `scope=tenant` (default) or `scope=platform`, admin only. The generic settings endpoints never return these rows. Platform writes are audited on the `abenix.audit.tool_config` logger with the scope and the caller's tenant. |
 | Masking | Every `tool.credential.*` key is treated as a secret by `is_secret()`. The tool-config endpoints mask by declared kind and show the last four characters of a secret. |
 | At rest | AES-GCM under `ABENIX_DATA_KEY_KEK_BASE64` when set, otherwise stored as entered. The screen says which. Both tables use one scope, so the runtime decodes them the same way. |
-| Reset | `POST /api/admin/settings/reset` leaves `tool.credential.*` rows and `tenant_tool_credentials` alone. |
+| Reset | `POST /api/admin/settings/reset` clears only the settings listed on this page. Tool credentials, connector secrets and the marketplace and monetization switches stay as they are. |
 | Propagation | 30 seconds. The agent-runtime reads both tables over `DATABASE_URL` with asyncpg, single-flight, serving the previous snapshot while a refresh runs. |
 | Precedence | The tenant row wins over the platform row, which wins over the environment, which wins over `tool_defaults.yaml`, which wins over the tool's declared default. |
 | Which tenant | The executor sets the tenant at the start of a run and the queue consumer sets it before building an executor. `GET /api/tools` resolves for the caller's tenant. |
@@ -134,7 +134,7 @@ How a tool declares a key, and how the screen is generated from that: [08-howto/
 |---|---|---|---|
 | `GET` | `/api/admin/settings` | admin | Every key with its stored value or default, grouped by category. Secrets masked |
 | `PATCH` | `/api/admin/settings/{key}` | admin | Body `{"value": "..."}`. Model keys must be in the catalogue, int keys inside their bounds. Enabling subscription mode needs a stored or environment token |
-| `POST` | `/api/admin/settings/reset` | admin | Deletes every stored row except `tool.credential.*` |
+| `POST` | `/api/admin/settings/reset` | admin | Clears the stored values of the settings on this page, nothing else |
 | `GET` | `/api/admin/settings/models` | admin | The model catalogue the pickers offer |
 | `GET` | `/api/admin/settings/models/public` | signed in | Same catalogue for non-admin pickers |
 | `GET` | `/api/admin/settings/subscription` | admin | Subscription state, token masked |

@@ -242,4 +242,11 @@ contractiq/e2e/fixtures/uat_run_*.pdf
 
 # exploratory UI runs and journey screenshots
 e2e/explore_*/
-e2e/uat_core_features_ui/shots/
+e2e/uat_*/shots/
+
+# test run output
+e2e/test-results*/
+e2e/uat_*/report.json
+e2e/uat_*/report.md
+e2e/uat_*/state.json
+e2e/uat_first_use_tasks/

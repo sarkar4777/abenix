@@ -121,54 +121,62 @@ export default function BuilderTopBar({
   };
 
   return (
-    <div className="h-14 bg-[#0F172A] border-b border-slate-800 flex items-center justify-between px-4 shrink-0">
+    <header
+      className="min-h-14 py-1.5 bg-[#0F172A] border-b border-slate-800 flex flex-wrap items-center justify-between gap-x-2 gap-y-1.5 px-4 shrink-0"
+      data-testid="page-header"
+    >
       <h1 className="sr-only">Agent Builder</h1>
-      <div className="flex items-center gap-3 min-w-0">
-        {editing ? (
-          <input
-            ref={inputRef}
-            value={editValue}
-            onChange={(e) => setEditValue(e.target.value)}
-            onBlur={commitName}
-            onKeyDown={handleKeyDown}
-            data-testid="builder-name-input"
-            aria-label="Agent name"
-            className="px-2 py-1 bg-slate-800 border border-cyan-500 rounded text-sm text-white focus:outline-none min-w-[200px]"
-          />
-        ) : (
-          <button
-            onClick={() => {
-              setEditValue(name);
-              setEditing(true);
-            }}
-            data-testid="builder-name-button"
-            className="flex items-center gap-2 text-sm font-semibold text-white hover:text-cyan-400 transition-colors group"
-          >
-            <span className="truncate max-w-[300px]">{name || 'Untitled Agent'}</span>
-            <Pencil className="w-3.5 h-3.5 text-slate-500 group-hover:text-cyan-400" />
-          </button>
-        )}
+      <div className="min-w-0 max-w-full">
+        <div className="flex items-center gap-3 min-w-0">
+          {editing ? (
+            <input
+              ref={inputRef}
+              value={editValue}
+              onChange={(e) => setEditValue(e.target.value)}
+              onBlur={commitName}
+              onKeyDown={handleKeyDown}
+              data-testid="builder-name-input"
+              aria-label="Agent name"
+              className="px-2 py-1 bg-slate-800 border border-cyan-500 rounded text-sm text-white focus:outline-none min-w-[200px]"
+            />
+          ) : (
+            <button
+              onClick={() => {
+                setEditValue(name);
+                setEditing(true);
+              }}
+              data-testid="builder-name-button"
+              className="flex items-center gap-2 text-sm font-semibold text-white hover:text-cyan-400 transition-colors group"
+            >
+              <span className="truncate max-w-[300px]">{name || 'Untitled Agent'}</span>
+              <Pencil className="w-3.5 h-3.5 text-slate-500 group-hover:text-cyan-400" />
+            </button>
+          )}
 
-        {saving && (
-          <span className="flex items-center gap-1.5 text-xs text-slate-500">
-            <Loader2 className="w-3 h-3 animate-spin" />
-            Saving...
-          </span>
-        )}
-        {!saving && !dirty && agentId && (
-          <span className="flex items-center gap-1 text-xs text-emerald-400/70">
-            <Check className="w-3 h-3" />
-            Saved
-          </span>
-        )}
-        {showNextStep && (
-          <span
-            className="hidden md:inline text-[11px] text-amber-300/90 truncate"
-            data-testid="builder-next-step"
-          >
-            Saved as draft. You and people you share it with can run it. Publish to make it available to your organisation.
-          </span>
-        )}
+          {saving && (
+            <span className="flex items-center gap-1.5 text-xs text-slate-500">
+              <Loader2 className="w-3 h-3 animate-spin" />
+              Saving...
+            </span>
+          )}
+          {!saving && !dirty && agentId && (
+            <span className="flex items-center gap-1 text-xs text-emerald-400/70">
+              <Check className="w-3 h-3" />
+              Saved
+            </span>
+          )}
+          {showNextStep && (
+            <span
+              className="hidden md:inline text-[11px] text-amber-300/90 truncate"
+              data-testid="builder-next-step"
+            >
+              Saved as draft. You and people you share it with can run it. Publish to make it available to your organisation.
+            </span>
+          )}
+        </div>
+        <p className="truncate text-[11px] leading-4 text-slate-500" data-testid="page-purpose">
+          Design an agent or pipeline, then save and publish it
+        </p>
       </div>
 
       <div className="flex items-center gap-1.5 flex-wrap">
@@ -328,38 +336,40 @@ export default function BuilderTopBar({
           <Sparkles className="w-3.5 h-3.5" />
           Build with AI
         </button>
-        <button
-          onClick={onSave}
-          disabled={saving || !dirty}
-          data-testid="builder-save-draft"
-          className="flex items-center gap-1.5 px-3 py-2 bg-slate-700/50 border border-slate-600 text-slate-200 text-xs rounded-lg hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-        >
-          <Save className="w-3.5 h-3.5" />
-          Save Draft
-        </button>
-        <button
-          onClick={() => setShowPublish(true)}
-          disabled={saving || !agentId}
-          data-testid="builder-publish"
-          // Publishing needs a saved draft to publish. Without this the button
-          // is just greyed out and there is nothing on screen saying why.
-          title={
-            saving
-              ? 'Saving…'
-              : !agentId
-                ? 'Save Draft first — publishing needs a saved agent'
-                : 'Publish this agent'
-          }
-          className="flex items-center gap-1.5 px-3 py-2 bg-gradient-to-r from-cyan-500 to-purple-600 text-white text-xs font-medium rounded-lg hover:from-cyan-400 hover:to-purple-500 shadow-lg shadow-cyan-500/25 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
-        >
-          <Rocket className="w-3.5 h-3.5" />
-          Publish
-        </button>
-        {!agentId && !saving && (
-          <span className="text-[10px] text-slate-500 self-center whitespace-nowrap">
-            Save the draft to enable Publish
-          </span>
-        )}
+        <div className="flex items-center gap-1.5" data-testid="page-primary-action">
+          <button
+            onClick={onSave}
+            disabled={saving || !dirty}
+            data-testid="builder-save-draft"
+            className="flex items-center gap-1.5 px-3 py-2 bg-slate-700/50 border border-slate-600 text-slate-200 text-xs rounded-lg hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            <Save className="w-3.5 h-3.5" />
+            Save Draft
+          </button>
+          <button
+            onClick={() => setShowPublish(true)}
+            disabled={saving || !agentId}
+            data-testid="builder-publish"
+            // Publishing needs a saved draft to publish. Without this the button
+            // is just greyed out and there is nothing on screen saying why.
+            title={
+              saving
+                ? 'Saving…'
+                : !agentId
+                  ? 'Save Draft first — publishing needs a saved agent'
+                  : 'Publish this agent'
+            }
+            className="flex items-center gap-1.5 px-3 py-2 bg-gradient-to-r from-cyan-500 to-purple-600 text-white text-xs font-medium rounded-lg hover:from-cyan-400 hover:to-purple-500 shadow-lg shadow-cyan-500/25 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+          >
+            <Rocket className="w-3.5 h-3.5" />
+            Publish
+          </button>
+          {!agentId && !saving && (
+            <span className="text-[10px] text-slate-500 self-center whitespace-nowrap">
+              Save the draft to enable Publish
+            </span>
+          )}
+        </div>
       </div>
       {agentId && (
         <PublishDialog
@@ -387,6 +397,6 @@ export default function BuilderTopBar({
         agentName={name}
         getDraft={getDraftForValidate}
       />
-    </div>
+    </header>
   );
 }

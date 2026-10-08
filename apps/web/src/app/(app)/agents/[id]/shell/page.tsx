@@ -1,11 +1,11 @@
 'use client';
 
 import { useEffect, useState, useRef, useCallback } from 'react';
-import { useParams, useRouter } from 'next/navigation';
-import Link from 'next/link';
+import { useParams } from 'next/navigation';
 import {
-  ChevronLeft, ChevronRight, Loader2, Send, Sparkles, Terminal,
+  BookOpen, Loader2, Send, Sparkles, Terminal,
 } from 'lucide-react';
+import PageHeader from '@/components/layout/PageHeader';
 import ReactMarkdown from 'react-markdown';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
@@ -60,7 +60,6 @@ function intentColor(intent: string): string {
 
 export default function WorkflowShellPage() {
   const params = useParams();
-  const router = useRouter();
   const pipelineId = params.id as string;
 
   const [verbs, setVerbs] = useState<Verb[]>([]);
@@ -161,40 +160,26 @@ export default function WorkflowShellPage() {
   const candidates = head ? verbs.filter(v => v.name.startsWith(head)).slice(0, 8) : verbs.slice(0, 8);
 
   return (
-    <div className="p-6 max-w-6xl mx-auto h-[calc(100vh-3.5rem-1.75rem)] flex flex-col">
-      <div className="mb-4">
-        <button
-          onClick={() => router.push(`/agents/${pipelineId}/info`)}
-          className="text-xs text-slate-500 hover:text-slate-300 inline-flex items-center gap-1 mb-2"
-        >
-          <ChevronLeft className="w-3 h-3" /> Back to pipeline
-        </button>
-        <h1 className="text-2xl font-semibold text-white flex items-center gap-3">
-          <Terminal className="w-6 h-6 text-cyan-400" />
-          Talk-to-workflow shell
-        </h1>
-        <p className="text-xs text-slate-400 mt-1">
-          Drive every aspect of this pipeline with a typed grammar.  Press{' '}
-          <kbd className="px-1 py-0.5 bg-slate-800 border border-slate-700 rounded text-[10px]">Tab</kbd>{' '}
-          to autocomplete,{' '}
-          <kbd className="px-1 py-0.5 bg-slate-800 border border-slate-700 rounded text-[10px]">↑/↓</kbd>{' '}
-          for history. Mutating verbs draft a Healing patch — they do not change the workflow directly.
-        </p>
-      </div>
+    <div className="p-3 md:p-6 max-w-6xl mx-auto h-[calc(100vh-3.5rem-1.75rem)] flex flex-col min-w-0">
+      <PageHeader
+        compact
+        title="Talk-to-workflow shell"
+        icon={Terminal}
+        purpose="Look at, run and fix this pipeline by typing short commands. For builders who prefer the keyboard."
+        back={{ href: `/agents/${pipelineId}/info`, label: 'Back to pipeline' }}
+        primaryAction={{ label: showCheat ? 'Hide cheat sheet' : 'Show cheat sheet', onClick: () => setShowCheat(!showCheat), icon: BookOpen }}
+        secondaryAction={{ label: 'Healing', href: `/agents/${pipelineId}/healing`, icon: Sparkles }}
+        steps={[
+          { title: 'Type a command', body: <>Start with <code>help</code> or <code>show workflow</code>. Press <kbd className="px-1 py-0.5 bg-slate-800 border border-slate-700 rounded text-[10px]">Tab</kbd> to complete a word.</> },
+          { title: 'Reuse what you typed', body: <>Use <kbd className="px-1 py-0.5 bg-slate-800 border border-slate-700 rounded text-[10px]">↑</kbd> and <kbd className="px-1 py-0.5 bg-slate-800 border border-slate-700 rounded text-[10px]">↓</kbd> to step through earlier commands.</> },
+          { title: 'Changes are drafts', body: 'Commands that change the pipeline only draft a fix. You review and apply it on the Healing page.' },
+        ]}
+        docSlug="02-runtime/10-pipeline-healing-drift"
+        storageKey="agent-shell"
+        className="mb-4"
+      />
 
       <div className="flex items-center gap-2 mb-3 flex-wrap">
-        <button
-          onClick={() => setShowCheat(!showCheat)}
-          className="text-[11px] px-2 py-1 border border-slate-700 hover:bg-slate-800 text-slate-300 rounded"
-        >
-          {showCheat ? 'Hide' : 'Show'} cheat sheet
-        </button>
-        <Link
-          href={`/agents/${pipelineId}/healing`}
-          className="text-[11px] px-2 py-1 border border-cyan-500/30 hover:bg-cyan-500/10 text-cyan-300 rounded inline-flex items-center gap-1"
-        >
-          <Sparkles className="w-3 h-3" /> Healing
-        </Link>
         {(['INSPECT', 'MUTATE', 'EXECUTE', 'GOVERN', 'LEARN'] as const).map(intent => (
           <span key={intent} className={`text-[10px] px-2 py-0.5 rounded-full border ${intentColor(intent)}`}>
             {intent} ({verbs.filter(v => v.intent === intent).length})

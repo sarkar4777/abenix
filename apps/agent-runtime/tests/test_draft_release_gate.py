@@ -47,12 +47,13 @@ def test_pipeline_agent_step_refuses_an_unreleased_high_tier_agent():
         "input_message": "go",
         "system_prompt": "x",
     }
-    with patch.object(
-        mod, "_budget_breach", AsyncMock(return_value=None)
-    ), patch.object(
-        mod,
-        "_agent_settings",
-        AsyncMock(return_value=({"risk_tier": "high"}, None, "draft")),
+    with (
+        patch.object(mod, "_budget_breach", AsyncMock(return_value=None)),
+        patch.object(
+            mod,
+            "_agent_settings",
+            AsyncMock(return_value=({"risk_tier": "high"}, None, "draft")),
+        ),
     ):
         res = asyncio.run(tool.execute(args))
     assert res.is_error

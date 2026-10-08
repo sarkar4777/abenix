@@ -6,12 +6,13 @@ import asyncio
 import json
 import sys
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, Header, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
-from sqlalchemy import select, desc, func
+from sqlalchemy import select, desc, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.permissions import sees_other_users_resources
@@ -22,6 +23,7 @@ from app.core.execution_state import (
     get_tenant_live_executions,
     node_statuses_from_log,
 )
+from app.core import run_origin
 from app.core.responses import error, success
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "packages" / "db"))
@@ -33,13 +35,67 @@ from models.user import User
 router = APIRouter(prefix="/api/executions", tags=["executions"])
 
 
+RECENT_MAX_SECONDS = 600
+
+
 @router.get("/live")
 async def list_live_executions(
     user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    recent_seconds: int = Query(
+        0, ge=0, le=RECENT_MAX_SECONDS, description="Also list runs that ended lately"
+    ),
 ) -> JSONResponse:
-    """Get all currently-running executions for the tenant."""
+    """Running executions for the tenant, plus in meta.recent the ones that just ended.
+
+    A run shorter than the page's poll would otherwise never show at all.
+    """
     executions = await get_tenant_live_executions(str(user.tenant_id))
-    return success(executions)
+    if not recent_seconds:
+        return success(executions)
+    return success(
+        executions, meta={"recent": await _recent_runs(db, user, recent_seconds)}
+    )
+
+
+async def _recent_runs(db: AsyncSession, user: User, seconds: int) -> list[dict]:
+    from datetime import timedelta
+
+    since = datetime.now(timezone.utc) - timedelta(seconds=seconds)
+    where = [
+        Execution.tenant_id == user.tenant_id,
+        Execution.completed_at >= since,
+        Execution.status != ExecutionStatus.RUNNING,
+    ]
+    if not sees_other_users_resources(user):
+        where.append(Execution.user_id == user.id)
+    rows = (
+        await db.execute(
+            select(Execution, Agent.name)
+            .outerjoin(Agent, Execution.agent_id == Agent.id)
+            .where(*where)
+            .order_by(desc(Execution.completed_at))
+            .limit(10)
+        )
+    ).all()
+    out = []
+    for e, name in rows:
+        status = e.status.value if hasattr(e.status, "value") else str(e.status)
+        out.append(
+            {
+                "execution_id": str(e.id),
+                "agent_id": str(e.agent_id),
+                "agent_name": name,
+                "status": status.lower(),
+                "duration_ms": e.duration_ms,
+                "completed_at": e.completed_at.isoformat() if e.completed_at else None,
+                "failure_code": e.failure_code,
+                "trigger_kind": e.trigger_kind,
+                "trigger_name": e.trigger_name,
+                "trigger_id": str(e.trigger_id) if e.trigger_id else None,
+            }
+        )
+    return out
 
 
 @router.get("/live/stream")
@@ -511,6 +567,9 @@ async def get_execution(
     mc = row[3] or {}
     if mc.get("tool_config"):
         data["tool_config"] = mc["tool_config"]
+    from app.routers.llm_models import _subscription_state
+
+    data["flat_rate_billing"] = (await _subscription_state(db))["active"]
     return success(data)
 
 
@@ -526,38 +585,62 @@ async def list_executions(
     ),
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
+    since: str | None = Query(None, description="'today' for runs since UTC midnight"),
+    trigger_kind: str | None = Query(
+        None, description="What started the run, comma separated: schedule,chat,api"
+    ),
+    trigger_id: uuid.UUID | None = Query(None, description="Runs one trigger started"),
 ) -> JSONResponse:
     """List past executions with optional filters."""
-    query = select(Execution).where(Execution.tenant_id == user.tenant_id)
+    where = [Execution.tenant_id == user.tenant_id]
     # a member sees their own runs, admins (the flag) see the tenant's
     if not sees_other_users_resources(user):
-        query = query.where(Execution.user_id == user.id)
-    count_query = select(func.count(Execution.id)).where(
-        Execution.tenant_id == user.tenant_id
-    )
-    if not sees_other_users_resources(user):
-        count_query = count_query.where(Execution.user_id == user.id)
-
+        where.append(Execution.user_id == user.id)
     if agent_id:
-        query = query.where(Execution.agent_id == agent_id)
-        count_query = count_query.where(Execution.agent_id == agent_id)
+        where.append(Execution.agent_id == agent_id)
+    if search:
+        where.append(Execution.input_message.ilike(f"%{search}%"))
+    if trigger_id:
+        where.append(Execution.trigger_id == trigger_id)
+    if trigger_kind:
+        kinds = [k.strip() for k in trigger_kind.split(",") if k.strip()]
+        unknown = [k for k in kinds if k not in run_origin.KINDS and k != "unknown"]
+        if unknown:
+            return error(f"Unknown trigger_kind '{unknown[0]}'", 400)
+        known = [k for k in kinds if k != "unknown"]
+        conds = [Execution.trigger_kind.in_(known)] if known else []
+        if "unknown" in kinds:
+            conds.append(Execution.trigger_kind.is_(None))
+        where.append(or_(*conds))
+    if since:
+        if since != "today":
+            return error("since must be 'today'", 400)
+        now = datetime.now(timezone.utc)
+        where.append(
+            Execution.created_at
+            >= now.replace(hour=0, minute=0, second=0, microsecond=0)
+        )
+    # KPI counts ignore the status filter so the cards stay correct
+    base_where = list(where)
     if status:
-        query = query.where(Execution.status == ExecutionStatus(status))
-        count_query = count_query.where(Execution.status == ExecutionStatus(status))
-    if search:
-        query = query.where(Execution.input_message.ilike(f"%{search}%"))
-        count_query = count_query.where(Execution.input_message.ilike(f"%{search}%"))
+        try:
+            where.append(Execution.status == ExecutionStatus(status.lower()))
+        except ValueError:
+            return error(f"Unknown status '{status}'", 400)
 
-    total = (await db.execute(count_query)).scalar() or 0
+    from app.routers.llm_models import _subscription_state
 
-    # Completed / failed counts (unfiltered by status so the KPI cards are always correct)
-    base_where = [Execution.tenant_id == user.tenant_id]
-    if not sees_other_users_resources(user):
-        base_where.append(Execution.user_id == user.id)
-    if agent_id:
-        base_where.append(Execution.agent_id == agent_id)
-    if search:
-        base_where.append(Execution.input_message.ilike(f"%{search}%"))
+    flat_rate = (await _subscription_state(db))["active"]
+    total = (
+        await db.execute(select(func.count(Execution.id)).where(*where))
+    ).scalar() or 0
+    # the Total card counts every run, like Completed and Failed beside it
+    all_count = (
+        (await db.execute(select(func.count(Execution.id)).where(*base_where))).scalar()
+        or 0
+        if status
+        else total
+    )
     completed_count = (
         await db.execute(
             select(func.count(Execution.id)).where(
@@ -573,18 +656,11 @@ async def list_executions(
         )
     ).scalar() or 0
 
-    # Join with Agent to get agent_name
     joined_query = (
         select(Execution, Agent.name.label("agent_name"))
         .outerjoin(Agent, Execution.agent_id == Agent.id)
-        .where(Execution.tenant_id == user.tenant_id)
+        .where(*where)
     )
-    if agent_id:
-        joined_query = joined_query.where(Execution.agent_id == agent_id)
-    if status:
-        joined_query = joined_query.where(Execution.status == ExecutionStatus(status))
-    if search:
-        joined_query = joined_query.where(Execution.input_message.ilike(f"%{search}%"))
 
     # Sort
     if sort == "oldest":
@@ -615,10 +691,12 @@ async def list_executions(
         data,
         meta={
             "total": total,
+            "all": all_count,
             "completed": completed_count,
             "failed": failed_count,
             "limit": limit,
             "offset": offset,
+            "flat_rate_billing": flat_rate,
         },
     )
 
@@ -774,4 +852,11 @@ def _serialize_execution(e: Execution) -> dict:
         data["subject_id"] = str(e.subject_id)
     if hasattr(e, "subject_type") and e.subject_type:
         data["subject_type"] = str(e.subject_type)
+    tid = getattr(e, "trigger_id", None)
+    kind = getattr(e, "trigger_kind", None)
+    name = getattr(e, "trigger_name", None)
+    data["trigger_id"] = str(tid) if tid else None
+    data["trigger_kind"] = kind
+    data["trigger_name"] = name
+    data["started_by"] = run_origin.started_by(kind, name)
     return data

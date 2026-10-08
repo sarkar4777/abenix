@@ -11,9 +11,15 @@ data:
   LOG_LEVEL: {{ .Values.logLevel | default "info" | quote }}
   # Edge signing policy, the API logs an error when this is true outside dev
   EDGE_ALLOW_UNSIGNED: {{ if and .Values.edge .Values.edge.allowUnsigned }}"true"{{ else }}"false"{{ end }}
+  # Marketplace and monetization defaults, an admin can override both at runtime
+  {{- $features := default dict .Values.features }}
+  MARKETPLACE_ENABLED: {{ (hasKey $features "marketplace" | ternary $features.marketplace true) | quote }}
+  MONETIZATION_ENABLED: {{ (hasKey $features "monetization" | ternary $features.monetization false) | quote }}
   PGSSLMODE: "disable"
   RUNTIME_MODE: {{ .Values.runtimeMode | default "embedded" | quote }}
   RUNTIME_URL: "http://{{ .Release.Name }}-agent-runtime:8001"
+  # runtime and worker call the API for approvals and gates
+  INTERNAL_API_URL: "http://{{ .Release.Name }}-api:8000"
   # Wave-2: when true, the API publishes agent jobs onto the queue
   # backend instead of running them inline. Requires per-pool
   # Deployments (scaling.enabled) + a valid queueBackend selection.
@@ -77,6 +83,10 @@ data:
   # Sandboxed-job runner — on by default in every deploy. Override the
   # allow-list via .Values.sandboxedJob.allowedImages.
   SANDBOXED_JOB_ENABLED: {{ .Values.sandboxedJob.enabled | default "true" | quote }}
+  # Cluster view: lets the page name the helm value when reads are refused
+  {{- $cvRbac := default dict (default dict .Values.clusterView).rbac }}
+  CLUSTER_VIEW_RBAC: {{ ternary (toString $cvRbac.enabled) "true" (hasKey $cvRbac "enabled") | quote }}
+  HELM_RELEASE: {{ .Release.Name | quote }}
   # Code-runner assets often need outbound HTTP (pip installs, dataset
   # pulls, etc.). Admins can flip this off per-cluster if the security
   # posture demands it, but default allows it so the feature works.

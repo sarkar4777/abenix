@@ -52,6 +52,8 @@ dependencies = [
     "jsonschema>=4.21.0",
     # Excel uploads on the Portfolio Schemas page
     "openpyxl>=3.1.0",
+    # Cluster view reads nodes, workloads and events
+    "kubernetes>=29.0.0,<37",
 ]
 
 [project.optional-dependencies]

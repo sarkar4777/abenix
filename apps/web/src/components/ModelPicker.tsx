@@ -148,6 +148,13 @@ export function ModelPicker({
     return { configuredProviders, groups, flatAvailable };
   }, [models, providers, capabilities, includeUnavailable]);
 
+  // a dated id and its alias share a name, show the id so they can be told apart
+  const sharedLabels = useMemo(() => {
+    const seen = new Map<string, number>();
+    for (const m of flatAvailable) seen.set(m.label, (seen.get(m.label) || 0) + 1);
+    return new Set([...seen].filter(([, n]) => n > 1).map(([l]) => l));
+  }, [flatAvailable]);
+
   const visibleProviderGroups = useMemo(() => {
     const order = [...PROVIDER_ORDER, ...[...groups.keys()].filter((p) => !PROVIDER_ORDER.includes(p))];
     return order.filter((p) => (groups.get(p)?.length || 0) > 0);
@@ -230,6 +237,7 @@ export function ModelPicker({
     return (
       <option key={m.value} value={m.value} disabled={unavailable}>
         {m.label}
+        {sharedLabels.has(m.label) ? ` (${m.value})` : ''}
         {suffix}
       </option>
     );

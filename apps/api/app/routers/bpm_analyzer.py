@@ -2046,6 +2046,8 @@ async def _smoke_test(
         message=message, stream=False, wait=True, wait_timeout_seconds=180
     )
     try:
+        if hasattr(request, "state"):
+            request.state.run_origin = {"kind": "builder", "name": "BPM analyzer test"}
         resp = await agents_router.execute_agent(agent_id, body, request, user, db)
     except Exception as exc:
         logger.exception("Smoke-test execution failed")

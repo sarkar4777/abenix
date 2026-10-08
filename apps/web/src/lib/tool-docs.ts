@@ -753,7 +753,7 @@ export const TOOL_DOCS: Record<string, ToolDoc> = {
     name: "HTTP Client",
     description: "Make HTTP requests to external APIs and web services. Supports GET, POST, PUT, DELETE methods with custom headers and JSON payloads. Useful for integrating with third-party APIs, fetching data from REST endpoints, and interacting with web services. Respects sandbox domain restrictions.",
     parameters: [
-      { name: "url", type: "string", required: true, description: "Full URL to request (must be HTTPS)" },
+      { name: "url", type: "string", required: true, description: "Full http or https URL to request" },
       { name: "method", type: "string", required: false, description: "HTTP method", enum: ["GET", "POST", "PUT", "DELETE", "PATCH"], default: "GET" },
       { name: "headers", type: "object", required: false, description: "Request headers as key-value pairs" },
       { name: "body", type: "object", required: false, description: "JSON request body (for POST/PUT/PATCH)", showWhen: { field: "method", values: ["POST", "PUT", "PATCH"] } },
@@ -958,7 +958,7 @@ export const TOOL_DOCS: Record<string, ToolDoc> = {
   meeting_listen: {
     category: "Meetings",
     name: "Meeting Listen",
-    description: "Stream audio from the joined meeting for a bounded window, run Whisper STT on utterance boundaries (VAD-based), and return the transcript. Utterances publish to the meeting's Redis event stream AS THEY CLOSE \u2014 so the UI sees text flow in real time, not in 10-second batches. Honors 'bot leave' voice commands and flags utterances that address the bot directly (addressed=true).",
+    description: "Stream audio from the joined meeting for a bounded window, run Whisper STT on utterance boundaries (VAD-based), and return the transcript. Utterances publish to the meeting's Redis event stream AS THEY CLOSE \u2014 so the UI sees text flow in real time, not in 10-second batches. Honors 'bot leave' voice commands and flags utterances that address the bot directly (addressed=true). Every addressed utterance carries scope: answer, defer or decline, already checked against the meeting's topics. Follow it: defer goes to defer_to_human, decline gets a polite refusal.",
     parameters: [
       { name: "meeting_id", type: "string", required: true, description: "" },
       { name: "duration_seconds", type: "integer", required: false, description: "Maximum listen window. Loop EXITS EARLY the moment an addressed utterance (voice or chat) is fully transcribed, so typical turn-around is under 2s, not `duration_seconds`.", default: 8, minimum: 3, maximum: 60 },
@@ -1321,12 +1321,12 @@ export const TOOL_DOCS: Record<string, ToolDoc> = {
   regex_extractor: {
     category: "Data & Search",
     name: "Regex Extractor",
-    description: "Extract data from text using regular expressions. Supports custom regex patterns and preset patterns for common data types: email, url, phone, ip_address, date_us, date_iso, currency_usd, percentage, uuid, ppa_price, energy_capacity, contract_reference. Can also search/replace, split text, and validate patterns.",
+    description: "Extract data from text using regular expressions. Supports custom regex patterns and preset patterns for common data types: email, url, phone, ip_address, date_us, date_iso, currency (prices in $, \u00a3, \u20ac, \u00a5 or \u20b9), currency_usd, percentage, uuid, ppa_price, energy_capacity, contract_reference. Can also search/replace, split text, and validate patterns.",
     parameters: [
       { name: "text", type: "string", required: true, description: "Text to search in" },
       { name: "operation", type: "string", required: false, description: "Regex operation", enum: ["extract", "extract_preset", "replace", "split", "validate", "list_presets"], default: "extract" },
       { name: "pattern", type: "string", required: false, description: "Custom regex pattern" },
-      { name: "preset", type: "string", required: false, description: "Preset pattern name (e.g. 'email', 'currency_usd', 'ppa_price')" },
+      { name: "preset", type: "string", required: false, description: "Preset pattern name (e.g. 'email', 'currency' for prices in any currency, 'currency_usd' for dollars only, 'ppa_price')" },
       { name: "presets", type: "array", required: false, description: "Multiple preset patterns to extract at once", items: { type: "string" } },
       { name: "replacement", type: "string", required: false, description: "Replacement string for replace operation" },
       { name: "flags", type: "array", required: false, description: "Regex flags", items: { type: "string" } },
@@ -1350,6 +1350,15 @@ export const TOOL_DOCS: Record<string, ToolDoc> = {
     parameters: [
       { name: "analysis_type", type: "string", required: true, description: "Type of risk analysis to perform", enum: ["monte_carlo", "sensitivity", "scenario", "risk_matrix", "var", "expected_value"] },
       { name: "params", type: "object", required: true, description: "Analysis-specific parameters" },
+    ],
+  },
+  sample_plant: {
+    category: "Core",
+    name: "Sample Plant",
+    description: "A simulated plant for trying autonomy. 'read' returns pressure_bar, setpoint_bar, demand, any alarm and a note on how it responds. 'set_setpoint' sets setpoint_bar. Pressure settles to about setpoint_bar x demand within 30 seconds, give or take 0.1 bar, and demand drifts slowly on its own. Normal pressure is 4.0 to 5.0 bar.",
+    parameters: [
+      { name: "operation", type: "string", required: true, description: "read the plant, or set a new pressure setpoint", enum: ["read", "set_setpoint"] },
+      { name: "setpoint_bar", type: "number", required: false, description: "New pressure setpoint in bar, for set_setpoint" },
     ],
   },
   sanctions_screening: {

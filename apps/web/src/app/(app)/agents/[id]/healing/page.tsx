@@ -1,13 +1,15 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import {
-  AlertTriangle, Bot, Check, ChevronLeft, GitPullRequest,
+  AlertTriangle, Bot, Check, GitPullRequest,
   Loader2, RotateCcw, ShieldCheck, Sparkles, X,
 } from 'lucide-react';
 import { toastError, toastSuccess } from '@/stores/toastStore';
+import { describePatch } from '@/lib/patchDiff';
+import PageHeader from '@/components/layout/PageHeader';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -95,7 +97,6 @@ function statusColor(s: string): string {
 
 export default function HealingPage() {
   const params = useParams();
-  const router = useRouter();
   const pipelineId = params.id as string;
 
   const [diffs, setDiffs] = useState<DiffRow[]>([]);
@@ -162,7 +163,10 @@ export default function HealingPage() {
         headers: authHeaders(),
       });
       await readEnvelope<unknown>(res);
-      toastSuccess(`Patch ${action === 'apply' ? 'applied' : action === 'reject' ? 'rejected' : 'rolled back'}`);
+      toastSuccess(
+        `Patch ${action === 'apply' ? 'applied' : action === 'reject' ? 'rejected' : 'rolled back'}`,
+        action === 'apply' ? 'Run the pipeline again from the builder to confirm the fix.' : undefined,
+      );
       await loadAll();
     } catch (e: unknown) {
       toastError(`${action} failed`, e instanceof Error ? e.message : String(e));
@@ -176,30 +180,29 @@ export default function HealingPage() {
   const otherPatches = patches.filter(p => p.status === 'rejected' || p.status === 'superseded');
 
   return (
-    <div className="p-8 max-w-6xl mx-auto">
-      <div className="mb-6">
-        <button
-          onClick={() => router.push(`/agents/${pipelineId}/info`)}
-          className="text-xs text-slate-500 hover:text-slate-300 inline-flex items-center gap-1 mb-2"
-        >
-          <ChevronLeft className="w-3 h-3" /> Back to pipeline
-        </button>
-        <h1 className="text-2xl font-semibold text-white flex items-center gap-3">
-          <Sparkles className="w-6 h-6 text-cyan-400" />
-          Self-healing
-        </h1>
-        <p className="text-sm text-slate-400 mt-2 max-w-3xl">
-          When a node fails, Abenix captures a structured failure-diff
-          (error class, observed vs expected shape, upstream inputs).  The
-          <strong className="text-white"> Pipeline Surgeon </strong> agent
-          reads that diff plus your last successful runs and drafts the
-          smallest possible JSON-Patch against the pipeline DSL — typically
-          a fallback default, a defensive validate node, or an{' '}
-          <code className="text-cyan-300">on_error: continue</code> flag.
-          Patches always require human approval and ship with one-click
-          rollback.
-        </p>
-      </div>
+    <div className="p-4 md:p-8 max-w-6xl mx-auto">
+      <PageHeader
+        title="Self-healing"
+        icon={Sparkles}
+        purpose="Review fixes drafted for this pipeline's failed steps and apply the ones you trust. For pipeline owners."
+        back={{ href: `/agents/${pipelineId}/info`, label: 'Back to pipeline' }}
+        primaryAction={{
+          label: 'Diagnose latest failure',
+          onClick: diagnose,
+          icon: diagnosing ? Loader2 : Bot,
+          busy: diagnosing,
+          disabled: diffs.length === 0 || !canEdit || !!loadError,
+          title: canEdit ? undefined : 'Only admins or the pipeline owner can run the surgeon',
+        }}
+        steps={[
+          'When a step fails, the failure is recorded with what the step expected and what it got.',
+          'Press Diagnose and the Pipeline Surgeon agent drafts the smallest fix, like a fallback value or a skip on error.',
+          'Nothing changes until you press Apply. Every applied fix can be rolled back in one click.',
+        ]}
+        docSlug="02-runtime/10-pipeline-healing-drift"
+        storageKey="agent-healing"
+        className="mb-6"
+      />
 
       {loadError && (
         <div className="mb-6 flex items-start gap-2 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-xs text-red-300">
@@ -212,16 +215,7 @@ export default function HealingPage() {
         </div>
       )}
 
-      <div className="flex items-center gap-3 mb-6">
-        <button
-          onClick={diagnose}
-          disabled={diagnosing || diffs.length === 0 || !canEdit || !!loadError}
-          title={canEdit ? undefined : 'Only admins or the pipeline owner can run the surgeon'}
-          className="inline-flex items-center gap-2 px-4 py-2 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-medium rounded-lg text-sm disabled:opacity-50"
-        >
-          {diagnosing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Bot className="w-4 h-4" />}
-          Diagnose latest failure
-        </button>
+      <div className="flex flex-wrap items-center gap-3 mb-6 empty:hidden">
         {diffs.length === 0 && !loading && !loadError && (
           <span className="text-xs text-slate-500">No failures recorded yet — run the pipeline first.</span>
         )}
@@ -259,6 +253,18 @@ export default function HealingPage() {
                         <span className="text-[10px] text-slate-500">{relTime(p.created_at)}</span>
                       </div>
                       <p className="text-xs text-slate-400 mt-1">{p.rationale}</p>
+                      {describePatch(p.json_patch, p.dsl_before).length > 0 && (
+                        <ul className="mt-2 space-y-1">
+                          {describePatch(p.json_patch, p.dsl_before).map((c, i) => (
+                            <li key={i} data-testid="patch-change" className="text-[11px] font-mono bg-slate-950/50 border border-slate-800 rounded px-2 py-1 break-all">
+                              <span className="text-slate-400">{c.where}</span>{' '}
+                              <span className="text-red-300 line-through decoration-red-400/60">{c.before}</span>{' '}
+                              <span className="text-slate-500">→</span>{' '}
+                              <span className="text-emerald-300">{c.after}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
                     </div>
                     {canEdit && (
                     <div className="flex items-center gap-2 shrink-0">
@@ -322,6 +328,15 @@ export default function HealingPage() {
                     )}
                   </div>
                   <p className="text-xs text-slate-500 mt-0.5 line-clamp-1">{p.rationale}</p>
+                  {!p.rolled_back_at && (
+                    <Link
+                      href={`/builder?agent=${pipelineId}`}
+                      data-testid="healing-rerun"
+                      className="inline-block mt-1 text-[11px] text-cyan-400 hover:text-cyan-300"
+                    >
+                      Open in the builder and run it again →
+                    </Link>
+                  )}
                 </div>
                 {!p.rolled_back_at && canRollback(p) && (
                   <button

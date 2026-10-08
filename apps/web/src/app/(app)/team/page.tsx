@@ -2,8 +2,10 @@
 
 import { useState } from 'react';
 import { motion } from 'framer-motion';
-import { Check, Copy, Plus, Users, Loader2, Mail } from 'lucide-react';
+import { Check, Copy, Plus, Users, Loader2, Mail, Share2, ShieldCheck } from 'lucide-react';
 import { usePageTitle } from '@/hooks/usePageTitle';
+import PageHeader from '@/components/layout/PageHeader';
+import NextSteps from '@/components/shared/NextSteps';
 import { useApi } from '@/hooks/useApi';
 import ResponsiveModal from '@/components/ui/ResponsiveModal';
 import { apiFetch } from '@/lib/api-client';
@@ -55,6 +57,7 @@ export default function TeamPage() {
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState<'user' | 'creator' | 'admin'>('user');
   const [inviteSubmitting, setInviteSubmitting] = useState(false);
+  const [invited, setInvited] = useState<string | null>(null);
 
   async function submitInvite() {
     const email = inviteEmail.trim();
@@ -74,6 +77,7 @@ export default function TeamPage() {
         return;
       }
       toastSuccess('Invite created', `Send the link to ${email}`);
+      setInvited(email);
       setInviteEmail('');
       setInviteRole('user');
       setInviteLink(res.data?.invite_url || null);
@@ -91,19 +95,32 @@ export default function TeamPage() {
       transition={{ duration: 0.4 }}
       className="space-y-6 max-w-3xl"
     >
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-white">Team</h1>
-          <p className="text-sm text-slate-500 mt-1">Manage workspace members and permissions</p>
-        </div>
-        <button
-          onClick={() => setInviteOpen(true)}
-          className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-cyan-500 to-blue-600 text-white text-sm font-medium rounded-lg hover:opacity-90 transition-opacity"
-        >
-          <Plus className="w-4 h-4" />
-          Invite Member
-        </button>
-      </div>
+      <PageHeader
+        title="Team"
+        purpose="See who is in your workspace and what role each person has, and invite new people. For workspace admins."
+        icon={Users}
+        storageKey="team"
+        docSlug="01-architecture/01-tenants-rbac"
+        primaryAction={{ label: 'Invite Member', icon: Plus, onClick: () => setInviteOpen(true) }}
+        steps={[
+          { title: 'Invite someone', body: 'Enter their email and pick a role. You get a link to send them.' },
+          { title: 'They join', body: 'The link works once and lasts 7 days. Until then they show under Pending invites.' },
+          { title: 'Roles', body: 'Users run agents, creators also build them, admins manage the whole workspace.' },
+        ]}
+      />
+
+      {invited && (
+        <NextSteps
+          title={`${invited} is invited. What next?`}
+          testId="team-next-steps"
+          onDismiss={() => setInvited(null)}
+          steps={[
+            { id: 'share', label: 'Share an agent', hint: 'Open an agent and use Share to give them access.', icon: Share2, href: '/agents' },
+            { id: 'permissions', label: 'Give extra abilities', hint: 'Let them review or approve without being an admin.', icon: ShieldCheck, href: '/admin/permissions' },
+            { id: 'another', label: 'Invite another', hint: 'Send one more invite link.', icon: Plus, onClick: () => { setInviteLink(null); setInviteOpen(true); } },
+          ]}
+        />
+      )}
 
       <div className="bg-slate-800/30 border border-slate-700/50 rounded-xl overflow-hidden overflow-x-auto">
         {isLoading ? (

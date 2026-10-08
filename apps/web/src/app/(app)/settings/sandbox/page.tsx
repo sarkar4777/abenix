@@ -1,9 +1,10 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Box, AlertCircle, Check, Loader2, Plus, X, ShieldOff, Wifi, WifiOff, Power } from 'lucide-react';
 import { usePageTitle } from '@/hooks/usePageTitle';
 import { apiFetch } from '@/lib/api-client';
+import PageHeader from '@/components/layout/PageHeader';
 
 interface SandboxConfig {
   effective: { enabled: boolean; allow_network: boolean; allowed_images: string[] };
@@ -19,6 +20,7 @@ export default function SandboxSettingsPage() {
   const [err, setErr] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [newImage, setNewImage] = useState('');
+  const imageInput = useRef<HTMLInputElement>(null);
 
   const load = async () => {
     setLoading(true);
@@ -78,17 +80,27 @@ export default function SandboxSettingsPage() {
 
   return (
     <div className="space-y-6 max-w-3xl">
-      <div>
-        <h1 className="text-2xl font-bold text-white flex items-center gap-2">
-          <Box className="w-6 h-6 text-cyan-400" /> Sandbox
-        </h1>
-        <p className="text-sm text-slate-500 mt-1">
-          Controls the <code className="bg-slate-800 px-1 rounded">sandboxed_job</code> tool — one-shot containers (k8s Job in cluster, Docker locally) that agents can launch for binaries, untrusted code, or jobs that shouldn't share the API process.
-        </p>
-        <p className="text-xs text-slate-500 mt-2">
-          Tenant overrides win over the host env defaults set at deploy time. Clear an override to fall back to the env default.
-        </p>
-      </div>
+      <PageHeader
+        title="Sandbox"
+        icon={Box}
+        purpose="Decide whether agents may run programs and untrusted code in throwaway containers, and which container images they may use. For workspace admins."
+        primaryAction={{
+          label: 'Add an image',
+          icon: Plus,
+          onClick: () => {
+            imageInput.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            imageInput.current?.focus();
+          },
+        }}
+        steps={[
+          'Turn the sandbox on so the sandboxed job tool can start containers. Off means every call is refused.',
+          'Leave network off unless a job really needs the internet. Each job must still ask for it.',
+          'Only images on the allow list can run. Keep it short and pin the tags.',
+          'Your choices here win over the platform defaults. Clear an override to go back to the default.',
+        ]}
+        docSlug="02-runtime/11-sandboxed-code-execution"
+        storageKey="settings-sandbox"
+      />
 
       {err && (
         <div className="rounded-lg bg-red-500/10 border border-red-500/30 text-red-300 text-sm px-4 py-2.5 flex items-center gap-2">
@@ -203,7 +215,9 @@ export default function SandboxSettingsPage() {
         </div>
         <div className="flex items-center gap-2">
           <input
+            ref={imageInput}
             type="text"
+            aria-label="Container image to allow"
             value={newImage}
             onChange={(e) => setNewImage(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && addImage()}

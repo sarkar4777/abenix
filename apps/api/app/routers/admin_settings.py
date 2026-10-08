@@ -455,10 +455,10 @@ async def reset_settings(
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
     _ensure_admin(user)
-    # Tool credentials are managed on their own screen and survive a reset of
-    # the LLM settings. Wiping them here would log every integration out.
+    # only the keys this screen manages, credentials and feature switches live elsewhere
     await db.execute(
-        text("DELETE FROM platform_settings WHERE key NOT LIKE 'tool.credential.%'")
+        text("DELETE FROM platform_settings WHERE key = ANY(:keys)"),
+        {"keys": list(DEFAULTS)},
     )
     await db.commit()
     invalidate()

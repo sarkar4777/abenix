@@ -58,6 +58,8 @@ class MeetingAdapter(abc.ABC):
     """One instance per meeting session. Hold live state internally."""
 
     provider: str
+    # a rehearsal stands in for a room: no audio, no voice spend
+    simulated: bool = False
 
     @abc.abstractmethod
     async def join(self, req: JoinRequest) -> JoinResult:
@@ -107,6 +109,10 @@ def get_adapter(provider: str) -> MeetingAdapter:
         from engine.tools._zoom_adapter import ZoomAdapter
 
         return ZoomAdapter()
+    if p == "rehearsal":
+        from engine.tools._rehearsal_adapter import RehearsalAdapter
+
+        return RehearsalAdapter()
     raise ValueError(
         f"Unknown meeting provider '{provider}'. "
         "Expected one of: livekit, teams, zoom."

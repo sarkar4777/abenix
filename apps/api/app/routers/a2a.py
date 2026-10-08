@@ -204,6 +204,7 @@ async def invoke_agent(
         message=message,
         model=model,
         subject=subject_columns_for(user),
+        kind="a2a",
     )
     db.add(execution)
     await db.commit()

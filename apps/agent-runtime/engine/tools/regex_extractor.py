@@ -17,6 +17,8 @@ PRESET_PATTERNS: dict[str, str] = {
     "date_us": r"\b\d{1,2}/\d{1,2}/\d{2,4}\b",
     "date_iso": r"\b\d{4}-\d{2}-\d{2}\b",
     "currency_usd": r"\$[\d,]+(?:\.\d{1,2})?",
+    # a price in any of the common symbols, $ £ € ¥ ₹
+    "currency": r"[$£€¥₹]\s?\d[\d,]*(?:\.\d{1,2})?",
     "percentage": r"\d+(?:\.\d+)?%",
     "ssn": r"\b\d{3}-\d{2}-\d{4}\b",
     "zipcode_us": r"\b\d{5}(?:-\d{4})?\b",
@@ -35,7 +37,8 @@ class RegexExtractorTool(BaseTool):
     description = (
         "Extract data from text using regular expressions. Supports custom regex "
         "patterns and preset patterns for common data types: email, url, phone, "
-        "ip_address, date_us, date_iso, currency_usd, percentage, uuid, "
+        "ip_address, date_us, date_iso, currency (prices in $, £, €, ¥ or ₹), "
+        "currency_usd, percentage, uuid, "
         "ppa_price, energy_capacity, contract_reference. Can also search/replace, "
         "split text, and validate patterns."
     )
@@ -65,7 +68,7 @@ class RegexExtractorTool(BaseTool):
             },
             "preset": {
                 "type": "string",
-                "description": "Preset pattern name (e.g. 'email', 'currency_usd', 'ppa_price')",
+                "description": "Preset pattern name (e.g. 'email', 'currency' for prices in any currency, 'currency_usd' for dollars only, 'ppa_price')",
             },
             "presets": {
                 "type": "array",
@@ -195,7 +198,12 @@ class RegexExtractorTool(BaseTool):
             matches = re.findall(pattern, text, re.IGNORECASE)
             unique = list(set(matches))
             if unique:
-                results[name] = {"count": len(matches), "unique": unique[:30]}
+                # values keeps repeats and page order, so sums and averages are right
+                results[name] = {
+                    "count": len(matches),
+                    "values": matches[:500],
+                    "unique": unique[:30],
+                }
 
         return {"extracted": results, "presets_used": presets}
 

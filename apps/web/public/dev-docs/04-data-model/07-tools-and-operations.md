@@ -71,7 +71,7 @@ See [02-runtime/12-ml-models](../02-runtime/12-ml-models.md).
 | `user_mcp_connections` | `user_id`, `server_name`, `server_url`, `transport_type`, `auth_type`, `auth_config`, `discovered_tools`, `health_status`, `is_enabled`, OAuth2 client, URLs and encrypted token columns | OAuth2 columns added by `d4e5f6a7b8c9` |
 | `agent_mcp_tools` | `agent_id`, `mcp_connection_id`, `tool_name`, `tool_config`, `approval_required`, `max_calls_per_execution`, `is_orphaned`, `orphaned_at` | A tool attached to an agent |
 | `mcp_registry_cache` | `registry_id`, `name`, `server_url`, `auth_type`, `categories`, `tools_count`, `popularity_score`, `verified` | Cached public registry |
-| `connectors` | `name`, `kind`, `preset_key`, `base_url`, `auth_type`, `secret_ref`, `config`, `is_active`, `last_test_ok` | External systems, added by `1100_a_connectors` |
+| `connectors` | `name`, `kind`, `preset_key`, `base_url`, `auth_type`, `secret_ref`, `config`, `is_active`, `last_test_ok` | External systems, added by `1100_a_connectors`. `secret_ref` is legacy and never read as a credential. The secret lives in `tenant_tool_credentials` as `CONNECTOR_<id hex>_SECRET` |
 | `edge_gateways` | `gateway_id`, `name`, `endpoint_url`, `status`, `deployed_agents`, `registered_at`, `last_seen_at` | Remote edge pods, added by `1100_e_edge` |
 
 `is_orphaned` replaced deletion. When a connection is refreshed and the server no longer offers a tool, the row is flagged with `orphaned_at` instead of removed. The runtime leaves orphaned tools out of the agent's tool list. If the server offers the tool again the flag clears.

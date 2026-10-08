@@ -49,3 +49,4 @@ nats-py>=2.7.0
 zen-engine==2.1.2
 jsonschema>=4.21.0
 openpyxl>=3.1.0
+kubernetes>=29.0.0,<37

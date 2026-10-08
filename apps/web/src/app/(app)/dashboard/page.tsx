@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import Link from 'next/link';
+import { useAuth } from '@/contexts/AuthContext';
 import { motion } from 'framer-motion';
 import {
   Activity,
@@ -8,6 +10,8 @@ import {
   Bot,
   CheckCircle2,
   Clock,
+  LayoutDashboard,
+  MessageSquare,
   Coins,
   DollarSign,
   Plus,
@@ -22,7 +26,8 @@ import { useApi } from '@/hooks/useApi';
 import { usePageTitle } from '@/hooks/usePageTitle';
 import { apiFetch } from '@/lib/api-client';
 import { DashboardSkeleton } from '@/components/ui/Skeleton';
-import { GettingStarted } from '@/components/GettingStarted';
+import PageHeader from '@/components/layout/PageHeader';
+import StartHere from '@/components/shared/StartHere';
 
 interface LiveStats {
   active_executions: number;
@@ -35,6 +40,16 @@ interface LiveStats {
   today_input_tokens?: number;
   today_output_tokens?: number;
   today_total_tokens?: number;
+  flat_rate_billing?: boolean;
+}
+
+interface Quota {
+  id?: string;
+  tokens_used: number;
+  token_allowance: number | null;
+  cost_used: number;
+  cost_limit: number | null;
+  usage_pct: number | null;
 }
 
 function fmtTokens(n: number | undefined): string {
@@ -122,13 +137,19 @@ export default function DashboardPage() {
   const { data: stats, isLoading: loading, mutate } = useApi<LiveStats>(
     '/api/analytics/live-stats',
   );
-  const [userQuota, setUserQuota] = useState<{tokens_used: number; token_allowance: number | null; cost_used: number; cost_limit: number | null; usage_pct: number | null} | null>(null);
+  const { user } = useAuth();
+  const [userQuota, setUserQuota] = useState<Quota | null>(null);
+  const [quotaFailed, setQuotaFailed] = useState(false);
 
   useEffect(() => {
-    apiFetch('/api/analytics/per-user').then(res => {
-      if (res.data && !Array.isArray(res.data)) setUserQuota(res.data as {tokens_used: number; token_allowance: number | null; cost_used: number; cost_limit: number | null; usage_pct: number | null});
+    if (!user?.id) return;
+    apiFetch<Quota | Quota[]>('/api/analytics/per-user').then(res => {
+      // admins get the whole tenant back, pick our own row
+      const mine = Array.isArray(res.data) ? res.data.find((r) => r.id === user.id) : res.data;
+      if (mine) setUserQuota(mine);
+      else setQuotaFailed(true);
     });
-  }, []);
+  }, [user?.id]);
 
   useEffect(() => {
     mutate();
@@ -137,6 +158,7 @@ export default function DashboardPage() {
   const kpiCards = [
     {
       label: 'Total Agents',
+      href: '/agents?tab=all',
       value: stats?.total_agents ?? 0,
       change: stats ? `${stats.active_executions} active now` : '',
       changeColor: stats && stats.active_executions > 0 ? 'text-cyan-400' : 'text-slate-500',
@@ -146,6 +168,7 @@ export default function DashboardPage() {
     },
     {
       label: 'Executions Today',
+      href: '/executions?since=today',
       value: stats?.today_executions ?? 0,
       change: stats ? `${stats.today_failed} failed` : '',
       changeColor: stats && stats.today_failed > 0 ? 'text-red-400' : 'text-emerald-400',
@@ -155,6 +178,7 @@ export default function DashboardPage() {
     },
     {
       label: 'Success Rate',
+      href: '/executions?since=today',
       // Honest rendering: no data → em-dash; zero runs today → "No runs today"; otherwise rounded %.
       value: !stats
         ? '—'
@@ -170,8 +194,10 @@ export default function DashboardPage() {
     },
     {
       label: 'Token Spend',
+      href: '/analytics',
       value: stats?.today_cost ?? 0,
       prefix: '$',
+      note: stats?.flat_rate_billing ? 'Claude subscription, flat rate with no per-token charge' : undefined,
       // Secondary line on the card — total tokens used today, so the
       // operator sees volume AND dollar spend at a glance. Prevents the
       // "$0 for 1M tokens" silent-zero-pricing gap from looking like
@@ -198,111 +224,39 @@ export default function DashboardPage() {
       className="space-y-6 max-w-[1400px]"
     >
       <motion.div variants={item}>
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold text-white">Dashboard</h1>
-            <p className="text-sm text-slate-500 mt-1">Overview of your agent platform</p>
-          </div>
-          {stats && stats.active_executions > 0 && (
-            <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-cyan-500/10 border border-cyan-500/20">
+        <PageHeader
+          title="Dashboard"
+          icon={LayoutDashboard}
+          storageKey="dashboard"
+          purpose="Your home page. See what your agents did today and what to do next. For everyone in the workspace."
+          primaryAction={{ label: 'Build an agent', href: '/builder', icon: Plus, testId: 'dashboard-new-agent' }}
+          secondaryAction={{ label: 'Open chat', href: '/chat', icon: MessageSquare }}
+          meta={stats && stats.active_executions > 0 ? (
+            <Link href="/executions?status=running" className="flex items-center gap-2 px-3 py-1 rounded-lg bg-cyan-500/10 border border-cyan-500/20">
               <RefreshCw className="w-3.5 h-3.5 text-cyan-400 animate-spin" />
-              <span className="text-xs text-cyan-400 font-medium">
-                {stats.active_executions} running
-              </span>
-            </div>
-          )}
-        </div>
+              <span className="text-xs text-cyan-400 font-medium">{stats.active_executions} running</span>
+            </Link>
+          ) : null}
+          steps={[
+            'Follow Start here below. It ticks itself off as you go and only shows steps for your role.',
+            'The cards show the runs, failures and spend for today. Click any of them to see the runs behind the number.',
+            'Quick actions jump straight to building, uploading documents or connecting tools.',
+          ]}
+          docSlug="08-howto/07-finding-your-way-around"
+        />
       </motion.div>
 
       <motion.div variants={item}>
-        <GettingStarted />
+        <StartHere />
       </motion.div>
-
-      {/*
-        Zero-state hero — shown when a fresh tenant lands here for the
-        first time (no agents, no executions). Three concrete actions
-        that move them forward in <30 seconds. Hidden once the tenant
-        has any activity so power users don't see redundant CTAs.
-      */}
-      {stats && stats.total_agents === 0 && stats.today_executions === 0 && (
-        <motion.div variants={item}>
-          <div className="bg-gradient-to-br from-cyan-500/10 via-purple-500/5 to-transparent border border-cyan-500/20 rounded-xl p-6">
-            <h2 className="text-lg font-semibold text-white mb-1">Welcome to Abenix</h2>
-            <p className="text-sm text-slate-300 mb-5">
-              Three ways to get going in the next 5 minutes:
-            </p>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              <a
-                href="/chat"
-                className="group bg-slate-900/60 border border-cyan-500/20 rounded-lg p-4 hover:border-cyan-500/40 hover:bg-slate-900 transition-colors"
-              >
-                <div className="flex items-center gap-2 mb-2">
-                  <div className="w-8 h-8 rounded-lg bg-cyan-500/15 flex items-center justify-center">
-                    <Bot className="w-4 h-4 text-cyan-400" />
-                  </div>
-                  <h3 className="text-white font-medium">Talk to a sample agent</h3>
-                </div>
-                <p className="text-xs text-slate-400">
-                  We pre-seeded a few agents (code-assistant, web-researcher, doc-summariser).
-                  Open <code className="text-cyan-300">/chat</code>, pick one, send a prompt.
-                </p>
-                <span className="inline-flex items-center gap-1 mt-3 text-xs text-cyan-400 group-hover:gap-2 transition-all">
-                  Try it <ArrowRight className="w-3 h-3" />
-                </span>
-              </a>
-              <a
-                href="/agents/new"
-                className="group bg-slate-900/60 border border-cyan-500/20 rounded-lg p-4 hover:border-cyan-500/40 hover:bg-slate-900 transition-colors"
-              >
-                <div className="flex items-center gap-2 mb-2">
-                  <div className="w-8 h-8 rounded-lg bg-purple-500/15 flex items-center justify-center">
-                    <Plus className="w-4 h-4 text-purple-400" />
-                  </div>
-                  <h3 className="text-white font-medium">Build your first agent</h3>
-                </div>
-                <p className="text-xs text-slate-400">
-                  Pick a system prompt + a few tools (calculator, web_search, file_reader).
-                  No code needed.
-                </p>
-                <span className="inline-flex items-center gap-1 mt-3 text-xs text-purple-400 group-hover:gap-2 transition-all">
-                  Open builder <ArrowRight className="w-3 h-3" />
-                </span>
-              </a>
-              <a
-                href="/knowledge"
-                className="group bg-slate-900/60 border border-cyan-500/20 rounded-lg p-4 hover:border-cyan-500/40 hover:bg-slate-900 transition-colors"
-              >
-                <div className="flex items-center gap-2 mb-2">
-                  <div className="w-8 h-8 rounded-lg bg-amber-500/15 flex items-center justify-center">
-                    <Upload className="w-4 h-4 text-amber-400" />
-                  </div>
-                  <h3 className="text-white font-medium">Upload a knowledge base</h3>
-                </div>
-                <p className="text-xs text-slate-400">
-                  Drop in PDFs, DOCX, CSV, or Markdown. Agents can search them with
-                  the <code className="text-amber-300">knowledge_search</code> tool.
-                </p>
-                <span className="inline-flex items-center gap-1 mt-3 text-xs text-amber-400 group-hover:gap-2 transition-all">
-                  Upload <ArrowRight className="w-3 h-3" />
-                </span>
-              </a>
-            </div>
-            <p className="text-xs text-slate-500 mt-4">
-              Need a deeper walkthrough?{' '}
-              <a href="/help" className="text-cyan-400 hover:underline">
-                Open the help center
-              </a>{' '}
-              — every feature has a short tour.
-            </p>
-          </div>
-        </motion.div>
-      )}
 
       <motion.div variants={item} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {kpiCards.map((kpi) => (
-          <div
+          <Link
             key={kpi.label}
-            className="bg-slate-800/30 border border-cyan-500/20 rounded-xl p-5 hover:border-cyan-500/40 transition-colors"
+            href={kpi.href}
+            data-testid={`kpi-${kpi.label.toLowerCase().replace(/\s+/g, '-')}`}
+            className="block bg-slate-800/30 border border-cyan-500/20 rounded-xl p-5 hover:border-cyan-500/40 transition-colors"
           >
             <div className="flex items-start justify-between mb-3">
               <div className={`w-10 h-10 rounded-lg ${kpi.iconBg} flex items-center justify-center`}>
@@ -318,12 +272,13 @@ export default function DashboardPage() {
               )}
             </p>
             <p className="text-xs text-slate-500 mt-1">{kpi.label}</p>
-          </div>
+            {kpi.note && <p className="text-[11px] text-violet-300/80 mt-1" data-testid="kpi-cost-note">{kpi.note}</p>}
+          </Link>
         ))}
         {/* User token usage card */}
-        <div className="bg-slate-800/30 border border-cyan-500/20 rounded-xl p-4">
+        <div className="bg-slate-800/30 border border-cyan-500/20 rounded-xl p-4" data-testid="kpi-your-usage">
           <div className="flex items-center justify-between mb-2">
-            <span className="text-xs text-slate-500 uppercase">Your Token Usage</span>
+            <span className="text-xs text-slate-500 uppercase">Your Token Usage this month</span>
             <Coins className="w-4 h-4 text-cyan-400" />
           </div>
           {userQuota ? (
@@ -344,10 +299,14 @@ export default function DashboardPage() {
               )}
               <p className="text-xs text-slate-500 mt-1">
                 Cost: ${userQuota.cost_used.toFixed(2)}{userQuota.cost_limit ? ` / $${userQuota.cost_limit.toFixed(2)}` : ''}
+                {!userQuota.token_allowance && ' · no limit set'}
+                {stats?.flat_rate_billing && <span className="text-violet-300/80" data-testid="your-usage-subscription"> · Claude subscription</span>}
               </p>
             </>
+          ) : quotaFailed ? (
+            <p className="text-sm text-slate-500">Usage not available</p>
           ) : (
-            <p className="text-lg font-bold text-slate-600">Unlimited</p>
+            <div className="h-6 w-20 bg-slate-800 animate-pulse rounded" aria-label="Loading usage" />
           )}
         </div>
       </motion.div>
@@ -356,29 +315,29 @@ export default function DashboardPage() {
         <motion.div variants={item} className="lg:col-span-2 bg-slate-800/30 border border-cyan-500/20 rounded-xl overflow-hidden">
           <div className="flex items-center justify-between px-5 py-4 border-b border-cyan-500/20">
             <h2 className="text-sm font-semibold text-white">Live Activity</h2>
-            <a href="/analytics" className="text-xs text-cyan-400 hover:text-cyan-300 flex items-center gap-1 transition-colors">
+            <a href="/executions" className="text-xs text-cyan-400 hover:text-cyan-300 flex items-center gap-1 transition-colors">
               View all <ArrowRight className="w-3 h-3" />
             </a>
           </div>
           <div className="p-5 grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <div className="bg-slate-900/50 rounded-lg p-4 border border-cyan-500/20">
+            <Link href="/executions?status=running" data-testid="live-active-now" className="block bg-slate-900/50 rounded-lg p-4 border border-cyan-500/20 hover:border-cyan-500/40 transition-colors">
               <p className="text-xs text-slate-500 mb-1">Active Now</p>
               <p className="text-xl font-bold text-cyan-400">
                 {stats?.active_executions ?? 0}
               </p>
-            </div>
-            <div className="bg-slate-900/50 rounded-lg p-4 border border-cyan-500/20">
+            </Link>
+            <Link href="/executions?since=today&status=completed" data-testid="live-completed-today" className="block bg-slate-900/50 rounded-lg p-4 border border-cyan-500/20 hover:border-cyan-500/40 transition-colors">
               <p className="text-xs text-slate-500 mb-1">Completed Today</p>
               <p className="text-xl font-bold text-emerald-400">
                 {stats?.today_completed ?? 0}
               </p>
-            </div>
-            <div className="bg-slate-900/50 rounded-lg p-4 border border-cyan-500/20">
+            </Link>
+            <Link href="/executions?since=today&status=failed" data-testid="live-failed-today" className="block bg-slate-900/50 rounded-lg p-4 border border-cyan-500/20 hover:border-cyan-500/40 transition-colors">
               <p className="text-xs text-slate-500 mb-1">Failed Today</p>
               <p className="text-xl font-bold text-red-400">
                 {stats?.today_failed ?? 0}
               </p>
-            </div>
+            </Link>
           </div>
         </motion.div>
 

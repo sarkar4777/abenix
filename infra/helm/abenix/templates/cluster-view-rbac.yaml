@@ -1,0 +1,85 @@
+{{- $cv := default dict .Values.clusterView }}
+{{- $rbac := default dict $cv.rbac }}
+{{- $enabled := "true" }}
+{{- if hasKey $rbac "enabled" }}{{ $enabled = toString $rbac.enabled }}{{ end }}
+{{- if ne $enabled "false" }}
+{{- $sa := default "default" $rbac.serviceAccount }}
+# Read-only access for the admin cluster view. No secrets, no writes.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ .Release.Name }}-{{ .Release.Namespace }}-cluster-view
+  labels:
+    {{- include "abenix.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["nodes", "namespaces"]
+    verbs: ["get", "list", "watch"]
+  {{- if or (.Capabilities.APIVersions.Has "metrics.k8s.io/v1beta1") (eq (toString $rbac.metrics) "true") }}
+  - apiGroups: ["metrics.k8s.io"]
+    resources: ["nodes"]
+    verbs: ["get", "list"]
+  {{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ .Release.Name }}-{{ .Release.Namespace }}-cluster-view
+  labels:
+    {{- include "abenix.labels" . | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $sa }}
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  kind: ClusterRole
+  name: {{ .Release.Name }}-{{ .Release.Namespace }}-cluster-view
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ .Release.Name }}-cluster-view
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "abenix.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "events", "persistentvolumeclaims"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "replicasets", "statefulsets", "daemonsets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["autoscaling"]
+    resources: ["horizontalpodautoscalers"]
+    verbs: ["get", "list", "watch"]
+  {{- if or (.Capabilities.APIVersions.Has "metrics.k8s.io/v1beta1") (eq (toString $rbac.metrics) "true") }}
+  - apiGroups: ["metrics.k8s.io"]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  {{- end }}
+  {{- if or (.Capabilities.APIVersions.Has "keda.sh/v1alpha1") (and .Values.scaling .Values.scaling.keda .Values.scaling.keda.enabled) (eq (toString $rbac.keda) "true") }}
+  - apiGroups: ["keda.sh"]
+    resources: ["scaledobjects"]
+    verbs: ["get", "list", "watch"]
+  {{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ .Release.Name }}-cluster-view
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "abenix.labels" . | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $sa }}
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  kind: Role
+  name: {{ .Release.Name }}-cluster-view
+  apiGroup: rbac.authorization.k8s.io
+{{- end }}

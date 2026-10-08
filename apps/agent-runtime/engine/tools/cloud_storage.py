@@ -5,12 +5,15 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from engine.tools.base import BaseTool, ConfigField, ToolResult
+from engine.tools.base import READ_ONLY, BaseTool, ConfigField, Effect, ToolResult
 
 
 class CloudStorageTool(BaseTool):
     name = "cloud_storage"
     risk_tier = "medium"
+    effect = Effect(
+        kind="write", label="Write a cloud storage object", target_param="path"
+    )
     config_fields = (
         ConfigField(
             "AWS_ACCESS_KEY_ID",
@@ -82,6 +85,19 @@ class CloudStorageTool(BaseTool):
         },
         "required": ["operation", "path"],
     }
+
+    @classmethod
+    def effect_for(cls, arguments: dict[str, Any]) -> Effect | None:
+        op = arguments.get("operation")
+        if op == "write_object":
+            return cls.effect
+        if op == "delete_object":
+            return Effect(
+                kind="delete",
+                label="Delete a cloud storage object",
+                target_param="path",
+            )
+        return READ_ONLY
 
     async def execute(self, arguments: dict[str, Any]) -> ToolResult:
         operation = arguments.get("operation", "")

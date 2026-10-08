@@ -254,3 +254,94 @@ def test_agents_by_slug_and_identity():
         ("POST", "/api/agents"),
         ("PUT", "/api/agents/1"),
     ]
+
+
+def test_actions_propose_wait_executed_outcome():
+    waits = iter(
+        [
+            {"action_id": "a1", "decision": "wait", "status": "pending"},
+            {
+                "action_id": "a1",
+                "decision": "run",
+                "status": "edited",
+                "arguments": {"setpoint_bar": 4.4},
+            },
+        ]
+    )
+
+    def h(r):
+        if r.url.path == "/api/autonomy/actions/propose":
+            return _ok({"action_id": "a1", "decision": "wait", "approval_id": "p1"}, 201)
+        if r.url.path.endswith("/wait"):
+            return _ok(next(waits))
+        return _ok({"id": "a1", "status": "executed"})
+
+    sdk, seen = _client(h)
+
+    async def go():
+        d = await sdk.actions.propose(
+            "sample_plant.set_setpoint",
+            {"setpoint_bar": 4.6},
+            target="plant-1",
+            intent="Pressure is low",
+            prediction={"metric": "pressure_bar", "value": 4.5, "low": 4.4, "high": 4.6},
+        )
+        assert d["decision"] == "wait"
+        w = await sdk.actions.wait("a1", timeout_seconds=150)
+        assert w["decision"] == "run" and w["arguments"] == {"setpoint_bar": 4.4}
+        await sdk.actions.executed("a1", True, result_preview="ok")
+        await sdk.actions.report_outcome("a1", 4.47, note="read from SCADA")
+        await sdk.actions.get("a1")
+
+    asyncio.run(go())
+    body = _body(seen[0])
+    assert body["action_key"] == "sample_plant.set_setpoint"
+    assert body["target"] == "plant-1" and body["prediction"]["high"] == 4.6
+    assert "agent_id" not in body
+    assert seen[1].url.params["timeout_s"] == "120"
+    assert seen[2].url.params["timeout_s"] == "30"
+    assert [(r.method, r.url.path) for r in seen[3:]] == [
+        ("POST", "/api/autonomy/actions/a1/executed"),
+        ("POST", "/api/autonomy/actions/a1/outcome"),
+        ("GET", "/api/autonomy/actions/a1"),
+    ]
+    assert _body(seen[3]) == {"ok": True, "result_preview": "ok"}
+    assert _body(seen[4]) == {"value": 4.47, "source": "api", "note": "read from SCADA"}
+
+
+def test_actions_harm_needs_a_note_and_errors_carry_code():
+    sdk, seen = _client(
+        lambda r: httpx.Response(
+            404,
+            json={
+                "data": None,
+                "error": {"message": "No such action type", "error_code": "UNKNOWN_ACTION"},
+            },
+        )
+    )
+    with pytest.raises(ValueError):
+        asyncio.run(sdk.actions.flag_harm("a1", "  "))
+    assert seen == []
+    with pytest.raises(AbenixError) as e:
+        asyncio.run(sdk.actions.propose("nope", {}))
+    assert e.value.status == 404 and e.value.code == "UNKNOWN_ACTION"
+
+
+def test_autonomy_reads_and_edited_approval():
+    sdk, seen = _client(lambda r: _ok({"items": [], "next_before": None}))
+
+    async def go():
+        await sdk.autonomy.overview()
+        await sdk.autonomy.grant("g1")
+        await sdk.autonomy.grant_actions("g1", status="executed", limit=10, before="x")
+        await sdk.approvals.approve("p1", edited_arguments={"setpoint_bar": 4.4})
+
+    asyncio.run(go())
+    assert [(r.method, r.url.path) for r in seen] == [
+        ("GET", "/api/autonomy/overview"),
+        ("GET", "/api/autonomy/grants/g1"),
+        ("GET", "/api/autonomy/grants/g1/actions"),
+        ("POST", "/api/approvals/p1/signoff"),
+    ]
+    assert dict(seen[2].url.params) == {"limit": "10", "status": "executed", "before": "x"}
+    assert _body(seen[3])["edited_arguments"] == {"setpoint_bar": 4.4}

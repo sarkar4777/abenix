@@ -8,7 +8,7 @@ import json
 import os
 from typing import Any
 
-from engine.tools.base import BaseTool, ConfigField, ToolResult
+from engine.tools.base import BaseTool, ConfigField, Effect, ToolResult
 
 
 EXPORT_DIR = os.environ.get("EXPORT_DIR", "/tmp/abenix_exports")
@@ -17,6 +17,7 @@ EXPORT_DIR = os.environ.get("EXPORT_DIR", "/tmp/abenix_exports")
 class DataExporterTool(BaseTool):
     name = "data_exporter"
     risk_tier = "medium"
+    effect = Effect(kind="write", label="Export data")
     config_fields = (
         ConfigField(
             "SMTP_HOST",
@@ -146,6 +147,30 @@ class DataExporterTool(BaseTool):
         },
         "required": ["destination", "data"],
     }
+
+    _BY_DESTINATION = {
+        "file": Effect(
+            kind="write", label="Write an export file", target_param="filename"
+        ),
+        "email": Effect(kind="send", label="Email an export", target_param="email_to"),
+        "s3": Effect(
+            kind="write", label="Upload an export to S3", target_param="filename"
+        ),
+        "webhook": Effect(
+            kind="send", label="Send an export to a webhook", target_param="webhook_url"
+        ),
+        "database": Effect(
+            kind="write",
+            label="Write an export to a database table",
+            target_param="db_table",
+        ),
+    }
+
+    @classmethod
+    def effect_for(cls, arguments: dict[str, Any]) -> Effect | None:
+        return cls._BY_DESTINATION.get(
+            str(arguments.get("destination") or ""), cls.effect
+        )
 
     async def execute(self, arguments: dict[str, Any]) -> ToolResult:
         destination = arguments.get("destination", "")

@@ -173,6 +173,7 @@ async def execute_pipeline(
 
     # Create execution record
     from app.core.acting_subject import subject_columns_for
+    from app.core.run_origin import caller_kind
 
     _sid, _stype = subject_columns_for(user)
     execution = Execution(
@@ -185,6 +186,7 @@ async def execute_pipeline(
         input_message=f"[pipeline:{len(body.nodes)} nodes]",
         status=ExecutionStatus.RUNNING,
         started_at=datetime.now(timezone.utc),
+        trigger_kind=caller_kind(user, "builder"),
     )
     db.add(execution)
     await db.commit()
@@ -368,6 +370,7 @@ async def execute_saved_pipeline(
 
     # Create execution record
     from app.core.acting_subject import subject_columns_for
+    from app.core.run_origin import caller_kind
 
     _sid, _stype = subject_columns_for(user)
     execution = Execution(
@@ -380,6 +383,7 @@ async def execute_saved_pipeline(
         input_message=f"[pipeline-saved:{len(raw_nodes)} nodes]",
         status=ExecutionStatus.RUNNING,
         started_at=datetime.now(timezone.utc),
+        trigger_kind=caller_kind(user, "builder"),
     )
     db.add(execution)
     await db.commit()
@@ -513,6 +517,7 @@ async def execute_pipeline_stream(
         return error("Duplicate node IDs in pipeline definition", 400)
 
     from app.core.acting_subject import subject_columns_for
+    from app.core.run_origin import caller_kind
 
     _sid, _stype = subject_columns_for(user)
     execution = Execution(
@@ -525,6 +530,7 @@ async def execute_pipeline_stream(
         input_message=f"[pipeline-stream:{len(body.nodes)} nodes]",
         status=ExecutionStatus.RUNNING,
         started_at=datetime.now(timezone.utc),
+        trigger_kind=caller_kind(user, "builder"),
     )
     db.add(execution)
     await db.commit()
@@ -832,6 +838,8 @@ async def replay_pipeline(
 
     _sid, _stype = subject_columns_for(user)
     replay_exec = Execution(
+        trigger_kind="replay",
+        trigger_name=f"Replay from {start_from}"[:255],
         tenant_id=user.tenant_id,
         agent_id=agent.id,
         user_id=user.id,

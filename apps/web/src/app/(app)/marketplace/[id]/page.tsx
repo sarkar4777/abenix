@@ -2,7 +2,7 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { useParams, useRouter, useSearchParams } from 'next/navigation';
+import { useParams, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { motion } from 'framer-motion';
 import dynamic from 'next/dynamic';
@@ -13,7 +13,6 @@ const PipelineDAGPreview = dynamic(
 );
 
 import {
-  ArrowLeft,
   BarChart3,
   Bot,
   Calendar,
@@ -21,6 +20,7 @@ import {
   Cloud,
   Code,
   Copy,
+  Download,
   FileText,
   GraduationCap,
   Mail,
@@ -34,6 +34,10 @@ import type { LucideIcon } from 'lucide-react';
 import { useApi } from '@/hooks/useApi';
 import { apiFetch, API_URL } from '@/lib/api-client';
 import { usePageTitle } from '@/hooks/usePageTitle';
+import { usePlatformFeatures, plainError } from '@/hooks/usePlatformFeatures';
+import MarketplaceOffNotice from '@/components/marketplace/MarketplaceOffNotice';
+import PageHeader from '@/components/layout/PageHeader';
+import NextSteps from '@/components/shared/NextSteps';
 
 interface AgentDetail {
   id: string;
@@ -136,13 +140,13 @@ function RatingBar({ count, total, starNum }: { count: number; total: number; st
 
 export default function AgentDetailPage() {
   const params = useParams();
-  const router = useRouter();
   const agentId = params.id as string;
 
   const [tab, setTab] = useState<Tab>('overview');
   const [subscribing, setSubscribing] = useState(false);
   const searchParams = useSearchParams();
   const [subscribed, setSubscribed] = useState(false);
+  const [justInstalled, setJustInstalled] = useState(false);
 
   const [reviewPage, setReviewPage] = useState(1);
 
@@ -151,9 +155,13 @@ export default function AgentDetailPage() {
   const [submittingReview, setSubmittingReview] = useState(false);
   const [reviewError, setReviewError] = useState('');
 
-  const { data: agent, isLoading: loading } = useApi<AgentDetail>(
-    agentId ? `/api/marketplace/${agentId}` : null,
+  const switches = usePlatformFeatures();
+  const [installError, setInstallError] = useState('');
+  const { data: agent, isLoading: agentLoading, error: agentError, mutate: refreshAgent } = useApi<AgentDetail>(
+    agentId && switches.marketplace ? `/api/marketplace/${agentId}` : null,
   );
+  const loading = !switches.loaded || agentLoading;
+  const paidListing = !!agent && switches.monetization && !agent.is_free;
 
   usePageTitle(agent?.name || 'Agent Details');
 
@@ -178,12 +186,14 @@ export default function AgentDetailPage() {
   useEffect(() => {
     if (searchParams.get('subscribed') === 'true') {
       setSubscribed(true);
+      setJustInstalled(true);
     }
   }, [searchParams]);
 
   const handleSubscribe = async () => {
     if (!agent) return;
     setSubscribing(true);
+    setInstallError('');
     try {
       const res = await apiFetch<{
         checkout_url?: string;
@@ -198,9 +208,13 @@ export default function AgentDetailPage() {
       }
       if (res.data) {
         setSubscribed(true);
+        setJustInstalled(true);
+        refreshAgent();
+      } else {
+        setInstallError(plainError(res.error, res.errorDetail?.error_code, 'The agent was not installed. Try again.'));
       }
-    } catch {
-      // skip
+    } catch (e: any) {
+      setInstallError(plainError(e?.message, e?.errorCode, 'The agent was not installed. Try again.'));
     } finally {
       setSubscribing(false);
     }
@@ -237,10 +251,25 @@ export default function AgentDetailPage() {
     );
   }
 
+  if (switches.loaded && !switches.marketplace) {
+    return (
+      <div className="max-w-[1100px] space-y-4 py-6" data-testid="marketplace-page-off">
+        <MarketplaceOffNotice what="This listing cannot be opened while it is off." />
+        <Link href="/agents" className="text-sm text-cyan-400 hover:text-cyan-300">
+          Go to My Agents
+        </Link>
+      </div>
+    );
+  }
+
   if (!agent) {
     return (
-      <div className="flex flex-col items-center justify-center py-20 text-center">
-        <p className="text-sm text-slate-500 mb-4">Agent not found</p>
+      <div className="flex flex-col items-center justify-center py-20 text-center" data-testid="market-detail-missing">
+        <p className="text-sm text-slate-500 mb-4">
+          {agentError && !/not found/i.test(agentError)
+            ? `Could not load this listing. ${agentError}`
+            : 'This listing is not in the store. It may have been removed or not approved yet.'}
+        </p>
         <Link href="/marketplace" className="text-sm text-cyan-400 hover:text-cyan-300">
           Back to Marketplace
         </Link>
@@ -274,26 +303,42 @@ export default function AgentDetailPage() {
       transition={{ duration: 0.4 }}
       className="max-w-[1100px] space-y-6"
     >
-      {/* Back */}
-      <button
-        onClick={() => router.push('/marketplace')}
-        className="flex items-center gap-2 text-sm text-slate-400 hover:text-white transition-colors"
+      <PageHeader
+        title={agent.name}
+        icon={IconComp}
+        iconClassName={colors.text}
+        purpose="Read what this agent does, check its tools and reviews, then install it to run it like your own."
+        back={{ href: '/marketplace', label: 'Back to Marketplace' }}
+        meta={<span className="text-xs text-slate-500 font-mono">v{agent.version}</span>}
+        primaryAction={
+          subscribed
+            ? { label: 'Chat', href: `/agents/${agent.id}/chat`, icon: MessageSquare, testId: 'market-open-chat' }
+            : {
+                label: paidListing ? (subscribing ? 'Subscribing...' : 'Subscribe') : subscribing ? 'Installing...' : 'Install',
+                onClick: handleSubscribe,
+                icon: Download,
+                disabled: subscribing,
+                testId: 'market-install',
+              }
+        }
+        secondaryAction={
+          subscribed ? (
+            <span className="flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded-lg w-full sm:w-auto">
+              <CheckCircle2 className="w-4 h-4" />
+              {paidListing ? 'Subscribed' : 'Installed'}
+            </span>
+          ) : undefined
+        }
+        steps={[
+          'Overview shows what the agent does and which tools it uses.',
+          'Reviews show what other people thought. Leave your own once you have used it.',
+          `${paidListing ? 'Subscribe' : 'Install'} to add it to My Agents, then chat with it or call it from code.`,
+        ]}
+        docSlug="08-howto/14-marketplace-and-monetization"
+        storageKey="marketplace-detail"
       >
-        <ArrowLeft className="w-4 h-4" />
-        Back to Marketplace
-      </button>
-
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row items-start gap-6">
-        <div className={`w-16 h-16 rounded-xl ${colors.bg} flex items-center justify-center shrink-0`}>
-          <IconComp className={`w-8 h-8 ${colors.text}`} />
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-3 mb-1">
-            <h1 className="text-2xl font-bold text-white">{agent.name}</h1>
-            <span className="text-xs text-slate-500 font-mono">v{agent.version}</span>
-          </div>
-          <p className="text-sm text-slate-400 mb-3">by {agent.creator_name || 'Unknown'}</p>
+        <div className="min-w-0 space-y-2">
+          <p className="text-sm text-slate-400">by {agent.creator_name || 'Unknown'}</p>
           <div className="flex items-center gap-4 flex-wrap">
             <div className="flex items-center gap-1.5">
               <StarRating rating={agent.avg_rating} size="md" />
@@ -306,14 +351,14 @@ export default function AgentDetailPage() {
             </div>
             <span className="flex items-center gap-1 text-sm text-slate-500">
               <Users className="w-4 h-4" />
-              {agent.subscriber_count} subscriber{agent.subscriber_count !== 1 ? 's' : ''}
+              {agent.subscriber_count} {paidListing ? 'subscriber' : 'install'}{agent.subscriber_count !== 1 ? 's' : ''}
             </span>
             {agent.category && (
               <span className={`text-xs ${colors.text} ${colors.bg} border ${colors.border} px-2 py-0.5 rounded-full capitalize`}>
                 {agent.category}
               </span>
             )}
-            {agent.is_free ? (
+            {!paidListing ? (
               <span className="text-xs font-medium text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-full">
                 Free
               </span>
@@ -323,38 +368,26 @@ export default function AgentDetailPage() {
               </span>
             )}
           </div>
-        </div>
-        <div className="flex flex-col gap-2 shrink-0 w-full sm:w-auto">
-          {subscribed ? (
-            <>
-              <span className="flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded-lg w-full sm:w-auto">
-                <CheckCircle2 className="w-4 h-4" />
-                Subscribed
-              </span>
-              <Link
-                href={`/agents/${agent.id}/chat`}
-                className="flex items-center justify-center gap-2 px-4 py-2 bg-gradient-to-r from-cyan-500 to-purple-600 text-white text-sm font-medium rounded-lg hover:from-cyan-400 hover:to-purple-500 shadow-lg shadow-cyan-500/25 transition-all w-full sm:w-auto"
-              >
-                <MessageSquare className="w-4 h-4" />
-                Chat
-              </Link>
-            </>
-          ) : (
-            <button
-              onClick={handleSubscribe}
-              disabled={subscribing}
-              className="px-6 py-2 bg-gradient-to-r from-cyan-500 to-purple-600 text-white text-sm font-medium rounded-lg hover:from-cyan-400 hover:to-purple-500 shadow-lg shadow-cyan-500/25 transition-all disabled:opacity-50 w-full sm:w-auto"
-            >
-              {subscribing ? 'Subscribing...' : 'Subscribe'}
-            </button>
+          {installError && (
+            <p role="alert" data-testid="market-install-error" className="text-xs text-red-400 break-words">
+              {installError}
+            </p>
           )}
         </div>
-      </div>
+      </PageHeader>
 
-      {searchParams.get('subscribed') === 'true' && (
-        <div className="mx-6 mt-4 p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-lg">
-          <p className="text-sm text-emerald-400">Successfully subscribed to this agent!</p>
-        </div>
+      {justInstalled && (
+        <NextSteps
+          title="Done. The agent is in your list and ready to run"
+          testId="market-installed-next"
+          onDismiss={() => setJustInstalled(false)}
+          steps={[
+            { id: 'chat', label: 'Try it in chat', hint: 'Ask it something from your own work.', icon: MessageSquare, href: `/agents/${agent.id}/chat` },
+            { id: 'info', label: 'Call it from code', hint: 'Copy ready API and SDK snippets.', icon: Code, href: `/agents/${agent.id}/info` },
+            { id: 'schedule', label: 'Run it on a schedule', hint: 'Add a webhook or timed trigger.', icon: Calendar, href: `/triggers?agent=${agent.id}` },
+            { id: 'agents', label: 'See My Agents', hint: 'It sits next to the agents you built.', icon: Bot, href: '/agents' },
+          ]}
+        />
       )}
 
       {/* Tabs */}

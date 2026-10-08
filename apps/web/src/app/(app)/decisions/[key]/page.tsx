@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import {
-  Activity, AlertTriangle, ArrowLeft, Check, CheckCircle2, ChevronDown, Download, FilePlus2, FileUp, GitBranch, History,
+  Activity, AlertTriangle, Bot, Check, CheckCircle2, ChevronDown, Download, FilePlus2, FileUp, GitBranch, History,
   ListChecks, Loader2, Rocket, Scale, Send, ShieldCheck, Table2, TestTube2, Undo2, Users, Workflow, X,
 } from 'lucide-react';
 import { apiFetch } from '@/lib/api-client';
@@ -16,6 +16,8 @@ import {
 } from '@/lib/decisions';
 import { TIER_STYLE } from '@/components/governance/TierPolicies';
 import ConfirmModal from '@/components/ui/ConfirmModal';
+import PageHeader from '@/components/layout/PageHeader';
+import NextSteps from '@/components/shared/NextSteps';
 import RuleBuilder from '@/components/decisions/RuleBuilder';
 import DecisionTable from '@/components/decisions/DecisionTable';
 import FactsOutcomes from '@/components/decisions/FactsOutcomes';
@@ -78,6 +80,7 @@ export default function DecisionWorkspace() {
   });
   const [tryPreload] = useState(() => readTryPreload(decisionKey, search.get('try')));
   const [initialEvaluation] = useState(() => search.get('evaluation'));
+  const [justCreated, setJustCreated] = useState(() => search.get('created') === '1');
   const [selectedRule, setSelectedRule] = useState<string | null>(null);
   const [merge, setMerge] = useState<{ who: string; result: MergeResult; theirs: VersionFull } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -118,6 +121,7 @@ export default function DecisionWorkspace() {
       const url = new URL(window.location.href);
       url.searchParams.set('version', String(versionNo));
       url.searchParams.delete('try');
+      url.searchParams.delete('created');
       window.history.replaceState(null, '', url.toString());
     }
   }, [versionNo, load]);
@@ -290,52 +294,81 @@ export default function DecisionWorkspace() {
 
   const live = model.versions.filter((v) => v.state === 'published');
   const tabs = TABS.filter((t) => !t.needsBuilder || doc);
+  const agentHref = `/builder?tool=decision_evaluate&name=${encodeURIComponent(`${model.name} agent`)}&prompt=${encodeURIComponent(`When a question needs the ${model.name} rules, call decision_evaluate with decision '${model.key}' and the facts from the request. Answer from its result and say which rule applied.`)}`;
   const saveText = { saved: 'All changes saved', unsaved: 'Unsaved changes', saving: 'Saving…', error: 'Not saved', conflict: 'Someone else saved first' }[save];
 
   return (
     <div className="max-w-[1400px] mx-auto px-4 md:px-6 py-6">
-      <div className="mb-4">
-        <Link href="/decisions" className="inline-flex items-center gap-1 text-xs text-slate-400 hover:text-white"><ArrowLeft className="w-3.5 h-3.5" /> Decisions</Link>
-        <div className="flex flex-wrap items-center gap-3 mt-1">
-          <h1 className="text-2xl font-semibold text-white">{model.name}</h1>
-          {canPublish ? (
-            <select
-              value={model.risk_tier}
-              onChange={(e) => setTier(e.target.value as Tier)}
-              disabled={busy === 'tier'}
-              className={`text-[11px] px-1.5 py-0.5 rounded border bg-transparent cursor-pointer ${TIER_STYLE[model.risk_tier].chip}`}
-              aria-label="Risk tier"
-              title="Higher tiers need more sign-off before a new version goes live"
-              data-testid="decision-tier"
-            >
-              {(Object.keys(TIER_STYLE) as Tier[]).map((t) => <option key={t} value={t} className="bg-slate-900 text-white">{TIER_STYLE[t].label} risk</option>)}
-            </select>
-          ) : (
-            <span className={`text-[11px] px-1.5 py-0.5 rounded border ${TIER_STYLE[model.risk_tier].chip}`}>{TIER_STYLE[model.risk_tier].label} risk</span>
-          )}
-          <span className="text-xs font-mono text-slate-500">{model.key}</span>
-          <div className="relative">
-            <button type="button" onClick={() => setVersionMenu((o) => !o)} className={`inline-flex items-center gap-1.5 text-xs px-2 py-1 rounded border ${STATE_STYLE[version.state]}`} data-testid="version-picker" aria-haspopup="listbox">
-              <GitBranch className="w-3.5 h-3.5" /> Version {version.version} · {STATE_LABEL[version.state]} <ChevronDown className="w-3 h-3" />
-            </button>
-            {versionMenu && (
-              <ul className="absolute z-40 mt-1 w-72 rounded-lg border border-slate-700 bg-slate-900 shadow-xl py-1" role="listbox">
-                {[...model.versions].sort((a, b) => b.version - a.version).map((v) => (
-                  <li key={v.id}>
-                    <button type="button" onClick={() => { setVersionMenu(false); setVersionNo(v.version); }} className={`w-full flex items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-slate-800 ${v.version === version.version ? 'text-white' : 'text-slate-300'}`}>
-                      <span className="w-8">v{v.version}</span>
-                      <span className={`text-[10px] px-1.5 rounded border ${STATE_STYLE[v.state]}`}>{STATE_LABEL[v.state]}</span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
+      <PageHeader
+        className="mb-4"
+        title={model.name}
+        purpose="Write, test and sign off one set of business rules, then publish it for agents and apps to call. For the rule owners."
+        icon={Scale}
+        storageKey="decision-workspace"
+        docSlug="08-howto/09-decisions"
+        back={{ href: '/decisions', label: 'Decisions' }}
+        primaryAction={{ label: 'Use in an agent', href: agentHref, icon: Bot, title: 'Open the builder with a tool that evaluates this decision' }}
+        steps={[
+          'Edit the draft under Rules or Table. Changes save as you type and are checked for gaps and overlaps.',
+          'Use Try it to run facts through the rules and see which rule fired.',
+          'Add golden tests, then propose the version for sign off and publish it.',
+          'Agents and apps call it by its key. Every answer is kept and can be replayed.',
+        ]}
+        meta={
+          <>
+            {canPublish ? (
+              <select
+                value={model.risk_tier}
+                onChange={(e) => setTier(e.target.value as Tier)}
+                disabled={busy === 'tier'}
+                className={`text-[11px] px-1.5 py-0.5 rounded border bg-transparent cursor-pointer ${TIER_STYLE[model.risk_tier].chip}`}
+                aria-label="Risk tier"
+                title="Higher tiers need more sign-off before a new version goes live"
+                data-testid="decision-tier"
+              >
+                {(Object.keys(TIER_STYLE) as Tier[]).map((t) => <option key={t} value={t} className="bg-slate-900 text-white">{TIER_STYLE[t].label} risk</option>)}
+              </select>
+            ) : (
+              <span className={`text-[11px] px-1.5 py-0.5 rounded border ${TIER_STYLE[model.risk_tier].chip}`}>{TIER_STYLE[model.risk_tier].label} risk</span>
             )}
-          </div>
-          {editingNow.length > 0 && (
-            <span className="inline-flex items-center gap-1 text-xs text-amber-300" data-testid="also-editing"><Users className="w-3.5 h-3.5" /> {editingNow.map((e) => e.email).join(', ')} also editing</span>
-          )}
-        </div>
-      </div>
+            <span className="text-xs font-mono text-slate-500 break-all">{model.key}</span>
+            <div className="relative">
+              <button type="button" onClick={() => setVersionMenu((o) => !o)} className={`inline-flex items-center gap-1.5 text-xs px-2 py-1 rounded border ${STATE_STYLE[version.state]}`} data-testid="version-picker" aria-haspopup="listbox">
+                <GitBranch className="w-3.5 h-3.5" /> Version {version.version} · {STATE_LABEL[version.state]} <ChevronDown className="w-3 h-3" />
+              </button>
+              {versionMenu && (
+                <ul className="absolute z-40 mt-1 w-72 max-w-[calc(100vw-2rem)] rounded-lg border border-slate-700 bg-slate-900 shadow-xl py-1" role="listbox">
+                  {[...model.versions].sort((a, b) => b.version - a.version).map((v) => (
+                    <li key={v.id}>
+                      <button type="button" onClick={() => { setVersionMenu(false); setVersionNo(v.version); }} className={`w-full flex items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-slate-800 ${v.version === version.version ? 'text-white' : 'text-slate-300'}`}>
+                        <span className="w-8">v{v.version}</span>
+                        <span className={`text-[10px] px-1.5 rounded border ${STATE_STYLE[v.state]}`}>{STATE_LABEL[v.state]}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+            {editingNow.length > 0 && (
+              <span className="inline-flex items-center gap-1 text-xs text-amber-300" data-testid="also-editing"><Users className="w-3.5 h-3.5" /> {editingNow.map((e) => e.email).join(', ')} also editing</span>
+            )}
+          </>
+        }
+      />
+
+      {justCreated && (
+        <NextSteps
+          className="mb-4"
+          title="Decision created. Where it can be used"
+          onDismiss={() => setJustCreated(false)}
+          testId="decision-next-steps"
+          steps={[
+            { id: 'tests', label: 'Add golden tests', hint: 'Pin the answers it must always give before you publish.', icon: TestTube2, onClick: () => setTab('tests') },
+            { id: 'limits', label: 'Use it as limits', hint: 'Once published, pick it under Hard limits when you enrol an agent action.', icon: ShieldCheck, href: '/autonomy' },
+            { id: 'agent', label: 'Use in an agent', hint: 'Open the builder with a tool that evaluates this decision.', icon: Bot, href: agentHref },
+          ]}
+        />
+      )}
 
       <LifecycleBar
         version={version} model={model} live={live} canAuthor={canAuthor} canPublish={canPublish} busy={busy} saveText={saveText} save={save} errorCount={errorCount}

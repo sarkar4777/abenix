@@ -2,20 +2,22 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
-import Link from 'next/link';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   ArrowLeft,
+  Bot,
   Database,
   FileText,
+  FolderOpen,
   Loader2,
   Plus,
   Search,
   Share2,
   Trash2,
   Upload,
-  X,
 } from 'lucide-react';
+import PageHeader from '@/components/layout/PageHeader';
+import NextSteps from '@/components/shared/NextSteps';
 import ResourceShareDialog from '@/components/share/ResourceShareDialog';
 import ResponsiveModal from '@/components/ui/ResponsiveModal';
 import { KnowledgeSkeleton } from '@/components/ui/Skeleton';
@@ -67,6 +69,7 @@ interface DocumentInfo {
   chunk_count: number;
   status: string;
   created_at: string | null;
+  error_message?: string | null;
 }
 
 function getAuthHeaders(): Record<string, string> {
@@ -118,7 +121,7 @@ function CreateModal({
         body: JSON.stringify({ name: name.trim(), description: description.trim() }),
       });
       const json = await res.json();
-      if (json.error) { setErr(json.error.message); return; }
+      if (json.error) { setErr(json.error.message || 'Could not create the knowledge base'); return; }
       onCreated(json.data);
       reset();
       onClose();
@@ -133,8 +136,9 @@ function CreateModal({
     <ResponsiveModal open={open} onClose={() => { reset(); onClose(); }} title="New Knowledge Base" maxWidth="max-w-md">
       <div className="space-y-4">
         <div>
-          <label className="block text-xs text-slate-400 mb-1.5">Name</label>
+          <label htmlFor="kb-new-name" className="block text-xs text-slate-400 mb-1.5">Name</label>
           <input
+            id="kb-new-name"
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
@@ -143,8 +147,9 @@ function CreateModal({
           />
         </div>
         <div>
-          <label className="block text-xs text-slate-400 mb-1.5">Description</label>
+          <label htmlFor="kb-new-description" className="block text-xs text-slate-400 mb-1.5">Description</label>
           <textarea
+            id="kb-new-description"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             placeholder="What kind of documents will this contain?"
@@ -152,7 +157,7 @@ function CreateModal({
             className="w-full px-3 py-2 bg-slate-800/50 border border-slate-700 rounded-lg text-sm text-white placeholder-slate-500 resize-none focus:outline-none focus:border-cyan-500"
           />
         </div>
-        {err && <p className="text-xs text-red-400">{err}</p>}
+        {err && <p role="alert" className="text-xs text-red-400">{err}</p>}
         <div className="flex justify-end gap-2 pt-2">
           <button onClick={() => { reset(); onClose(); }} className="px-4 py-2 text-sm text-slate-400 hover:text-white transition-colors">
             Cancel
@@ -186,7 +191,8 @@ function DropZone({
   const [batchFailed, setBatchFailed] = useState<string[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const uploadOne = async (file: File): Promise<boolean> => {
+  // null when it worked, otherwise the reason
+  const uploadOne = async (file: File): Promise<string | null> => {
     try {
       const form = new FormData();
       form.append('file', file);
@@ -195,12 +201,15 @@ function DropZone({
         headers: getAuthHeadersRaw(),
         body: form,
       });
-      const json = await res.json();
-      if (json.error) return false;
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || json.error) {
+        const m = typeof json.error === 'string' ? json.error : json.error?.message;
+        return m || `upload failed (${res.status})`;
+      }
       onUploaded(json.data);
-      return true;
+      return null;
     } catch {
-      return false;
+      return 'network error';
     }
   };
 
@@ -213,13 +222,17 @@ function DropZone({
     setBatchFailed([]);
     const failed: string[] = [];
     for (const f of files) {
-      const ok = await uploadOne(f);
-      if (!ok) failed.push(f.name);
+      const why = await uploadOne(f);
+      if (why) failed.push(`${f.name} (${why})`);
       setBatchDone((n) => n + 1);
     }
     setBatchFailed(failed);
     if (failed.length > 0) {
-      setUploadError(`${failed.length} of ${files.length} failed: ${failed.slice(0, 3).join(', ')}${failed.length > 3 ? '…' : ''}`);
+      setUploadError(
+        files.length === 1
+          ? `Could not upload ${failed[0]}`
+          : `${failed.length} of ${files.length} failed: ${failed.slice(0, 3).join(', ')}${failed.length > 3 ? '…' : ''}`,
+      );
     }
     setUploading(false);
   };
@@ -286,7 +299,7 @@ function DropZone({
           </p>
         </div>
       )}
-      {uploadError && <p className="text-xs text-red-400 mt-2">{uploadError}</p>}
+      {uploadError && <p role="alert" data-testid="kb-upload-error" className="text-xs text-red-400 mt-2">{uploadError}</p>}
     </div>
   );
 }
@@ -295,16 +308,21 @@ function KBDetailView({
   kb,
   onBack,
   onDeleted,
+  justCreated,
+  onDismissNext,
 }: {
   kb: KBDetail;
   onBack: () => void;
   onDeleted: () => void;
+  justCreated?: boolean;
+  onDismissNext?: () => void;
 }) {
   const [docs, setDocs] = useState<DocumentInfo[]>(kb.documents || []);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [deletingKB, setDeletingKB] = useState(false);
   const [confirmDeleteKB, setConfirmDeleteKB] = useState(false);
   const [showShare, setShowShare] = useState(false);
+  const dropRef = useRef<HTMLDivElement>(null);
 
   const pollInterval = useRef<ReturnType<typeof setInterval>>();
 
@@ -338,12 +356,15 @@ function KBDetailView({
   };
 
   const deleteDoc = async (docId: string) => {
+    const doc = docs.find((d) => d.id === docId);
+    if (!window.confirm(`Delete ${doc?.filename || 'this document'}? Agents stop finding its content.`)) return;
     setDeleting(docId);
     try {
-      await fetch(`${API_URL}/api/knowledge-bases/${kb.id}/documents/${docId}`, {
+      const res = await fetch(`${API_URL}/api/knowledge-bases/${kb.id}/documents/${docId}`, {
         method: 'DELETE',
         headers: getAuthHeaders(),
       });
+      if (!res.ok) throw new Error(String(res.status));
       setDocs((prev) => prev.filter((d) => d.id !== docId));
       toastSuccess('Document deleted');
     } catch {
@@ -382,62 +403,85 @@ function KBDetailView({
         </button>
       </div>
 
-      <div className="flex items-start justify-between">
-        <div>
-          <h1 className="text-xl font-bold text-white">{kb.name}</h1>
-          {kb.description && (
-            <p className="text-sm text-slate-500 mt-1">{kb.description}</p>
-          )}
-          <div className="flex items-center gap-4 mt-2 text-xs text-slate-500">
-            <span className={`px-2 py-0.5 rounded-full ${statusColor(kb.status)}`}>
-              {kb.status}
-            </span>
-            <span>{docs.length} documents</span>
-            <span>Chunk size: {kb.chunk_size}</span>
-          </div>
+      <PageHeader
+        title={kb.name}
+        purpose={kb.description || 'Upload documents here so agents can search them and answer from them.'}
+        icon={Database}
+        iconClassName="text-emerald-400"
+        storageKey="knowledge-detail"
+        docSlug="04-data-model/03-knowledge"
+        meta={
+          <span className={`text-xs px-2 py-0.5 rounded-full ${statusColor(kb.status)}`}>{kb.status}</span>
+        }
+        steps={[
+          'Drop in PDFs, Word files, text, CSV, Markdown or JSON.',
+          'Each file is split into small passages and indexed. That takes a few seconds per file.',
+          'Once a file shows ready, add this knowledge base to an agent so it can search it.',
+        ]}
+        primaryAction={
+          docs.some((d) => d.status === 'ready')
+            ? { label: 'Use in an agent', icon: Bot, onClick: () => { window.location.href = `/builder?kb=${kb.id}`; }, testId: 'kb-use-in-agent' }
+            : kb.can_edit !== false
+              ? { label: 'Upload documents', icon: Upload, onClick: () => dropRef.current?.querySelector('input')?.click(), testId: 'kb-upload-primary' }
+              : undefined
+        }
+        extraActions={
+          <>
+            {docs.some((d) => d.status === 'ready') && (
+              <button
+                onClick={() => { window.location.href = `/knowledge/${kb.id}/engine`; }}
+                className="flex items-center justify-center gap-1.5 px-3 py-2 text-xs text-emerald-300 hover:text-white border border-emerald-500/30 hover:border-emerald-400 rounded-lg transition-colors"
+                data-testid="kb-open-engine"
+              >
+                <Database className="w-3 h-3" /> Search this knowledge base
+              </button>
+            )}
+            {kb.can_manage !== false && (
+              <button
+                onClick={() => setShowShare(true)}
+                className="flex items-center justify-center gap-1.5 px-3 py-2 text-xs text-slate-300 hover:text-white border border-slate-600/40 hover:border-slate-500 rounded-lg transition-colors"
+                data-testid="kb-share"
+              >
+                <Share2 className="w-3 h-3" /> Share
+              </button>
+            )}
+            {kb.can_edit !== false && (
+              <button
+                onClick={() => setConfirmDeleteKB(true)}
+                className="flex items-center justify-center gap-1.5 px-3 py-2 text-xs text-red-400 hover:text-red-300 border border-red-500/20 hover:border-red-500/40 rounded-lg transition-colors"
+              >
+                <Trash2 className="w-3 h-3" />
+                Delete KB
+              </button>
+            )}
+          </>
+        }
+      >
+        <div className="flex flex-wrap items-center gap-4 text-xs text-slate-500">
+          <span>{docs.length} document{docs.length === 1 ? '' : 's'}</span>
+          <span>Chunk size: {kb.chunk_size}</span>
         </div>
-        <div className="flex items-center gap-2">
-          {docs.some((d) => d.status === 'ready') && (
-            <button
-              onClick={() => { window.location.href = `/builder?kb=${kb.id}`; }}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-cyan-300 hover:text-white border border-cyan-500/30 hover:border-cyan-400 rounded-lg transition-colors"
-              data-testid="kb-use-in-agent"
-            >
-              <Upload className="w-3 h-3 rotate-90" /> Use in an agent
-            </button>
-          )}
-          {docs.some((d) => d.status === 'ready') && (
-            <button
-              onClick={() => { window.location.href = `/knowledge/${kb.id}/engine`; }}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-emerald-300 hover:text-white border border-emerald-500/30 hover:border-emerald-400 rounded-lg transition-colors"
-              data-testid="kb-open-engine"
-            >
-              <Database className="w-3 h-3" /> Search this knowledge base
-            </button>
-          )}
-          {kb.can_manage !== false && (
-            <button
-              onClick={() => setShowShare(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-slate-300 hover:text-white border border-slate-600/40 hover:border-slate-500 rounded-lg transition-colors"
-              data-testid="kb-share"
-            >
-              <Share2 className="w-3 h-3" /> Share
-            </button>
-          )}
-          {kb.can_edit !== false && (
-            <button
-              onClick={() => setConfirmDeleteKB(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-red-400 hover:text-red-300 border border-red-500/20 hover:border-red-500/40 rounded-lg transition-colors"
-            >
-              <Trash2 className="w-3 h-3" />
-              Delete KB
-            </button>
-          )}
-        </div>
-      </div>
+      </PageHeader>
+
+      {justCreated && (
+        <NextSteps
+          title="Knowledge base created. What next?"
+          testId="kb-next-steps"
+          onDismiss={onDismissNext}
+          steps={[
+            ...(kb.can_edit !== false
+              ? [{ id: 'upload', label: 'Upload documents', hint: 'Add the files your agent should read.', icon: Upload, onClick: () => dropRef.current?.querySelector('input')?.click() }]
+              : []),
+            { id: 'agent', label: 'Use in an agent', hint: 'Open the builder with this knowledge base attached.', icon: Bot, href: `/builder?kb=${kb.id}` },
+            { id: 'project', label: 'Group into a project', hint: 'Put related knowledge bases together.', icon: FolderOpen, href: '/knowledge/projects' },
+          ]}
+        />
+      )}
 
       {kb.can_edit !== false ? (
-        <DropZone kbId={kb.id} onUploaded={handleUploaded} />
+        <div ref={dropRef}>
+          <DropZone kbId={kb.id} onUploaded={handleUploaded} />
+        </div>
       ) : (
         <p className="text-xs text-slate-400 border border-slate-700/50 rounded-lg px-3 py-2" data-testid="kb-read-only">
           You can search and use this knowledge base but not add documents to it. Ask {kb.owner_name || 'its owner'} for edit access.
@@ -467,10 +511,13 @@ function KBDetailView({
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-sm text-white truncate">{doc.filename}</p>
+                {doc.status === 'failed' && doc.error_message && (
+                  <p className="text-[11px] text-red-300 break-words" data-testid="kb-doc-error">{doc.error_message}</p>
+                )}
                 <div className="flex items-center gap-3 text-[10px] text-slate-500">
                   <span>{doc.file_type.toUpperCase()}</span>
                   <span>{formatSize(doc.file_size)}</span>
-                  {doc.chunk_count > 0 && <span>{doc.chunk_count} chunks</span>}
+                  {doc.chunk_count > 0 && <span>{doc.chunk_count} chunk{doc.chunk_count === 1 ? '' : 's'}</span>}
                 </div>
               </div>
               <div className="flex items-center gap-2">
@@ -483,7 +530,8 @@ function KBDetailView({
                 <button
                   onClick={() => deleteDoc(doc.id)}
                   disabled={deleting === doc.id}
-                  className="text-slate-500 hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100 disabled:opacity-50"
+                  aria-label={`Delete ${doc.filename}`}
+                  className="text-slate-500 hover:text-red-400 transition-colors md:opacity-0 md:group-hover:opacity-100 focus:opacity-100 disabled:opacity-50"
                 >
                   {deleting === doc.id ? (
                     <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -525,12 +573,13 @@ export default function KnowledgePage() {
   const [statusFilter, setStatusFilter] = useState('');
   const [sortBy, setSortBy] = useState('newest');
   const [page, setPage] = useState(0);
+  const [createdId, setCreatedId] = useState<string | null>(null);
   const LIMIT = 20;
 
   const apiUrl = `/api/knowledge-bases?search=${encodeURIComponent(search)}&status=${encodeURIComponent(statusFilter)}&sort=${sortBy}&limit=${LIMIT}&offset=${page * LIMIT}`;
   const [deletingCard, setDeletingCard] = useState<{ id: string; name: string } | null>(null);
   const { data: kbs, isLoading: loading, meta, mutate: mutateKBs } =
-    useApi<KnowledgeBase[]>(apiUrl);
+    useApi<KnowledgeBase[]>(apiUrl, { keepPreviousData: true });
 
   const total = (meta?.total as number) || (kbs ?? []).length;
 
@@ -561,8 +610,13 @@ export default function KnowledgePage() {
     if (queryId) router.replace('/knowledge');
   };
 
-  const handleCreated = () => {
+  // straight into the new KB so the upload box is right there
+  const handleCreated = (kb: KnowledgeBase) => {
     mutateKBs();
+    if (kb?.id) {
+      setCreatedId(kb.id);
+      router.replace(`/knowledge?id=${kb.id}`);
+    }
   };
 
   const handleKBDeleted = () => {
@@ -571,7 +625,7 @@ export default function KnowledgePage() {
     mutateKBs();
   };
 
-  if (loading) {
+  if (loading && !kbs) {
     return <KnowledgeSkeleton />;
   }
 
@@ -582,6 +636,8 @@ export default function KnowledgePage() {
           kb={selectedKB}
           onBack={closeDetail}
           onDeleted={handleKBDeleted}
+          justCreated={createdId === selectedKB.id}
+          onDismissNext={() => setCreatedId(null)}
         />
       </div>
     );
@@ -598,32 +654,22 @@ export default function KnowledgePage() {
       transition={{ duration: 0.4 }}
       className="space-y-6 max-w-[1400px]"
     >
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-white">Knowledge Bases</h1>
-          <p className="text-sm text-slate-500 mt-1">
-            Manage RAG data sources for your agents.{' '}
-            <Link href="/knowledge/projects" className="text-emerald-400 hover:text-emerald-300">
-              Group them into Projects →
-            </Link>
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Link
-            href="/knowledge/projects"
-            className="hidden sm:inline-flex items-center gap-2 px-3 py-2 border border-slate-700 hover:border-slate-600 text-slate-200 text-sm font-medium rounded-lg transition-colors"
-          >
-            Projects
-          </Link>
-          <button
-            onClick={() => setModalOpen(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-cyan-500 to-blue-600 text-white text-sm font-medium rounded-lg hover:opacity-90 transition-opacity"
-          >
-            <Plus className="w-4 h-4" />
-            New Knowledge Base
-          </button>
-        </div>
-      </div>
+      <PageHeader
+        title="Knowledge Bases"
+        purpose="Upload documents your agents can search and quote from. For anyone building agents."
+        icon={Database}
+        iconClassName="text-emerald-400"
+        storageKey="knowledge"
+        docSlug="04-data-model/03-knowledge"
+        steps={[
+          'Create a knowledge base and give it a clear name.',
+          'Upload PDFs, Word files, text or spreadsheets. Each file is split into passages and indexed.',
+          'Attach it to an agent in the builder so the agent can search it while it answers.',
+          'Group related knowledge bases into projects when you have many.',
+        ]}
+        primaryAction={{ label: 'New Knowledge Base', icon: Plus, onClick: () => setModalOpen(true) }}
+        secondaryAction={{ label: 'Projects', icon: FolderOpen, href: '/knowledge/projects' }}
+      />
 
       {/* Search & Filters */}
       <div className="flex flex-col gap-3 md:flex-row md:items-center">
@@ -632,12 +678,14 @@ export default function KnowledgePage() {
           <input
             type="text"
             placeholder="Search knowledge bases..."
+            aria-label="Search knowledge bases"
             value={search}
             onChange={(e) => { setSearch(e.target.value); setPage(0); }}
             className="w-full pl-10 pr-4 py-2 bg-slate-800/50 border border-slate-700 rounded-lg text-sm text-white placeholder-slate-500 focus:border-cyan-500 focus:outline-none"
           />
         </div>
         <select
+          aria-label="Filter by status"
           value={statusFilter}
           onChange={(e) => { setStatusFilter(e.target.value); setPage(0); }}
           className="bg-slate-800/50 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:border-cyan-500 focus:outline-none"
@@ -657,7 +705,13 @@ export default function KnowledgePage() {
         </select>
       </div>
 
-      {(kbs ?? []).length === 0 && !loading && (
+      {(kbs ?? []).length === 0 && !loading && (search || statusFilter ? (
+        <EmptyState
+          icon={Database}
+          title="No knowledge bases match"
+          description="Try another name or clear the status filter."
+        />
+      ) : (
         <EmptyState
           icon={Database}
           title="No knowledge bases yet"
@@ -665,7 +719,7 @@ export default function KnowledgePage() {
           actionLabel="New Knowledge Base"
           onAction={() => setModalOpen(true)}
         />
-      )}
+      ))}
 
       <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
         <AnimatePresence>
@@ -676,7 +730,7 @@ export default function KnowledgePage() {
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              onClick={() => openDetail(kb.id)}
+              onClick={() => router.push(`/knowledge?id=${kb.id}`)}
               data-testid="kb-card" data-name={kb.name} data-status={kb.status}
               className="relative bg-slate-800/30 border border-slate-700/50 rounded-xl p-5 hover:border-slate-600/50 transition-colors cursor-pointer group"
             >
@@ -706,10 +760,10 @@ export default function KnowledgePage() {
               <OwnerBadge ownership={kb.ownership} ownerName={kb.owner_name} className="mb-2" />
               <div className="space-y-1.5 text-xs text-slate-500">
                 <div className="flex items-center gap-2">
-                  <FileText className="w-3 h-3" /> {kb.doc_count} documents
+                  <FileText className="w-3 h-3" /> {kb.doc_count} document{kb.doc_count === 1 ? '' : 's'}
                 </div>
                 <div className="flex items-center gap-2">
-                  <Database className="w-3 h-3" /> {(kb.chunk_count || 0).toLocaleString()} chunks
+                  <Database className="w-3 h-3" /> {(kb.chunk_count || 0).toLocaleString()} chunk{kb.chunk_count === 1 ? '' : 's'}
                 </div>
                 {kb.total_size > 0 && (
                   <div className="flex items-center gap-2">

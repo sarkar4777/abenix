@@ -1,8 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import Link from 'next/link';
-import { ArrowLeft, Layers, Loader2, Plus, Save, Trash2 } from 'lucide-react';
+import { Layers, Loader2, Plus, Save, Scale, Trash2 } from 'lucide-react';
+import PageHeader from '@/components/layout/PageHeader';
 import { apiFetch } from '@/lib/api-client';
 import { useApi } from '@/hooks/useApi';
 import { holds, useMyPermissions } from '@/lib/capabilities';
@@ -93,14 +93,23 @@ export default function ReferenceSetsPage() {
 
   return (
     <div className="max-w-5xl mx-auto px-6 py-8">
-      <Link href="/decisions" className="inline-flex items-center gap-1 text-xs text-slate-400 hover:text-white"><ArrowLeft className="w-3.5 h-3.5" /> Decisions</Link>
-      <header className="mt-1 mb-6 flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2 mb-2"><Layers className="w-6 h-6 text-cyan-400" /><h1 className="text-3xl font-semibold text-white">Reference sets</h1></div>
-          <p className="text-slate-400 max-w-3xl">Named lists rules can check against, such as covered product codes. Each change is a new version. A decision keeps the values it was compiled with until a new draft picks up the change, so published answers never move by themselves.</p>
-        </div>
-        {canAuthor && <button type="button" onClick={() => setCreating(true)} className="inline-flex items-center gap-1.5 px-4 py-2 rounded-md text-sm font-medium bg-cyan-500 text-white" data-testid="refset-new"><Plus className="w-4 h-4" /> New set</button>}
-      </header>
+      <PageHeader
+        className="mb-6"
+        title="Reference sets"
+        purpose="Named lists that rules can check against, such as covered product codes. For the people who write decision rules."
+        icon={Layers}
+        storageKey="decision-reference-sets"
+        docSlug="08-howto/09-decisions"
+        back={{ href: '/decisions', label: 'Decisions' }}
+        primaryAction={canAuthor
+          ? { label: 'New set', onClick: () => setCreating(true), icon: Plus, testId: 'refset-new' }
+          : { label: 'Open decisions', href: '/decisions', icon: Scale }}
+        steps={[
+          'Create a set and paste its values, one per line or as a spreadsheet column.',
+          'In a rule, pick the condition is in reference set.',
+          'Each change saves a new version. A decision keeps the values it was built with until a new draft picks up the change, so published answers never move by themselves.',
+        ]}
+      />
 
       {creating && (
         <div className="mb-6 rounded-xl border border-slate-700 bg-slate-900/60 p-4 space-y-3" data-testid="refset-create">

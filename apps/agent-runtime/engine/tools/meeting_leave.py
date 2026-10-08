@@ -65,7 +65,7 @@ class MeetingLeaveTool(BaseTool):
         await sessmod.append_decision(
             meeting_id,
             "leave",
-            f"Bot left meeting — {(arguments.get('summary') or 'no summary provided')[:200]}",
+            f"Bot left meeting — {(arguments.get('summary') or 'no summary provided')[:600]}",
             detail={"summary": arguments.get("summary") or ""},
         )
         sessmod.drop(sess.execution_id)

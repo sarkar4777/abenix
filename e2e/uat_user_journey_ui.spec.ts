@@ -186,10 +186,10 @@ test('a new teammate builds a supplier risk desk through the UI', async ({ page 
       await page.waitForURL(/\/dashboard/, { timeout: 30_000 });
       await record(page, 'accept invite', true, 'signed in as the new teammate');
       // a new user is shown where to start, not an empty dashboard
-      const guide = page.getByTestId('getting-started');
+      const guide = page.getByTestId('start-here');
       await expect(guide).toBeVisible({ timeout: 20_000 });
-      const codeDone = await page.getByTestId('getting-started-code').getAttribute('data-done');
-      await record(page, 'getting started', codeDone === 'false', `dashboard guides a new user, upload-code step done=${codeDone}`);
+      const firstDone = await guide.locator('li[data-done]').first().getAttribute('data-done');
+      await record(page, 'getting started', firstDone === 'false', `dashboard guides a new user, first step done=${firstDone}`);
       // and they can sign in again with the password they chose
       await signOut(page);
       await signIn(page, USER.email, USER.password);
@@ -198,10 +198,7 @@ test('a new teammate builds a supplier risk desk through the UI', async ({ page 
 
     // ── 2. custom code ────────────────────────────────────────────────────
     await test.step('upload and test the custom scorer in Code Runner', async () => {
-      // start from the guide, the way a new user would
-      await go(page, '/dashboard');
-      await page.getByTestId('getting-started-code').click();
-      await page.waitForURL(/\/code-runner/, { timeout: 20_000 });
+      await go(page, '/code-runner');
       await page.getByPlaceholder('Name (e.g. sentiment-scorer)').fill(NAMES.asset);
       await page.getByPlaceholder('Description (optional)').fill('Scores supplier financial risk from ratios, stdin JSON in, JSON out');
       await page.locator('input[type=file][accept=".zip"]').setInputFiles(path.join(FIX, 'supplier_risk.zip'));
@@ -528,8 +525,8 @@ test('a new teammate builds a supplier risk desk through the UI', async ({ page 
 
     await test.step('the guide is complete', async () => {
       await go(page, '/dashboard');
-      const left = await page.locator('[data-testid^="getting-started-"][data-done="false"]').count();
-      await record(page, 'getting started done', left === 0 || !(await page.getByTestId('getting-started').isVisible()), `${left} steps still open`);
+      const left = await page.locator('[data-testid^="start-here-"][data-done="false"]').count();
+      await record(page, 'getting started done', left === 0 || !(await page.getByTestId('start-here').isVisible()), `${left} steps still open`);
     });
 
     // ── 12. API keys ──────────────────────────────────────────────────────

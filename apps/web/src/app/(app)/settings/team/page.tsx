@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
+  Bot,
   Check,
   ChevronDown,
   Copy,
@@ -11,14 +12,19 @@ import {
   MoreHorizontal,
   Plus,
   Trash2,
+  UserCog,
+  UserPlus,
   Users,
   X,
 } from 'lucide-react';
+import PageHeader from '@/components/layout/PageHeader';
+import NextSteps from '@/components/shared/NextSteps';
 import { usePageTitle } from '@/hooks/usePageTitle';
 import { useApi } from '@/hooks/useApi';
 import { apiFetch } from '@/lib/api-client';
 import ConfirmModal from '@/components/ui/ConfirmModal';
 import { toastSuccess, toastError } from '@/stores/toastStore';
+import { roleLabel } from '@/lib/monitor-format';
 
 interface Member {
   id: string;
@@ -77,6 +83,7 @@ export default function TeamPage() {
   const [removeLoading, setRemoveLoading] = useState(false);
   const [inviteLink, setInviteLink] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
+  const [showNext, setShowNext] = useState(false);
 
   const copyLink = async (url: string, key: string) => {
     try {
@@ -103,6 +110,7 @@ export default function TeamPage() {
         setInviteEmail('');
         setShowInvite(false);
         setInviteLink(res.data.invite_url || null);
+        setShowNext(true);
         mutateTeam();
         toastSuccess('Invite created', 'Copy the link and send it to your teammate');
       } else {
@@ -119,17 +127,18 @@ export default function TeamPage() {
 
   const handleChangeRole = async (memberId: string, role: string) => {
     setMenuOpen(null);
-    try {
-      await apiFetch(`/api/team/members/${memberId}/role`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ role }),
-      });
-      mutateTeam();
-      toastSuccess('Role updated');
-    } catch {
-      toastError('Failed to update role');
+    const res = await apiFetch(`/api/team/members/${memberId}/role`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ role }),
+      throwOnError: false,
+    });
+    if (res.error) {
+      toastError('Could not change the role', res.error);
+      return;
     }
+    mutateTeam();
+    toastSuccess(`Role changed to ${roleLabel(role)}`);
   };
 
   const handleRemoveMember = (member: Member) => {
@@ -140,26 +149,24 @@ export default function TeamPage() {
   const confirmRemoveMember = async () => {
     if (!removingMember) return;
     setRemoveLoading(true);
-    try {
-      await apiFetch(`/api/team/members/${removingMember.id}`, { method: 'DELETE' });
+    const res = await apiFetch(`/api/team/members/${removingMember.id}`, { method: 'DELETE', throwOnError: false });
+    if (res.error) toastError('Could not remove this person', res.error);
+    else {
       mutateTeam();
       toastSuccess('Member removed');
-    } catch {
-      toastError('Failed to remove member');
-    } finally {
-      setRemoveLoading(false);
-      setRemovingMember(null);
     }
+    setRemoveLoading(false);
+    setRemovingMember(null);
   };
 
   const handleCancelInvite = async (inviteId: string) => {
-    try {
-      await apiFetch(`/api/team/invites/${inviteId}`, { method: 'DELETE' });
-      mutateTeam();
-      toastSuccess('Invitation cancelled');
-    } catch {
-      toastError('Failed to cancel invitation');
+    const res = await apiFetch(`/api/team/invites/${inviteId}`, { method: 'DELETE', throwOnError: false });
+    if (res.error) {
+      toastError('Could not cancel the invitation', res.error);
+      return;
     }
+    mutateTeam();
+    toastSuccess('Invitation cancelled');
   };
 
   if (loading) {
@@ -196,21 +203,20 @@ export default function TeamPage() {
       transition={{ duration: 0.4 }}
       className="space-y-6 max-w-2xl"
     >
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-white">Team</h1>
-          <p className="text-sm text-slate-500 mt-1">
-            Who is in this workspace, the role each person has, and invitations still waiting to be accepted.
-          </p>
-        </div>
-        <button
-          onClick={() => setShowInvite(true)}
-          className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-cyan-500 to-purple-600 text-white text-sm font-medium rounded-lg hover:from-cyan-400 hover:to-purple-500 shadow-lg shadow-cyan-500/25 transition-all"
-        >
-          <Plus className="w-4 h-4" />
-          Invite Member
-        </button>
-      </div>
+      <PageHeader
+        title="Team"
+        icon={Users}
+        purpose="Who is in this workspace, the role each person has, and invitations still waiting to be accepted. For workspace admins."
+        primaryAction={{ label: 'Invite Member', icon: Plus, onClick: () => setShowInvite(true) }}
+        steps={[
+          'Invite someone by email and pick their role.',
+          'Copy the invite link and send it to them. It works once and expires in 7 days.',
+          'Admins manage everything, creators build agents, members use what is shared with them.',
+          'Use the menu on a person to change their role or remove them.',
+        ]}
+        docSlug="01-architecture/01-tenants-rbac"
+        storageKey="settings-team"
+      />
 
       <AnimatePresence>
         {showInvite && (
@@ -223,17 +229,21 @@ export default function TeamPage() {
             <p className="text-sm text-white font-medium mb-3">
               Invite a team member
             </p>
-            <div className="flex items-center gap-3">
-              <div className="flex-1 flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="flex-1 min-w-[240px] flex items-center gap-2">
                 <input
                   type="email"
+                  aria-label="Email to invite"
+                  data-testid="invite-email"
                   value={inviteEmail}
                   onChange={(e) => setInviteEmail(e.target.value)}
                   placeholder="email@example.com"
-                  className="flex-1 px-3 py-2.5 bg-slate-800/50 border border-slate-700 rounded-lg text-sm text-slate-200 placeholder:text-slate-600 focus:border-cyan-500 focus:outline-none transition-colors"
+                  className="flex-1 min-w-0 px-3 py-2.5 bg-slate-800/50 border border-slate-700 rounded-lg text-sm text-slate-200 placeholder:text-slate-600 focus:border-cyan-500 focus:outline-none transition-colors"
                   onKeyDown={(e) => e.key === 'Enter' && handleInvite()}
                 />
                 <select
+                  aria-label="Role"
+                  data-testid="invite-role"
                   value={inviteRole}
                   onChange={(e) => setInviteRole(e.target.value)}
                   className="px-3 py-2.5 bg-slate-800/50 border border-slate-700 rounded-lg text-sm text-slate-200 focus:border-cyan-500 focus:outline-none"
@@ -247,6 +257,7 @@ export default function TeamPage() {
               </div>
               <button
                 onClick={handleInvite}
+                data-testid="invite-send"
                 disabled={inviting || !inviteEmail.trim()}
                 className="px-4 py-2.5 bg-cyan-500/20 text-cyan-400 text-sm font-medium rounded-lg hover:bg-cyan-500/30 transition-colors disabled:opacity-50 flex items-center gap-2"
               >
@@ -301,13 +312,27 @@ export default function TeamPage() {
         </div>
       )}
 
+      {showNext && (
+        <NextSteps
+          title="Invite created. What next?"
+          testId="invite-next-steps"
+          onDismiss={() => setShowNext(false)}
+          steps={[
+            { id: 'invite-another', label: 'Invite someone else', hint: 'Add the next teammate while you are here.', icon: UserPlus, onClick: () => setShowInvite(true) },
+            { id: 'permissions', label: 'Give extra abilities', hint: 'Add a permission set without making them an admin.', icon: UserCog, href: '/admin/permissions' },
+            { id: 'share-agent', label: 'Share an agent', hint: 'Pick an agent and share it so they can use it.', icon: Bot, href: '/agents' },
+          ]}
+        />
+      )}
+
       <div className="bg-slate-800/30 border border-slate-700/50 rounded-xl overflow-hidden">
         {members
           .filter((m) => m.is_active)
           .map((member, i, arr) => (
             <div
               key={member.id}
-              className={`flex items-center gap-4 p-4 ${
+              data-testid={`member-${member.email}`}
+              className={`flex items-center gap-3 sm:gap-4 p-4 ${
                 i < arr.length - 1 || invites.length > 0
                   ? 'border-b border-slate-700/30'
                   : ''
@@ -317,17 +342,18 @@ export default function TeamPage() {
                 {member.full_name.charAt(0)}
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-white">
+                <p className="text-sm font-medium text-white truncate">
                   {member.full_name}
                 </p>
-                <p className="text-xs text-slate-500">{member.email}</p>
+                <p className="text-xs text-slate-500 truncate">{member.email}</p>
               </div>
               <span
-                className={`text-xs px-2 py-0.5 rounded-full capitalize ${
+                className={`text-xs px-2 py-0.5 rounded-full shrink-0 ${
                   ROLE_COLORS[member.role] || ROLE_COLORS.user
                 }`}
+                data-testid="member-role"
               >
-                {member.role}
+                {roleLabel(member.role)}
               </span>
               <div className="relative">
                 <button
@@ -365,6 +391,7 @@ export default function TeamPage() {
         {invites.map((invite, i) => (
           <div
             key={invite.id}
+            data-testid={`invite-${invite.email}`}
             className={`flex items-center gap-4 p-4 ${
               i < invites.length - 1 ? 'border-b border-slate-700/30' : ''
             }`}
@@ -386,7 +413,7 @@ export default function TeamPage() {
                 )}
               </div>
               <p className="text-xs text-slate-600">
-                Invited as {invite.role}
+                Invited as {roleLabel(invite.role)}
               </p>
             </div>
             {invite.invite_url && !invite.expired && (

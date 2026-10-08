@@ -5,6 +5,8 @@ import {
   Workflow, RefreshCw, ChevronDown, ChevronRight, Box, Cpu, Cog, Server,
 } from 'lucide-react';
 import { formatCount } from '@/lib/format-stats';
+import PageHeader from '@/components/layout/PageHeader';
+import { AccessGate } from '@/components/layout/NoAccess';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 function getToken() {
@@ -58,7 +60,7 @@ const POOL_COLOR: Record<string, string> = {
   runtime: 'bg-purple-700/40 text-purple-300',
 };
 
-export default function PipelineScalingPage() {
+function PipelineScalingPage() {
   const [rows, setRows] = useState<Pipeline[]>([]);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
@@ -88,26 +90,28 @@ export default function PipelineScalingPage() {
 
   return (
     <div className="p-6 max-w-7xl mx-auto">
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-2xl font-semibold text-slate-100 flex items-center gap-2">
-            <Workflow className="w-6 h-6 text-cyan-400" /> Pipeline scaling
-          </h1>
-          <p className="text-sm text-slate-400 mt-1 max-w-3xl">
-            Each pipeline lands on its own <code className="bg-slate-800 px-1 rounded">runtime_pool</code> (KEDA-scaled).
-            Inside the pipeline, every node dispatches further: <span className="text-violet-300">agent nodes</span> enqueue to that agent's own pool,
-            <span className="text-cyan-300"> tool nodes</span> go through the tool gate (cache + qps + concurrency cap),
-            and <span className="text-slate-300">control nodes</span> run in-process on the pipeline's pod.
-            This view shows that composition graphically.
-          </p>
-        </div>
-        <button
-          onClick={load}
-          className="px-3 py-1.5 text-sm rounded-md bg-slate-800 hover:bg-slate-700 text-slate-200 flex items-center gap-1.5 border border-slate-700"
-        >
-          <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} /> refresh
-        </button>
-      </div>
+      <PageHeader
+        className="mb-6"
+        title="Pipeline scaling"
+        purpose="See where each step of every pipeline runs, so you know which worker pool to grow when pipelines slow down. For admins."
+        icon={Workflow}
+        storageKey="admin-pipeline-scaling"
+        docSlug="02-runtime/08-queue-scaling"
+        primaryAction={{ label: 'Refresh', icon: RefreshCw, onClick: load, busy: loading }}
+        secondaryAction={{ label: 'Agent pools', icon: Server, href: '/admin/scaling' }}
+        steps={[
+          'Each pipeline runs on its own worker pool, which grows and shrinks with its queue.',
+          <span key="agent">
+            Inside a pipeline, <span className="text-violet-300">agent steps</span> go to that agent&apos;s own pool.
+          </span>,
+          <span key="tool">
+            <span className="text-cyan-300">Tool steps</span> pass through the tool limits for caching, rate and how many run at once.
+          </span>,
+          <span key="control">
+            <span className="text-slate-200">Control steps</span> like branches and loops run on the pipeline&apos;s own worker.
+          </span>,
+        ]}
+      />
 
       {error && <div className="mb-4 p-3 rounded-md bg-red-900/30 border border-red-700/50 text-red-200 text-sm">{error}</div>}
 
@@ -276,5 +280,19 @@ export default function PipelineScalingPage() {
         )}
       </div>
     </div>
+  );
+}
+
+export default function PipelineScalingPageGated() {
+  return (
+    <AccessGate
+      title="Pipeline scaling"
+      purpose="See where each step of every pipeline runs, so you know which worker pool to grow when pipelines slow down. For admins."
+      icon={Workflow}
+      need={{ admin: true }}
+      instead={{ text: 'You can follow your own runs and how long they take on Executions.', href: '/executions', label: 'Open Executions' }}
+    >
+      <PipelineScalingPage />
+    </AccessGate>
   );
 }

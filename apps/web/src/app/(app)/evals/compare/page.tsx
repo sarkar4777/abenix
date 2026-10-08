@@ -3,7 +3,8 @@
 import { Suspense, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { ArrowLeft, CheckCircle2, CircleDashed, XCircle } from 'lucide-react';
+import { CheckCircle2, CircleDashed, ExternalLink, GitCompare, XCircle } from 'lucide-react';
+import PageHeader from '@/components/layout/PageHeader';
 import { useApi } from '@/hooks/useApi';
 import { TRIGGER_LABEL, pct, runVerdict, shortHash, type Comparison, type EvalResult, type EvalRun } from '@/lib/evals';
 
@@ -39,8 +40,21 @@ function Compare() {
 
   return (
     <div className="max-w-6xl mx-auto px-6 py-8">
-      <Link href={`/evals/${data.a.suite_id}`} className="inline-flex items-center gap-1 text-sm text-slate-400 hover:text-white mb-4"><ArrowLeft className="w-4 h-4" /> Back to the suite</Link>
-      <h1 className="text-2xl font-semibold text-white mb-1">Compare runs</h1>
+      <PageHeader
+        className="mb-1"
+        title="Compare runs"
+        purpose="Two evaluation runs side by side, case by case, so you can see what got better or worse. For whoever is changing the agent."
+        icon={GitCompare}
+        storageKey="eval-compare"
+        docSlug="08-howto/10-evals"
+        back={{ href: `/evals/${data.a.suite_id}`, label: 'Back to the suite' }}
+        primaryAction={{ label: 'Open run B', href: `/evals/runs/${data.b.id}`, icon: ExternalLink }}
+        steps={[
+          'A is the earlier run and B the one you are checking.',
+          'Red rows passed in A and fail in B. Green rows were fixed.',
+          'Tick Only what changed to hide cases that behaved the same. Click run to open the real execution.',
+        ]}
+      />
       {!data.same_suite && <p className="text-sm text-amber-300 mb-2">These runs belong to different suites, so only cases with the same id line up.</p>}
       <div className="grid gap-3 md:grid-cols-2 my-5" data-testid="eval-compare-heads">
         <RunHead label="A" run={data.a} />

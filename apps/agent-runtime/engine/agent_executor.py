@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 
-from engine import credentials, governance, risk
+from engine import autonomy, credentials, governance, risk
 from engine.agent_budget import BUDGET_EXCEEDED, run_budget_message, run_cost_limit
 from engine.llm_router import LLMResponse, LLMRouter
 from engine.metrics import (
@@ -20,7 +20,10 @@ from engine.metrics import (
 from engine.moderation_gate import (
     GateConfig,
     ModerationBlocked,
+    ModerationHeld,
     check as moderation_check,
+    guards_output,
+    held_message,
 )
 from engine.sandbox import ExecutionSandbox
 from engine.tools.base import ToolRegistry, ToolResult
@@ -40,6 +43,26 @@ def _provider_key(model: str) -> str:
     return "other"
 
 
+def _held(mb: Any) -> dict[str, Any]:
+    """Extra result and event fields when the gate held content for a reviewer."""
+    if not isinstance(mb, ModerationHeld):
+        return {}
+    return {"moderation_held": True, "moderation_review_id": mb.review_id}
+
+
+def _held_event(mb: Any) -> dict[str, Any]:
+    return {
+        "source": mb.source,
+        "outcome": "held",
+        "review_id": mb.review_id,
+        "categories": list(getattr(mb.decision, "triggered_categories", None) or []),
+        "timeout_minutes": mb.timeout_minutes,
+        "timeout_action": mb.timeout_action,
+        "content": _moderation_block_text(mb, ""),
+        "message": _moderation_block_text(mb, ""),
+    }
+
+
 def _moderation_block_text(mb: Any, subject: str) -> str:
     """Explain a moderation block without inventing a policy hit.
 
@@ -47,10 +70,25 @@ def _moderation_block_text(mb: Any, subject: str) -> str:
     the old wording still claimed the content breached the policy — printing
     "Categories: n/a." and leaving no way to tell an outage from a real refusal.
     """
+    if isinstance(mb, ModerationHeld):
+        return held_message(mb.source, mb.timeout_minutes, mb.timeout_action)
     decision = getattr(mb, "decision", None)
     cats = list(getattr(decision, "triggered_categories", None) or [])
     if cats:
-        return f"{subject} blocked by moderation policy. Categories: {', '.join(cats[:5])}."
+        # custom:0 is the policy's first pattern, say it the way /moderation lists it
+        named = [
+            (
+                f"custom pattern {int(c.split(':', 1)[1]) + 1}"
+                if c.startswith("custom:") and c.split(":", 1)[1].isdigit()
+                else c
+            )
+            for c in cats[:5]
+        ]
+        return (
+            f"{subject} blocked by your organisation's moderation policy, "
+            f"it matched {', '.join(named)}. Remove that part and try again. "
+            "Admins see the event on the Moderation page."
+        )
     reason = getattr(decision, "reason", "") or ""
     err = getattr(decision, "error", "") or ""
     if reason == "provider_error_fail_closed" or err:
@@ -114,6 +152,9 @@ def _attach_decision_record(tc: dict[str, Any], result: Any) -> None:
     record = (getattr(result, "metadata", None) or {}).get("decision_record")
     if record:
         tc["decision_record"] = record
+    auto = (getattr(result, "metadata", None) or {}).get("autonomy")
+    if auto:
+        tc["autonomy"] = auto
 
 
 def _model_visible_content(result: Any) -> str:
@@ -293,6 +334,9 @@ class ExecutionResult:
     # the Execution.failure_code = "MODERATION_BLOCKED" off this.
     moderation_blocked: bool = False
     moderation_block_source: str = ""  # pre_llm | post_llm
+    # a HOLD is a block that a reviewer may still release
+    moderation_held: bool = False
+    moderation_review_id: str = ""
     # Set when the agent is configured with require_knowledge_search=True
     # but completed the run without ever invoking the knowledge_search
     # tool. Downstream callers map this to failure_code=
@@ -337,8 +381,10 @@ class AgentExecutor:
         agent_name: str = "",
         cost_limit: float | None = None,
         history: list[dict[str, Any]] | None = None,
+        user_id: str = "",
     ) -> None:
         self.llm_router = llm_router
+        self.user_id = str(user_id or "")
         # earlier turns of a chat thread, sent ahead of the new user message
         self.history: list[dict[str, Any]] = [
             {"role": m["role"], "content": m["content"]}
@@ -472,6 +518,14 @@ class AgentExecutor:
             scope="agent",
             subject_id=str(self.agent_id or ""),
             parent=parent,
+            agent_id=str(self.agent_id or ""),
+            user_id=str(
+                getattr(self, "user_id", "")
+                or getattr(self.tool_registry, "run_user_id", "")
+                or (parent.user_id if parent else "")
+                or ""
+            ),
+            agent_config_hash=autonomy.config_hash(self.agent_id),
         )
         if base != "low":
             ctx.reasons.append({"tier": base, "source": "agent", "detail": ""})
@@ -514,6 +568,7 @@ class AgentExecutor:
 
     async def invoke(self, input_message: str) -> ExecutionResult:
         await governance.ensure_fresh()
+        await autonomy.ensure_fresh()
         ctx, parent, token = self._begin_governed_run()
         try:
             refusal = await self._governance_refusal()
@@ -584,6 +639,7 @@ class AgentExecutor:
                     model=self.model,
                     moderation_blocked=True,
                     moderation_block_source="pre_llm",
+                    **_held(mb),
                 )
 
         messages: list[dict[str, Any]] = [
@@ -843,6 +899,7 @@ class AgentExecutor:
                             node_traces=node_traces,
                             moderation_blocked=True,
                             moderation_block_source="post_llm",
+                            **_held(mb),
                         )
 
                 if self.cache and not self.history and output_text == resp.content:
@@ -942,6 +999,7 @@ class AgentExecutor:
                         _tspan.set_attribute(
                             "tool.args_preview", _short(tc.get("arguments"))
                         )
+                        autonomy.set_tool_call(tc.get("id"))
                         result = await tool.execute(tc["arguments"])
                         _tspan.set_attribute(
                             "tool.is_error", bool(getattr(result, "is_error", False))
@@ -1122,6 +1180,7 @@ class AgentExecutor:
 
     async def stream(self, input_message: str) -> AsyncGenerator[ExecutionEvent, None]:
         await governance.ensure_fresh()
+        await autonomy.ensure_fresh()
         ctx, parent, token = self._begin_governed_run()
         try:
             refusal = await self._governance_refusal()
@@ -1222,6 +1281,8 @@ class AgentExecutor:
                 ).inc()
                 duration = int((time.monotonic() - start) * 1000)
                 agent_active_streams.dec()
+                if isinstance(mb, ModerationHeld):
+                    yield ExecutionEvent(event="moderation", data=_held_event(mb))
                 yield ExecutionEvent(
                     event="token",
                     data=(_moderation_block_text(mb, "Request")),
@@ -1238,6 +1299,7 @@ class AgentExecutor:
                         "error": "moderation_blocked",
                         "moderation_blocked": True,
                         "moderation_block_source": "pre_llm",
+                        **_held(mb),
                     },
                 )
                 return
@@ -1255,8 +1317,14 @@ class AgentExecutor:
         effective_model: str | None = None
         effective_fallback_reason: str | None = None
 
+        # the reply waits for the post-LLM check when the policy could stop it
+        guarded = guards_output(self.moderation_gate)
+        withheld = ""
+        checking_sent = False
+
         # replies that depend on earlier turns stay out of the shared cache
-        if self.cache and not self.history:
+        # a cached reply would skip the output check, so a guarded run never reads it
+        if self.cache and not self.history and not guarded:
             cache_result = await self.cache.check(
                 model=self.model,
                 messages=messages,
@@ -1322,7 +1390,18 @@ class AgentExecutor:
             async for event in stream_resp:  # type: ignore[union-attr]
                 if event.event == "token":
                     full_text += event.data
-                    yield ExecutionEvent(event="token", data=event.data)
+                    if not guarded:
+                        yield ExecutionEvent(event="token", data=event.data)
+                        continue
+                    withheld += event.data
+                    if not checking_sent:
+                        checking_sent = True
+                        yield ExecutionEvent(
+                            event="reply_checking",
+                            data={
+                                "message": "Checking the reply against your organisation's moderation policy."
+                            },
+                        )
                 elif event.event == "tool_call":
                     iteration_tool_calls.append(event.data)
                     yield ExecutionEvent(event="tool_call", data=event.data)
@@ -1362,9 +1441,12 @@ class AgentExecutor:
                 agent_execution_duration_seconds.observe(duration / 1000)
                 agent_active_streams.dec()
 
-                # Post-LLM gate on the streamed answer. The tokens are already out,
-                # so a redaction goes to the client as a replacement it applies.
+                # Post-LLM gate on the answer. Unguarded tokens are already out, so a
+                # redaction goes to the client as a replacement it applies.
                 _post_redacted = False
+                if guarded:
+                    # the check covers everything the model wrote this run, nothing was shown yet
+                    full_text = withheld
                 if self.moderation_gate is not None:
                     try:
                         _checked, _mod_post = await moderation_check(
@@ -1395,12 +1477,16 @@ class AgentExecutor:
                         ).inc()
                         yield ExecutionEvent(
                             event="moderation",
-                            data={
-                                "source": "post_llm",
-                                "outcome": "blocked",
-                                "content": _moderation_block_text(mb, "Response"),
-                                "message": "The answer was blocked by the moderation policy.",
-                            },
+                            data=(
+                                _held_event(mb)
+                                if isinstance(mb, ModerationHeld)
+                                else {
+                                    "source": "post_llm",
+                                    "outcome": "blocked",
+                                    "content": _moderation_block_text(mb, "Response"),
+                                    "message": "The answer was blocked by the moderation policy.",
+                                }
+                            ),
                         )
                         yield ExecutionEvent(
                             event="done",
@@ -1415,9 +1501,14 @@ class AgentExecutor:
                                 "error": "moderation_blocked",
                                 "moderation_blocked": True,
                                 "moderation_block_source": "post_llm",
+                                **_held(mb),
                             },
                         )
                         return
+
+                # a redaction already went out as the moderation event's content
+                if guarded and full_text and not _post_redacted:
+                    yield ExecutionEvent(event="token", data=full_text)
 
                 if self.cache and not self.history and not _post_redacted:
                     response_data = {
@@ -1531,7 +1622,22 @@ class AgentExecutor:
                         _tspan.set_attribute(
                             "tool.args_preview", _short(tc.get("arguments"))
                         )
-                        result = await tool.execute(tc["arguments"])
+                        autonomy.set_tool_call(tc.get("id"))
+                        if autonomy.managed(
+                            str(getattr(self, "tenant_id", "") or ""),
+                            governance.current(),
+                            tc["name"],
+                        ):
+                            # events raised while it waits, such as action_pending, go out live
+                            async for _aev, _adata in autonomy.stream_call(
+                                tool.execute(tc["arguments"])
+                            ):
+                                if _aev == "result":
+                                    result = _adata
+                                else:
+                                    yield ExecutionEvent(event=_aev, data=_adata)
+                        else:
+                            result = await tool.execute(tc["arguments"])
                         _tspan.set_attribute(
                             "tool.is_error", bool(getattr(result, "is_error", False))
                         )
@@ -1570,10 +1676,14 @@ class AgentExecutor:
                     result.metadata, bool(result.is_error)
                 )
 
-                yield ExecutionEvent(
-                    event="tool_result",
-                    data={"name": tc["name"], "result": result.content},
-                )
+                _tr_data: dict[str, Any] = {
+                    "name": tc["name"],
+                    "result": result.content,
+                    "is_error": bool(result.is_error),
+                }
+                if (result.metadata or {}).get("autonomy"):
+                    _tr_data["autonomy"] = result.metadata["autonomy"]
+                yield ExecutionEvent(event="tool_result", data=_tr_data)
 
                 _trace = {
                     "node_type": "tool_call",
@@ -1832,6 +1942,7 @@ def _ensure_tool_classes() -> None:
     from engine.tools.connector_call import ConnectorCallTool
     from engine.tools.approval_gate import ApprovalGateTool
     from engine.tools.mqtt_publish import MqttPublishTool
+    from engine.tools.sample_plant import SamplePlantTool
     from engine.tools.tsdb_query import TsdbQueryTool
     from engine.tools.windowed_state import WindowedStateTool
     from engine.tools.subscribed_feed import SubscribedFeedTool
@@ -1996,6 +2107,7 @@ def _ensure_tool_classes() -> None:
             "fitch_connect": FitchConnectTool,
             "connector_call": ConnectorCallTool,
             "mqtt_publish": MqttPublishTool,
+            "sample_plant": SamplePlantTool,
             "tsdb_query": TsdbQueryTool,
             "windowed_state": WindowedStateTool,
             "subscribed_feed": SubscribedFeedTool,
@@ -2310,6 +2422,8 @@ def build_tool_registry(
         )
 
     registry = ToolRegistry()
+    # who the run acts for, read when the run begins
+    registry.run_user_id = str(user_id or _acting_user or "")  # type: ignore[attr-defined]
     unknown_tools: list[str] = []
     for name in tool_names:
         # Check context tools first (need constructor args)

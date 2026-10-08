@@ -45,16 +45,18 @@ async def purge_endpoint(
         return error("Forbidden", 403)
     if not await _in_tenant(db, user, user_id):
         return error("User not found", 404)
+    # a failed store rolls the session back and expires user, so read it first
+    tenant_id, actor_id = user.tenant_id, user.id
     receipt = await purge_user(
         db,
-        tenant_id=user.tenant_id,
+        tenant_id=tenant_id,
         subject_user_id=user_id,
-        requested_by=user.id,
+        requested_by=actor_id,
     )
     await log_action(
         db,
-        user.tenant_id,
-        user.id,
+        tenant_id,
+        actor_id,
         "gdpr.purge_executed",
         {"subject_user_id": str(user_id), "stores": list(receipt.keys())},
         request,

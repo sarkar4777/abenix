@@ -2,9 +2,12 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { Plus, Video, Calendar, CheckCircle2, XCircle, Loader2, Radio } from 'lucide-react';
 import { apiFetch } from '@/lib/api-client';
 import { usePageTitle } from '@/hooks/usePageTitle';
+import PageHeader from '@/components/layout/PageHeader';
+import MeetingReadiness from '@/components/meetings/MeetingReadiness';
 
 interface Meeting {
   id: string;
@@ -37,6 +40,7 @@ const STATUS_STYLE: Record<string, string> = {
 
 export default function MeetingsPage() {
   usePageTitle('Meetings');
+  const router = useRouter();
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
@@ -47,12 +51,10 @@ export default function MeetingsPage() {
 
   const load = async () => {
     setLoading(true);
-    try {
-      const r = await apiFetch<Meeting[]>('/api/meetings');
-      setMeetings(r.data || []);
-    } catch (e: any) {
-      setErr(e?.message || 'failed');
-    }
+    setErr(null);
+    const r = await apiFetch<Meeting[]>('/api/meetings', { silent: true });
+    if (r.error) setErr(`Could not load meetings. ${r.error}`);
+    setMeetings(r.data || []);
     setLoading(false);
   };
 
@@ -66,12 +68,17 @@ export default function MeetingsPage() {
         method: 'POST',
         body: JSON.stringify({ title: newTitle.trim(), provider: 'livekit' }),
       });
-      if ((r as any)?.error) throw new Error(String((r as any).error?.message));
       setNewTitle('');
       setShowCreate(false);
+      // straight to the new meeting so its scope can be set
+      if (r.data?.id) {
+        try { sessionStorage.setItem('meeting-created', r.data.id); } catch { /* storage blocked, no next steps then */ }
+        router.push(`/meetings/${r.data.id}`);
+        return;
+      }
       await load();
     } catch (e: any) {
-      setErr(e?.message || 'create failed');
+      setErr(`Could not create the meeting. ${e?.message || ''}`.trim());
     }
     setCreating(false);
   };
@@ -84,37 +91,36 @@ export default function MeetingsPage() {
 
   return (
     <div className="space-y-6 max-w-6xl">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold text-white flex items-center gap-2">
-            <Video className="w-6 h-6 text-cyan-400" />
-            Meeting sessions
-          </h1>
-          <p className="text-sm text-slate-400 mt-1">
-            Live meeting sessions — used by any agent in this workspace that
-            calls the <code className="text-cyan-300 text-xs">meeting_*</code>{' '}
-            tools (e.g. the OOB{' '}
-            <Link href="/agents" className="text-cyan-400 hover:underline">
+      <PageHeader
+        title="Meeting sessions"
+        purpose="An agent can sit in a call for you and answer only on the topics you choose. For anyone who wants a stand-in at meetings."
+        icon={Video}
+        storageKey="meetings"
+        docSlug="08-howto/15-meetings"
+        primaryAction={{ label: 'New meeting', icon: Plus, onClick: () => setShowCreate(true), testId: 'new-meeting-btn' }}
+        steps={[
+          { title: 'Create a meeting', body: 'Give it a title. It gets its own room.' },
+          { title: 'Set the scope', body: 'List the topics the bot may answer and the ones it must hand back to you.' },
+          { title: 'Rehearse it', body: 'Type questions at the bot before the real call. No room or voice needed.' },
+          { title: 'Start the bot', body: 'It joins the room, answers within scope and writes a summary at the end.' },
+        ]}
+        howItWorks={
+          <p className="text-xs text-slate-400">
+            The built-in{' '}
+            <Link href="/agents?tab=prebuilt" className="text-cyan-400 hover:underline">
               Meeting Representative
-            </Link>
-            , or a custom agent you've built). Meetings aren't a first-class
-            product — they're an execution surface for whichever agent you
-            choose to delegate.
+            </Link>{' '}
+            does this out of the box, and any agent with the meeting tools can too.
           </p>
-        </div>
-        <button
-          onClick={() => setShowCreate(true)}
-          className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-cyan-600/20 border border-cyan-500/30 text-cyan-300 hover:bg-cyan-600/30 text-sm font-medium"
-          data-testid="new-meeting-btn"
-        >
-          <Plus className="w-4 h-4" />
-          New meeting
-        </button>
-      </div>
+        }
+      />
+
+      <MeetingReadiness />
 
       {err && (
-        <div className="px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/30 text-red-300 text-xs">
+        <div role="alert" data-testid="meetings-error" className="px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/30 text-red-300 text-xs flex flex-wrap gap-2">
           {err}
+          <button onClick={load} className="underline">Try again</button>
         </div>
       )}
 
@@ -123,17 +129,26 @@ export default function MeetingsPage() {
           <h3 className="text-sm font-medium text-white">New LiveKit meeting</h3>
           <input
             autoFocus
+            aria-label="Meeting title"
+            data-testid="new-meeting-title"
             type="text"
             value={newTitle}
             onChange={e => setNewTitle(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && createMeeting()}
+            onKeyDown={e => {
+              if (e.key === 'Enter') createMeeting();
+              if (e.key === 'Escape') { setShowCreate(false); setNewTitle(''); }
+            }}
+            maxLength={300}
             placeholder="e.g. Weekly standup with client ACME"
             className="w-full px-3 py-2 bg-slate-800/60 border border-slate-700/50 rounded-lg text-sm text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500/50"
           />
+          <p className="text-[11px] text-slate-500">Next you pick the topics the bot may answer. You can rehearse it before the real meeting.</p>
           <div className="flex gap-2">
             <button
               onClick={createMeeting}
+              data-testid="new-meeting-create"
               disabled={creating || !newTitle.trim()}
+              title={!newTitle.trim() ? 'Give the meeting a title first' : undefined}
               className="px-3 py-1.5 text-xs rounded bg-cyan-600 text-white hover:bg-cyan-500 disabled:opacity-50"
             >
               {creating ? 'Creating…' : 'Create'}
@@ -152,6 +167,8 @@ export default function MeetingsPage() {
         {(['upcoming', 'live', 'history'] as const).map(k => (
           <button
             key={k}
+            role="tab"
+            aria-selected={tab === k}
             onClick={() => setTab(k)}
             className={`px-4 py-2 text-sm capitalize border-b-2 transition-colors ${
               tab === k
@@ -173,9 +190,13 @@ export default function MeetingsPage() {
         <div className="flex items-center justify-center py-20">
           <Loader2 className="w-6 h-6 animate-spin text-cyan-500" />
         </div>
-      ) : filtered.length === 0 ? (
-        <div className="text-center py-16 text-sm text-slate-500">
-          No {tab} meetings. Click "New meeting" to create one.
+      ) : err && meetings.length === 0 ? null : filtered.length === 0 ? (
+        <div className="text-center py-16 text-sm text-slate-500" data-testid="meetings-empty">
+          {tab === 'upcoming'
+            ? 'No upcoming meetings. Click New meeting to create one.'
+            : tab === 'live'
+              ? 'No meeting is live right now. Start the bot from a meeting to see it here.'
+              : 'No finished meetings yet. Ended and stopped meetings show here with their summary.'}
         </div>
       ) : (
         <div className="grid gap-3">
@@ -198,8 +219,8 @@ export default function MeetingsPage() {
                   )}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <h3 className="text-sm font-medium text-white truncate">{m.title}</h3>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h3 className="text-sm font-medium text-white truncate max-w-full">{m.title}</h3>
                     <span className={`text-[10px] px-1.5 py-0.5 rounded border ${STATUS_STYLE[m.status] || ''}`}>
                       {m.status}
                     </span>
@@ -215,13 +236,13 @@ export default function MeetingsPage() {
                       <span className="text-[10px] text-amber-300/70">no scope declared</span>
                     )}
                   </div>
-                  <div className="mt-2 flex gap-4 text-[11px] text-slate-500">
+                  <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-slate-500">
                     <span>{m.transcript_count} lines</span>
                     <span>{m.decision_count} decisions</span>
                     <span className={m.deferral_count > 0 ? 'text-amber-300/70' : ''}>
                       {m.deferral_count} deferrals
                     </span>
-                    <span className="ml-auto font-mono text-slate-600">{m.room}</span>
+                    <span className="ml-auto font-mono text-slate-600 break-all">{m.room}</span>
                   </div>
                 </div>
               </div>

@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from engine import code_runners
-from engine.tools.base import BaseTool, ToolResult
+from engine.tools.base import BaseTool, Effect, ToolResult
 from engine.tools.sandboxed_job import SandboxedJobTool
 
 logger = logging.getLogger(__name__)
@@ -128,6 +128,9 @@ def single_root_prefix(names: list[str]) -> str:
 class CodeAssetTool(BaseTool):
     name = "code_asset"
     risk_tier = "medium"
+    effect = Effect(
+        kind="external", label="Run a code asset", target_param="code_asset_id"
+    )
     description = (
         "Execute a registered code asset (a user-uploaded zip/git repo) "
         "with a JSON input. Runs inside the sandboxed_job isolation layer "

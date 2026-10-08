@@ -1,11 +1,14 @@
 'use client';
 
-import { useMemo, useState } from 'react';
-import { Check, KeyRound, Loader2, Pencil, Plus, Search, Trash2, UserCog, UserPlus, Users, X } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Check, KeyRound, Loader2, Mail, Pencil, Plus, Search, ShieldCheck, Trash2, UserCog, UserPlus, Users, X } from 'lucide-react';
 import { apiFetch } from '@/lib/api-client';
 import { useApi } from '@/hooks/useApi';
 import { holds, useMyPermissions } from '@/lib/capabilities';
 import ConfirmModal from '@/components/ui/ConfirmModal';
+import PageHeader from '@/components/layout/PageHeader';
+import NoAccess from '@/components/layout/NoAccess';
+import NextSteps, { type NextStep } from '@/components/shared/NextSteps';
 
 interface Cap {
   key: string;
@@ -52,19 +55,28 @@ export default function PermissionsPage() {
   const allowed = holds(perms?.capabilities, 'permissions.manage');
   const { data: cat } = useApi<Catalog>(allowed ? '/api/governance/capabilities' : null);
   const { data: sets, isLoading, error, mutate } = useApi<PermSet[]>(allowed ? '/api/governance/permission-sets' : null);
-  const { data: team } = useApi<{ members: TeamMember[] }>(allowed ? '/api/team/members' : null);
+  // always fresh, someone who just accepted an invite must be pickable
+  const { data: team, mutate: refreshTeam } = useApi<{ members: TeamMember[] }>(allowed ? '/api/team/members' : null, { revalidateOnMount: true, dedupingInterval: 0 });
+  // a list the Team page fetched seconds ago is reused on mount, ask again so new joiners show
+  useEffect(() => {
+    if (allowed) refreshTeam();
+  }, [allowed]);
   const [editing, setEditing] = useState<PermSet | 'new' | null>(null);
+  const [firstSet, setFirstSet] = useState<{ name: string; capabilities: string[] } | null>(null);
 
   if (loading && !perms) {
     return <div className="max-w-6xl mx-auto px-6 py-8"><div className="h-40 rounded-xl bg-slate-800/40 animate-pulse" /></div>;
   }
   if (!allowed) {
     return (
-      <div className="max-w-3xl mx-auto px-6 py-16 text-center" data-testid="permissions-no-access">
-        <UserCog className="w-10 h-10 text-slate-500 mx-auto mb-3" />
-        <h1 className="text-xl font-semibold text-white">Permissions</h1>
-        <p className="text-slate-400 mt-2">This page needs the permissions.manage capability. Ask an admin for it.</p>
-      </div>
+      <NoAccess
+        testId="permissions-no-access"
+        title="Permissions"
+        purpose="Give specific people extra abilities, like reviewing decisions or signing legal approvals, without making them admins. For admins."
+        icon={UserCog}
+        need={{ capability: 'permissions.manage', label: 'Manage permissions' }}
+        role={perms?.role}
+      />
     );
   }
 
@@ -72,27 +84,30 @@ export default function PermissionsPage() {
 
   return (
     <div className="max-w-6xl mx-auto px-6 py-8">
-      <header className="mb-6 flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2 mb-2">
-            <UserCog className="w-6 h-6 text-cyan-400" />
-            <h1 className="text-3xl font-semibold text-white">Permissions</h1>
-          </div>
-          <p className="text-slate-400 max-w-3xl">
-            Every person gets what their role allows. A permission set adds specific abilities on top, such as reviewing
-            decisions or signing legal approvals, without making someone an admin. Changes apply within ten seconds and
-            are recorded in the audit log.
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={() => setEditing('new')}
-          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-md text-sm font-medium bg-cyan-500 text-white hover:bg-cyan-400"
-          data-testid="permset-new"
-        >
-          <Plus className="w-4 h-4" /> New permission set
-        </button>
-      </header>
+      <PageHeader
+        className="mb-6"
+        title="Permissions"
+        purpose="Give specific people extra abilities, like reviewing decisions or signing legal approvals, without making them admins. For admins."
+        icon={UserCog}
+        storageKey="admin-permissions"
+        docSlug="01-architecture/01-tenants-rbac"
+        primaryAction={{ label: 'New permission set', icon: Plus, onClick: () => setEditing('new'), testId: 'permset-new' }}
+        steps={[
+          'Every person starts with what their role allows. The role cards show exactly what that is.',
+          'A permission set is a named bundle of extra abilities. Create one and tick what it grants.',
+          'Add people to the set. Changes apply within ten seconds and are recorded in the audit log.',
+        ]}
+      />
+
+      {firstSet && (
+        <NextSteps
+          className="mb-6"
+          title={`${firstSet.name} is ready. What next?`}
+          testId="permissions-next-steps"
+          onDismiss={() => setFirstSet(null)}
+          steps={firstSetSteps(firstSet, () => setFirstSet(null))}
+        />
+      )}
 
       {cat && (
         <section className="mb-8" aria-labelledby="role-baseline">
@@ -135,7 +150,7 @@ export default function PermissionsPage() {
         ) : (
           <div className="space-y-3">
             {(sets || []).map((s) => (
-              <SetCard key={s.id} set={s} catalog={catalog} team={team?.members || []} onEdit={() => setEditing(s)} onChanged={mutate} />
+              <SetCard key={s.id} set={s} catalog={catalog} team={team?.members || []} onMissing={refreshTeam} onEdit={() => setEditing(s)} onChanged={mutate} />
             ))}
           </div>
         )}
@@ -147,7 +162,8 @@ export default function PermissionsPage() {
           catalog={catalog}
           existingNames={(sets || []).filter((s) => editing === 'new' || s.id !== editing.id).map((s) => s.name.toLowerCase())}
           onClose={() => setEditing(null)}
-          onSaved={() => {
+          onSaved={(saved) => {
+            if (editing === 'new' && (sets || []).length === 0) setFirstSet(saved);
             setEditing(null);
             mutate();
           }}
@@ -157,16 +173,41 @@ export default function PermissionsPage() {
   );
 }
 
+function firstSetSteps(set: { name: string; capabilities: string[] }, hide: () => void): NextStep[] {
+  const steps: NextStep[] = [
+    {
+      id: 'add-people',
+      label: 'Add people to it',
+      hint: 'Pick who should get these abilities.',
+      icon: UserPlus,
+      onClick: () => {
+        const input = Array.from(document.querySelectorAll<HTMLInputElement>('input[data-testid^="permset-add-"]'))
+          .find((el) => el.dataset.testid === `permset-add-${set.name}`);
+        input?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        input?.focus();
+        hide();
+      },
+    },
+    { id: 'invite', label: 'Invite a teammate', hint: 'People must join the workspace before you can add them.', icon: Mail, href: '/team' },
+  ];
+  if (set.capabilities.some((c) => c === 'approvals.sign' || c.startsWith('approvals.sign:'))) {
+    steps.push({ id: 'approvals', label: 'Open approvals', hint: 'Where members of this set sign gates.', icon: ShieldCheck, href: '/approvals' });
+  }
+  return steps;
+}
+
 function SetCard({
   set,
   catalog,
   team,
+  onMissing,
   onEdit,
   onChanged,
 }: {
   set: PermSet;
   catalog: Cap[];
   team: TeamMember[];
+  onMissing: () => void;
   onEdit: () => void;
   onChanged: () => void;
 }) {
@@ -182,6 +223,14 @@ function SetCard({
       .filter((t) => !q || t.email.toLowerCase().includes(q) || (t.full_name || '').toLowerCase().includes(q))
       .slice(0, 6);
   }, [team, adding, set.members]);
+  // nobody matches, they may have joined since the list loaded, look again at most every few seconds
+  const lastRefresh = useRef(0);
+  useEffect(() => {
+    if (!adding.trim() || candidates.length > 0) return;
+    if (Date.now() - lastRefresh.current < 3000) return;
+    lastRefresh.current = Date.now();
+    onMissing();
+  }, [adding, candidates.length, onMissing]);
 
   async function add(email: string) {
     setBusy(true);
@@ -311,7 +360,7 @@ function SetEditor({
   catalog: Cap[];
   existingNames: string[];
   onClose: () => void;
-  onSaved: () => void;
+  onSaved: (saved: { name: string; capabilities: string[] }) => void;
 }) {
   const [name, setName] = useState(initial?.name || '');
   const [description, setDescription] = useState(initial?.description || '');
@@ -357,7 +406,7 @@ function SetEditor({
       : await apiFetch(`/api/governance/permission-sets`, { method: 'POST', body, throwOnError: false });
     setBusy(false);
     if (r.error) setErr(r.error);
-    else onSaved();
+    else onSaved({ name: name.trim(), capabilities: caps });
   }
 
   const signGroups = caps.filter((c) => c.startsWith('approvals.sign:')).map((c) => c.split(':')[1]);

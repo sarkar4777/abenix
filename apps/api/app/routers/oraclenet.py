@@ -89,6 +89,7 @@ async def analyze_decision(
         input_message=body.decision_prompt,
         status=ExecutionStatus.RUNNING,
         model_used="pipeline",
+        trigger_kind="api" if getattr(user, "_api_key_scopes", None) else "manual",
     )
     db.add(execution)
     await db.commit()

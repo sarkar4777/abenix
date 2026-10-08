@@ -6,7 +6,7 @@ from engine import credentials
 import json
 from typing import Any
 
-from engine.tools.base import BaseTool, ConfigField, ToolResult
+from engine.tools.base import READ_ONLY, BaseTool, ConfigField, Effect, ToolResult
 
 # Service registry: name → {env_key, base_url, description}
 SERVICES = {
@@ -39,6 +39,9 @@ SERVICES = {
 class IntegrationHubTool(BaseTool):
     name = "integration_hub"
     risk_tier = "medium"
+    effect = Effect(
+        kind="external", label="Act on a connected service", target_param="service"
+    )
     # One secret per service in SERVICES, plus the Jira and Salesforce
     # addresses read by name below. Several services share a key with
     # another tool, which is fine, storage is per key.
@@ -98,6 +101,13 @@ class IntegrationHubTool(BaseTool):
         },
         "required": ["service", "action"],
     }
+
+    _READ_PREFIXES = ("get", "list", "read", "query", "search", "fetch", "find")
+
+    @classmethod
+    def effect_for(cls, arguments: dict[str, Any]) -> Effect | None:
+        action = str(arguments.get("action") or "").lower()
+        return READ_ONLY if action.startswith(cls._READ_PREFIXES) else cls.effect
 
     async def execute(self, arguments: dict[str, Any]) -> ToolResult:
         service = arguments.get("service", "")

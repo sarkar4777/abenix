@@ -4,10 +4,12 @@ import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  ArrowLeft, Brain, ChevronRight, Database, FolderOpen, Loader2, Plus, Search,
-  Shield, Trash2, Users, X,
+  Brain, ChevronRight, Database, FolderOpen, Loader2, Plus, Search,
+  Shield, Trash2, Users,
 } from 'lucide-react';
 
+import PageHeader from '@/components/layout/PageHeader';
+import NextSteps from '@/components/shared/NextSteps';
 import ResponsiveModal from '@/components/ui/ResponsiveModal';
 import EmptyState from '@/components/ui/EmptyState';
 import ConfirmModal from '@/components/ui/ConfirmModal';
@@ -326,6 +328,7 @@ export default function KnowledgeProjectsPage() {
   const [grantsFor, setGrantsFor] = useState<{ id: string; name: string } | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<KProject | null>(null);
   const [collections, setCollections] = useState<Record<string, KCollection[]>>({});
+  const [created, setCreated] = useState<KProject | null>(null);
 
   const filtered = useMemo(() => {
     if (!projects) return [] as KProject[];
@@ -375,24 +378,36 @@ export default function KnowledgeProjectsPage() {
 
   return (
     <div className="p-8 max-w-7xl mx-auto">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <Link href="/knowledge" className="text-xs text-slate-500 hover:text-slate-300 inline-flex items-center gap-1 mb-2">
-            <ArrowLeft className="w-3 h-3" /> Back to all collections
-          </Link>
-          <h1 className="text-2xl font-semibold text-white">Knowledge Projects</h1>
-          <p className="text-sm text-slate-400 mt-1">
-            Group related collections, manage access per agent or per user, share an ontology across them.
-          </p>
-        </div>
-        <button
-          onClick={() => setCreateOpen(true)}
-          className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-medium rounded-lg text-sm"
-        >
-          <Plus className="w-4 h-4" /> New Project
-        </button>
-      </div>
+      <PageHeader
+        className="mb-6"
+        back={{ href: '/knowledge', label: 'Back to all collections' }}
+        title="Knowledge Projects"
+        purpose="Group related knowledge bases, control which agents and people can read them, and share one map of terms across them. For admins and agent builders."
+        icon={FolderOpen}
+        iconClassName="text-emerald-400"
+        storageKey="knowledge-projects"
+        docSlug="02-runtime/15-v2-knowledge-enterprise"
+        steps={[
+          'Create a project for a topic or team, like Legal or Support.',
+          'Open a project to see its knowledge bases and who can read each one.',
+          'Use Access to give a specific agent or person read or write rights.',
+          'Open Ontology to define the kinds of things and links the project talks about.',
+        ]}
+        primaryAction={{ label: 'New Project', icon: Plus, onClick: () => setCreateOpen(true) }}
+      />
+
+      {created && (
+        <NextSteps
+          className="mb-6"
+          title={`${created.name} is ready. What next?`}
+          testId="kp-next-steps"
+          onDismiss={() => setCreated(null)}
+          steps={[
+            { id: 'ontology', label: 'Define its ontology', hint: 'Say which kinds of things and links matter here.', icon: Brain, href: `/knowledge/projects/${created.id}/ontology` },
+            { id: 'kb', label: 'Open knowledge bases', hint: 'Create one and upload the documents.', icon: Database, href: '/knowledge' },
+          ]}
+        />
+      )}
 
       {/* Search */}
       <div className="relative mb-4 max-w-md">
@@ -516,7 +531,7 @@ export default function KnowledgeProjectsPage() {
       <CreateProjectModal
         open={createOpen}
         onClose={() => setCreateOpen(false)}
-        onCreated={() => mutate()}
+        onCreated={(p) => { setCreated(p); mutate(); }}
       />
 
       <GrantsModal

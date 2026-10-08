@@ -9,6 +9,8 @@ class ExecuteRequest(BaseModel):
     context: dict[str, Any] | None = None  # Input variables for pipelines and agents
     # chat thread owned by the caller, its earlier turns go to the agent as history
     conversation_id: str | None = Field(default=None, max_length=64)
+    # where a browser run came from, recorded as "Started by" on the run
+    source: str | None = Field(default=None, pattern=r"^(chat|playground|builder)$")
     # Tri-state: None means "let the server pick based on caller type":
     #   - SDK / X-API-Key callers default to wait=True (synchronous), because
     #     they have no UI to subscribe to a live stream and are almost always

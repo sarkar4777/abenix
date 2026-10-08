@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import time
 from typing import Any
-from engine.tools.base import BaseTool
+from engine.tools.base import BaseTool, Effect
 
 
 class EventBufferTool(BaseTool):
@@ -188,6 +188,9 @@ class RedisStreamPublisherTool(BaseTool):
 
     name = "redis_stream_publisher"
     risk_tier = "medium"
+    effect = Effect(
+        kind="publish", label="Publish to a Redis stream", target_param="stream"
+    )
     description = "Publish messages to a Redis Stream. Use for inter-agent communication, event broadcasting, and IoT data ingestion pipelines."
     input_schema = {
         "type": "object",

@@ -44,6 +44,7 @@ class Connector(UUIDMixin, TenantMixin, TimestampMixin, Base):
         Enum(ConnectorAuthType, name="connector_auth_type"),
         default=ConnectorAuthType.none,
     )
+    # legacy ApiKey pointer, never read as a credential, see routers/connectors.py
     secret_ref: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
     config: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)

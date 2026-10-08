@@ -160,6 +160,102 @@ def _run_cost_cap(loaded: dict[str, Any], payload: dict[str, Any]) -> float | No
     )
 
 
+def _moderation_sink(events: list[dict[str, Any]]) -> Any:
+    """Collect gate decisions so queue-routed runs leave events like inline runs do."""
+
+    def _sink(**kw: Any) -> None:
+        decision = kw.get("decision")
+        if decision is None:
+            return
+        events.append(
+            {
+                "source": kw.get("source") or "pre_llm",
+                "outcome": getattr(decision, "outcome", "allowed"),
+                "content_preview": (kw.get("content_preview") or "")[:500],
+                "content_sha256": kw.get("content_sha256"),
+                "acted_categories": list(
+                    getattr(decision, "triggered_categories", None) or []
+                ),
+                "category_scores": dict(
+                    getattr(decision, "category_scores", None) or {}
+                ),
+                "provider_response": getattr(decision, "provider_response", None) or {},
+                "latency_ms": int(getattr(decision, "latency_ms", 0) or 0),
+                "hold": kw.get("hold"),
+                "consumed_review_id": kw.get("consumed_review_id"),
+            }
+        )
+
+    return _sink
+
+
+async def _persist_moderation_events(
+    gate: Any, events: list[dict[str, Any]], execution_id: str, user_id: str | None
+) -> None:
+    """Write the collected events. Never fails the run."""
+    if gate is None or not events:
+        return
+    try:
+        from models.moderation_policy import (  # type: ignore
+            ModerationEvent,
+            ModerationEventOutcome,
+        )
+
+        from engine.moderation_hold import persist_gate_event
+
+        Session = await _get_session_factory()
+        async with Session() as db:
+            for e in events:
+                try:
+                    outcome = ModerationEventOutcome(e["outcome"])
+                except ValueError:
+                    outcome = ModerationEventOutcome.ERROR
+                ev = ModerationEvent(
+                    id=uuid.uuid4(),
+                    tenant_id=uuid.UUID(gate.tenant_id),
+                    policy_id=uuid.UUID(gate.policy_id) if gate.policy_id else None,
+                    user_id=uuid.UUID(user_id) if user_id else None,
+                    execution_id=uuid.UUID(execution_id),
+                    source=e["source"],
+                    outcome=outcome,
+                    content_sha256=e.get("content_sha256"),
+                    content_preview=e.get("content_preview"),
+                    provider_response=e.get("provider_response") or {},
+                    acted_categories=e.get("acted_categories") or [],
+                    latency_ms=e.get("latency_ms") or 0,
+                )
+                db.add(ev)
+                # held content goes to the review inbox, the API announces it to reviewers
+                await persist_gate_event(
+                    db,
+                    event=ev,
+                    payload=e,
+                    tenant_id=gate.tenant_id,
+                    user_id=user_id,
+                    policy_id=gate.policy_id,
+                    execution_id=execution_id,
+                    redaction_mask=getattr(gate, "redaction_mask", "█████"),
+                )
+            await db.commit()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("moderation events not saved for %s: %s", execution_id, exc)
+
+
+async def _released_for(tenant_id: str, user_id: str | None) -> dict[str, str]:
+    """Messages a reviewer released for this person, so a resend goes through once."""
+    if not user_id:
+        return {}
+    try:
+        from engine.moderation_hold import load_released
+
+        Session = await _get_session_factory()
+        async with Session() as db:
+            return await load_released(db, tenant_id, user_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("released reviews not loaded: %s", exc)
+        return {}
+
+
 async def _load_moderation_gate(
     tenant_id: str,
 ) -> Any:
@@ -212,6 +308,12 @@ async def _load_moderation_gate(
                 redaction_mask=str(policy.redaction_mask or "█████"),
                 fail_closed=bool(getattr(policy, "fail_closed", False)),
                 event_sink=None,
+                hold_timeout_minutes=int(
+                    getattr(policy, "hold_timeout_minutes", 60) or 60
+                ),
+                hold_timeout_action=str(
+                    getattr(policy, "hold_timeout_action", "reject") or "reject"
+                ),
             )
     except Exception as e:
         logger.warning("could not load moderation gate for tenant %s: %s", tenant_id, e)
@@ -525,6 +627,9 @@ def _merge_tool_trace(tool_calls: list[dict[str, Any]], trace: dict[str, Any]) -
             record = (trace.get("metadata") or {}).get("decision_record")
             if record:
                 tc["decision_record"] = record
+            auto = (trace.get("metadata") or {}).get("autonomy")
+            if auto:
+                tc["autonomy"] = auto
             return
 
 
@@ -550,6 +655,9 @@ def _pipeline_tool_calls(node_results: dict[str, Any] | None) -> list[dict[str, 
         record = (nr.get("metadata") or {}).get("decision_record")
         if record:
             entry["decision_record"] = record
+        auto = (nr.get("metadata") or {}).get("autonomy")
+        if auto:
+            entry["autonomy"] = auto
         out.append(entry)
     return out
 
@@ -696,6 +804,24 @@ async def _write_trigger_outcome_fallback(
         await db.commit()
 
 
+async def _trigger_of(Session: Any, execution_id: str) -> str | None:
+    """The trigger recorded on the row, for a message that came without one."""
+    from sqlalchemy import text
+
+    try:
+        async with Session() as db:
+            tid = (
+                await db.execute(
+                    text("SELECT trigger_id FROM executions WHERE id = :id"),
+                    {"id": uuid.UUID(str(execution_id))},
+                )
+            ).scalar()
+        return str(tid) if tid else None
+    except Exception as e:
+        logger.debug("consumer: trigger lookup skipped for %s: %s", execution_id, e)
+        return None
+
+
 async def _after_terminal(
     execution_id: str, status: str, error: str | None, trigger_id: str | None
 ) -> None:
@@ -712,6 +838,8 @@ async def _after_terminal(
             await record(Session, execution_id)
         except Exception as e:
             logger.warning("consumer: drift record skipped for %s: %s", execution_id, e)
+    if not trigger_id:
+        trigger_id = await _trigger_of(Session, execution_id)
     if not trigger_id:
         return
     writer = None
@@ -1116,6 +1244,15 @@ async def _run_one(payload: dict) -> None:
                 loaded["model_cfg"].get("require_knowledge_search", False)
             )
             _moderation_gate = await _load_moderation_gate(tenant_id)
+            _mod_events: list[dict[str, Any]] = []
+            if _moderation_gate is not None:
+                _moderation_gate.event_sink = _moderation_sink(_mod_events)
+                _moderation_gate.user_id = str(user_id or "")
+                _moderation_gate.conversation_id = str(
+                    payload.get("conversation_id") or ""
+                )
+                _moderation_gate.agent_id = str(loaded.get("agent_id") or "")
+                _moderation_gate.released = await _released_for(tenant_id, user_id)
             executor = AgentExecutor(
                 llm_router=llm_router,
                 tool_registry=registry,
@@ -1225,6 +1362,9 @@ async def _run_one(payload: dict) -> None:
                                 "output_summary": _summary,
                             }
                         )
+            await _persist_moderation_events(
+                _moderation_gate, _mod_events, execution_id, user_id
+            )
             result = SimpleNamespace(
                 output="".join(_full_text_parts),
                 tool_calls=_agg_tool_calls,
@@ -1324,7 +1464,11 @@ async def _run_one(payload: dict) -> None:
                 "moderation_blocked"
             ):
                 _final_status = "failed"
-                _final_code = "MODERATION_BLOCKED"
+                _final_code = (
+                    "MODERATION_HELD"
+                    if _last_done.get("moderation_held")
+                    else "MODERATION_BLOCKED"
+                )
                 _final_error = (
                     full_output_str[:2000] or "Moderation policy blocked the request"
                 )

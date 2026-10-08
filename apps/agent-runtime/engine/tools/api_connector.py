@@ -5,12 +5,15 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from engine.tools.base import BaseTool, ConfigField, ToolResult
+from engine.tools.base import READ_ONLY, BaseTool, ConfigField, Effect, ToolResult
 
 
 class ApiConnectorTool(BaseTool):
     name = "api_connector"
     risk_tier = "medium"
+    effect = Effect(
+        kind="external", label="Write to a connected service", target_param="service"
+    )
     config_fields = (
         ConfigField(
             "SLACK_WEBHOOK_URL",
@@ -93,6 +96,12 @@ class ApiConnectorTool(BaseTool):
         },
         "required": ["service", "params"],
     }
+
+    _READS = {"airtable_read", "notion_query", "jira_search", "google_sheets_read"}
+
+    @classmethod
+    def effect_for(cls, arguments: dict[str, Any]) -> Effect | None:
+        return READ_ONLY if arguments.get("service") in cls._READS else cls.effect
 
     async def execute(self, arguments: dict[str, Any]) -> ToolResult:
         service = arguments.get("service", "")

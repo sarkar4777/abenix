@@ -12,7 +12,7 @@ from urllib.parse import quote_plus
 import httpx
 
 from engine import credentials
-from engine.tools.base import BaseTool, ConfigField, ToolResult
+from engine.tools.base import READ_ONLY, BaseTool, ConfigField, ToolResult
 
 logger = logging.getLogger(__name__)
 
@@ -267,6 +267,7 @@ def _compute_effective_pct(ownership_paths: list[list[dict[str, Any]]]) -> float
 class UBODiscoveryTool(BaseTool):
     name = "ubo_discovery"
     risk_tier = "medium"
+    effect = READ_ONLY
     config_fields = (
         ConfigField(
             "COMPANIES_HOUSE_API_KEY",

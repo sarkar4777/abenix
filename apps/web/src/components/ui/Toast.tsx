@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
+import Link from 'next/link';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   CheckCircle2,
@@ -82,6 +83,11 @@ function ToastCard({ toast }: { toast: Toast }) {
           <p className="text-sm font-medium text-white">{toast.title}</p>
           {toast.message && (
             <p className="mt-0.5 text-xs text-slate-400">{toast.message}</p>
+          )}
+          {toast.action && (
+            <Link href={toast.action.href} className="mt-1 inline-block text-xs font-medium text-cyan-300 hover:underline" data-testid="toast-action">
+              {toast.action.label}
+            </Link>
           )}
         </div>
 

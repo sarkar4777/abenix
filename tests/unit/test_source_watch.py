@@ -222,6 +222,16 @@ def test_text_diff_hunks_and_summary():
     assert d["materiality_hint"] in ("medium", "high")
 
 
+def test_summary_does_not_double_quote_a_quoted_line():
+    old = "\n".join(["{", '  "uuid": "a"', "}"])
+    new = "\n".join(["{", '  "uuid": "b"', "}"])
+    d = D.compare("json", old, new)
+    assert 'Now reads: "uuid": "b".' in d["summary"]
+    assert '""' not in d["summary"]
+    plain = D.compare("html", "a", "b shall apply")
+    assert plain["summary"].endswith('Now reads: "b shall apply".')
+
+
 def test_identical_content_is_no_change():
     assert D.compare("html", "same", "same") is None
     t = {"": [["id", "v"], ["1", "a"]]}

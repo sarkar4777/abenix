@@ -3,9 +3,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Cpu, Loader2, RefreshCw, Send, X, AlertTriangle, CheckCircle2, Clock, Wifi,
-  Copy, ChevronDown, ChevronRight, Package, Terminal, Info,
+  Copy, Package, Terminal,
 } from 'lucide-react';
+import PageHeader from '@/components/layout/PageHeader';
+import NextSteps from '@/components/shared/NextSteps';
 import { fetchAllAgents } from '@/lib/fetch-all-agents';
+import { useEscapeToClose } from '@/hooks/useEscapeToClose';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 function getToken() {
@@ -30,6 +33,10 @@ type Gateway = {
   registered_at: string | null;
   last_seen_at: string | null;
 };
+
+type NextState =
+  | { kind: 'first'; gatewayId: string; gatewayName: string }
+  | { kind: 'deployed'; gatewayId: string; gatewayName: string; agentId: string };
 
 type AgentRow = {
   id: string;
@@ -102,25 +109,34 @@ export default function EdgePage() {
   const [agentLoadProgress, setAgentLoadProgress] = useState<{ loaded: number; total: number } | null>(null);
   const loadStartedAt = useRef<number>(0);
   const [toast, setToast] = useState<string | null>(null);
-  const [howOpen, setHowOpen] = useState(false);
+  const [next, setNext] = useState<NextState | null>(null);
+  // null until the first load, so a gateway that was already there is not news
+  const gatewayCount = useRef<number | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
-  const [tokenModal, setTokenModal] = useState<{ token: string; pubkey: string; warning: string } | null>(null);
+  const [tokenModal, setTokenModal] = useState<{ token: string; pubkey: string; warning: string; name: string } | null>(null);
   const [minting, setMinting] = useState(false);
+  const closeTokenModal = useCallback(() => setTokenModal(null), []);
+  useEscapeToClose(!!tokenModal, closeTokenModal);
 
   const mintToken = useCallback(async () => {
     const token = getToken();
     if (!token) return;
     setMinting(true);
+    setError(null);
+    // unique per mint so the key is easy to find and revoke later
+    const keyName = `edge gateway ${new Date().toISOString().slice(0, 16).replace('T', ' ')}`;
     try {
       const r = await fetch(`${API_URL}/api/edge/tokens/mint`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: `edge-${new Date().toISOString().slice(0,10)}` }),
+        body: JSON.stringify({ name: keyName }),
       });
-      const j = await r.json();
+      const j = await r.json().catch(() => ({}));
       const d = j?.data;
-      if (!r.ok || !d?.platform_token) { setError(j?.error?.message || 'Failed to mint token'); return; }
-      setTokenModal({ token: d.platform_token, pubkey: d.signing_pubkey_pem || '', warning: d.warning || '' });
+      if (!r.ok || !d?.platform_token) { setError(j?.error?.message || 'Could not mint an edge token. Try again.'); return; }
+      setTokenModal({ token: d.platform_token, pubkey: d.signing_pubkey_pem || '', warning: d.warning || '', name: keyName });
+    } catch {
+      setError('Could not reach the server to mint a token.');
     } finally {
       setMinting(false);
     }
@@ -155,7 +171,12 @@ export default function EdgePage() {
       ]);
       const gj = await gr.json();
       const vj = await vr.json();
-      setGateways(gj?.data?.gateways || []);
+      const gws: Gateway[] = gj?.data?.gateways || [];
+      if (gatewayCount.current === 0 && gws.length > 0) {
+        setNext({ kind: 'first', gatewayId: gws[0].id, gatewayName: gws[0].name || gws[0].gateway_id });
+      }
+      gatewayCount.current = gws.length;
+      setGateways(gws);
       const rawAgents: any[] = Array.isArray(agentsResult.agents) ? agentsResult.agents : [];
       setAgents(
         rawAgents.map((a: any) => ({
@@ -193,6 +214,8 @@ export default function EdgePage() {
       const j = await r.json();
       if (j?.error) throw new Error(j.error.message || 'Deploy failed');
       setToast(`Deployed (digest ${(j.data?.bundle_digest || '').slice(0, 12)}…)`);
+      const gw = gateways.find(g => g.id === gatewayPk);
+      setNext({ kind: 'deployed', gatewayId: gatewayPk, gatewayName: gw?.name || gw?.gateway_id || 'the gateway', agentId });
       setModalGatewayId(null);
       await load();
     } catch (e: any) {
@@ -211,28 +234,81 @@ export default function EdgePage() {
   }
 
   return (
-    <div className="p-6" data-testid="edge-page">
+    <div className="p-4 sm:p-6" data-testid="edge-page">
       <div className="max-w-6xl mx-auto space-y-6">
-        <header className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold text-white flex items-center gap-2">
-              <Cpu className="w-6 h-6 text-cyan-400" /> Edge Gateways
-            </h1>
-            <p className="text-sm text-slate-400 mt-1">
-              Remote pods that pull <code className="text-cyan-300">.agent</code> bundles. Mark an agent as
-              edge-compatible in the builder Advanced tab to deploy here.
-            </p>
-          </div>
-          <button
-            onClick={load}
-            className="px-3 py-1.5 text-xs text-slate-300 bg-slate-800/60 border border-slate-700 rounded-lg flex items-center gap-1.5 hover:bg-slate-700/60"
-          >
-            <RefreshCw className="w-3.5 h-3.5" /> Refresh
-          </button>
-        </header>
+        <PageHeader
+          title="Edge Gateways"
+          purpose="Run agents on your own boxes, next to the machines and sensors they watch, and push new versions to them from here. For operators."
+          icon={Cpu}
+          storageKey="edge"
+          docSlug="06-deployment/05-edge-runtime"
+          primaryAction={{ label: minting ? 'Getting token…' : 'Get gateway token', icon: Package, onClick: mintToken, disabled: minting }}
+          extraActions={
+            <button
+              onClick={load}
+              className="min-h-[40px] px-3 py-2 text-xs text-slate-300 bg-slate-800/60 border border-slate-700 rounded-lg flex items-center justify-center gap-1.5 hover:bg-slate-700/60"
+            >
+              <RefreshCw className="w-3.5 h-3.5" /> Refresh
+            </button>
+          }
+          howToggleTestId="how-it-works-toggle"
+          steps={[
+            { title: 'Get a token', body: 'The gateway signs in with it and checks every agent it receives against the signing key.' },
+            { title: 'Install the runtime', body: 'Pick a variant below and run it on the box. It shows up under Registered gateways.' },
+            { title: 'Make an agent edge ready', body: 'Turn on Edge compatible in the builder, Advanced tab.' },
+            { title: 'Deploy it', body: 'Pick a gateway and send the agent. Callers then run it on the box itself.' },
+          ]}
+          howItWorks={
+            <details className="text-xs text-slate-400">
+              <summary className="cursor-pointer text-slate-300">For developers</summary>
+              <ol className="mt-2 list-decimal list-outside pl-5 space-y-2 leading-relaxed">
+                <li>
+                  Gateway registers with the platform via{' '}
+                  <code className="text-cyan-300 break-all">POST /api/edge/gateways/register</code>{' '}
+                  every 60s (auth: <code className="text-cyan-300">af_</code> key).
+                </li>
+                <li>
+                  UI pushes via{' '}
+                  <code className="text-cyan-300 break-all">POST /api/edge/gateways/{'{id}'}/deploy</code>{' '}
+                  and the backend tries MQTT first (<code className="text-cyan-300 break-all">edge.{'{gateway_id}'}.deploy</code>),
+                  HTTP fallback.
+                </li>
+                <li>
+                  Runtime hot-loads the bundle into{' '}
+                  <code className="text-cyan-300 break-all">/var/edge/agents/{'{slug}'}/</code>.
+                </li>
+                <li>
+                  Caller hits{' '}
+                  <code className="text-cyan-300 break-all">POST {'{gateway_endpoint}'}/agents/{'{slug}'}/execute</code>{' '}
+                  for sync calls, or publishes to{' '}
+                  <code className="text-cyan-300 break-all">agents.{'{slug}'}.input</code> over MQTT for async.
+                </li>
+              </ol>
+            </details>
+          }
+        />
+
+        {next && (
+          <NextSteps
+            title={next.kind === 'first' ? 'Your first gateway is here. What next?' : `Agent sent to ${next.gatewayName}. What next?`}
+            testId="edge-next-steps"
+            onDismiss={() => setNext(null)}
+            steps={
+              next.kind === 'first'
+                ? [
+                    { id: 'deploy', label: 'Deploy an agent', hint: 'Send an edge ready agent to this gateway.', icon: Send, onClick: () => { setModalGatewayId(next.gatewayId); setNext(null); } },
+                    { id: 'agents', label: 'Make an agent edge ready', hint: 'Turn on Edge compatible in the builder, Advanced tab.', icon: Cpu, href: '/agents' },
+                  ]
+                : [
+                    { id: 'agent', label: 'Open the agent', hint: 'See its settings and recent runs.', icon: Cpu, href: `/agents/${next.agentId}` },
+                    { id: 'another', label: 'Deploy another agent', hint: 'Send one more agent to the same gateway.', icon: Send, onClick: () => { setModalGatewayId(next.gatewayId); setNext(null); } },
+                  ]
+            }
+          />
+        )}
 
         {error && (
-          <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-4 text-rose-200 text-sm flex items-center gap-2">
+          <div role="alert" data-testid="edge-error" className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-4 text-rose-200 text-sm flex items-center gap-2">
             <AlertTriangle className="w-4 h-4" /> {error}
           </div>
         )}
@@ -244,25 +320,9 @@ export default function EdgePage() {
           </div>
         )}
 
-        <section className="rounded-lg border border-cyan-700/40 bg-cyan-900/10 p-4 flex items-start justify-between gap-4">
-          <div className="flex-1 min-w-0">
-            <div className="text-sm font-semibold text-cyan-200 mb-1">Step 1 — Mint a platform token + grab the signing pubkey</div>
-            <p className="text-xs text-slate-300">
-              Every gateway needs a platform token (so it can <code className="bg-slate-800 px-1 rounded">/register</code> + receive bundles) and the platform&apos;s RSA-PSS signing pubkey (so it verifies bundle signatures). Click below — token is shown once.
-            </p>
-          </div>
-          <button
-            onClick={mintToken}
-            disabled={minting}
-            className="px-3 py-1.5 rounded-md bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 text-white text-sm font-medium whitespace-nowrap"
-          >
-            {minting ? 'Minting…' : 'Mint edge token + pubkey'}
-          </button>
-        </section>
-
         <details className="rounded-lg border border-slate-700/50 bg-slate-800/30 p-4">
           <summary className="text-sm font-semibold text-slate-200 cursor-pointer">
-            Step 0 — What software do I need on the gateway box?
+            Step 1. What the gateway box needs (no hardware is needed to try the steps below)
           </summary>
           <div className="mt-3 space-y-3 text-xs text-slate-300">
             <p>Three tiers. Pick by hardware. All three end up registered identically.</p>
@@ -323,13 +383,34 @@ curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 |
           </div>
         </details>
 
+        <section className="rounded-lg border border-cyan-700/40 bg-cyan-900/10 p-4 flex flex-wrap sm:flex-nowrap items-start justify-between gap-4">
+          <div className="flex-1 min-w-0">
+            <div className="text-sm font-semibold text-cyan-200 mb-1">Step 2. Get a gateway token and the signing key</div>
+            <p className="text-xs text-slate-300">
+              A gateway signs in with a token and checks every bundle against the platform&apos;s signing key. The token is shown once and is saved as an API key you can revoke under Settings, API keys.
+            </p>
+          </div>
+          <button
+            onClick={mintToken}
+            data-testid="edge-mint"
+            disabled={minting}
+            className="px-3 py-1.5 rounded-md bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 text-white text-sm font-medium whitespace-nowrap"
+          >
+            {minting ? 'Minting…' : 'Mint edge token + pubkey'}
+          </button>
+        </section>
+
         {tokenModal && (
-          <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4" onClick={() => setTokenModal(null)}>
-            <div className="bg-slate-900 border border-cyan-700/50 rounded-lg max-w-3xl w-full p-5" onClick={(e) => e.stopPropagation()}>
+          <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4" onClick={() => setTokenModal(null)} role="dialog" aria-modal="true" aria-label="Edge token and signing key">
+            <div className="bg-slate-900 border border-cyan-700/50 rounded-lg max-w-3xl w-full p-5 max-h-[92vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
               <div className="flex items-center justify-between mb-3">
-                <h3 className="text-lg font-semibold text-cyan-200">Edge token + signing pubkey</h3>
-                <button onClick={() => setTokenModal(null)} className="text-slate-400 hover:text-white">close</button>
+                <h3 className="text-lg font-semibold text-cyan-200">Edge token and signing key</h3>
+                <button onClick={() => setTokenModal(null)} aria-label="Close" className="text-sm text-slate-400 hover:text-white">Close</button>
               </div>
+              <p className="text-xs text-slate-300 mb-3" data-testid="edge-token-key-name">
+                Saved as the API key <strong>{tokenModal.name}</strong>. Revoke it under{' '}
+                <a href="/settings/api-keys" className="text-cyan-300 underline">Settings, API keys</a> when the gateway is retired.
+              </p>
               <div className="rounded bg-amber-900/30 border border-amber-700/40 p-2.5 text-[12px] text-amber-200 mb-3">
                 {tokenModal.warning}
               </div>
@@ -337,14 +418,14 @@ curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 |
                 <div>
                   <div className="text-slate-400 mb-1">PLATFORM_TOKEN</div>
                   <div className="flex items-center gap-2">
-                    <code className="block flex-1 bg-slate-950 border border-slate-800 rounded p-2 font-mono break-all text-emerald-300">{tokenModal.token}</code>
+                    <code data-testid="edge-token-value" className="block flex-1 bg-slate-950 border border-slate-800 rounded p-2 font-mono break-all text-emerald-300">{tokenModal.token}</code>
                     <button onClick={() => copyToClipboard(tokenModal.token, 'tok')} className="px-2 py-1 bg-slate-800 hover:bg-slate-700 rounded text-xs">{copied === 'tok' ? '✓' : 'Copy'}</button>
                   </div>
                 </div>
                 <div>
                   <div className="text-slate-400 mb-1">SIGNING_PUBKEY (PEM)</div>
                   <div className="flex items-start gap-2">
-                    <pre className="block flex-1 bg-slate-950 border border-slate-800 rounded p-2 font-mono text-[11px] text-cyan-300 max-h-40 overflow-y-auto">{tokenModal.pubkey || '(none — set EDGE_SIGNING_KEY_PEM on the api pod first)'}</pre>
+                    <pre data-testid="edge-pubkey" className="block flex-1 min-w-0 bg-slate-950 border border-slate-800 rounded p-2 font-mono text-[11px] text-cyan-300 max-h-40 overflow-auto">{tokenModal.pubkey || '(none — set EDGE_SIGNING_KEY_PEM on the api pod first)'}</pre>
                     {tokenModal.pubkey && (
                       <button onClick={() => copyToClipboard(tokenModal.pubkey, 'pub')} className="px-2 py-1 bg-slate-800 hover:bg-slate-700 rounded text-xs">{copied === 'pub' ? '✓' : 'Copy'}</button>
                     )}
@@ -450,47 +531,6 @@ curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 |
               );
             })}
           </div>
-        </section>
-
-        <section className="rounded-lg border border-slate-700/50 bg-slate-800/30">
-          <button
-            onClick={() => setHowOpen((o) => !o)}
-            className="w-full flex items-center justify-between px-4 py-3 text-sm text-slate-200 hover:bg-slate-800/50 rounded-lg"
-            data-testid="how-it-works-toggle"
-          >
-            <span className="flex items-center gap-2">
-              <Info className="w-4 h-4 text-cyan-400" />
-              How interactions work
-            </span>
-            {howOpen ? <ChevronDown className="w-4 h-4 text-slate-400" /> : <ChevronRight className="w-4 h-4 text-slate-400" />}
-          </button>
-          {howOpen && (
-            <div className="px-4 pb-4 pt-1 text-xs text-slate-300 space-y-2 leading-relaxed border-t border-slate-700/50">
-              <ol className="list-decimal list-outside pl-5 space-y-2">
-                <li>
-                  Gateway registers with the platform via{' '}
-                  <code className="text-cyan-300">POST /api/edge/gateways/register</code>{' '}
-                  every 60s (auth: <code className="text-cyan-300">af_</code> key).
-                </li>
-                <li>
-                  UI pushes via{' '}
-                  <code className="text-cyan-300">POST /api/edge/gateways/{'{id}'}/deploy</code>{' '}
-                  → backend tries MQTT first (<code className="text-cyan-300">edge.{'{gateway_id}'}.deploy</code>),
-                  HTTP fallback.
-                </li>
-                <li>
-                  Runtime hot-loads the bundle into{' '}
-                  <code className="text-cyan-300">/var/edge/agents/{'{slug}'}/</code>.
-                </li>
-                <li>
-                  Caller hits{' '}
-                  <code className="text-cyan-300">POST {'{gateway_endpoint}'}/agents/{'{slug}'}/execute</code>{' '}
-                  for sync calls; or publishes to{' '}
-                  <code className="text-cyan-300">agents.{'{slug}'}.input</code> over MQTT for async.
-                </li>
-              </ol>
-            </div>
-          )}
         </section>
 
         <div className="pt-2">

@@ -164,7 +164,41 @@ client.approvals().signoff(approvalId, "approve", "Looks right", "signoff-123");
 | `waitFor` | `(approvalId, timeoutSeconds)`, long-polls `/wait` in chunks of up to 120 s |
 | `configureWebhook` | `(url, secret)`, needs the admin or owner role. A null `url` clears the URL, a null `secret` keeps the stored one |
 
-They return the `Approval` record. There is no `returnForChanges` in Java, send `signoff(approvalId, "return", reason, null)` instead. `client.approve(executionId, gateId, comment)` and `client.reject(...)` are the old gate-id shape.
+They return the `Approval` record. There is no `returnForChanges` in Java, send `signoff(approvalId, "return", reason, null)` instead. `client.approve(executionId, gateId, comment)` and `client.reject(...)` are the old gate-id shape. Approving an action with edited arguments is not wrapped in Java yet.
+
+---
+
+## Actions
+
+Earned autonomy for actions the app takes itself. Propose, act only when told to run, then report. See [08-howto/13-earned-autonomy](../08-howto/13-earned-autonomy.md#8-drive-it-from-a-standalone-app).
+
+```java
+ActionDecision d = client.actions().propose(
+    ActionsClient.ProposeRequest.of("claims.pay_out")
+        .arguments(Map.of("claim_id", "C-1042", "amount", 1800))
+        .target("C-1042")
+        .intent("Covered peril, under the auto-pay limit")
+        .prediction(Map.of("metric", "reopened", "value", "no")));
+if (d.isWaiting()) d = client.actions().waitFor(d.actionId(), 1800);
+if (d.shouldRun()) {
+    payOut(d.arguments());                       // edited values when a reviewer changed them
+    client.actions().executed(d.actionId(), true, "paid");
+    client.actions().reportOutcome(d.actionId(), "no", "not reopened after 30 days");
+}
+```
+
+| Method | Signature |
+|---|---|
+| `propose` | `(ProposeRequest req)` or `(actionKey, arguments)`, returns `ActionDecision` |
+| `waitFor` | `(actionId, timeoutSeconds)`, long-polls in chunks of up to 120 s, returns `ActionDecision` |
+| `executed` | `(actionId, ok, resultPreview)` |
+| `reportOutcome` | `(actionId, value, note)`, sends `source: "api"`. Needs `actions.review` |
+| `flagHarm` | `(actionId, note)`, `IllegalArgumentException` on a blank note. Needs `actions.review` |
+| `get` | `(actionId)` |
+
+`ActionDecision` is a record: `actionId`, `decision` (`run`, `wait`, `watching`, `blocked`), `status`, `approvalId`, `message`, `arguments`, `edited`, `decidedByName`, `decisionNote`, plus `shouldRun()` and `isWaiting()`. The other methods return `Map<String, Object>`.
+
+`client.autonomy()` reads the ladder: `overview()`, `grant(grantId)` and `grantActions(grantId, status, limit, before)`.
 
 ---
 
@@ -176,6 +210,7 @@ Each returns `Map<String, Object>` or `List<Map<String, Object>>`.
 |---|---|
 | `agents()` | `list()`, `get(agentId)`, `findBySlug(slug)` (null when not found) |
 | `executions()` | `live()`, `get(id)`, `replay(id)`, `tree(id)`, `pendingApprovals()` |
+| `autonomy()` | `overview()`, `grant(grantId)`, `grantActions(grantId, status, limit, before)` |
 | `knowledge()` | `cognify(kbId, docIds, model, chunkSize, chunkOverlap)`, `graphStats(kbId)`, `search(kbId, query, mode, topK, graphDepth)`, `graph(kbId, limit)`, `cognifyJobs(kbId)` |
 | `chat()` | `create(agentSlug, agentId, appSlug, title, actAs)`, `list(appSlug, agentSlug, archived, limit, offset, actAs)`, `get`, `send(threadId, content, context, agentSlug, attachments, actAs)`, `rename`, `archive`, `delete` |
 | `tools()` | `list()`, `catalog()`, `execute(slug, arguments, config)` |

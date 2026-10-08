@@ -4,7 +4,10 @@ import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { Cpu, Save, RotateCcw, Sparkles, Shield, BookOpen, Zap, Clock } from 'lucide-react';
 import { apiFetch } from '@/lib/api-client';
+import { settingTitle } from '@/lib/monitor-format';
 import ModelPicker from '@/components/ModelPicker';
+import PageHeader from '@/components/layout/PageHeader';
+import { AccessGate } from '@/components/layout/NoAccess';
 
 type Setting = {
   key: string;
@@ -58,7 +61,7 @@ const CATEGORY_META: Record<string, { label: string; icon: React.ReactNode; hint
 };
 
 
-export default function LlmSettingsPage() {
+function LlmSettingsPage() {
   const [data, setData] = useState<ApiResp | null>(null);
   const [pending, setPending] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
@@ -235,39 +238,34 @@ export default function LlmSettingsPage() {
 
   return (
     <div className="p-6 space-y-5" data-testid="admin-llm-settings">
-      {/* Header */}
-      <div className="flex items-start justify-between">
-        <div>
-          <p className="text-[10px] uppercase tracking-wider text-slate-500">Admin · platform</p>
-          <h1 className="text-2xl font-semibold text-white flex items-center gap-2">
-            <Cpu className="w-6 h-6 text-cyan-400" />
-            Model Selection
-          </h1>
-          <p className="text-sm text-slate-400 mt-1">
-            Pick which LLM powers each built-in Abenix feature. Applies across all tenants.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={resetAll}
-            disabled={saving}
-            data-testid="reset-settings"
-            className="flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-700/60 bg-slate-800/30 text-slate-300 text-sm hover:bg-slate-800/60 disabled:opacity-50"
-          >
-            <RotateCcw className="w-4 h-4" />
-            Reset all
-          </button>
-          <button
-            onClick={save}
-            disabled={!dirty || saving}
-            data-testid="save-settings"
-            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-cyan-500 text-white text-sm font-semibold hover:bg-cyan-400 disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            <Save className="w-4 h-4" />
-            {saving ? 'Saving…' : `Save ${dirty ? `(${Object.keys(pending).length})` : ''}`}
-          </button>
-        </div>
-      </div>
+      <PageHeader
+        title="Model Selection"
+        purpose="Pick which AI model runs each built in feature, for every workspace on the platform. For admins."
+        icon={Cpu}
+        storageKey="admin-llm-settings"
+        docSlug="09-reference/04-platform-settings"
+        primaryAction={{
+          label: saving ? 'Saving…' : `Save${dirty ? ` (${Object.keys(pending).length})` : ''}`,
+          icon: Save,
+          onClick: save,
+          disabled: !dirty || saving,
+          title: !dirty ? 'Change a setting first' : undefined,
+          testId: 'save-settings',
+        }}
+        secondaryAction={{
+          label: 'Reset all',
+          icon: RotateCcw,
+          onClick: resetAll,
+          disabled: saving,
+          testId: 'reset-settings',
+        }}
+        steps={[
+          'A Claude subscription, if connected, can run every call in place of separate provider keys.',
+          'Each card below is one built in feature. Pick the model it should use.',
+          'Changes are held until you click Save. They take effect within 30 seconds.',
+          'Reset all puts every feature back on its default model.',
+        ]}
+      />
 
       {msg && (
         <div className="rounded-lg border border-cyan-500/30 bg-cyan-500/10 p-3 text-sm text-cyan-200">
@@ -315,7 +313,7 @@ export default function LlmSettingsPage() {
 
           {/* Token */}
           <div className="rounded-lg border border-slate-700/40 bg-slate-900/40 p-3 space-y-2">
-            <p className="text-sm font-medium text-white font-mono">llm.subscription.token</p>
+            <p className="text-sm font-medium text-white" title="llm.subscription.token">{settingTitle('llm.subscription.token')}</p>
             <p className="text-[11px] text-slate-500">
               {sub.token_set
                 ? `Currently set (${sub.token_masked}) from ${sub.token_source === 'environment' ? 'the environment' : 'platform settings'}. Paste a new value to rotate, or save an empty field to clear it.`
@@ -360,8 +358,8 @@ export default function LlmSettingsPage() {
 
           {/* Model the subscription serves */}
           <div className="rounded-lg border border-slate-700/40 bg-slate-900/40 p-3 space-y-2">
-            <p className="text-sm font-medium text-white font-mono">
-              llm.subscription.default_model
+            <p className="text-sm font-medium text-white" title="llm.subscription.default_model">
+              {settingTitle('llm.subscription.default_model')}
             </p>
             <p className="text-[11px] text-slate-500">
               The model the subscription serves, and the target for non-Claude requests while
@@ -506,7 +504,7 @@ export default function LlmSettingsPage() {
                     <div key={s.key} className="rounded-lg border border-slate-700/40 bg-slate-900/40 p-3">
                       <div className="flex items-start justify-between gap-3 mb-2">
                         <div>
-                          <p className="text-sm font-medium text-white font-mono">{s.key}</p>
+                          <p className="text-sm font-medium text-white" title={s.key}>{settingTitle(s.key)}</p>
                           <p className="text-[11px] text-slate-500">{s.description}</p>
                         </div>
                         {!s.is_default && !pending[s.key] && (
@@ -576,5 +574,19 @@ export default function LlmSettingsPage() {
         <code className="text-slate-300">abenix-secrets</code> for the corresponding provider.
       </div>
     </div>
+  );
+}
+
+export default function LlmSettingsPageGated() {
+  return (
+    <AccessGate
+      title="Model Selection"
+      purpose="Pick which AI model runs each built in feature, for every workspace on the platform. For admins."
+      icon={Cpu}
+      need={{ feature: 'manage_settings' }}
+      instead={{ text: 'You can still pick the model for each of your own agents in the Agent Builder.', href: '/builder', label: 'Open the Agent Builder' }}
+    >
+      <LlmSettingsPage />
+    </AccessGate>
   );
 }

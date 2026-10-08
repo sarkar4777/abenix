@@ -2,7 +2,8 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
-import { AlertTriangle, Camera, Check, Loader2, Trash2 } from 'lucide-react';
+import { AlertTriangle, Camera, Check, Loader2, Trash2, User } from 'lucide-react';
+import PageHeader from '@/components/layout/PageHeader';
 import { useAuth } from '@/contexts/AuthContext';
 import { usePageTitle } from '@/hooks/usePageTitle';
 import { API_URL, ApiError, apiFetch } from '@/lib/api-client';
@@ -196,12 +197,23 @@ export default function ProfilePage() {
       transition={{ duration: 0.4 }}
       className="space-y-6 max-w-2xl"
     >
-      <div>
-        <h1 className="text-2xl font-bold text-white">Profile</h1>
-        <p className="text-sm text-slate-500 mt-1">
-          Your name and picture as teammates see them, and the password you sign in with.
-        </p>
-      </div>
+      <PageHeader
+        title="Profile"
+        icon={User}
+        purpose="Your name and picture as teammates see them, and the password you sign in with. For everyone."
+        primaryAction={{
+          label: uploading ? 'Uploading...' : 'Upload picture',
+          icon: uploading ? Loader2 : Camera,
+          busy: uploading,
+          onClick: () => fileRef.current?.click(),
+        }}
+        steps={[
+          'Upload a picture or paste a link to one. Leave it empty to show your initial.',
+          'Change your name and press Save changes.',
+          'Change your password below. Other signed in sessions stay signed in.',
+        ]}
+        storageKey="settings-profile"
+      />
 
       <div className="bg-slate-800/30 border border-slate-700/50 rounded-xl p-4 sm:p-6 space-y-5">
         <div className="flex flex-wrap items-center gap-4">

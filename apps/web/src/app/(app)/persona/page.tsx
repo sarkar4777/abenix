@@ -4,9 +4,11 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   UserCircle2, Plus, Upload, FileText, Trash2, Shield, Lock, X, Eye, Pencil, RefreshCw,
   Loader2, StickyNote, Tag, Calendar, Mic, MicOff, CheckCircle2, AlertTriangle, Database,
-  Info, ChevronDown, ChevronRight, Bot,
+  Bot,
 } from 'lucide-react';
 import Link from 'next/link';
+import PageHeader from '@/components/layout/PageHeader';
+import NextSteps from '@/components/shared/NextSteps';
 import { apiFetch } from '@/lib/api-client';
 import { usePageTitle } from '@/hooks/usePageTitle';
 import { useIsAdmin } from '@/hooks/useToolConfig';
@@ -70,8 +72,6 @@ function plain(msg: string): string {
 function errMsg(e: unknown, fallback: string): string {
   return plain(e instanceof Error && e.message ? e.message : fallback);
 }
-
-const HOWTO_KEY = 'persona.howto.collapsed';
 
 function StatusPill({ p }: { p: PersonaItem }) {
   if (p.status === 'indexed') {
@@ -149,17 +149,8 @@ export default function PersonaPage() {
   const [voiceName, setVoiceName] = useState('My meeting voice');
   const [voiceUploading, setVoiceUploading] = useState(false);
   const voiceFileRef = useRef<HTMLInputElement>(null);
-  const [howtoOpen, setHowtoOpen] = useState(true);
-
-  useEffect(() => {
-    try { if (localStorage.getItem(HOWTO_KEY) === '1') setHowtoOpen(false); } catch { /* storage blocked */ }
-  }, []);
-
-  const toggleHowto = () => {
-    const next = !howtoOpen;
-    setHowtoOpen(next);
-    try { localStorage.setItem(HOWTO_KEY, next ? '0' : '1'); } catch { /* storage blocked */ }
-  };
+  // scope that just got its first item
+  const [firstScope, setFirstScope] = useState<string | null>(null);
 
   const agentHref = `/builder?tool=persona_rag&persona_scope=${encodeURIComponent(activeScope)}`;
 
@@ -254,6 +245,7 @@ export default function PersonaPage() {
     startAction();
     if (!noteText.trim()) return;
     setSaving(true);
+    const wasEmpty = items.length === 0 && noteScope === activeScope;
     try {
       const r = await apiFetch<SaveResult>('/api/persona/notes', {
         method: 'POST',
@@ -265,6 +257,7 @@ export default function PersonaPage() {
       });
       showSaved(r.data);
       setNoteTitle(''); setNoteText(''); setShowNote(false);
+      if (wasEmpty) setFirstScope(noteScope);
       await goToScope(noteScope);
     } catch (e: unknown) {
       setErr(errMsg(e, 'save failed'));
@@ -299,6 +292,7 @@ export default function PersonaPage() {
     startAction();
     if (!uploadFile) { setErr('Choose a file first'); return; }
     setUploading(true);
+    const wasEmpty = items.length === 0 && uploadScope === activeScope;
     try {
       const fd = new FormData();
       fd.append('file', uploadFile);
@@ -307,6 +301,7 @@ export default function PersonaPage() {
       const r = await apiFetch<SaveResult>('/api/persona/upload', { method: 'POST', body: fd });
       showSaved(r.data);
       setUploadTitle('');
+      if (wasEmpty) setFirstScope(uploadScope);
       await goToScope(uploadScope);
     } catch (e: unknown) {
       setErr(errMsg(e, 'upload failed'));
@@ -402,20 +397,35 @@ export default function PersonaPage() {
 
   return (
     <div className="space-y-6 max-w-5xl min-w-0">
-      <div>
-        <h1 className="text-2xl font-semibold text-white flex items-center gap-2">
-          <UserCircle2 className="w-6 h-6 text-cyan-400" />
-          Persona KB
-        </h1>
-        <p className="text-sm text-slate-400 mt-1">
-          Notes and files about you that your agents can use to answer as you. Only you can retrieve them.
-        </p>
-        <div className="mt-2 flex items-start gap-1.5 text-xs text-slate-500">
+      <PageHeader
+        title="Persona KB"
+        purpose="Notes and files about you that your agents can use to answer as you. Only you can retrieve them."
+        icon={UserCircle2}
+        storageKey="persona"
+        docSlug="04-data-model/03-knowledge"
+        howTestId="persona-howto"
+        primaryAction={{ label: 'Add a note', icon: StickyNote, onClick: openNoteForm, testId: 'persona-add-note-primary' }}
+        steps={[
+          {
+            title: 'Add what your agent should know',
+            body: <>Write a note or upload a .txt, .md or .pdf. Each item goes into a <strong>scope</strong>, a label that groups items, such as <code className="text-cyan-300">self</code>, <code className="text-cyan-300">client:acme</code> or <code className="text-cyan-300">project:q2</code>. Use <code className="text-cyan-300">self</code> for facts about you.</>,
+          },
+          {
+            title: 'It stays yours',
+            body: 'Only agents running as you can read your items, and only through the Persona RAG tool. Other users, admins included, cannot retrieve them, and generic knowledge searches never return them. In a meeting the bot can read only the scopes you authorized for that meeting.',
+          },
+          {
+            title: 'Use it in an agent',
+            body: <>Click <strong>Use in an agent</strong> below. It opens the builder with Persona RAG added for the current scope. Run that agent and ask it about yourself.</>,
+          },
+        ]}
+      >
+        <div className="flex items-start gap-1.5 text-xs text-slate-500">
           <Lock className="w-3 h-3 mt-0.5 shrink-0" />
           <span>Every search is filtered on your tenant, on you as the owner and on the persona scope. No other user can read your items.</span>
         </div>
         {store && (
-          <div className="mt-1 flex items-start gap-1.5 text-xs text-slate-500" data-testid="persona-store-status">
+          <div className="flex items-start gap-1.5 text-xs text-slate-500" data-testid="persona-store-status">
             <Database className="w-3 h-3 mt-0.5 shrink-0" />
             {store.ready ? (
               <span>
@@ -431,35 +441,7 @@ export default function PersonaPage() {
             )}
           </div>
         )}
-      </div>
-
-      <div className="rounded-lg border border-cyan-500/20 bg-cyan-500/5" data-testid="persona-howto">
-        <button
-          onClick={toggleHowto}
-          aria-expanded={howtoOpen}
-          className="w-full flex items-center gap-2 px-4 py-2.5 text-left text-sm text-cyan-100"
-        >
-          <Info className="w-4 h-4 text-cyan-300 shrink-0" />
-          <span className="flex-1 font-medium">How this works</span>
-          {howtoOpen ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
-        </button>
-        {howtoOpen && (
-          <div className="px-4 pb-4 grid gap-3 sm:grid-cols-3 text-xs text-slate-300">
-            <div className="space-y-1">
-              <p className="font-medium text-white">1. Add what your agent should know</p>
-              <p>Write a note or upload a .txt, .md or .pdf. Each item goes into a <strong>scope</strong>, a label that groups items, such as <code className="text-cyan-300">self</code>, <code className="text-cyan-300">client:acme</code> or <code className="text-cyan-300">project:q2</code>. Use <code className="text-cyan-300">self</code> for facts about you.</p>
-            </div>
-            <div className="space-y-1">
-              <p className="font-medium text-white">2. It stays yours</p>
-              <p>Only agents running as you can read your items, and only through the Persona RAG tool. Other users, admins included, cannot retrieve them, and generic knowledge searches never return them. In a meeting the bot can read only the scopes you authorized for that meeting.</p>
-            </div>
-            <div className="space-y-1">
-              <p className="font-medium text-white">3. Use it in an agent</p>
-              <p>Click <strong>Use in an agent</strong> below. It opens the builder with Persona RAG added for the current scope. Run that agent and ask it about yourself.</p>
-            </div>
-          </div>
-        )}
-      </div>
+      </PageHeader>
 
       {err && (
         <div role="alert" data-testid="persona-error" className="flex items-start gap-2 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/30 text-red-300 text-xs">
@@ -728,6 +710,18 @@ export default function PersonaPage() {
 
       {/* Items list */}
       <div className="min-w-0">
+        {firstScope && firstScope === activeScope && items.length > 0 && (
+          <NextSteps
+            className="mb-3"
+            title="Your first item is saved. What next?"
+            testId="persona-next-steps"
+            onDismiss={() => setFirstScope(null)}
+            steps={[
+              { id: 'agent', label: 'Use in an agent', hint: `Open the builder with Persona RAG reading ${activeScope}.`, icon: Bot, href: agentHref },
+              { id: 'upload', label: 'Upload a file', hint: 'Add a .txt, .md or .pdf to the same scope.', icon: Upload, onClick: () => { setFirstScope(null); setUploadScope(activeScope); fileRef.current?.click(); } },
+            ]}
+          />
+        )}
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-sm font-medium text-white flex flex-wrap items-center gap-2 min-w-0">
             <Shield className="w-4 h-4 text-cyan-400" />

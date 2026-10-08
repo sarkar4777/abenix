@@ -88,7 +88,7 @@ Same agent. Same definition. Cloud or edge. Built for the long-running, knowledg
 <a id="why-abenix"></a>
 ## ✨ Why Abenix
 
-Nine things that, taken together, you do not get anywhere else open-source:
+Ten things that, taken together, you do not get anywhere else open-source:
 
 ### 1. Graph-grounded knowledge — Atlas + Knowledge Engine
 
@@ -238,6 +238,18 @@ Drop a PDF, image, audio, video, DOCX, DWG/DXF, GeoJSON, or text file anywhere A
 `helm install abenix ./infra/helm/abenix` deploys api + web + workers + per-agent-pool runtimes + Postgres + Redis + Neo4j + NATS + KEDA + mosquitto + TimescaleDB + Prometheus + Grafana + ingress. Every pod exposes `/metrics`. The `/alerts` page groups by `failure_code`. Slack + email fan-out via env var.
 
 Same chart on AKS, EKS, GKE, minikube, bare metal. MIT license. Self-host without vendor handcuffs.
+
+### 10. Earned autonomy — agents earn the right to act
+
+An agent gets more freedom one action type at a time, from its measured record. Each consequential tool call is declared, predicted, gated, run, observed and scored. The score moves the agent along five levels: Off, Watching, Asks first, Acts within limits, Acts and reports.
+
+- **Watching** records what the agent would do without running it. Reviewers agree or say what they did instead, with keyboard shortcuts.
+- **Asks first** puts an action card in Approvals with the intent, the predicted effect and band, the limits checked and the agent's record. Approve, edit or reject.
+- **Promotion** is recommended when the numbers are there (Wilson lower bound, rolling window, no recent harm) and approved by someone who did not build the agent.
+- **Demotion** is automatic: a harm flag, falling accuracy or a changed prompt or model drops the level at once. Kill switches and hard limits from the rule engine apply at every level.
+- **Apps too.** `actions.propose`, `wait` and `report_outcome` in the Python, TypeScript and Java SDKs put an app's own actions on the same ladder.
+
+**Monitor → Autonomy → Try it with the sample plant** shows the whole ladder in a few minutes with a simulated plant. See [Earned autonomy](docs/02-runtime/21-earned-autonomy.md).
 
 ---
 

@@ -6,7 +6,7 @@ import os
 from typing import Any
 from urllib.parse import urlparse
 
-from engine.tools.base import BaseTool, ToolResult
+from engine.tools.base import READ_ONLY, BaseTool, Effect, ToolResult
 
 
 def _domain_allowed(url: str) -> tuple[bool, str]:
@@ -28,6 +28,7 @@ def _domain_allowed(url: str) -> tuple[bool, str]:
 class BrowserAutomationTool(BaseTool):
     name = "browser_automation"
     risk_tier = "medium"
+    effect = Effect(kind="external", label="Click on a web page", target_param="url")
     description = (
         "Headless Chromium via Playwright for sites that need JS rendering, "
         "login flows, or click-throughs. Operations: get_text (full visible "
@@ -72,6 +73,12 @@ class BrowserAutomationTool(BaseTool):
         },
         "required": ["operation", "url"],
     }
+
+    @classmethod
+    def effect_for(cls, arguments: dict[str, Any]) -> Effect | None:
+        return (
+            cls.effect if arguments.get("operation") == "click_and_get" else READ_ONLY
+        )
 
     async def execute(self, arguments: dict[str, Any]) -> ToolResult:
         url = arguments.get("url", "").strip()

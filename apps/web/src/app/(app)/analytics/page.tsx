@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
 import { usePageTitle } from '@/hooks/usePageTitle';
+import PageHeader from '@/components/layout/PageHeader';
 import {
   Activity,
   AlertTriangle,
@@ -15,6 +16,7 @@ import {
   Zap,
 } from 'lucide-react';
 import { apiFetch } from '@/lib/api-client';
+import { driftChange, metricLabel } from '@/lib/monitor-format';
 import { formatCount, formatPct, formatUsd, formatMs as fmtMs } from '@/lib/format-stats';
 import {
   LazyAreaChart as AreaChart,
@@ -29,6 +31,7 @@ import {
 } from '@/components/ui/LazyCharts';
 import { useApi } from '@/hooks/useApi';
 import { AnalyticsSkeleton } from '@/components/ui/Skeleton';
+import { SubscriptionNote } from '@/components/shared/CostValue';
 
 interface OverviewData {
   total_executions: number;
@@ -42,6 +45,7 @@ interface OverviewData {
   total_tokens: number;
   cache_hit_rate: number;
   period: string;
+  flat_rate_billing?: boolean;
 }
 
 interface ExecutionPoint {
@@ -152,11 +156,13 @@ function formatCost(c: number): string {
 interface TokensData {
   by_model: ModelBreakdown[];
   daily_tokens: DailyToken[];
+  flat_rate_billing?: boolean;
 }
 
 interface CostsData {
   by_agent: AgentCost[];
   daily_costs: DailyCost[];
+  flat_rate_billing?: boolean;
 }
 
 export default function AnalyticsPage() {
@@ -224,46 +230,50 @@ export default function AnalyticsPage() {
       transition={{ duration: 0.4 }}
       className="space-y-6 max-w-[1400px]"
     >
-      {/* Header + Period Selector */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-white">Analytics</h1>
-          <p className="text-sm text-slate-500 mt-1">
-            Track executions, token usage, costs, and performance.{' '}
-            <a href="#drift-alerts" className="text-amber-400 hover:text-amber-300 underline decoration-dotted">
-              Jump to Drift Alerts ↓
-            </a>
-          </p>
+      <PageHeader
+        title="Analytics"
+        purpose="See how many runs your agents did, how fast they were, what they cost and where they fail. For builders and admins."
+        icon={BarChart3}
+        storageKey="analytics"
+        docSlug="06-deployment/04-observability"
+        primaryAction={{ label: 'Open runs', icon: Zap, href: '/executions' }}
+        secondaryAction={{ label: 'Drift alerts', icon: AlertTriangle, href: '#drift-alerts' }}
+        steps={[
+          'Pick a time range. Every chart and number below follows it.',
+          'Click an agent in the agent table to see only its numbers. Clear the filter to see everything again.',
+          'Drift alerts at the bottom flag agents whose speed, cost or errors changed a lot.',
+        ]}
+      >
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <div className="flex max-w-full flex-wrap items-center gap-1 bg-slate-800/50 border border-slate-700/50 rounded-lg p-1">
+            {PERIODS.map((p) => (
+              <button
+                key={p.value}
+                onClick={() => setPeriod(p.value)}
+                className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                  period === p.value
+                    ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
           {selectedAgentId && (
-            <div className="flex items-center gap-2 mt-2">
-              <span className="text-xs bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 px-2.5 py-1 rounded-full flex items-center gap-1.5">
-                Filtered: {selectedAgentName || selectedAgentId.slice(0, 8)}
-                <button
-                  onClick={() => { setSelectedAgentId(null); setSelectedAgentName(null); }}
-                  className="ml-1 text-cyan-400 hover:text-white font-bold"
-                >
-                  &times;
-                </button>
-              </span>
-            </div>
+            <span className="text-xs bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 px-2.5 py-1 rounded-full flex items-center gap-1.5 min-w-0 break-all">
+              Filtered: {selectedAgentName || selectedAgentId.slice(0, 8)}
+              <button
+                onClick={() => { setSelectedAgentId(null); setSelectedAgentName(null); }}
+                aria-label="Clear agent filter"
+                className="ml-1 text-cyan-400 hover:text-white font-bold"
+              >
+                &times;
+              </button>
+            </span>
           )}
         </div>
-        <div className="flex items-center gap-1 bg-slate-800/50 border border-slate-700/50 rounded-lg p-1">
-          {PERIODS.map((p) => (
-            <button
-              key={p.value}
-              onClick={() => setPeriod(p.value)}
-              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
-                period === p.value
-                  ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30'
-                  : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              {p.label}
-            </button>
-          ))}
-        </div>
-      </div>
+      </PageHeader>
 
       {/* KPI Row */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
@@ -299,7 +309,8 @@ export default function AnalyticsPage() {
           iconColor="text-purple-400"
           iconBg="bg-purple-500/10"
           sub={overview ? `${formatNumber(overview.total_tokens)} tokens` : undefined}
-          dim={overview?.total_cost === 0}
+          badge={overview?.flat_rate_billing ? 'Claude subscription' : undefined}
+          dim={overview?.total_cost === 0 && !overview?.flat_rate_billing}
         />
         <KpiCard
           label="Success Rate"
@@ -314,13 +325,13 @@ export default function AnalyticsPage() {
       {/* Charts Row 1: Executions + Token Usage */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* Executions Over Time */}
-        <div className="bg-slate-800/30 border border-slate-700/50 rounded-xl p-6">
-          <div className="flex items-center justify-between mb-4">
+        <div className="bg-slate-800/30 border border-slate-700/50 rounded-xl p-4 sm:p-6">
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
             <div className="flex items-center gap-2">
               <BarChart3 className="w-4 h-4 text-cyan-400" />
               <h2 className="text-sm font-semibold text-white">Executions Over Time</h2>
             </div>
-            <div className="flex items-center gap-3 text-[11px]">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]">
               <span className="flex items-center gap-1.5">
                 <span className="w-2 h-2 rounded-full bg-cyan-400" />
                 <span className="text-slate-400">Completed</span>
@@ -358,13 +369,13 @@ export default function AnalyticsPage() {
         </div>
 
         {/* Token Usage by Model */}
-        <div className="bg-slate-800/30 border border-slate-700/50 rounded-xl p-6">
-          <div className="flex items-center justify-between mb-4">
+        <div className="bg-slate-800/30 border border-slate-700/50 rounded-xl p-4 sm:p-6">
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
             <div className="flex items-center gap-2">
               <Activity className="w-4 h-4 text-purple-400" />
               <h2 className="text-sm font-semibold text-white">Token Usage by Model</h2>
             </div>
-            <div className="flex items-center gap-3 text-[11px]">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]">
               {byModel.slice(0, 3).map((m, i) => (
                 <span key={m.model} className="flex items-center gap-1.5">
                   <span className="w-2 h-2 rounded-full" style={{ backgroundColor: getModelColor(m.model, i) }} />
@@ -401,11 +412,12 @@ export default function AnalyticsPage() {
       {/* Charts Row 2: Cost by Agent + Daily Costs */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* Cost by Agent */}
-        <div className="bg-slate-800/30 border border-slate-700/50 rounded-xl p-6">
+        <div className="bg-slate-800/30 border border-slate-700/50 rounded-xl p-4 sm:p-6">
           <div className="flex items-center gap-2 mb-4">
             <DollarSign className="w-4 h-4 text-amber-400" />
             <h2 className="text-sm font-semibold text-white">Cost by Agent</h2>
           </div>
+          <SubscriptionNote flatRate={costsData?.flat_rate_billing} className="-mt-2 mb-3" />
           {byAgent.length > 0 ? (
             <div className="space-y-3">
               {byAgent.slice(0, 8).map((agent, i) => {
@@ -447,11 +459,12 @@ export default function AnalyticsPage() {
         </div>
 
         {/* Daily Cost Trend */}
-        <div className="bg-slate-800/30 border border-slate-700/50 rounded-xl p-6">
+        <div className="bg-slate-800/30 border border-slate-700/50 rounded-xl p-4 sm:p-6">
           <div className="flex items-center gap-2 mb-4">
             <TrendingUp className="w-4 h-4 text-emerald-400" />
             <h2 className="text-sm font-semibold text-white">Daily Cost Trend</h2>
           </div>
+          <SubscriptionNote flatRate={costsData?.flat_rate_billing} className="-mt-2 mb-3" />
           {costChartData.length > 0 ? (
             <ResponsiveContainer width="100%" height={260}>
               <AreaChart data={costChartData}>
@@ -477,11 +490,12 @@ export default function AnalyticsPage() {
       {/* Row 3: Top Agents Leaderboard + Error Rate */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* Top Agents Leaderboard */}
-        <div className="bg-slate-800/30 border border-slate-700/50 rounded-xl p-6">
+        <div className="bg-slate-800/30 border border-slate-700/50 rounded-xl p-4 sm:p-6">
           <div className="flex items-center gap-2 mb-4">
             <Zap className="w-4 h-4 text-cyan-400" />
             <h2 className="text-sm font-semibold text-white">Top Agents by Usage</h2>
           </div>
+          <SubscriptionNote flatRate={costsData?.flat_rate_billing} className="-mt-2 mb-3" />
           {byAgent.length > 0 ? (
             <div className="overflow-x-auto">
               <table className="w-full">
@@ -535,7 +549,7 @@ export default function AnalyticsPage() {
         </div>
 
         {/* Error Rate Trend */}
-        <div className="bg-slate-800/30 border border-slate-700/50 rounded-xl p-6">
+        <div className="bg-slate-800/30 border border-slate-700/50 rounded-xl p-4 sm:p-6">
           <div className="flex items-center gap-2 mb-4">
             <TrendingDown className="w-4 h-4 text-red-400" />
             <h2 className="text-sm font-semibold text-white">Error Rate Trend</h2>
@@ -574,11 +588,12 @@ export default function AnalyticsPage() {
 
       {/* Model Breakdown Table */}
       {byModel.length > 0 && (
-        <div className="bg-slate-800/30 border border-slate-700/50 rounded-xl p-6">
+        <div className="bg-slate-800/30 border border-slate-700/50 rounded-xl p-4 sm:p-6">
           <div className="flex items-center gap-2 mb-4">
             <Activity className="w-4 h-4 text-purple-400" />
             <h2 className="text-sm font-semibold text-white">Token Usage by Model</h2>
           </div>
+          <SubscriptionNote flatRate={tokensData?.flat_rate_billing} className="-mt-2 mb-3" />
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead>
@@ -625,6 +640,7 @@ function KpiCard({
   iconColor,
   iconBg,
   sub,
+  badge,
   dim,
 }: {
   label: string;
@@ -633,6 +649,7 @@ function KpiCard({
   iconColor: string;
   iconBg: string;
   sub?: string;
+  badge?: string;
   dim?: boolean;
 }) {
   const isMissing = value === '—';
@@ -648,6 +665,16 @@ function KpiCard({
         </span>
       </div>
       <p className={`text-2xl font-bold ${valueClass}`}>{value}</p>
+      {badge && (
+        <p className="mt-1" data-testid="kpi-subscription-badge">
+          <span
+            className="text-[10px] px-1.5 py-0.5 rounded bg-violet-500/10 text-violet-300 ring-1 ring-violet-500/30"
+            title="Claude runs use a flat-rate subscription, so they show $0 per run."
+          >
+            {badge}
+          </span>
+        </p>
+      )}
       {sub && <p className="text-[11px] text-slate-500 mt-1">{sub}</p>}
       {dim && !sub && <p className="text-[11px] text-slate-600 mt-1">idle</p>}
     </div>
@@ -754,15 +781,15 @@ function DriftAlertsCard({ agentId }: { agentId: string | null }) {
             <span className={`inline-block w-2 h-2 rounded-full ${driftEnabled ? 'bg-emerald-400' : 'bg-slate-500'}`} />
             {driftEnabled ? 'Detection ON' : 'Detection OFF'}
           </button>
-          <select value={sev} onChange={(e) => setSev(e.target.value as any)}
+          <select value={sev} onChange={(e) => setSev(e.target.value as any)} aria-label="Severity"
             className="bg-slate-800/50 border border-slate-700/50 rounded px-2 py-1 text-slate-300">
-            <option value="all">all</option>
+            <option value="all">All severities</option>
             <option value="warning">warning (2σ)</option>
             <option value="critical">critical (3σ)</option>
           </select>
           <label className="flex items-center gap-1 text-slate-400">
             <input type="checkbox" checked={onlyUnacked} onChange={(e) => setOnlyUnacked(e.target.checked)} />
-            un-acked only
+            Unacknowledged only
           </label>
         </div>
       </div>
@@ -784,19 +811,16 @@ function DriftAlertsCard({ agentId }: { agentId: string | null }) {
                       : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
                   }`}>{a.severity}</span>
                   <span className="text-xs text-white font-medium">{a.agent_name || a.agent_id.slice(0, 8)}</span>
-                  <span className="text-xs text-slate-500">{a.metric_name}</span>
+                  <span className="text-xs text-slate-500">{metricLabel(a.metric_name)}</span>
                   <span className="text-[11px] text-slate-600 ml-auto">{new Date(a.created_at).toLocaleString()}</span>
                 </div>
-                <p className="text-xs text-slate-300 truncate">{a.message}</p>
-                <p className="text-[11px] text-slate-500 mt-0.5">
-                  baseline {a.baseline_value.toFixed(2)} → current {a.current_value.toFixed(2)}
-                  {' '}({a.deviation_pct >= 0 ? '+' : ''}{a.deviation_pct.toFixed(1)}%)
-                </p>
+                <p className="text-xs text-slate-300" data-testid="drift-change">{driftChange(a)}</p>
               </div>
               {!a.acknowledged && (
                 <button onClick={() => ack(a.id)}
+                  title="Mark as seen. It leaves this list while Unacknowledged only is ticked."
                   className="shrink-0 text-xs px-2 py-1 rounded bg-slate-800 border border-slate-700 hover:border-emerald-500/50 text-slate-300">
-                  ack
+                  Acknowledge
                 </button>
               )}
             </li>

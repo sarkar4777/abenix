@@ -5,9 +5,11 @@ import { motion } from 'framer-motion';
 import {
   Code2, Sparkles, Play, Copy, Check, Loader2, Terminal,
   FileCode2, Boxes, Zap, AlertCircle, Database, BookOpen,
-  ShieldAlert, ChevronDown,
+  ShieldAlert, ChevronDown, KeyRound,
 } from 'lucide-react';
+import PageHeader from '@/components/layout/PageHeader';
 import { apiFetch } from '@/lib/api-client';
+import { CostValue } from '@/components/shared/CostValue';
 import { fetchAllAgents } from '@/lib/fetch-all-agents';
 
 interface Asset {
@@ -165,6 +167,7 @@ export default function SDKPlaygroundPage() {
         message,
         wait_mode: 'until_gate',
         wait_timeout_seconds: 180,
+        source: 'playground',
       };
       if (Object.keys(context).length > 0) body.context = context;
       const res = await apiFetch<any>(`/api/agents/${selectedAsset.id}/execute`, {
@@ -181,6 +184,7 @@ export default function SDKPlaygroundPage() {
   const generate = async () => {
     if (!selectedAsset) return;
     setGenerating(true);
+    setGenError(null);
     setCode('');
     setExplanation('');
     setOutput('');
@@ -199,11 +203,15 @@ export default function SDKPlaygroundPage() {
       const data = res.data || {};
       setCode(data.code || '');
       setExplanation(data.explanation || '');
-    } catch (e) {
-      setCode(`// Error: ${e}`);
+      if (!data.code) setGenError('No code came back. Try again or pick another use case.');
+    } catch (e: any) {
+      setGenError(`Could not generate code. ${e?.message || ''}`.trim());
     }
     setGenerating(false);
   };
+
+  const [genError, setGenError] = useState<string | null>(null);
+  const [copyFailed, setCopyFailed] = useState(false);
 
   const runCode = async () => {
     if (!code) return;
@@ -256,34 +264,48 @@ export default function SDKPlaygroundPage() {
     setRunning(false);
   };
 
-  const copyCode = () => {
-    navigator.clipboard.writeText(code);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+  const copyCode = async () => {
+    try {
+      await navigator.clipboard.writeText(code);
+      setCopyFailed(false);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // clipboard blocked, select the code so Ctrl+C works
+      setCopyFailed(true);
+      const pre = document.querySelector('[data-testid="generated-code"]');
+      if (pre) window.getSelection()?.selectAllChildren(pre);
+    }
   };
 
   return (
-    <div className="min-h-screen bg-[#0B0F19] p-6">
+    <div className="min-h-screen bg-[#0B0F19] p-4 sm:p-6">
       <div className="max-w-7xl mx-auto space-y-6">
-        {/* Header */}
-        <div>
-          <div className="flex items-center gap-3 mb-2">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-cyan-500/20 to-purple-500/20 flex items-center justify-center">
-              <Code2 className="w-5 h-5 text-cyan-400" />
-            </div>
-            <div>
-              <h1 className="text-xl font-bold text-white flex items-center gap-2">
-                SDK Code Playground
-                <Sparkles className="w-4 h-4 text-purple-400" />
-              </h1>
-              <p className="text-sm text-slate-400">Generate SDK code, test it, ship it to your product.</p>
-            </div>
-          </div>
-        </div>
+        <PageHeader
+          title={<span className="inline-flex items-center gap-2">SDK Code Playground <Sparkles className="w-4 h-4 text-purple-400" /></span>}
+          purpose="Pick an agent, get ready-to-paste code that calls it from your own product, and try the call live. For developers."
+          icon={Code2}
+          storageKey="sdk-playground"
+          docSlug="03-sdk/00-overview"
+          primaryAction={{
+            label: generating ? 'Generating…' : 'Generate code',
+            icon: Sparkles,
+            onClick: generate,
+            disabled: !selectedAsset || generating,
+            title: !selectedAsset ? 'Pick an agent first' : undefined,
+          }}
+          secondaryAction={{ label: 'API keys', icon: KeyRound, href: '/settings/api-keys' }}
+          steps={[
+            'Pick the agent your product should call.',
+            'Choose a language and say what the code should handle, like retries or batches.',
+            'Fill in the live inputs and press Run live to see a real answer and its cost.',
+            'Copy the code and add an API key from Settings to use it in your product.',
+          ]}
+        />
 
-        <div className="grid grid-cols-12 gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
           {/* Left: Configuration */}
-          <div className="col-span-4 space-y-4">
+          <div className="lg:col-span-4 space-y-4 min-w-0">
             {/* Asset Picker */}
             <div className="bg-slate-800/30 border border-slate-700/50 rounded-xl p-4">
               <label className="text-xs font-semibold text-white uppercase tracking-wider mb-3 flex items-center gap-2">
@@ -294,6 +316,7 @@ export default function SDKPlaygroundPage() {
                 value={search}
                 onChange={e => setSearch(e.target.value)}
                 placeholder="Search agents..."
+                aria-label="Search agents"
                 className="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white placeholder-slate-500 focus:border-cyan-500 focus:outline-none mb-2"
               />
               <div className="max-h-60 overflow-y-auto space-y-1" data-testid="playground-agent-list">
@@ -307,6 +330,8 @@ export default function SDKPlaygroundPage() {
                 {filteredAgents.map(a => (
                   <button
                     key={a.id}
+                    data-testid={`playground-agent-${a.id}`}
+                    aria-pressed={selectedAsset?.id === a.id}
                     onClick={() => setSelectedAsset(a)}
                     className={`w-full text-left px-3 py-2 rounded-lg text-xs transition-colors ${
                       selectedAsset?.id === a.id
@@ -381,12 +406,14 @@ export default function SDKPlaygroundPage() {
               />
               <button
                 onClick={generate}
+                data-testid="generate-code"
                 disabled={!selectedAsset || generating}
                 className="w-full mt-3 bg-gradient-to-r from-cyan-500 to-purple-600 text-white text-xs font-semibold py-2.5 rounded-lg hover:shadow-lg hover:shadow-cyan-500/20 disabled:opacity-30 transition-all flex items-center justify-center gap-2"
               >
                 {generating ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Generating...</> : <><Sparkles className="w-3.5 h-3.5" /> Generate Code</>}
               </button>
               {selectedAsset && <p className="text-[10px] text-slate-500 mt-2">The code uses the message and inputs filled in under Live inputs.</p>}
+              {genError && <p role="alert" data-testid="generate-error" className="text-[11px] text-rose-300 mt-2">{genError}</p>}
             </div>
 
             {/* Inputs panel — driven by the agent/pipeline's declared
@@ -521,7 +548,7 @@ export default function SDKPlaygroundPage() {
           </div>
 
           {/* Right: Code & Output */}
-          <div className="col-span-8 space-y-4">
+          <div className="lg:col-span-8 space-y-4 min-w-0">
             {/* Code Block */}
             <div className="bg-slate-800/30 border border-slate-700/50 rounded-xl overflow-hidden">
               <div className="flex items-center justify-between px-4 py-3 border-b border-slate-700/50">
@@ -533,6 +560,7 @@ export default function SDKPlaygroundPage() {
                 <div className="flex items-center gap-2">
                   <button
                     onClick={copyCode}
+                    data-testid="copy-code"
                     disabled={!code}
                     className="px-3 py-1.5 text-[10px] rounded-lg border border-slate-700 text-slate-400 hover:text-white hover:border-slate-600 disabled:opacity-30 transition-colors flex items-center gap-1"
                   >
@@ -548,7 +576,10 @@ export default function SDKPlaygroundPage() {
                   </button>
                 </div>
               </div>
-              <pre className="p-4 text-xs text-slate-300 font-mono overflow-x-auto min-h-[300px] max-h-[500px] overflow-y-auto">
+              {copyFailed && (
+                <p role="alert" className="px-4 pt-3 text-[11px] text-amber-300">The browser blocked the clipboard. The code is selected, press Ctrl+C to copy it.</p>
+              )}
+              <pre data-testid="generated-code" className="p-4 text-xs text-slate-300 font-mono overflow-x-auto min-h-[300px] max-h-[500px] overflow-y-auto">
                 {code || (
                   <span className="text-slate-600">
                     {selectedAsset ? 'Click "Generate Code" to create SDK code for ' + selectedAsset.name : 'Select an agent to start'}
@@ -621,8 +652,18 @@ export default function SDKPlaygroundPage() {
                       </span>
                     )}
                     {liveResult.execution_id && (
-                      <span className="text-[10px] font-mono text-slate-500">
-                        #{liveResult.execution_id.slice(0, 8)}
+                      <a
+                        href={`/executions/${liveResult.execution_id}`}
+                        data-testid="live-result-run-link"
+                        className="text-[10px] font-mono text-cyan-300 hover:underline"
+                        title="Open this run"
+                      >
+                        #{liveResult.execution_id.slice(0, 8)} · View run
+                      </a>
+                    )}
+                    {typeof liveResult.cost === 'number' && (
+                      <span className="text-[10px] text-slate-400" data-testid="live-result-cost">
+                        Cost <CostValue cost={liveResult.cost} />
                       </span>
                     )}
                   </div>

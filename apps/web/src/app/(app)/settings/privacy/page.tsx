@@ -16,6 +16,7 @@ import { usePageTitle } from '@/hooks/usePageTitle';
 import { useApi } from '@/hooks/useApi';
 import { apiFetch } from '@/lib/api-client';
 import { toastSuccess, toastError } from '@/stores/toastStore';
+import PageHeader from '@/components/layout/PageHeader';
 
 interface PrivacyInfo {
   data_processing: {
@@ -135,12 +136,25 @@ export default function PrivacyPage() {
       transition={{ duration: 0.4 }}
       className="space-y-6 max-w-2xl"
     >
-      <div>
-        <h1 className="text-2xl font-bold text-white">Privacy & Data</h1>
-        <p className="text-sm text-slate-500 mt-1">
-          Download a copy of your data, see how long it is kept, or delete your account.
-        </p>
-      </div>
+      <PageHeader
+        title="Privacy & Data"
+        icon={Shield}
+        purpose="Download a copy of your data, see how long it is kept, or delete your account. For everyone, retention is for admins."
+        primaryAction={{
+          label: exporting ? 'Exporting...' : 'Export my data',
+          icon: exporting ? Loader2 : Download,
+          busy: exporting,
+          onClick: handleExport,
+        }}
+        steps={[
+          'See how your data is protected at rest and on the wire.',
+          'Set how many days runs, chats and audit logs are kept before cleanup.',
+          'Export everything about you as one JSON file at any time.',
+          'Deleting your account is permanent. Type DELETE to confirm.',
+        ]}
+        docSlug="01-architecture/07-governance"
+        storageKey="settings-privacy"
+      />
 
       {/* Data Processing Info */}
       {privacy && (

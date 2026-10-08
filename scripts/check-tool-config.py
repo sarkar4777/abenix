@@ -17,6 +17,9 @@ Rules
      tool builds the name at run time from a table.
   4. Every BaseTool subclass under engine/tools is reachable from the registry
      or the lazy list the API reads, or carries `# tool-registry: exempt`.
+  5. Every tool declares its risk_tier.
+  6. Every tool at medium tier or above declares an `effect`, READ_ONLY for
+     one that only reads, so the autonomy gate knows what it changes.
 
 Reads are found on the AST, so a name inside a string literal or a call split
 over several lines is seen for what it is.
@@ -48,6 +51,8 @@ INFRA_ENV = {
     "EXPORT_DIR",
     "TENANT_ID",
     "INTERNAL_API_URL",
+    "ABENIX_API_SERVICE_HOST",
+    "ABENIX_API_SERVICE_PORT",
     "API_BASE_URL",
     "ABENIX_API_URL",
     "ABENIX_INTERNAL_URL",
@@ -300,6 +305,22 @@ def main(argv: list[str]) -> int:
             problems.append(
                 f"{qual} has risk_tier {tier!r}, expected one of {', '.join(tiers)}."
             )
+
+    # 6. medium and above say what they change
+    from engine.tools.base import Effect  # noqa: E402
+
+    for qual, cls in sorted(classes.items()):
+        tier = cls.__dict__.get("risk_tier") or getattr(cls, "risk_tier", "low")
+        if tier not in ("medium", "high", "critical"):
+            continue
+        eff = getattr(cls, "effect", None)
+        if eff is None:
+            problems.append(
+                f"{qual} is {tier} risk and does not declare effect. Add effect = Effect(kind=..., label=...) "
+                "for what it changes, or effect = READ_ONLY if it only reads, see engine/tools/base.py."
+            )
+        elif not isinstance(eff, Effect):
+            problems.append(f"{qual} has effect {eff!r}, expected an Effect.")
 
     if report:
         by_file: dict[Path, list[str]] = defaultdict(list)

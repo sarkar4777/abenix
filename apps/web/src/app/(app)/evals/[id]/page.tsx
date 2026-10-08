@@ -5,12 +5,13 @@ import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import {
   AlertTriangle,
-  ArrowLeft,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
   CircleDashed,
   Cpu,
+  FlaskConical,
+  History,
   GitCompare,
   Loader2,
   Lock,
@@ -27,6 +28,8 @@ import { useApi } from '@/hooks/useApi';
 import { holds, useMyPermissions } from '@/lib/capabilities';
 import { TIER_STYLE } from '@/components/governance/TierPolicies';
 import ConfirmModal from '@/components/ui/ConfirmModal';
+import PageHeader from '@/components/layout/PageHeader';
+import NextSteps, { type NextStep } from '@/components/shared/NextSteps';
 import AssertionBuilder, { ModelSelect, describe, useAssertionCatalog } from '@/components/evals/AssertionBuilder';
 import RunsChart from '@/components/evals/RunsChart';
 import {
@@ -61,6 +64,9 @@ export default function SuitePage() {
   const [runErr, setRunErr] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
   const [modelDialog, setModelDialog] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [firstCase, setFirstCase] = useState(false);
+  const [nextHidden, setNextHidden] = useState(false);
 
   async function runNow(model?: string) {
     setStarting(true);
@@ -89,41 +95,85 @@ export default function SuitePage() {
   const tier = (suite.agent?.risk_tier || 'low') as Tier;
   const lastBaseline = suite.runs.find((r) => r.status === 'completed' && !r.model_override) || null;
   const stale = !!(lastBaseline && suite.current_config_hash && lastBaseline.config_hash !== suite.current_config_hash);
+  const fresh = suite.cases.length === 0 && suite.runs.length === 0 && !!suite.created_at && Date.now() - new Date(suite.created_at).getTime() < 15 * 60 * 1000;
+  const openAdd = () => { setTab('cases'); setAdding(true); };
+  const pastRuns = suite.agent ? `/executions?agent=${suite.agent.id}&status=completed` : '/executions?status=completed';
+  let nextSteps: { title: string; steps: NextStep[] } | null = null;
+  if (!nextHidden && canManage && firstCase && suite.cases.length > 0 && suite.runs.length === 0) {
+    nextSteps = {
+      title: 'First case saved. What next?',
+      steps: [
+        ...(canRun ? [{ id: 'run', label: 'Run the suite', hint: 'Score the agent on this case now.', icon: Play, onClick: () => runNow() }] : []),
+        { id: 'add-case', label: 'Add another case', hint: 'A few cases cover more of what the agent should do.', icon: Plus, onClick: openAdd },
+        { id: 'from-run', label: 'Save a past run', hint: 'Open a good run and choose Save as eval case.', icon: History, href: pastRuns },
+      ],
+    };
+  } else if (!nextHidden && canManage && fresh) {
+    nextSteps = {
+      title: 'Suite created. Add its first cases.',
+      steps: [
+        { id: 'add-case', label: 'Write a case', hint: 'One input and the checks its answer must pass.', icon: Plus, onClick: openAdd },
+        { id: 'from-run', label: 'Save a past run', hint: 'Open a good run and choose Save as eval case.', icon: History, href: pastRuns },
+      ],
+    };
+  }
 
   return (
     <div className="max-w-6xl mx-auto px-6 py-8">
-      <Link href="/evals" className="inline-flex items-center gap-1 text-sm text-slate-400 hover:text-white mb-4"><ArrowLeft className="w-4 h-4" /> Evaluations</Link>
-      <header className="flex flex-wrap items-start justify-between gap-4 mb-5">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <h1 className="text-2xl font-semibold text-white" data-testid="eval-suite-title">{suite.name}</h1>
-            {suite.gating && <span className="inline-flex items-center gap-1 text-[11px] px-1.5 py-0.5 rounded border border-amber-500/30 text-amber-300 bg-amber-500/10"><Lock className="w-3 h-3" /> Gates publishing</span>}
-          </div>
-          <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-slate-400">
-            {suite.agent ? (
-              <Link href={`/agents/${suite.agent.id}/info`} className="hover:text-white">{suite.agent.kind === 'pipeline' ? 'Pipeline' : 'Agent'} {suite.agent.name}</Link>
-            ) : (
-              <span>Agent deleted</span>
-            )}
-            <span className={`text-[11px] px-1.5 py-0.5 rounded border ${TIER_STYLE[tier].chip}`}>{TIER_STYLE[tier].label} risk</span>
-            {suite.agent?.kind === 'agent' && <span className="text-xs font-mono text-slate-500">{suite.agent.model}</span>}
-            <span className="text-xs text-slate-500">pass at {pct(suite.pass_threshold)}</span>
-          </div>
-          {suite.description && <p className="text-sm text-slate-400 mt-1 max-w-3xl">{suite.description}</p>}
+      <PageHeader
+        className="mb-5"
+        title={suite.name}
+        titleTestId="eval-suite-title"
+        purpose="The golden cases one agent must keep passing, with every run of them and how it scored. For the people who own that agent."
+        icon={FlaskConical}
+        storageKey="eval-suite"
+        docSlug="08-howto/10-evals"
+        back={{ href: '/evals', label: 'Evaluations' }}
+        meta={suite.gating ? <span className="inline-flex items-center gap-1 text-[11px] px-1.5 py-0.5 rounded border border-amber-500/30 text-amber-300 bg-amber-500/10"><Lock className="w-3 h-3" /> Gates publishing</span> : null}
+        primaryAction={canRun ? {
+          label: 'Run now',
+          onClick: () => runNow(),
+          icon: starting ? Loader2 : Play,
+          busy: starting,
+          disabled: !!active || suite.cases.length === 0,
+          title: suite.cases.length === 0 ? 'Add a case first' : undefined,
+          testId: 'eval-run-now',
+        } : undefined}
+        secondaryAction={canRun && suite.agent?.kind === 'agent' ? {
+          label: 'Try another model',
+          onClick: () => setModelDialog(true),
+          icon: Cpu,
+          disabled: suite.cases.length === 0,
+          testId: 'eval-compare-model',
+        } : undefined}
+        steps={[
+          'A case is one input plus the checks its answer must pass. Add them by hand or save a past run as a case.',
+          'Run now executes every case for real against the current version and scores it.',
+          'Try another model reruns the same cases on a different model so you can compare.',
+          'If the suite gates publishing, a new version can only go live once it passes.',
+        ]}
+      >
+        <div className="flex flex-wrap items-center gap-2 text-sm text-slate-400">
+          {suite.agent ? (
+            <Link href={`/agents/${suite.agent.id}/info`} className="hover:text-white">{suite.agent.kind === 'pipeline' ? 'Pipeline' : 'Agent'} {suite.agent.name}</Link>
+          ) : (
+            <span>Agent deleted</span>
+          )}
+          <span className={`text-[11px] px-1.5 py-0.5 rounded border ${TIER_STYLE[tier].chip}`}>{TIER_STYLE[tier].label} risk</span>
+          {suite.agent?.kind === 'agent' && <span className="text-xs font-mono text-slate-500 break-all">{suite.agent.model}</span>}
+          <span className="text-xs text-slate-500">pass at {pct(suite.pass_threshold)}</span>
         </div>
-        {canRun && (
-          <div className="flex items-center gap-2">
-            {suite.agent?.kind === 'agent' && (
-              <button type="button" onClick={() => setModelDialog(true)} disabled={suite.cases.length === 0} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-sm text-slate-200 border border-slate-700 hover:bg-slate-800 disabled:opacity-40" data-testid="eval-compare-model">
-                <Cpu className="w-4 h-4" /> Try another model
-              </button>
-            )}
-            <button type="button" onClick={() => runNow()} disabled={starting || !!active || suite.cases.length === 0} className="inline-flex items-center gap-1.5 px-4 py-2 rounded-md text-sm font-medium bg-cyan-500 text-white hover:bg-cyan-400 disabled:opacity-40" data-testid="eval-run-now" title={suite.cases.length === 0 ? 'Add a case first' : undefined}>
-              {starting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />} Run now
-            </button>
-          </div>
-        )}
-      </header>
+        {suite.description && <p className="text-sm text-slate-400 max-w-3xl break-words">{suite.description}</p>}
+      </PageHeader>
+      {nextSteps && (
+        <NextSteps
+          className="mb-5"
+          title={nextSteps.title}
+          steps={nextSteps.steps}
+          onDismiss={() => setNextHidden(true)}
+          testId="eval-next-steps"
+        />
+      )}
       {runErr && <p className="mb-4 text-sm text-rose-300" role="alert">{runErr}</p>}
 
       {active && (
@@ -154,7 +204,7 @@ export default function SuitePage() {
         ))}
       </div>
 
-      {tab === 'cases' && <CasesTab suite={suite} canManage={canManage} onChanged={mutate} />}
+      {tab === 'cases' && <CasesTab suite={suite} canManage={canManage} onChanged={mutate} adding={adding} setAdding={setAdding} onAdded={() => { if (suite.cases.length === 0) setFirstCase(true); }} />}
       {tab === 'runs' && <RunsTab suite={suite} />}
       {tab === 'settings' && <SettingsTab suite={suite} canManage={canManage} onChanged={mutate} />}
 
@@ -206,8 +256,7 @@ function GateBanner({ suite, stale, onRun, canRun }: { suite: SuiteDetail; stale
   );
 }
 
-function CasesTab({ suite, canManage, onChanged }: { suite: SuiteDetail; canManage: boolean; onChanged: () => void }) {
-  const [adding, setAdding] = useState(false);
+function CasesTab({ suite, canManage, onChanged, adding, setAdding, onAdded }: { suite: SuiteDetail; canManage: boolean; onChanged: () => void; adding: boolean; setAdding: (v: boolean) => void; onAdded: () => void }) {
   const [open, setOpen] = useState<string | null>(null);
   const catalog = useAssertionCatalog();
   return (
@@ -222,7 +271,7 @@ function CasesTab({ suite, canManage, onChanged }: { suite: SuiteDetail; canMana
       )}
       {adding && (
         <div className="rounded-xl border border-cyan-500/30 bg-slate-900/60 p-4">
-          <CaseEditor suiteId={suite.id} onDone={() => { setAdding(false); onChanged(); }} onCancel={() => setAdding(false)} />
+          <CaseEditor suiteId={suite.id} onDone={() => { setAdding(false); onAdded(); onChanged(); }} onCancel={() => setAdding(false)} />
         </div>
       )}
       {suite.cases.length === 0 && !adding && (

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import {
   Gauge, Loader2, RefreshCw, Search, Pause, Play,
@@ -8,6 +8,8 @@ import {
   DollarSign, Users, Zap, Server,
 } from 'lucide-react';
 import { formatCount, formatUsd } from '@/lib/format-stats';
+import PageHeader from '@/components/layout/PageHeader';
+import { AccessGate } from '@/components/layout/NoAccess';
 
 // Same resolution as apps/web/src/lib/api-client.ts — fall back to
 // localhost:8000 in dev, which the Next.js build bakes in at compile
@@ -87,7 +89,7 @@ const STATUS_COLORS: Record<string, string> = {
 };
 
 
-export default function AdminScalingPage() {
+function AdminScalingPage() {
   const [pools, setPools] = useState<Pool[]>([]);
   const [agents, setAgents] = useState<AgentScale[]>([]);
   const [loading, setLoading] = useState(true);
@@ -95,6 +97,11 @@ export default function AdminScalingPage() {
   const [search, setSearch] = useState('');
   const [poolFilter, setPoolFilter] = useState<string>('all');
   const [editing, setEditing] = useState<AgentScale | null>(null);
+  // the list stops at 500 rows, these counts cover every agent
+  const [fleet, setFleet] = useState<{ total: number; with_rate_limit: number; with_budget: number } | null>(null);
+  const [listTotal, setListTotal] = useState<number | null>(null);
+  const [listLoading, setListLoading] = useState(false);
+  const firstQuery = useRef(true);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -114,6 +121,10 @@ export default function AdminScalingPage() {
       const aj = await ar.json();
       setPools(pj.data?.pools || []);
       setAgents(aj.data?.agents || []);
+      if (typeof aj.data?.total === 'number') {
+        setFleet({ total: aj.data.total, with_rate_limit: aj.data.with_rate_limit ?? 0, with_budget: aj.data.with_budget ?? 0 });
+        setListTotal(aj.data.total);
+      }
     } catch (e: any) {
       setError(e?.message || 'Failed to load');
     }
@@ -121,6 +132,30 @@ export default function AdminScalingPage() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  // search and pool filter run on the server so agents past the first 500 can be found
+  useEffect(() => {
+    if (firstQuery.current) { firstQuery.current = false; return; }
+    const token = getToken();
+    if (!token) return;
+    const ctl = new AbortController();
+    const t = setTimeout(async () => {
+      setListLoading(true);
+      try {
+        const qs = new URLSearchParams({ limit: '500' });
+        if (search.trim()) qs.set('q', search.trim());
+        if (poolFilter !== 'all') qs.set('pool', poolFilter);
+        const r = await fetch(`${API_URL}/api/admin/scaling/agents?${qs}`, { headers: { Authorization: `Bearer ${token}` }, signal: ctl.signal });
+        const j = await r.json();
+        if (j.data?.agents) {
+          setAgents(j.data.agents);
+          setListTotal(typeof j.data.total === 'number' ? j.data.total : j.data.agents.length);
+        }
+      } catch { /* aborted or offline, keep the current rows */ }
+      setListLoading(false);
+    }, 300);
+    return () => { clearTimeout(t); ctl.abort(); };
+  }, [search, poolFilter]);
 
   const filteredAgents = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -134,10 +169,10 @@ export default function AdminScalingPage() {
   const totals = useMemo(() => {
     const exec24 = pools.reduce((s, p) => s + (p.executions_24h || 0), 0);
     const maxRep = agents.reduce((s, a) => s + (a.max_replicas || 0), 0);
-    const withBudget = agents.filter(a => a.daily_budget_usd != null).length;
-    const withRateLimit = agents.filter(a => a.rate_limit_qps != null).length;
+    const withBudget = fleet ? fleet.with_budget : agents.filter(a => a.daily_budget_usd != null).length;
+    const withRateLimit = fleet ? fleet.with_rate_limit : agents.filter(a => a.rate_limit_qps != null).length;
     return { exec24, maxRep, withBudget, withRateLimit };
-  }, [pools, agents]);
+  }, [pools, agents, fleet]);
 
   const saveAgent = async (id: string, updates: Partial<AgentScale>) => {
     const token = getToken();
@@ -195,38 +230,36 @@ export default function AdminScalingPage() {
   }
 
   return (
-    <div className="p-6" data-testid="admin-scaling">
+    <div className="sm:p-6" data-testid="admin-scaling">
       <div className="max-w-7xl mx-auto space-y-6">
-        {/* Header */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-cyan-500/20 to-violet-500/20 border border-cyan-500/30 flex items-center justify-center">
-              <Gauge className="w-6 h-6 text-cyan-400" />
-            </div>
-            <div>
-              <h1 className="text-2xl font-bold text-white">Scaling Console</h1>
-              <p className="text-xs text-slate-400">
-                Per-agent pool routing, replicas, concurrency, rate-limits, and budgets. No YAML or helm-upgrade required.
-              </p>
-              <p className="text-[11px] text-amber-300/80 mt-1">
-                <span className="inline-block rounded bg-amber-500/10 border border-amber-500/30 px-1.5 py-0.5 mr-1.5">platform-wide</span>
-                Counts below cover every tenant in the cluster — intentionally broader than the tenant-scoped sidebar stats.
-              </p>
-            </div>
-          </div>
-          <button
-            onClick={load}
-            className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-800/60 border border-slate-700/50 text-xs text-slate-300 hover:bg-slate-800"
-          >
-            <RefreshCw className="w-3 h-3" /> Refresh
-          </button>
-        </div>
+        <PageHeader
+          title="Scaling Console"
+          purpose="Choose where each agent runs and set its replicas, how many runs it takes at once, rate limits and daily budget, with no redeploy. For admins."
+          icon={Gauge}
+          storageKey="admin-scaling"
+          docSlug="02-runtime/08-queue-scaling"
+          meta={
+            <span
+              className="rounded border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[11px] text-amber-300"
+              title="Counts on this page cover every workspace in the cluster, not just yours."
+            >
+              all workspaces
+            </span>
+          }
+          primaryAction={{ label: 'Refresh', icon: RefreshCw, onClick: load }}
+          steps={[
+            'Each pool is a group of workers that grows and shrinks with its queue. Click a pool card to list only its agents.',
+            'Click the pencil on an agent to move it to another pool or change its replicas, limits and daily budget.',
+            'Pause stops an agent taking new runs. Dedicated mode gives it workers of its own.',
+            'Counts on this page cover every workspace in the cluster, not just yours.',
+          ]}
+        />
 
         {/* KPI strip */}
         <div className="grid grid-cols-2 md:grid-cols-5 gap-3" data-testid="scaling-kpis">
           {[
             { label: 'Pools',                    value: pools.length,             icon: Server,    color: 'text-cyan-400' },
-            { label: 'Agents (all tenants)',     value: agents.length,            icon: Zap,       color: 'text-violet-400' },
+            { label: 'Agents (all tenants)',     value: fleet ? fleet.total : agents.length, icon: Zap, color: 'text-violet-400' },
             { label: 'Execs last 24h (fleet)',   value: totals.exec24,            icon: TrendingUp,color: 'text-emerald-400' },
             { label: 'With rate-limit',          value: totals.withRateLimit,     icon: Gauge,     color: 'text-amber-400' },
             { label: 'With daily budget',        value: totals.withBudget,        icon: DollarSign,color: 'text-rose-400' },
@@ -293,22 +326,27 @@ export default function AdminScalingPage() {
         {/* Agent table */}
         <section className="bg-slate-800/30 border border-slate-700/50 rounded-xl p-4">
           <div className="flex items-center justify-between mb-3 gap-3 flex-wrap">
-            <h2 className="text-sm font-semibold text-white">Agents ({filteredAgents.length})</h2>
-            <div className="flex items-center gap-2">
-              <div className="flex items-center gap-1.5 bg-slate-900/50 rounded-lg px-3 py-1.5 border border-slate-700/50">
+            <h2 className="text-sm font-semibold text-white" data-testid="scaling-agent-count">
+              Agents ({listTotal != null && listTotal > filteredAgents.length ? `first ${filteredAgents.length} of ${listTotal}` : filteredAgents.length})
+              {listLoading && <Loader2 className="inline w-3 h-3 ml-1.5 animate-spin text-slate-400" />}
+            </h2>
+            <div className="flex w-full min-w-0 flex-wrap items-center gap-2 sm:w-auto">
+              <div className="flex min-w-0 basis-full items-center gap-1.5 bg-slate-900/50 rounded-lg px-3 py-1.5 border border-slate-700/50 sm:basis-auto">
                 <Search className="w-3 h-3 text-slate-500" />
                 <input
                   value={search}
                   onChange={e => setSearch(e.target.value)}
                   placeholder="Search agents..."
-                  className="bg-transparent outline-none text-xs text-white w-48"
+                  aria-label="Search agents"
+                  className="min-w-0 border-0 bg-transparent p-0 outline-none focus:ring-0 text-xs text-white w-full sm:w-48"
                   data-testid="agent-search"
                 />
               </div>
               <select
+                aria-label="Pool"
                 value={poolFilter}
                 onChange={e => setPoolFilter(e.target.value)}
-                className="bg-slate-900/50 border border-slate-700/50 rounded-lg px-3 py-1.5 text-xs text-white"
+                className="min-w-0 w-full bg-slate-900/50 border border-slate-700/50 rounded-lg px-3 py-1.5 text-xs text-white sm:w-auto sm:max-w-[16rem]"
                 data-testid="pool-filter"
               >
                 <option value="all">All pools</option>
@@ -404,7 +442,7 @@ export default function AdminScalingPage() {
                     </tr>
                   );
                 })}
-                {filteredAgents.length === 0 && (
+                {filteredAgents.length === 0 && !listLoading && (
                   <tr><td colSpan={8} className="py-10 text-center text-slate-500">No agents match the filter.</td></tr>
                 )}
               </tbody>
@@ -647,5 +685,19 @@ function NumInput({
         <p className="text-[9px] text-slate-600 mt-0.5">0 or empty = unlimited</p>
       )}
     </div>
+  );
+}
+
+export default function AdminScalingPageGated() {
+  return (
+    <AccessGate
+      title="Scaling Console"
+      purpose="Choose where each agent runs and set its replicas, how many runs it takes at once, rate limits and daily budget, with no redeploy. For admins."
+      icon={Gauge}
+      need={{ admin: true }}
+      instead={{ text: 'You can follow your own runs and how long they take on Executions.', href: '/executions', label: 'Open Executions' }}
+    >
+      <AdminScalingPage />
+    </AccessGate>
   );
 }

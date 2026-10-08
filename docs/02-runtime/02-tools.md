@@ -480,7 +480,9 @@ Read watched sources and their changes. See [17-source-watch](17-source-watch.md
 | `meeting_post_chat` | Post to the meeting chat | medium | |
 | `meeting_speak` | Speak text into the meeting | medium | `ELEVENLABS_API_KEY`, `OPENAI_API_KEY` |
 | `persona_rag` | Retrieve from the executing user's own persona items, filtered on tenant, owner and scope | | `OPENAI_API_KEY` |
-| `scope_gate` | Check a meeting question against the allowed topics | | |
+| `scope_gate` | Check a meeting question against the allowed topics. Defer list and commitments hand back, allowed topics answer, anything else declines | | |
+
+`meeting_join` with provider `rehearsal` uses `RehearsalAdapter`, which feeds typed turns from Redis to `meeting_listen` as chat and makes `meeting_speak` skip TTS. The rest of the meeting tools run unchanged, which is what the rehearsal page relies on. `meeting_listen` scopes every addressed utterance with the same rule as `scope_gate` and logs the decision, so enforcement does not depend on the model calling the gate. `meeting_speak` and `meeting_post_chat` also write the bot's words into the transcript with `latency_ms` measured from the question.
 
 ### Multimodal
 

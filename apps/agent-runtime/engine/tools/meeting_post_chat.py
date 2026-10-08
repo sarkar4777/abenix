@@ -4,13 +4,16 @@ from __future__ import annotations
 
 from typing import Any
 
-from engine.tools.base import BaseTool, ToolResult
+from engine.tools.base import BaseTool, Effect, ToolResult
 from engine.tools import _meeting_session as sessmod
 
 
 class MeetingPostChatTool(BaseTool):
     name = "meeting_post_chat"
     risk_tier = "medium"
+    effect = Effect(
+        kind="send", label="Post a message in a meeting chat", target_param="meeting_id"
+    )
     description = (
         "Post a text message to the meeting chat without speaking out loud. "
         "Good for links, long-form answers, summaries, or when the user "
@@ -49,6 +52,12 @@ class MeetingPostChatTool(BaseTool):
             await sess.adapter.post_chat(text)
         except Exception as e:
             return ToolResult(content=f"post_chat failed: {e}", is_error=True)
+        await sessmod.append_transcript(
+            meeting_id,
+            sess.display_name or "Bot",
+            text,
+            extra={"bot": True, "via": "chat"},
+        )
         await sessmod.append_decision(
             meeting_id,
             "answer",

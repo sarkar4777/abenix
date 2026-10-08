@@ -13,6 +13,7 @@ import {
   Zap,
 } from 'lucide-react';
 import { FallbackBadge } from '@/components/FallbackBadge';
+import { CostValue } from '@/components/shared/CostValue';
 
 // ─── Types (mirror the Java/Python SDK DagSnapshot records) ─────────────────
 
@@ -216,7 +217,7 @@ export function LiveDagView({ executionId, apiUrl, watchPath, token, palette }: 
         </div>
         <div className="flex items-center gap-3 text-[11px]" style={{ color: p.subtle }}>
           <span>{snap.progress.completed}/{snap.progress.total} nodes</span>
-          <span>{formatCost(snap.cost_so_far)}</span>
+          <CostValue cost={snap.cost_so_far} />
           <span>{snap.tokens.in.toLocaleString()} in · {snap.tokens.out.toLocaleString()} out</span>
         </div>
       </div>

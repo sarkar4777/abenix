@@ -9,6 +9,8 @@ import { useApi } from '@/hooks/useApi';
 import { holds, useMyPermissions } from '@/lib/capabilities';
 import { CLIENT_SAMPLE, KEY_RE, STATE_STYLE, type Tier, type VersionSummary } from '@/lib/decisions';
 import { TIER_STYLE } from '@/components/governance/TierPolicies';
+import PageHeader from '@/components/layout/PageHeader';
+import NoAccess from '@/components/layout/NoAccess';
 
 interface ModelRow {
   id: string;
@@ -45,38 +47,37 @@ export default function DecisionsPage() {
 
   if (perms && !canView) {
     return (
-      <div className="max-w-3xl mx-auto px-6 py-16 text-center">
-        <Scale className="w-10 h-10 text-slate-500 mx-auto mb-3" />
-        <h1 className="text-xl font-semibold text-white">Decisions</h1>
-        <p className="text-slate-400 mt-2">Viewing decisions needs the decisions.view capability. An admin can grant it under Admin, Permissions.</p>
-      </div>
+      <NoAccess
+        testId="decisions-no-access"
+        title="Decisions"
+        purpose="Business rules that give the same answer every time, with a trace of why. For the people who own those rules and the agents that apply them."
+        icon={Scale}
+        need={{ capability: 'decisions.view', label: 'View decisions' }}
+        role={perms.role}
+      />
     );
   }
 
   return (
     <div className="max-w-6xl mx-auto px-6 py-8">
-      <header className="mb-6 flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2 mb-2">
-            <Scale className="w-6 h-6 text-cyan-400" />
-            <h1 className="text-3xl font-semibold text-white">Decisions</h1>
-          </div>
-          <p className="text-slate-400 max-w-3xl">
-            Business rules that give the same answer every time, with a trace of why. Write them in plain terms, test
-            them, get them signed off, and agents, pipelines and apps evaluate them through the API.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Link href="/decisions/reference-sets" className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-sm text-slate-300 border border-slate-700 hover:bg-slate-800">
-            <Layers className="w-4 h-4" /> Reference sets
-          </Link>
-          {canAuthor && (
-            <button type="button" onClick={() => setCreating('blank')} className="inline-flex items-center gap-1.5 px-4 py-2 rounded-md text-sm font-medium bg-cyan-500 text-white hover:bg-cyan-400" data-testid="decision-new">
-              <Plus className="w-4 h-4" /> New decision
-            </button>
-          )}
-        </div>
-      </header>
+      <PageHeader
+        className="mb-6"
+        title="Decisions"
+        purpose="Business rules that give the same answer every time, with a trace of why. For the people who own those rules and the agents that apply them."
+        icon={Scale}
+        storageKey="decisions"
+        docSlug="08-howto/09-decisions"
+        primaryAction={canAuthor
+          ? { label: 'New decision', onClick: () => setCreating('blank'), icon: Plus, testId: 'decision-new' }
+          : { label: 'Reference sets', href: '/decisions/reference-sets', icon: Layers }}
+        secondaryAction={canAuthor ? { label: 'Reference sets', href: '/decisions/reference-sets', icon: Layers } : undefined}
+        steps={[
+          'Write rules in plain terms: the facts that come in and the outcome that goes out.',
+          'Test them against golden cases until every answer is right.',
+          'Get a new version signed off and publish it. Old versions stay for replay.',
+          'Agents, pipelines and apps ask for an answer by the decision key.',
+        ]}
+      />
 
       {(data || []).length > 0 && (
         <div className="flex items-center gap-2 rounded-md border border-slate-700 bg-slate-950 px-3 mb-4 max-w-md">
@@ -205,7 +206,7 @@ function CreateDialog({ start, onClose }: { start: 'blank' | 'import' | 'example
     });
     setBusy(false);
     if (r.error) setErr(r.error);
-    else router.push(`/decisions/${encodeURIComponent(r.data!.key)}`);
+    else router.push(`/decisions/${encodeURIComponent(r.data!.key)}?created=1`);
   }
 
   return (

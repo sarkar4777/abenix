@@ -5,11 +5,16 @@ from __future__ import annotations
 import enum
 import uuid
 
+from datetime import datetime
+
 from sqlalchemy import (
     Boolean,
+    DateTime,
     Enum,
     ForeignKey,
     Index,
+    Integer,
+    SmallInteger,
     String,
     Text,
     text,
@@ -26,6 +31,7 @@ class ModerationAction(str, enum.Enum):
     ALLOW = "allow"  # Pass through. Default for un-triggered categories.
     FLAG = "flag"  # Allow through, log + notify. Non-blocking.
     REDACT = "redact"  # Mask offending spans with ████, allow through.
+    HOLD = "hold"  # Hold for a human reviewer to release, redact or reject.
     BLOCK = "block"  # Refuse the request. Raises ModerationBlocked.
 
 
@@ -36,6 +42,7 @@ class ModerationEventOutcome(str, enum.Enum):
     FLAGGED = "flagged"
     REDACTED = "redacted"
     BLOCKED = "blocked"
+    HELD = "held"  # Waiting for a human reviewer.
     ERROR = "error"  # Moderation provider call itself failed.
 
 
@@ -123,6 +130,14 @@ class ModerationPolicy(UUIDMixin, TenantMixin, TimestampMixin, Base):
         Boolean, nullable=False, default=False, server_default=text("false")
     )
 
+    # What happens to held content nobody decided on in time.
+    hold_timeout_minutes: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=60, server_default=text("60")
+    )
+    hold_timeout_action: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="reject", server_default="reject"
+    )
+
     created_by: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("users.id"),
@@ -188,3 +203,106 @@ class ModerationEvent(UUIDMixin, TenantMixin, TimestampMixin, Base):
 
     # Latency of the provider call in milliseconds.
     latency_ms: Mapped[int] = mapped_column(default=0, server_default="0")
+
+
+class ModerationReview(UUIDMixin, TenantMixin, TimestampMixin, Base):
+    """Content a HOLD policy stopped, waiting for or carrying a human decision."""
+
+    __tablename__ = "moderation_reviews"
+    __table_args__ = (
+        Index(
+            "ix_moderation_reviews_queue",
+            "tenant_id",
+            "status",
+            "priority",
+            "created_at",
+        ),
+        Index("ix_moderation_reviews_due", "status", "expires_at"),
+        Index("ix_moderation_reviews_tenant_decided", "tenant_id", "decided_at"),
+        Index("ix_moderation_reviews_user", "user_id", "status"),
+        Index("ix_moderation_reviews_execution", "execution_id"),
+    )
+
+    policy_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("moderation_policies.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    event_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
+    user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    execution_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
+    agent_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
+    conversation_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
+    # the chat message that stands in for the held content
+    message_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
+    source: Mapped[str] = mapped_column(String(40), default="pre_llm")
+
+    # pending | released | redacted | rejected | auto_released | auto_rejected
+    status: Mapped[str] = mapped_column(
+        String(24), default="pending", server_default="pending"
+    )
+    # 3 high, 2 medium, 1 low
+    priority: Mapped[int] = mapped_column(
+        SmallInteger, default=1, server_default=text("1")
+    )
+    categories: Mapped[list] = mapped_column(JSONB, default=list, server_default="[]")
+    category_scores: Mapped[dict] = mapped_column(
+        JSONB, default=dict, server_default="{}"
+    )
+    # [{"start", "end", "category"}] over the held text
+    spans: Mapped[list] = mapped_column(JSONB, default=list, server_default="[]")
+
+    # Full text, encrypted when the KEK is set, gone after the retention window.
+    held_content: Mapped[str | None] = mapped_column(Text, nullable=True)
+    released_content: Mapped[str | None] = mapped_column(Text, nullable=True)
+    content_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    content_length: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    # matched spans masked, kept with the decision record
+    masked_content: Mapped[str | None] = mapped_column(Text, nullable=True)
+    redaction_mask: Mapped[str] = mapped_column(
+        String(40), default="█████", server_default="█████"
+    )
+    content_purged_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    timeout_action: Mapped[str] = mapped_column(
+        String(16), default="reject", server_default="reject"
+    )
+    expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    assigned_to: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
+    assigned_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    decided_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
+    decided_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    decision_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # reviewers told about it, set once by whoever announces first
+    notified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # a released message went on to the agent
+    delivered_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # [{"at", "by", "action", "note"}]
+    history: Mapped[list] = mapped_column(JSONB, default=list, server_default="[]")
