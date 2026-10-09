@@ -47,4 +47,5 @@ class NotificationSettingsRequest(BaseModel):
     team_updates: bool | None = None
     autonomy_updates: bool | None = None
     moderation_reviews: bool | None = None
+    improvement_updates: bool | None = None
     channels: NotificationChannels | None = None

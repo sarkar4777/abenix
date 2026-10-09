@@ -10,9 +10,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+# same setting and default as the runtime's recall_trajectory tool, so it reads what we write
 TRAJECTORY_ROOT = Path(
     os.environ.get("TRAJECTORY_DIR")
-    or os.environ.get("WINGMAN_TRAJECTORY_DIR", "/data/wingman-trajectories")
+    or os.environ.get("WINGMAN_TRAJECTORY_DIR")
+    or "/data/trajectories"
 )
 TENANT = os.environ.get("WINGMAN_TRAJECTORY_TENANT", "shared")
 _WORD_RX = re.compile(r"[A-Za-z][A-Za-z0-9_-]{2,}")
@@ -37,12 +39,30 @@ def _atomic_write(path: Path, obj: Any) -> None:
         raise
 
 
+def _signal(t: dict[str, Any]) -> float:
+    try:
+        return float(t.get("success_signal"))
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def _tokens(s: str) -> set[str]:
     return {m.group(0).lower() for m in _WORD_RX.finditer(s or "")}
 
 
+def _id_for_execution(execution_id: str) -> str:
+    return "traj-" + re.sub(r"[^A-Za-z0-9_-]", "", str(execution_id))[:64]
+
+
 def write_trajectory(record: dict[str, Any]) -> str:
-    tid = record.get("id") or f"traj-{uuid.uuid4().hex[:12]}"
+    """One file per execution. A later write for the same execution is a no-op."""
+    exec_id = record.get("execution_id")
+    if exec_id and not record.get("id"):
+        tid = _id_for_execution(exec_id)
+        if (TRAJECTORY_ROOT / TENANT / f"{tid}.json").exists():
+            return tid
+    else:
+        tid = record.get("id") or f"traj-{uuid.uuid4().hex[:12]}"
     record["id"] = tid
     record.setdefault("created_at", _now_iso())
     record["created_at_epoch"] = time.time()
@@ -73,7 +93,7 @@ def search_trajectories(query: str, top_k: int = 5) -> list[dict[str, Any]]:
         score = len(q_terms & _tokens(intent))
         if score > 0:
             scored.append((score, t))
-    scored.sort(key=lambda x: (-x[0], -(x[1].get("created_at_epoch") or 0)))
+    scored.sort(key=lambda x: (-_signal(x[1]), -x[0], -(x[1].get("created_at_epoch") or 0)))
     return [t for _, t in scored[:top_k]]
 
 

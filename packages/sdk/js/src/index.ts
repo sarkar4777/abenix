@@ -210,6 +210,9 @@ export class Abenix {
   public events: EventsClient;
   public actions: ActionsClient;
   public autonomy: AutonomyClient;
+  public improvements: ImprovementsClient;
+  public lessons: LessonsClient;
+  public feedback: FeedbackClient;
 
   constructor(config: AbenixConfig) {
     this.apiKey = config.apiKey;
@@ -225,6 +228,9 @@ export class Abenix {
     this.events = new EventsClient(this);
     this.actions = new ActionsClient(this);
     this.autonomy = new AutonomyClient(this);
+    this.improvements = new ImprovementsClient(this);
+    this.lessons = new LessonsClient(this);
+    this.feedback = new FeedbackClient(this);
   }
 
   /** The key's user, role and capabilities. */
@@ -957,6 +963,88 @@ export class AutonomyClient {
     if (opts.status) q.set('status', opts.status);
     if (opts.before) q.set('before', opts.before);
     return platformCall(this.client, 'GET', `/api/autonomy/grants/${grantId}/actions?${q.toString()}`);
+  }
+}
+
+export type ProposalState =
+  | 'drafting' | 'proving' | 'failed_proof' | 'awaiting_approval' | 'approved'
+  | 'rejected' | 'released' | 'kept' | 'rolled_back' | 'superseded';
+
+export interface ProposalRow {
+  id: string;
+  agent: { id: string; name: string };
+  cluster: { id: string | null; title: string };
+  change_kind: string;
+  change_label: string;
+  diff: Record<string, unknown>;
+  rationale: string;
+  risk: 'low' | 'medium' | 'high';
+  state: ProposalState;
+  state_label: string;
+  progress: Record<string, unknown>;
+  proof: Record<string, unknown>;
+  approval_id: string | null;
+  released_revision_id: string | null;
+  watch_until: string | null;
+  watch_result: Record<string, unknown> | null;
+  created_at: string | null;
+}
+
+/** Fixes proposed from an agent's lessons, their proof, approval and watch. */
+export class ImprovementsClient {
+  constructor(private client: Abenix) {}
+
+  /** Proposals you may see, newest first. */
+  async list(opts: { agentId?: string; state?: ProposalState; limit?: number } = {}): Promise<ProposalRow[]> {
+    const q = new URLSearchParams({ limit: String(opts.limit ?? 50) });
+    if (opts.agentId) q.set('agent_id', opts.agentId);
+    if (opts.state) q.set('state', opts.state);
+    const out = await platformCall<{ items: ProposalRow[] }>(this.client, 'GET', `/api/improvements/proposals?${q.toString()}`);
+    return out?.items ?? [];
+  }
+
+  /** One proposal with its diff, proof, progress and watch result. */
+  get(proposalId: string): Promise<ProposalRow> {
+    return platformCall(this.client, 'GET', `/api/improvements/proposals/${proposalId}`);
+  }
+}
+
+/** Tell an agent what it got wrong. Lessons feed proposals, they never change an agent on their own. */
+export class LessonsClient {
+  constructor(private client: Abenix) {}
+
+  report(
+    agentId: string,
+    note: string,
+    opts: { expected?: string; executionId?: string; input?: string; output?: string } = {},
+  ): Promise<any> {
+    if (!note.trim()) return Promise.reject(new Error('Say what was wrong.'));
+    const body: Record<string, unknown> = { agent_id: agentId, note, source: 'sdk' };
+    if (opts.expected !== undefined) body.expected = opts.expected;
+    if (opts.input !== undefined) body.input = opts.input;
+    if (opts.output !== undefined) body.output = opts.output;
+    if (opts.executionId) body.execution_id = opts.executionId;
+    return platformCall(this.client, 'POST', '/api/improvements/lessons', body);
+  }
+}
+
+/** Thumbs up or down on an answer, with an optional correction. */
+export class FeedbackClient {
+  constructor(private client: Abenix) {}
+
+  /** rating is 1 or -1. A thumbs down with a correction becomes a lesson with that as the right answer. */
+  give(
+    rating: 1 | -1,
+    opts: { executionId?: string; conversationId?: string; messageId?: string; agentId?: string; correction?: string } = {},
+  ): Promise<{ id: string; lesson_id?: string | null }> {
+    if (rating !== 1 && rating !== -1) return Promise.reject(new Error('rating is 1 or -1.'));
+    const body: Record<string, unknown> = { rating };
+    if (opts.executionId) body.execution_id = opts.executionId;
+    if (opts.conversationId) body.conversation_id = opts.conversationId;
+    if (opts.messageId) body.message_id = opts.messageId;
+    if (opts.agentId) body.agent_id = opts.agentId;
+    if (opts.correction !== undefined) body.correction = opts.correction;
+    return platformCall(this.client, 'POST', '/api/improvements/feedback', body);
   }
 }
 

@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { AlertTriangle, CheckCircle2, Loader2, ShieldCheck, XCircle } from 'lucide-react';
 import { apiFetch } from '@/lib/api-client';
 import { isActionGate, levelLabel, relTime, signoffApproval } from '@/lib/autonomy';
-import { canSign, refreshInboxCounts, type SignableRow } from '@/lib/inbox';
+import { RELEASE_GATE, canSign, refreshInboxCounts, type SignableRow } from '@/lib/inbox';
 import ApprovalActionRow from '@/components/autonomy/ApprovalActionRow';
 
 interface Row extends SignableRow {
@@ -120,7 +120,7 @@ export default function ApprovalsPanel({
       return;
     }
     setError(null);
-    const mine = (r.data || []).filter((a) => a.status === 'pending' && canSign(a, me, caps));
+    const mine = (r.data || []).filter((a) => a.status === 'pending' && a.gate_kind !== RELEASE_GATE && canSign(a, me, caps));
     setRows(mine);
     onCount?.(mine.length);
   }, [me, caps, onCount]);

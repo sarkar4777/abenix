@@ -462,28 +462,70 @@ async def config_hash(db: AsyncSession, agent_id: Any) -> str | None:
         return None
 
 
-async def eval_passing(db: AsyncSession, agent_id: Any) -> bool | None:
-    """The latest finished evaluation run of the agent's suites, None when it has none."""
+async def eval_passing(
+    db: AsyncSession, agent_id: Any, current_hash: str | None = None
+) -> bool | None:
+    """Whether the suites pass for the agent as it is now, judged like the publish gate.
+
+    Only completed runs on the agent's own model against the current config hash count.
+    Gating suites decide when the agent has any. False when the suites ran only on an
+    older version, None when they never ran.
+    """
     from models.evals import EvalRun, EvalSuite
 
     aid = _uuid(agent_id)
     if aid is None:
         return None
+    chash = current_hash or await config_hash(db, aid)
+    if not chash:
+        return None
     try:
         async with db.begin_nested():
-            got = (
+            rows = (
                 await db.execute(
-                    select(EvalRun.threshold_met)
+                    select(EvalRun.suite_id, EvalRun.threshold_met, EvalSuite.gating)
                     .join(EvalSuite, EvalSuite.id == EvalRun.suite_id)
-                    .where(EvalSuite.agent_id == aid, EvalRun.threshold_met.isnot(None))
-                    .order_by(EvalRun.created_at.desc())
-                    .limit(1)
+                    .where(
+                        EvalSuite.agent_id == aid,
+                        EvalRun.status == "completed",
+                        EvalRun.model_override.is_(False),
+                        EvalRun.config_hash == chash,
+                        EvalRun.threshold_met.isnot(None),
+                    )
+                    .order_by(EvalRun.completed_at.desc().nulls_last())
                 )
-            ).first()
+            ).all()
+            verdict = latest_verdict(rows)
+            if verdict is None:
+                older = (
+                    await db.execute(
+                        select(EvalRun.id)
+                        .join(EvalSuite, EvalSuite.id == EvalRun.suite_id)
+                        .where(
+                            EvalSuite.agent_id == aid,
+                            EvalRun.status == "completed",
+                            EvalRun.model_override.is_(False),
+                        )
+                        .limit(1)
+                    )
+                ).first()
+                # an edit since the last run means the suites must run again
+                verdict = False if older is not None else None
     except Exception as e:  # noqa: BLE001
         logger.debug("eval lookup skipped: %s", e)
         return None
-    return None if got is None else bool(got[0])
+    return verdict
+
+
+def latest_verdict(rows: list[Any]) -> bool | None:
+    """rows are (suite_id, threshold_met, gating), newest first."""
+    latest: dict[Any, tuple[bool, bool]] = {}
+    for suite_id, met, gating in rows:
+        latest.setdefault(suite_id, (bool(met), bool(gating)))
+    if not latest:
+        return None
+    gating = [met for met, g in latest.values() if g]
+    return all(gating if gating else [met for met, _ in latest.values()])
 
 
 async def tenant_settings(db: AsyncSession, tenant_id: Any) -> dict[str, Any]:
@@ -573,7 +615,9 @@ async def grant_bundle(db: AsyncSession, grant: Any) -> dict[str, Any]:
         level_since=grant.level_since,
         created_at=grant.created_at,
         current_config_hash=current,
-        eval_passing=await eval_passing(db, grant.agent_id) if agent else None,
+        eval_passing=(
+            await eval_passing(db, grant.agent_id, current) if agent else None
+        ),
     )
     cap = ceiling_for(agent, at, grant)
     result = L.evaluate(grant, stats, policy, _now(), ceiling=cap)
@@ -1445,6 +1489,7 @@ async def on_action_gate_resolved(
     action.decided_by = getattr(decider, "id", None)
     action.decided_at = approval.decided_at or _now()
     action.decision_note = note or None
+    await _gate_lesson(action, edited, note, decider, db)
     score = dict(action.score or {})
     score["agreement"] = L.agreement_for(action.status, None)
     action.score = score
@@ -1453,6 +1498,27 @@ async def on_action_gate_resolved(
         if g is not None:
             await reevaluate(db, g)
     await db.commit()
+
+
+async def _gate_lesson(
+    action: Any, edited: Any, note: str, decider: Any, db: AsyncSession
+) -> None:
+    from app.services import lessons
+
+    by = getattr(decider, "id", None)
+    if action.status == "rejected" and note:
+        await lessons.capture_action(db, action, "autonomy_reject", note=note, by=by)
+    elif action.status == "edited":
+        await lessons.capture_action(
+            db,
+            action,
+            "autonomy_edit",
+            expected=json.dumps(edited, default=str),
+            note=note or None,
+            by=by,
+        )
+    elif action.status == "approved":
+        await lessons.capture_action(db, action, "positive", by=by)
 
 
 def validate_edited_arguments(
@@ -2398,6 +2464,16 @@ async def review(
     a.reviewer_alternative = (alternative or "").strip() or None
     a.decided_by = user.id
     a.decided_at = _now()
+    if answer in ("different", "agree"):
+        from app.services import lessons
+
+        await lessons.capture_action(
+            db,
+            a,
+            "autonomy_alternative" if answer == "different" else "positive",
+            expected=a.reviewer_alternative,
+            by=user.id,
+        )
     score = dict(a.score or {})
     score["agreement"] = L.agreement_for("watching", answer)
     a.score = score
@@ -2476,6 +2552,16 @@ async def apply_outcome(
     if prev.get("agreement") is not None:
         score["agreement"] = prev["agreement"]
     action.score = score
+    if score.get("within_band") is False:
+        from app.services import lessons
+
+        await lessons.capture_action(
+            db,
+            action,
+            "band_miss",
+            note=f"Predicted {pred.get('low')} to {pred.get('high')} for {metric}, got {value}",
+            by=by,
+        )
     await events.emit(
         db,
         action.tenant_id,
@@ -2507,6 +2593,9 @@ async def flag_harm(
         )
     a.harm = True
     a.harm_note = note
+    from app.services import lessons
+
+    await lessons.capture_action(db, a, "harm", note=note, by=user.id)
     a.score = {**(a.score or {}), "harm": True}
     if a.grant_id:
         g = await get_grant(db, user.tenant_id, a.grant_id)

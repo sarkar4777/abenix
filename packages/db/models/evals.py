@@ -52,6 +52,7 @@ class EvalSuite(UUIDMixin, TenantMixin, TimestampMixin, Base):
 
 class EvalCase(UUIDMixin, TenantMixin, TimestampMixin, Base):
     __tablename__ = "eval_cases"
+    __table_args__ = (Index("ix_eval_cases_suite_state", "suite_id", "state"),)
 
     suite_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("eval_suites.id", ondelete="CASCADE"), index=True
@@ -67,6 +68,13 @@ class EvalCase(UUIDMixin, TenantMixin, TimestampMixin, Base):
         UUID(as_uuid=True), nullable=True
     )
     reference_output: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # suggested cases come from lessons and only run once a person accepts them
+    state: Mapped[str] = mapped_column(
+        String(16), default="accepted", server_default="accepted"
+    )
+    source_lesson_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
 
 
 class EvalRun(UUIDMixin, TenantMixin, Base):

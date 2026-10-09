@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import {
-  Bot, Cpu, Globe, History, Loader2, OctagonX, Play, Radio, Scale, Search, Timer, Workflow, Wrench,
+  Bot, Cpu, Globe, History, Loader2, OctagonX, Play, Radio, Scale, Search, Sparkles, Timer, Workflow, Wrench,
 } from 'lucide-react';
 import { apiFetch } from '@/lib/api-client';
 import { useApi } from '@/hooks/useApi';
@@ -10,7 +10,7 @@ import { fetchAllAgents } from '@/lib/fetch-all-agents';
 import { useSelectableModels } from '@/lib/models';
 import ConfirmModal from '@/components/ui/ConfirmModal';
 
-type Scope = 'all' | 'agent' | 'pipeline' | 'tool' | 'model' | 'trigger' | 'decision' | 'source';
+type Scope = 'all' | 'agent' | 'pipeline' | 'tool' | 'model' | 'trigger' | 'decision' | 'source' | 'improvements';
 
 interface Switch {
   id: string;
@@ -38,6 +38,7 @@ const SCOPES: { value: Scope; label: string; icon: typeof Bot; help: string }[] 
   { value: 'trigger', label: 'A trigger', icon: Timer, help: 'Schedules and webhooks for this trigger stop firing.' },
   { value: 'decision', label: 'A decision', icon: Scale, help: 'The decision model refuses evaluations until resumed.' },
   { value: 'source', label: 'A watched source', icon: Radio, help: 'Change detection for this source pauses.' },
+  { value: 'improvements', label: 'Agent improvements', icon: Sparkles, help: 'Stops proposing and proving fixes for every agent. Releases already in their watch period keep being watched.' },
   { value: 'all', label: 'Everything', icon: Globe, help: 'Stops every agent, pipeline and tool call in this tenant. Use for an incident.' },
 ];
 
@@ -164,7 +165,7 @@ function SwitchRow({ s, name, canManage, onDone }: { s: Switch; name?: string; c
   const [err, setErr] = useState<string | null>(null);
   const meta = SCOPES.find((x) => x.value === s.scope);
   const Icon = meta?.icon || OctagonX;
-  const what = s.scope === 'all' ? 'Everything in this tenant' : `${meta?.label.replace(/^An? /, '') || s.scope} ${name || s.target}`;
+  const what = s.scope === 'all' ? 'Everything in this tenant' : s.scope === 'improvements' ? 'Agent improvements in this tenant' : `${meta?.label.replace(/^An? /, '') || s.scope} ${name || s.target}`;
 
   async function resume() {
     setBusy(true);
@@ -236,11 +237,11 @@ function NewSwitch({ optionsFor, onDone }: { optionsFor: (s: Scope) => Option[];
     return list.slice(0, 50);
   }, [options, query]);
   const chosen = options.find((o) => o.value === target);
-  const needsTarget = scope !== 'all';
+  const needsTarget = scope !== 'all' && scope !== 'improvements';
   const reasonOk = reason.trim().length >= 3;
   const ready = (!needsTarget || target.trim()) && reasonOk;
   const meta = SCOPES.find((s) => s.value === scope)!;
-  const what = scope === 'all' ? 'everything in this tenant' : `${meta.label.replace(/^An? /, '').toLowerCase()} ${chosen?.label || target}`;
+  const what = scope === 'all' ? 'everything in this tenant' : scope === 'improvements' ? 'agent improvements in this tenant' : `${meta.label.replace(/^An? /, '').toLowerCase()} ${chosen?.label || target}`;
 
   function pickScope(s: Scope) {
     setScope(s);
@@ -377,7 +378,7 @@ function NewSwitch({ optionsFor, onDone }: { optionsFor: (s: Scope) => Option[];
           data-testid="kill-switch-submit"
         >
           {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <OctagonX className="w-4 h-4" />}
-          Stop {needsTarget ? (chosen?.label || target || 'it') : 'everything'}
+          Stop {needsTarget ? (chosen?.label || target || 'it') : scope === 'improvements' ? 'agent improvements' : 'everything'}
         </button>
         {!ready && (
           <span className="text-xs text-slate-500">

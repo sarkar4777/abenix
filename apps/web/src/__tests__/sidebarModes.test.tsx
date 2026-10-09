@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 
 const state: {
   pathname: string;
@@ -88,6 +88,14 @@ describe('sidebar essentials mode', () => {
   it('adds Agent Builder and Autonomy for creators', () => {
     nav(as('creator'));
     expect(labels()).toEqual(['Needs you', 'Home', 'Agents', 'AI Chat', 'Knowledge', 'Monitor', 'Agent Builder', 'Autonomy']);
+  });
+
+  it('adds Improvements for builders who can view it, never for members', () => {
+    nav(as('creator', [...USER_CAPS, 'improvements.view']));
+    expect(labels()).toEqual(['Needs you', 'Home', 'Agents', 'AI Chat', 'Knowledge', 'Monitor', 'Agent Builder', 'Autonomy', 'Improvements']);
+    cleanup();
+    nav(as('user', [...USER_CAPS, 'improvements.view']));
+    expect(labels()).not.toContain('Improvements');
   });
 
   it('adds an Admin section for admins that opens to the admin pages', () => {

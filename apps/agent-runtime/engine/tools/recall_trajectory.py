@@ -11,8 +11,25 @@ from engine.tools.base import BaseTool, ToolResult
 
 logger = logging.getLogger(__name__)
 
-TRAJECTORY_ROOT = Path(os.environ.get("TRAJECTORY_DIR", "/data/trajectories"))
+DEFAULT_TRAJECTORY_DIR = "/data/trajectories"
 _WORD_RX = re.compile(r"[A-Za-z][A-Za-z0-9_-]{2,}")
+
+
+def trajectory_root() -> Path:
+    # the one setting writers and readers share, read per call so tests and reloads see it
+    return Path(os.environ.get("TRAJECTORY_DIR") or DEFAULT_TRAJECTORY_DIR)
+
+
+def _signal(entry: dict[str, Any]) -> float:
+    try:
+        return float(entry.get("success_signal"))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def rank_key(overlap: int, entry: dict[str, Any]) -> tuple[float, int, float]:
+    """Outcome first, then term overlap, then newest."""
+    return (-_signal(entry), -overlap, -float(entry.get("created_at_epoch") or 0))
 
 
 def _tokens(s: str) -> set[str]:
@@ -62,11 +79,13 @@ class RecallTrajectoryTool(BaseTool):
         if not q_terms:
             return ToolResult(content=json.dumps({"matches": []}))
 
+        root = trajectory_root()
         candidates: list[tuple[int, dict[str, Any]]] = []
-        for tenant_dir in (
-            TRAJECTORY_ROOT / self._tenant_id,
-            TRAJECTORY_ROOT / "shared",
-        ):
+        seen: set[str] = set()
+        dirs = [root / self._tenant_id]
+        if self._tenant_id != "shared":
+            dirs.append(root / "shared")
+        for tenant_dir in dirs:
             if not tenant_dir.exists():
                 continue
             for path in tenant_dir.glob("*.json"):
@@ -79,9 +98,13 @@ class RecallTrajectoryTool(BaseTool):
                 overlap = len(q_terms & terms)
                 if overlap < min_overlap:
                     continue
+                key = str(entry.get("execution_id") or entry.get("id") or path.stem)
+                if key in seen:
+                    continue
+                seen.add(key)
                 candidates.append((overlap, entry))
 
-        candidates.sort(key=lambda x: (-x[0], -(x[1].get("created_at_epoch") or 0)))
+        candidates.sort(key=lambda x: rank_key(x[0], x[1]))
         out = []
         for overlap, entry in candidates[:top_k]:
             out.append(

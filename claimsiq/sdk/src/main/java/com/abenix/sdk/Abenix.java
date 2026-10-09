@@ -37,6 +37,9 @@ public final class Abenix implements AutoCloseable {
     private final ExecutionsClient executions;
     private final ActionsClient actions;
     private final AutonomyClient autonomy;
+    private final ImprovementsClient improvements;
+    private final LessonsClient lessons;
+    private final FeedbackClient feedback;
 
     private Abenix(Builder b) {
         this.baseUrl = stripTrailingSlash(Objects.requireNonNull(b.baseUrl, "baseUrl"));
@@ -62,6 +65,9 @@ public final class Abenix implements AutoCloseable {
         this.executions = new ExecutionsClient(kit);
         this.actions = new ActionsClient(kit);
         this.autonomy = new AutonomyClient(kit);
+        this.improvements = new ImprovementsClient(kit);
+        this.lessons = new LessonsClient(kit);
+        this.feedback = new FeedbackClient(kit);
     }
 
     public static Builder builder() { return new Builder(); }
@@ -86,6 +92,12 @@ public final class Abenix implements AutoCloseable {
     public ActionsClient actions() { return actions; }
     /** Autonomy ladder reads: overview, grants and their actions. */
     public AutonomyClient autonomy() { return autonomy; }
+    /** Proposed fixes from the agent's lessons, their proof and watch. */
+    public ImprovementsClient improvements() { return improvements; }
+    /** Report what an agent got wrong. */
+    public LessonsClient lessons() { return lessons; }
+    /** Thumbs up or down on an answer. */
+    public FeedbackClient feedback() { return feedback; }
 
     // ─────────────────────────── Public verbs ───────────────────────────
 

@@ -18,7 +18,7 @@ interface TenantSettings {
   slack_webhook_is_set: boolean;
 }
 
-type PrefKey = 'execution_complete' | 'execution_failed' | 'billing_alerts' | 'team_updates' | 'autonomy_updates' | 'moderation_reviews';
+type PrefKey = 'execution_complete' | 'execution_failed' | 'billing_alerts' | 'team_updates' | 'autonomy_updates' | 'moderation_reviews' | 'improvement_updates';
 
 interface NotifPrefs extends Record<PrefKey, boolean> {
   channels: { slack: boolean; email: boolean };
@@ -45,6 +45,11 @@ const PREF_LABELS: { key: PrefKey; label: string; description: string }[] = [
     key: 'autonomy_updates',
     label: 'Agent autonomy',
     description: 'An agent is ready to move up a level, was moved down after a harm flag or a drop in accuracy, or proposed an action waiting for your review.',
+  },
+  {
+    key: 'improvement_updates',
+    label: 'Agent improvements',
+    description: 'A proven fix is waiting for your approval, a release was kept after its watch period, or a release was rolled back and why.',
   },
   {
     key: 'moderation_reviews',

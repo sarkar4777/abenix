@@ -121,6 +121,12 @@ from models.governance import (
 )
 from models.source_watch import SourceChange, SourceSnapshot, WatchSource
 from models.autonomy import ActionType, AgentAction, AutonomyChange, AutonomyGrant
+from models.improvement import (
+    Feedback,
+    ImprovementProposal,
+    Lesson,
+    LessonCluster,
+)
 
 __all__ = [
     "Base",
@@ -264,4 +270,8 @@ __all__ = [
     "AutonomyGrant",
     "AutonomyChange",
     "AgentAction",
+    "Feedback",
+    "Lesson",
+    "LessonCluster",
+    "ImprovementProposal",
 ]

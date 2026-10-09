@@ -219,6 +219,35 @@ moderation_provider_errors_total = _safe_counter(
     ["provider", "model"],
 )
 
+# governed self-improvement
+improvement_lessons_captured_total = _safe_counter(
+    "abenix_improvement_lessons_captured_total",
+    "Lessons captured from runs, reviews, flags and people's notes",
+    ["source"],
+)
+improvement_clusters_open = _safe_gauge(
+    "abenix_improvement_clusters_open",
+    "Open lesson clusters across tenants",
+)
+improvement_proofs_total = _safe_counter(
+    "abenix_improvement_proofs_total",
+    "Proofs finished, by whether they passed the bar",
+    ["result"],
+)
+improvement_proof_tokens_total = _safe_counter(
+    "abenix_improvement_proof_tokens_total",
+    "Tokens spent drafting and proving fixes",
+)
+improvement_proof_queue_depth = _safe_gauge(
+    "abenix_improvement_proof_queue_depth",
+    "Proposals waiting for a proof, the proof pool scales on this",
+)
+improvement_releases_total = _safe_counter(
+    "abenix_improvement_releases_total",
+    "Released fixes by how they ended: released, kept or rolled_back",
+    ["outcome"],
+)
+
 
 def setup_telemetry(
     app: FastAPI,

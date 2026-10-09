@@ -139,6 +139,14 @@
         {
           "slug": "02-runtime/21-earned-autonomy",
           "title": "Earned autonomy"
+        },
+        {
+          "slug": "02-runtime/22-lessons-and-improvements",
+          "title": "Lessons and improvements"
+        },
+        {
+          "slug": "02-runtime/23-governed-self-improvement",
+          "title": "Governed self-improvement: propose, prove, approve, watch"
         }
       ]
     },
@@ -203,6 +211,10 @@
         {
           "slug": "04-data-model/08-autonomy",
           "title": "Earned autonomy: action types, grants, ledger"
+        },
+        {
+          "slug": "04-data-model/09-self-improvement",
+          "title": "Self-improvement: feedback, lessons, groups, proposals"
         },
         {
           "slug": "document-versioning",
@@ -371,6 +383,10 @@
         {
           "slug": "08-howto/15-meetings",
           "title": "Send a bot to a meeting"
+        },
+        {
+          "slug": "08-howto/16-self-improvement",
+          "title": "Let an agent improve itself, under control"
         }
       ]
     },

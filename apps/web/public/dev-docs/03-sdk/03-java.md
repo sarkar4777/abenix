@@ -211,6 +211,9 @@ Each returns `Map<String, Object>` or `List<Map<String, Object>>`.
 | `agents()` | `list()`, `get(agentId)`, `findBySlug(slug)` (null when not found) |
 | `executions()` | `live()`, `get(id)`, `replay(id)`, `tree(id)`, `pendingApprovals()` |
 | `autonomy()` | `overview()`, `grant(grantId)`, `grantActions(grantId, status, limit, before)` |
+| `improvements()` | `list()`, `list(agentId, state, limit)`, `get(proposalId)` |
+| `lessons()` | `report(agentId, note)`, `report(agentId, note, expected, executionId)`. Sent with `source: sdk` |
+| `feedback()` | `give(rating, executionId, agentId, correction)`, `giveOnMessage(rating, conversationId, messageId, correction)`. `rating` is 1 or -1 |
 | `knowledge()` | `cognify(kbId, docIds, model, chunkSize, chunkOverlap)`, `graphStats(kbId)`, `search(kbId, query, mode, topK, graphDepth)`, `graph(kbId, limit)`, `cognifyJobs(kbId)` |
 | `chat()` | `create(agentSlug, agentId, appSlug, title, actAs)`, `list(appSlug, agentSlug, archived, limit, offset, actAs)`, `get`, `send(threadId, content, context, agentSlug, attachments, actAs)`, `rename`, `archive`, `delete` |
 | `tools()` | `list()`, `catalog()`, `execute(slug, arguments, config)` |

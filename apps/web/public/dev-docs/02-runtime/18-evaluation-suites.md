@@ -156,9 +156,9 @@ When the agent's tier requires it, publishing checks every suite of that agent w
 | `failed` | That run scored below the threshold. The message lists up to 8 failing cases |
 | `not_run` | No such run exists for the current version |
 
-Any suite not `passed` blocks the publish with 409, `error_code: "EVAL_GATE"`. `details` holds `agent_id` and the per-suite rows. The message names the tier, each blocking suite and what to do next.
+Any suite not `passed` blocks the publish with 409, `error_code: "EVAL_GATE"`. `details` holds `agent_id`, the per-suite rows and `link`, the first failing run (`/evals/runs/{id}`) or the suite when it has not run. The message names the tier, each blocking suite and what to do next.
 
-The gate is checked on `POST /api/agents/{id}/publish`, and on `PUT /api/agents/{id}` when the update moves the agent to active from another status. An agent with no gating suites, or whose tier does not require a pass, publishes as before.
+The gate is checked on `POST /api/agents/{id}/publish`, on `PUT /api/agents/{id}` when the update moves the agent to active, on any `PUT` that changes the prompt, model or tools of an agent that is already active, and when a healing patch is applied to an active pipeline. A refused live edit adds how to proceed: move the agent to draft, save, run the suite, publish again. Reverts and healing rollbacks skip the gate. An agent with no gating suites, or whose tier does not require a pass, saves and publishes as before.
 
 Editing the system prompt or the model config changes the hash, so the gating suites must run again on the new version before it can go live. `GET /api/evals/gate/{agent_id}` returns the gate decision now, without publishing.
 
@@ -232,7 +232,7 @@ All under `/api/evals`.
 | **Assertions, judge scoring, suggestions** | [`apps/api/app/services/eval_assertions.py`](../../apps/api/app/services/eval_assertions.py) |
 | **Run score, comparison, gate decision, model-change check** | [`apps/api/app/services/eval_scoring.py`](../../apps/api/app/services/eval_scoring.py) |
 | **Models** | [`packages/db/models/evals.py`](../../packages/db/models/evals.py) — `EvalSuite`, `EvalCase`, `EvalRun`, `EvalResult` |
-| **Publish gate hook** | [`apps/api/app/routers/agents.py`](../../apps/api/app/routers/agents.py) — `_eval_gate_problem` |
+| **Publish and live edit gate hook** | [`apps/api/app/services/agent_revisions.py`](../../apps/api/app/services/agent_revisions.py) — `eval_gate_refusal` |
 | **Tier policy defaults** | [`apps/agent-runtime/engine/risk.py`](../../apps/agent-runtime/engine/risk.py) — `require_eval_pass` |
 | **Scheduler job** | [`apps/api/app/core/scheduler.py`](../../apps/api/app/core/scheduler.py) — `eval_schedules` |
 | **Evaluations pages** | [`apps/web/src/app/(app)/evals/`](../../apps/web/src/app/(app)/evals/) |

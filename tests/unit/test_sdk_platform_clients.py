@@ -271,7 +271,9 @@ def test_actions_propose_wait_executed_outcome():
 
     def h(r):
         if r.url.path == "/api/autonomy/actions/propose":
-            return _ok({"action_id": "a1", "decision": "wait", "approval_id": "p1"}, 201)
+            return _ok(
+                {"action_id": "a1", "decision": "wait", "approval_id": "p1"}, 201
+            )
         if r.url.path.endswith("/wait"):
             return _ok(next(waits))
         return _ok({"id": "a1", "status": "executed"})
@@ -284,7 +286,12 @@ def test_actions_propose_wait_executed_outcome():
             {"setpoint_bar": 4.6},
             target="plant-1",
             intent="Pressure is low",
-            prediction={"metric": "pressure_bar", "value": 4.5, "low": 4.4, "high": 4.6},
+            prediction={
+                "metric": "pressure_bar",
+                "value": 4.5,
+                "low": 4.4,
+                "high": 4.6,
+            },
         )
         assert d["decision"] == "wait"
         w = await sdk.actions.wait("a1", timeout_seconds=150)
@@ -315,7 +322,10 @@ def test_actions_harm_needs_a_note_and_errors_carry_code():
             404,
             json={
                 "data": None,
-                "error": {"message": "No such action type", "error_code": "UNKNOWN_ACTION"},
+                "error": {
+                    "message": "No such action type",
+                    "error_code": "UNKNOWN_ACTION",
+                },
             },
         )
     )
@@ -343,5 +353,50 @@ def test_autonomy_reads_and_edited_approval():
         ("GET", "/api/autonomy/grants/g1/actions"),
         ("POST", "/api/approvals/p1/signoff"),
     ]
-    assert dict(seen[2].url.params) == {"limit": "10", "status": "executed", "before": "x"}
+    assert dict(seen[2].url.params) == {
+        "limit": "10",
+        "status": "executed",
+        "before": "x",
+    }
     assert _body(seen[3])["edited_arguments"] == {"setpoint_bar": 4.4}
+
+
+def test_improvements_lessons_and_feedback():
+    def handler(r):
+        if r.url.path == "/api/improvements/proposals":
+            return _ok({"items": [{"id": "p1", "state": "kept"}]})
+        return _ok({"id": "x", "lesson_id": "l1"})
+
+    sdk, seen = _client(handler)
+
+    async def go():
+        items = await sdk.improvements.list(agent_id="a1", state="kept", limit=5)
+        assert items == [{"id": "p1", "state": "kept"}]
+        await sdk.improvements.get("p1")
+        await sdk.lessons.report(
+            "a1", "Used Fahrenheit", expected="273.15 K", execution_id="e1"
+        )
+        await sdk.feedback.give(-1, execution_id="e1", correction="273.15 K")
+
+    asyncio.run(go())
+    assert (
+        seen[0].url.params["agent_id"] == "a1" and seen[0].url.params["state"] == "kept"
+    )
+    assert seen[1].url.path == "/api/improvements/proposals/p1"
+    assert seen[2].method == "POST" and seen[2].url.path == "/api/improvements/lessons"
+    assert _body(seen[2]) == {
+        "agent_id": "a1",
+        "note": "Used Fahrenheit",
+        "source": "sdk",
+        "expected": "273.15 K",
+        "execution_id": "e1",
+    }
+    assert _body(seen[3]) == {
+        "rating": -1,
+        "execution_id": "e1",
+        "correction": "273.15 K",
+    }
+    with pytest.raises(ValueError):
+        asyncio.run(sdk.feedback.give(0))
+    with pytest.raises(ValueError):
+        asyncio.run(sdk.lessons.report("a1", " "))

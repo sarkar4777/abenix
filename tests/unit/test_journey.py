@@ -74,6 +74,8 @@ class FakeDB:
         tables = _tables(stmt)
         # the most specific table answers, joins put the answering one first
         for name in (
+            "feedback",
+            "improvement_proposals",
             "messages",
             "eval_cases",
             "reviews",
@@ -180,6 +182,7 @@ async def test_builder_progress():
         "add_knowledge": False,
         "add_tests": True,
         "enrol_autonomy": False,
+        "review_improvements": False,
         "list_marketplace": False,
     }
     run = next(s for s in view["steps"] if s["id"] == "run_agent")
@@ -208,14 +211,28 @@ async def test_builder_marketplace_off_hides_step(monkeypatch):
     monkeypatch.setattr(pf, "marketplace_enabled", off)
     view = await J.journey_view(FakeDB({TENANT_A: {}}), _user(UserRole.CREATOR))
     assert "list_marketplace" not in _flags(view)
-    assert view["total"] == 5
+    assert view["total"] == 6
 
 
 async def test_member_steps():
-    db = FakeDB({TENANT_A: {"conversations": [uuid.uuid4()]}})
+    first = uuid.uuid4()
+    db = FakeDB({TENANT_A: {"conversations": [first]}})
     view = await J.journey_view(db, _user(UserRole.USER))
     assert view["role"] == "member"
-    assert _flags(view) == {"try_chat": True, "follow_up": False}
+    assert _flags(view) == {
+        "try_chat": True,
+        "follow_up": False,
+        "give_feedback": False,
+    }
+    # follow-up and feedback reopen the newest thread, not a blank chat
+    hrefs = {s["id"]: s["href"] for s in view["steps"]}
+    assert hrefs["try_chat"] == "/chat"
+    assert hrefs["follow_up"] == f"/chat?id={first}"
+    assert hrefs["give_feedback"] == f"/chat?id={first}"
+
+    # no thread yet, so the steps open chat itself
+    view = await J.journey_view(FakeDB({TENANT_A: {}}), _user(UserRole.USER))
+    assert {s["href"] for s in view["steps"]} == {"/chat"}
 
     # two of the member's messages in one thread
     conv = uuid.uuid4()
@@ -223,7 +240,42 @@ async def test_member_steps():
     assert _flags(await J.journey_view(db, _user(UserRole.USER))) == {
         "try_chat": True,
         "follow_up": True,
+        "give_feedback": False,
     }
+
+    # one feedback row of their own
+    db = FakeDB({TENANT_A: {"feedback": [uuid.uuid4()]}})
+    assert _flags(await J.journey_view(db, _user(UserRole.USER)))["give_feedback"]
+
+
+async def test_builder_improvements_step():
+    aid = uuid.uuid4()
+    agents = {"agents": [(aid, False, AgentStatus.ACTIVE)]}
+    view = await J.journey_view(FakeDB({TENANT_A: agents}), _user(UserRole.CREATOR))
+    step = next(s for s in view["steps"] if s["id"] == "review_improvements")
+    assert step["href"] == "/improvements" and not step["done"]
+
+    # a proposal they asked for
+    db = FakeDB({TENANT_A: {**agents, "improvement_proposals": [uuid.uuid4()]}})
+    assert _flags(await J.journey_view(db, _user(UserRole.CREATOR)))[
+        "review_improvements"
+    ]
+
+    # or the seen marker from opening a group or proposal
+    u = _user(UserRole.CREATOR, prefs={"journey": {"seen": ["improvements"]}})
+    db = FakeDB({TENANT_A: agents})
+    assert _flags(await J.journey_view(db, u))["review_improvements"]
+    assert not any("improvement_proposals" in _tables(x) for x in db.statements)
+
+
+async def test_note_seen_once():
+    u = _user(UserRole.CREATOR)
+    db = FakeDB({TENANT_A: {}})
+    await J.note_seen(db, u, "improvements")
+    await J.note_seen(db, u, "improvements")
+    await J.note_seen(db, u, "nope")
+    assert u.notification_settings["journey"]["seen"] == ["improvements"]
+    assert db.commits == 1
 
 
 async def test_tenant_isolation():
@@ -241,6 +293,8 @@ async def test_tenant_isolation():
         "agent_actions": [uuid.uuid4()],
         "reviews": [uuid.uuid4()],
         "messages": [uuid.uuid4()],
+        "feedback": [uuid.uuid4()],
+        "improvement_proposals": [uuid.uuid4()],
     }
     db = FakeDB({TENANT_A: full, TENANT_B: {}})
     for role in (UserRole.ADMIN, UserRole.CREATOR, UserRole.USER):

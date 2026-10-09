@@ -72,6 +72,7 @@ Always open, can't be collapsed.
 | `/analytics` | Analytics | `feature:view_analytics` | Executions, tokens, cost and performance charts, plus drift alerts and their config. On a Claude subscription the cost card and cost charts say so |
 | `/moderation` | Moderation | `feature:view_alerts` | Tenant moderation policies (pre-LLM, post-LLM, tool output), recent events and a vet sandbox |
 | `/autonomy` | Autonomy | `cap:autonomy.view` | Earned autonomy. See [2.5 pages](#abenix-25-pages) |
+| `/improvements` | Improvements | `cap:improvements.view` | Agents with open lessons worst first, four counts, the sample. Each agent opens its Improvements tab |
 
 ### MARKETPLACE
 
@@ -162,6 +163,7 @@ Collapsed by default.
 | `/agents/{id}/shell` | agent info (pipelines) | Drive a pipeline with a typed command grammar and autocomplete |
 | `/agents/new` | | Redirects to `/builder` |
 | `/autonomy/{grantId}` | `/autonomy`, notifications, action cards | One agent's level for one action. See [2.5 pages](#abenix-25-pages) |
+| `/agents/{id}/improvements` | agent info, `/improvements`, the See lessons link after feedback | Groups of lessons with examples, suggested test cases to accept, edit or drop one at a time or in bulk, an owner switch to require those tests before changes go live (off by default, asks first while tests fail), proposed fixes and releases |
 | `/decisions/{key}` | `/decisions` | Decision workspace. See [2.5 pages](#abenix-25-pages) |
 | `/decisions/reference-sets` | `/decisions` | Reference sets |
 | `/evals/{id}` | `/evals` | Evaluation suite |

@@ -225,6 +225,8 @@ objectStorage:
   # don't re-build every invocation).
   codeAssetStore: /data/code-assets
   codeAssetBuildCache: /data/code-asset-cache
+  # past runs recall_trajectory reads, written by Wingman and other apps
+  trajectoryDir: /data/trajectories
   bucket: ""
   region: ""
   container: ""
@@ -341,6 +343,30 @@ scaling:
     # PrometheusRule CRD is not present on a vanilla cluster.
     enabled: false
   pools: []
+
+# Governed self-improvement. Proofs of proposed fixes run on API pods unless the
+# proof pool is on, then a separate Deployment proves them apart from live
+# traffic and KEDA scales it on the proof queue depth.
+improvements:
+  proofPool:
+    enabled: false
+    minReplicas: 0
+    maxReplicas: 4
+    # proofs at once per pod
+    concurrency: 2
+    resources:
+      requests:
+        cpu: 250m
+        memory: 512Mi
+      limits:
+        cpu: "1"
+        memory: 1Gi
+    keda:
+      enabled: false
+      # empty = http://<release>-prometheus.<ns>.svc.cluster.local:9090
+      prometheusUrl: ""
+      # queued proposals per pod before another starts
+      queueTrigger: "3"
 
 # Warm code runners. One Deployment per tenant and asset version, created on
 # the first call and called over NATS. Needs scaling.queueBackend: nats.

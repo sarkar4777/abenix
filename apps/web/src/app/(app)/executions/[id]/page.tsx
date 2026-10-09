@@ -41,6 +41,9 @@ import DecisionRunCard from '@/components/decisions/DecisionRunCard';
 import type { DecisionRecord } from '@/lib/decisions';
 import ActionBadge from '@/components/autonomy/ActionBadge';
 import { autonomyMetaOf } from '@/lib/autonomy';
+import FeedbackBar from '@/components/improvements/FeedbackBar';
+import WrongBecause from '@/components/improvements/WrongBecause';
+import { readableInput } from '@/lib/readable-input';
 
 interface ChildExecution {
   id: string;
@@ -1080,15 +1083,21 @@ export default function ExecutionDetailPage() {
           <h3 className="text-xs font-semibold text-slate-400 uppercase mb-2 flex items-center gap-2">
             <MessageSquare className="w-3.5 h-3.5 text-cyan-400" /> Input
           </h3>
-          <p className="text-xs text-slate-300 whitespace-pre-wrap max-h-40 overflow-y-auto">{execution.input_message}</p>
+          <p className="text-xs text-slate-300 whitespace-pre-wrap max-h-40 overflow-y-auto">{readableInput(execution.input_message)}</p>
         </div>
         <div className="bg-slate-800/30 backdrop-blur-xl border border-slate-700/50 rounded-xl p-4">
           <h3 className="text-xs font-semibold text-slate-400 uppercase mb-2 flex items-center gap-2">
             <Eye className="w-3.5 h-3.5 text-cyan-400" /> Output
           </h3>
           <p className="text-xs text-slate-300 whitespace-pre-wrap max-h-40 overflow-y-auto">{execution.output_message || execution.error_message || '(no output)'}</p>
+          {['completed', 'failed'].includes((execution.status || '').toLowerCase()) && (
+            <FeedbackBar executionId={executionId} agentId={execution.agent_id} testId="run-feedback" />
+          )}
         </div>
       </div>
+      {['completed', 'failed'].includes((execution.status || '').toLowerCase()) && (
+        <WrongBecause executionId={executionId} agentId={execution.agent_id} />
+      )}
 
       {/* Error */}
       {execution.error_message && (

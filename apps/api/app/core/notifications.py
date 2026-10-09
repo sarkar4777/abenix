@@ -37,6 +37,9 @@ PREF_FOR_TYPE: dict[str, str] = {
     "action_pending_review": "autonomy_updates",
     "action_reported": "autonomy_updates",
     "moderation_review_requested": "moderation_reviews",
+    "improvement_ready": "improvement_updates",
+    "improvement_kept": "improvement_updates",
+    "improvement_rolled_back": "improvement_updates",
 }
 
 

@@ -13,7 +13,7 @@ const PipelineDAGPreview = dynamic(
 import {
   Bot, Code2, Copy, Check, Clock, Cpu, Database, ExternalLink,
   Play, Sparkles, Terminal, Thermometer, Webhook,
-  Wrench, Zap, Share2, GitBranch, Download,
+  Wrench, Zap, Share2, GitBranch, Download, Sprout,
 } from 'lucide-react';
 import { useApi } from '@/hooks/useApi';
 import { apiFetch } from '@/lib/api-client';
@@ -272,9 +272,17 @@ curl -X POST ${API_URL}/api/triggers \\
                 className="flex items-center gap-1.5 px-3 py-2 bg-slate-700/50 border border-slate-600 text-slate-300 text-xs rounded-lg hover:bg-slate-700 transition-colors"
                 title="View version history"
                 data-testid="agent-versions">
-                <GitBranch className="w-3.5 h-3.5" /> Versions
+                <GitBranch className="w-3.5 h-3.5" /> Version history
               </button>
             )}
+            <Link
+              href={`/agents/${agentId}/improvements`}
+              className="flex items-center gap-1.5 px-3 py-2 bg-slate-700/50 border border-slate-600 text-slate-300 text-xs rounded-lg hover:bg-slate-700 transition-colors"
+              title="Lessons from thumbs, corrections and failures, and the test cases they suggest"
+              data-testid="agent-improvements-link"
+            >
+              <Sprout className="w-3.5 h-3.5" /> Improvements
+            </Link>
             <button onClick={() => setShowExport(true)}
               className="flex items-center gap-1.5 px-3 py-2 bg-slate-700/50 border border-slate-600 text-slate-300 text-xs rounded-lg hover:bg-slate-700 transition-colors"
               title="Export as template">

@@ -1,5 +1,43 @@
 # Changelog
 
+## v2.5.5 — 2026-10-09
+
+### Added
+
+- Thumbs up and down on every agent answer in chat, on the run page and on action cards. A thumbs down offers one optional box, "What should it have said or done?", and the run page adds "This was wrong because".
+- Agents collect lessons on their own from feedback, corrections, failed runs, pipeline failures, drift alerts, failing scheduled evals and autonomy reviews, rejections, edits, harm flags and missed predictions. Capture never slows or fails a run, and the tenant's DLP masking applies before anything is stored.
+- Similar lessons are grouped every two minutes with a plain title, a count, a 14 day trend and examples, and each group suggests test cases written from what people said. Accept, edit or drop them one at a time or in bulk. Accepted cases run with every proposed fix, and the owner can choose to require them before changes go live.
+- New Improvements page under Monitor lists agents with open lessons worst first, and every agent has an Improvements tab with its groups, suggested cases, proposals and releases.
+- Lessons and feedback follow the tenant's retention setting (180 days by default) and GDPR erasure covers them, the cases made from them and proposal examples.
+- Propose a fix from any group of lessons, or let a group that grows past the threshold get one on its own. The improver drafts one small change, examples, a few edited sentences, one tool setting, one tool or a model switch the risk tier allows, and never touches limits, risk tier, autonomy, credentials or sharing.
+- Every fix is proven before anyone sees it. It runs against the agent's test cases and a replay of recent real inputs, with every action held so nothing changes in the world, and the proof shows lessons fixed, cases broken, before and after bars and three real examples. A fix that breaks anything or costs or slows more than the margin is kept as "did not pass" and never sent for approval.
+- Proven fixes go to Approvals as an agent improvement card with Approve, Edit and approve, and Reject with a reason. The agent's author is refused, apart from a labelled self-approval for the sample and solo builders, and a rejection becomes a lesson.
+- An approved fix is released as a new revision marked Improvement and watched against the old version for 7 days or 200 runs. Worse failed runs, thumbs down, cost, autonomy accuracy, drift or the same mistake coming back rolls it back on its own, and the approver and the owner are told why. Roll back now never needs an approval.
+- A daily budget for proofs and tokens with a meter on the Improvements page. When it is spent, proposals wait in line and say so. A new kill switch scope, Agent improvements, stops all proposing and proving at once.
+- Try it on the sample agent: a temperature helper with a planted mistake goes through the whole loop in a few minutes.
+- Proofs can run on their own pool, apart from live traffic, with KEDA scaling on the proof queue (`improvements.proofPool`, off by default). New metrics and two Grafana panels for lessons, proofs, the queue and releases kept and rolled back.
+- SDK `feedback.give`, `lessons.report` and `improvements.list` in Python, TypeScript and Java.
+- Needs you has a Proposals tab for proven fixes waiting on you, with the same rule as Approvals that the agent's author never approves their own fix outside the sample and solo builders.
+- Start here asks members to give feedback on an answer and builders to review what their agent learned. After a correction there is a link to the lesson, a new group of lessons offers Propose a fix and an approved fix links to its release watch.
+- Improvements is in the sidebar under Monitor and in the short list for builders and admins, and both Improvements pages use the standard page header with how it works.
+
+### Changed
+
+- Every change to an agent is in its version history with where it came from: an edit, a publish, a healing patch, an improvement, a restore or an import. A change whose history entry cannot be written is refused, it no longer saves silently.
+- Changing the prompt, model or tools of a live agent now runs the eval gate, the same as publishing, and so does applying a healing patch. A refusal links to the failing run. Restoring an earlier version asks first and never waits on the gate.
+
+### Fixed
+
+- Trajectory memory reads where Wingman writes, ranks past runs by outcome before overlap, and keeps one record per run. The autonomy eval check now looks at the agent as it is now.
+- Lessons are grouped again. A new group was linked before it was saved, which failed every grouping pass and left feedback waiting forever.
+- A fix that passed its proof no longer ends as "The proof stopped with an error" when it goes for approval, and rollback, ready and kept notices now reach people.
+- Automatic proposals use at most half of the daily improvement budget and a running proof stops when the day is spent, so a fix a person asks for still runs.
+- A correction after a thumbs down keeps one lesson instead of two, even when the thumbs down was already grouped.
+- See the proof opens the new proposal right away, an edited fix stays on Approvals while it is proved again, and the correction box opens the moment you press thumbs down.
+- Start here sends members back to their latest chat to follow up and rate an answer, instead of a blank chat.
+- Runs and moderation events started by pipelines show the message, not raw JSON.
+- A proof no longer fails as slower because the old version's answers came from the cache. Speed is judged only on runs timed side by side in the proof.
+
 ## v2.5.4 — 2026-10-08
 
 ### Added

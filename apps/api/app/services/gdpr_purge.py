@@ -199,6 +199,7 @@ async def _purge_postgres(db: AsyncSession, subject: Subject) -> int:
 
     # user_id stays, it is NOT NULL and now points at the scrubbed user row
     affected += await _erase_authored_content(db, subject)
+    affected += await _erase_lessons(db, subject)
 
     await db.commit()
     return affected
@@ -266,6 +267,21 @@ async def _erase_authored_content(db: AsyncSession, subject: Subject) -> int:
         _ERASE_HELD,
         _ERASE_EVENT_PREVIEWS,
     ):
+        total += (await db.execute(sql, params)).rowcount or 0
+    return total
+
+
+async def _erase_lessons(db: AsyncSession, subject: Subject) -> int:
+    """Lessons, feedback, suggested cases and proof examples taken from their runs and answers."""
+    from app.services.lessons import ERASE_SQL
+
+    params = {
+        "uid": str(subject.user_id),
+        "t": str(subject.tenant_id),
+        "erased": ERASED,
+    }
+    total = 0
+    for sql in ERASE_SQL:
         total += (await db.execute(sql, params)).rowcount or 0
     return total
 

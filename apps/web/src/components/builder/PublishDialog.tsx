@@ -59,6 +59,7 @@ export default function PublishDialog({
   const [shareEmails, setShareEmails] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
+  const [errorLink, setErrorLink] = useState<string | null>(null);
   const [publishedWithIssues, setPublishedWithIssues] = useState(false);
   const { data: perms } = useApi<{ features?: Record<string, boolean> }>(open ? '/api/me/permissions' : null);
   const canPublishPublic = perms?.features?.publish_to_marketplace !== false;
@@ -93,6 +94,7 @@ export default function PublishDialog({
 
   const handleSubmit = async () => {
     setError('');
+    setErrorLink(null);
     if (MONETIZATION_ENABLED && pricingMode === 'paid' && (!price || parseFloat(price) <= 0)) {
       setError('Please enter a valid price');
       return;
@@ -123,6 +125,7 @@ export default function PublishDialog({
       if (!res.ok) {
         const data = await res.json();
         setError(data.error?.message || 'Failed to publish');
+        setErrorLink(data.error?.details?.link || null);
         return;
       }
 
@@ -332,7 +335,10 @@ export default function PublishDialog({
         </div>
 
         {error && (
-          <p className="text-sm text-red-400" role="alert" data-testid="publish-error">{error}</p>
+          <p className="text-sm text-red-400" role="alert" data-testid="publish-error">
+            {error}
+            {errorLink && <> <a href={errorLink} className="underline hover:text-red-300">See the failing run</a></>}
+          </p>
         )}
         {publishedWithIssues && (
           <button

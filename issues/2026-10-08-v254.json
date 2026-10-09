@@ -1,0 +1,189 @@
+[
+  {
+    "title": "Connector test could reach private and cluster addresses",
+    "area": "security",
+    "problem": "The connector Test fetched any URL from the API pod with redirects and no private-address guard, and counted 4xx as success.",
+    "fix": "A shared outbound URL guard checks every hop, private targets need CONNECTORS_ALLOW_PRIVATE_TARGETS, and only 2xx or 3xx count as reachable.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 214
+  },
+  {
+    "title": "Connectors sent an Abenix API key prefix as their credential",
+    "area": "security",
+    "problem": "secret_ref pointed at an Abenix API key and its prefix was sent to the outside system.",
+    "fix": "Connector secrets are write-only and stored encrypted per tenant. Old connectors are flagged to re-enter their secret and never send the key.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 215
+  },
+  {
+    "title": "An agent could call another tenant's connector by id",
+    "area": "security",
+    "problem": "connector_call loaded any connector by id regardless of tenant.",
+    "fix": "Connectors are loaded only within the run's tenant.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 216
+  },
+  {
+    "title": "Members could see other users' runs in the executions list",
+    "area": "security",
+    "problem": "Only the counts were scoped to the member, the rows were not.",
+    "fix": "Rows follow the same scope as counts, and the status filter no longer errors.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 217
+  },
+  {
+    "title": "GDPR erase never scrubbed the account",
+    "area": "security",
+    "problem": "The scrub wrote to a column that does not exist, so erased accounts kept their email and name, and a failed step returned 500.",
+    "fix": "The scrub uses the real columns with a test that checks each column exists, and the router no longer reads an expired user.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 218
+  },
+  {
+    "title": "Moderation stored matched secrets in clear",
+    "area": "security",
+    "problem": "Event previews kept the matched text, for example an SSN, and queued runs recorded no moderation events at all.",
+    "fix": "Matches are masked for every category, queued runs record their events, and a retention policy purges previews and held content.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 219
+  },
+  {
+    "title": "A held reply could be glimpsed before the check",
+    "area": "moderation",
+    "problem": "The reply streamed to the member before the output check decided to hold it.",
+    "fix": "When a policy can hold, block or redact output the reply is buffered and the member sees a checking state, then the reply or the hold card.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 220
+  },
+  {
+    "title": "Approvals could not open inside the cluster",
+    "area": "autonomy",
+    "problem": "The runtime had no API address in cluster and fell back to localhost, so Asks first and approval_gate failed.",
+    "fix": "The runtime uses the in-cluster API service address and helm sets INTERNAL_API_URL.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 221
+  },
+  {
+    "title": "The sample plant limits never published",
+    "area": "autonomy",
+    "problem": "Golden tests compared only ok while results carried a reason, so every action was blocked.",
+    "fix": "Expected results match exactly, the sample repairs itself and the grant page shows a banner when limits cannot be checked.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 222
+  },
+  {
+    "title": "AI-built pipelines passed missing values between steps",
+    "area": "pipelines",
+    "problem": "The builder taught step.response for tools that return body or text, so steps got not available and still showed completed.",
+    "fix": "The prompt lists real output fields, the engine reads a step's main output, and steps after a failure no longer run.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 223
+  },
+  {
+    "title": "Run Pipeline never asked for inputs",
+    "area": "pipelines",
+    "problem": "Running from the builder started step one with nothing.",
+    "fix": "A run dialog asks for the inputs and failed steps show their error inline with a Diagnose and fix link.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 224
+  },
+  {
+    "title": "ML output could not be read by pipelines",
+    "area": "ml-models",
+    "problem": "The ml_model tool returned text followed by JSON.",
+    "fix": "It returns JSON with the prediction on top.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 225
+  },
+  {
+    "title": "Failed tool calls showed as completed in chat",
+    "area": "chat",
+    "problem": "The stream event carried no error flag.",
+    "fix": "Tool results carry is_error and chat shows failed.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 226
+  },
+  {
+    "title": "An invalid cron expression crashed the app",
+    "area": "triggers",
+    "problem": "An error object was rendered as text.",
+    "fix": "Errors render as plain messages, with presets and validation before submit.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 227
+  },
+  {
+    "title": "Pages were blank or silently redirected for people without access",
+    "area": "ux",
+    "problem": "Admin pages showed nothing to non-admins and some bounced to the dashboard.",
+    "fix": "One shared screen explains who can use a page and links onward, on every gated page.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 228
+  },
+  {
+    "title": "Several pages scrolled sideways on phones",
+    "area": "ux",
+    "problem": "Agents, Source Watch, Analytics, Moderation, Scaling and Help overflowed at 390 px.",
+    "fix": "Layouts wrap and tables scroll inside their own box.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 229
+  },
+  {
+    "title": "Next.js and sharp advisories in every web app",
+    "area": "deps",
+    "problem": "Next.js cache poisoning and the sharp librsvg advisory were open across the platform and standalone apps.",
+    "fix": "Next.js 15.5.27, sharp 0.35.5 and PostCSS 8.5.28 everywhere.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 230
+  }
+]

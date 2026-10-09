@@ -304,7 +304,7 @@ export default function PageHeader({
           </p>
         </div>
         {(primary || secondary || extraActions) && (
-          <div className="flex w-full min-w-0 flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:items-center lg:shrink-0 lg:justify-end">
+          <div className="flex w-full min-w-0 max-w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:items-center lg:shrink-0 lg:justify-end">
             {extraActions}
             {secondary}
             {primary && (

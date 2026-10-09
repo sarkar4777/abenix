@@ -36,9 +36,8 @@ data:
   PROGRESS_CHANNEL_PREFIX: "wingman:progress:"
   PROGRESS_PARENT_KEY_PREFIX: "wingman:parent:"
   PROGRESS_PARENT_TTL: "1800"
-  # Per-app trajectory cache root. recall_trajectory tool reads TRAJECTORY_DIR;
-  # wingman api falls back to WINGMAN_TRAJECTORY_DIR for back-compat.
-  TRAJECTORY_DIR: "/data/wingman-trajectories"
+  # The runtime's recall_trajectory reads this same dir, mounted from the platform's shared data
+  TRAJECTORY_DIR: "/data/trajectories"
 
 ---
 apiVersion: apps/v1
@@ -66,6 +65,9 @@ spec:
           volumeMounts:
             - name: shared-data
               mountPath: /data
+            - name: platform-data
+              mountPath: /data/trajectories
+              subPath: trajectories
           livenessProbe:
             httpGet: { path: /health, port: 8006 }
             initialDelaySeconds: 30
@@ -86,6 +88,9 @@ spec:
           hostPath:
             path: /tmp/abenix-shared-data
             type: DirectoryOrCreate
+        # the platform's shared data, deploy-azure.sh swaps in the abenix-shared-data claim
+        - name: platform-data
+          hostPath: { path: /var/lib/abenix/data, type: DirectoryOrCreate }
 
 ---
 apiVersion: v1

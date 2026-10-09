@@ -492,7 +492,9 @@ async def set_kill_switch(
 ) -> JSONResponse:
     if body.scope not in governance.SCOPES:
         return error(f"scope must be one of {', '.join(governance.SCOPES)}", 400)
-    target = "*" if body.scope == "all" else (body.target.strip() or "*")
+    target = (
+        "*" if body.scope in ("all", "improvements") else (body.target.strip() or "*")
+    )
     existing = (
         await db.execute(
             select(KillSwitch).where(

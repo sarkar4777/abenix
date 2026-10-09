@@ -240,9 +240,9 @@ A subset of multi-agent flows in this codebase use `recall_trajectory` as the fi
 2. Read what specialists those past runs invoked and what came out.
 3. Decide which specialists to invoke this time, possibly adapted from the past plans.
 4. Fan out with `invoke_agent`.
-5. Synthesise and **write a new trajectory row** keyed by intent + outcome.
+5. Synthesise and **write a trajectory record** for the run, one per execution.
 
-Trajectories live in their own table, keyed on `(tenant_id, intent_hash)` with the full plan + structured outputs + cost stored as JSONB. The store is described in [`docs/TRAJECTORY_MEMORY.md`](../TRAJECTORY_MEMORY.md). The recall tool is a thin SQL wrapper.
+Trajectories are JSON files under `TRAJECTORY_DIR` (`/data/trajectories`), one folder per tenant plus `shared`. Writers and the recall tool use that one setting. The store is described in [`docs/TRAJECTORY_MEMORY.md`](../TRAJECTORY_MEMORY.md).
 
 This is what lets the Wingman Desk Copilot get noticeably better the more it is used by the same desk. It is not RL. It is not fine-tuning. It is structured memory of "the last 200 plans that worked here".
 

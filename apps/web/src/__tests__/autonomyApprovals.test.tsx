@@ -86,6 +86,40 @@ describe('Approvals with action cards', () => {
     });
   });
 
+  it('keeps an edited fix on screen while it is proved again', async () => {
+    const fix = {
+      ...actionRow,
+      id: 'ap-fix',
+      title: 'Release a fix to Temperature helper',
+      gate_kind: 'improvement.release',
+      payload: {
+        id: 'p-1', proposal_id: 'p-1', agent: { id: 'ag-1', name: 'Temperature helper' }, cluster: { id: 'c1', title: 'Kelvin' },
+        change_kind: 'prompt_edit', change_label: 'Edit the instructions', diff: { append: 'Use kelvin.' }, rationale: 'Use the asked unit.',
+        risk: 'low', state: 'awaiting_approval', progress: {}, proof: {},
+      },
+    };
+    let edited = false;
+    apiFetch.mockImplementation(async (path: string) => {
+      if (path.includes('/rerun')) {
+        edited = true;
+        return { data: { ...fix.payload, state: 'proving' }, error: null };
+      }
+      if (path.startsWith('/api/approvals')) return { data: edited ? [] : [fix], error: null };
+      return { data: [], error: null };
+    });
+    render(<ApprovalsPage />);
+    await waitFor(() => expect(screen.getByTestId('improvement-edit-approve')).toBeTruthy());
+    fireEvent.click(screen.getByTestId('improvement-edit-approve'));
+    fireEvent.change(screen.getByTestId('improvement-approval-edit-text'), { target: { value: '{"append": "Use kelvin please."}' } });
+    fireEvent.click(screen.getByTestId('improvement-edit-save'));
+    await waitFor(() => expect(screen.getByTestId('improvement-approval-msg')).toHaveTextContent('being proved'));
+    await waitFor(() => expect(apiFetch.mock.calls.filter(([p]) => String(p).includes('status=pending')).length).toBeGreaterThan(1));
+    const card = screen.getByTestId('improvement-approval-card');
+    expect(card).toHaveAttribute('data-approval-id', 'ap-fix');
+    expect(screen.getByTestId('improvement-approval-status')).toHaveTextContent('withdrawn');
+    expect(screen.queryByTestId('improvement-approve')).toBeNull();
+  });
+
   it('rejects with the note as the reason', async () => {
     route();
     render(<ApprovalsPage />);

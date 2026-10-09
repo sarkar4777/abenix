@@ -32,16 +32,23 @@ turn it on for an agent you build yourself in the Abenix AI Builder.
 Trajectories are JSON files on the shared `/data` PVC:
 
 ```
-/data/wingman-trajectories/{tenant}/{trajectory_id}.json
+/data/trajectories/{tenant}/{trajectory_id}.json
 ```
 
 Each record is small (a few KB at most) so a year of desk activity is a
 few hundred MB. No DB migration is required to run trajectory memory.
 
-The platform's `recall_trajectory` tool reads `TRAJECTORY_DIR`
-(`/data/trajectories`) under the tenant's folder and `shared`. Wingman writes
-to `WINGMAN_TRAJECTORY_DIR` (`/data/wingman-trajectories`), folder
-`WINGMAN_TRAJECTORY_TENANT` (`shared` by default).
+One setting, `TRAJECTORY_DIR` (`/data/trajectories`), joins the writers and
+the reader. The platform's `recall_trajectory` tool reads the tenant's folder
+and `shared` under it. Wingman writes to the same directory, folder
+`WINGMAN_TRAJECTORY_TENANT` (`shared` by default). The chart sets it on the
+runtime pools from `objectStorage.trajectoryDir`. Wingman mounts the
+platform's shared data at `/data/trajectories`, and `deploy-azure.sh` swaps
+that mount to the `abenix-shared-data` claim. `WINGMAN_TRAJECTORY_DIR` is
+still read when `TRAJECTORY_DIR` is unset.
+
+A trajectory is written once per execution. Its id comes from the execution
+id, so polling a finished run on the Desk does not add a file per poll.
 
 ## Erasure
 
@@ -56,10 +63,12 @@ trajectory receipt counts the records deleted.
 When a trade card produced by a trajectory routes through `/approvals`
 and gets signed off, the approval id is attached to the trajectory via
 `POST /api/wingman/desk/trajectories/{trajectory_id}/outcome`. A
-follow-on (cron-driven) job grades the trajectory against realised
-spread movement N days later and updates `success_signal`.
-`recall_trajectory` weights past runs by `success_signal` so good
-trajectories get preferred and bad ones get retired.
+follow-on job can set `success_signal` on the same endpoint.
+
+`recall_trajectory` ranks matches by `success_signal` first, then by how many
+terms overlap the query, then newest first. A record with no signal counts
+as 0, so a graded good run beats an ungraded one and a negative signal sinks
+below both. Matches with the same execution id are returned once.
 
 ## Turning trajectory memory on for your own agent
 

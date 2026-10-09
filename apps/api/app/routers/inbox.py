@@ -32,7 +32,9 @@ from models.user import User  # noqa: E402
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/me", tags=["inbox"])
 
-TABS = ("approvals", "watching", "held", "marketplace", "alerts")
+TABS = ("approvals", "proposals", "watching", "held", "marketplace", "alerts")
+# improvement releases get their own tab, not counted under approvals
+RELEASE_GATE = "improvement.release"
 TTL_SECONDS = 15.0
 _MAX_CACHED = 5000
 _cache: dict[uuid.UUID, tuple[float, dict[str, Any]]] = {}
@@ -73,7 +75,11 @@ def can_sign(
         return False
     if gate_kind == "decision_publish" and not holds(caps, "decisions.review"):
         return False
-    if gate_kind == "autonomy.promote" and agent_creator_id == me and not self_approval:
+    if (
+        gate_kind in ("autonomy.promote", RELEASE_GATE)
+        and agent_creator_id == me
+        and not self_approval
+    ):
         return False
     if policy:
         if not holds(caps, str(policy.get("capability") or "approvals.sign")):
@@ -82,7 +88,9 @@ def can_sign(
     return _signer(user, caps)
 
 
-async def _approvals(db: AsyncSession, user: Any, caps: frozenset[str]) -> int:
+async def _signable_kinds(
+    db: AsyncSession, user: Any, caps: frozenset[str]
+) -> list[str | None]:
     now = datetime.now(timezone.utc)
     rows = (
         await db.execute(
@@ -102,8 +110,8 @@ async def _approvals(db: AsyncSession, user: Any, caps: frozenset[str]) -> int:
             .limit(500)
         )
     ).all()
-    n = sum(
-        1
+    return [
+        r[2]
         for r in rows
         if can_sign(
             user,
@@ -115,7 +123,11 @@ async def _approvals(db: AsyncSession, user: Any, caps: frozenset[str]) -> int:
             agent_creator_id=r[4],
             self_approval=r[5],
         )
-    )
+    ]
+
+
+async def _approvals(db: AsyncSession, user: Any, caps: frozenset[str], kinds) -> int:
+    n = sum(1 for k in await kinds() if k != RELEASE_GATE)
     if _signer(user, caps):
         from app.core.hitl import list_pending_hitl
 
@@ -212,7 +224,20 @@ async def rising_failures(db: AsyncSession, user: Any) -> list[dict[str, Any]]:
 async def compute_counts(db: AsyncSession, user: Any) -> dict[str, Any]:
     caps = await capabilities_for(db, user)
     feats = features_for(user)
-    sources: dict[str, Any] = {"approvals": lambda: _approvals(db, user, caps)}
+    memo: dict[str, list[str | None]] = {}
+
+    async def kinds() -> list[str | None]:
+        # one approvals query feeds both the approvals and proposals tabs
+        if "k" not in memo:
+            memo["k"] = await _signable_kinds(db, user, caps)
+        return memo["k"]
+
+    async def _proposals() -> int:
+        return sum(1 for k in await kinds() if k == RELEASE_GATE)
+
+    sources: dict[str, Any] = {"approvals": lambda: _approvals(db, user, caps, kinds)}
+    if holds(caps, "improvements.approve"):
+        sources["proposals"] = _proposals
     if holds(caps, "actions.review"):
         sources["watching"] = lambda: _watching(db, user)
     if holds(caps, "moderation.review"):

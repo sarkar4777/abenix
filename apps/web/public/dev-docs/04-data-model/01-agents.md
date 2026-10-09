@@ -72,16 +72,27 @@ as valid template targets.
 
 ## Revisions
 
-Every config save writes an `agent_revisions` row.
+Every change to an agent writes an `agent_revisions` row, all through
+`app.services.agent_revisions.record_revision`. The row joins the change's own
+transaction, so when it cannot be written the change is refused with 500
+`REVISION_WRITE_FAILED` and nothing is saved. The paths are a builder save
+(`PUT`), publish, revert, import, duplicate, and a healing patch applied or
+rolled back.
 
 | Column | Notes |
 |---|---|
 | `agent_id` | The agent. |
 | `revision_number` | Monotonic per agent. The provenance trigger stamps the latest one on each run as `executions.agent_revision`. |
 | `changed_by` | User. |
-| `change_type` | For example `config_update`. |
+| `change_type` | `config_update`, `publish`, `revert`, `import`, `duplicate`, `healing_patch` or `healing_rollback`. |
 | `previous_state` / `new_state` | jsonb snapshots of name, description, prompt, `model_config`, category, status. |
 | `diff_summary` | Short human summary of what changed. |
+| `source` | Where the change came from: `edit`, `healing`, `improvement`, `revert` or `import`. Default `edit`. |
+| `proposal_id` | The improvement proposal a release came from, null otherwise. The version history links it to its proof. |
+
+The version history on the agent's info page shows each revision's source as
+a badge, a "See the proof" link when `proposal_id` is set, and Restore with a
+confirmation. A revert never waits on the eval gate, it is the way back.
 
 ## Canary variants
 

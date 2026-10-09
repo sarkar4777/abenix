@@ -494,6 +494,7 @@ export default function ChatPage() {
           model: usedModel,
           requestedModel: data.requested_model,
           fallbackReason: data.fallback_reason,
+          executionId: data.execution_id,
         }]);
         setIsStreaming(false);
         setStreamingBlocks([]);
@@ -1012,6 +1013,10 @@ export default function ChatPage() {
               model={msg.model}
               requestedModel={msg.requestedModel}
               fallbackReason={msg.fallbackReason}
+              executionId={msg.executionId}
+              messageId={msg.id}
+              conversationId={activeConvId}
+              agentId={selectedAgent?.id}
               onHoldReleased={onHoldReleased}
             />
           ))}

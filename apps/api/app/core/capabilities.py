@@ -150,6 +150,30 @@ CATALOG: tuple[Capability, ...] = (
         "Release, redact or reject messages and replies a moderation policy held for review.",
     ),
     Capability(
+        "improvements.view",
+        "View improvements",
+        "Improvements",
+        "See lessons, proposed fixes, their proof and releases in their watch period.",
+    ),
+    Capability(
+        "improvements.propose",
+        "Propose improvements",
+        "Improvements",
+        "Ask for a fix to a group of lessons, rerun a proof and roll a release back.",
+    ),
+    Capability(
+        "improvements.approve",
+        "Approve improvements",
+        "Improvements",
+        "Approve a proven fix so it is released. Never for an agent you built.",
+    ),
+    Capability(
+        "feedback.give",
+        "Give feedback",
+        "Improvements",
+        "Thumbs up or down and a correction on any agent answer.",
+    ),
+    Capability(
         "runs.replay",
         "Replay runs",
         "Runs",
@@ -168,6 +192,7 @@ ROLE_DEFAULTS: dict[str, frozenset[str]] = {
             "runs.replay",
             "autonomy.view",
             "actions.review",
+            "feedback.give",
         }
     ),
     "creator": frozenset(
@@ -184,6 +209,9 @@ ROLE_DEFAULTS: dict[str, frozenset[str]] = {
             "autonomy.view",
             "autonomy.manage",
             "actions.review",
+            "improvements.view",
+            "improvements.propose",
+            "feedback.give",
         }
     ),
     "admin": frozenset({"*"}),

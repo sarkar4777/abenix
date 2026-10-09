@@ -106,6 +106,7 @@ export default function HealingPage() {
   const [acting, setActing] = useState<string | null>(null);
   const [expandedPatch, setExpandedPatch] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [gateBlock, setGateBlock] = useState<{ message: string; link: string } | null>(null);
   const [canEdit, setCanEdit] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
 
@@ -157,11 +158,17 @@ export default function HealingPage() {
 
   const act = async (patchId: string, action: 'apply' | 'reject' | 'rollback') => {
     setActing(patchId);
+    setGateBlock(null);
     try {
       const res = await fetch(`${API_URL}/api/pipelines/${pipelineId}/patches/${patchId}/${action}`, {
         method: 'POST',
         headers: authHeaders(),
       });
+      if (res.status === 409) {
+        const j = await res.clone().json().catch(() => null);
+        const link = j?.error?.details?.link;
+        if (link) setGateBlock({ message: j.error.message || 'The eval gate refused this patch.', link });
+      }
       await readEnvelope<unknown>(res);
       toastSuccess(
         `Patch ${action === 'apply' ? 'applied' : action === 'reject' ? 'rejected' : 'rolled back'}`,
@@ -211,6 +218,20 @@ export default function HealingPage() {
             <div className="font-medium">Could not load healing data</div>
             <div className="text-red-400/80 mt-0.5">{loadError}</div>
             <button onClick={() => void loadAll()} className="mt-2 underline hover:text-red-200">Retry</button>
+          </div>
+        </div>
+      )}
+
+      {gateBlock && (
+        <div role="alert" data-testid="healing-gate-block" className="mb-6 flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-xs text-amber-200">
+          <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+          <div className="min-w-0">
+            <div className="font-medium">The patch was not applied</div>
+            <div className="text-amber-200/80 mt-0.5 break-words">{gateBlock.message}</div>
+            <div className="mt-2 flex gap-3">
+              <a href={gateBlock.link} className="underline hover:text-white">See the failing run</a>
+              <button onClick={() => setGateBlock(null)} className="underline hover:text-white">Dismiss</button>
+            </div>
           </div>
         </div>
       )}

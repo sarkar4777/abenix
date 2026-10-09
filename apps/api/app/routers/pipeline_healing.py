@@ -457,10 +457,31 @@ async def apply_patch(
             details={"expected_sha256": expected_hash, "current_sha256": current_hash},
         )
 
+    from app.services import agent_revisions as revs
+
+    prev_state = revs.agent_state(pipeline)
     cfg = dict(pipeline.model_config_ or {})
     cfg["pipeline_config"] = new_pipeline_cfg
     # a patch that adds a step with a new tool would otherwise fail the tools check on run
     pipeline.model_config_ = with_node_tools(cfg, new_pipeline_cfg)
+    if prev_state.get("status") == "active":
+        blocked = await revs.eval_gate_refusal(db, pipeline, live_edit=True)
+        if blocked:
+            await db.rollback()
+            return blocked
+    try:
+        await revs.record_revision(
+            db,
+            pipeline,
+            changed_by=user.id,
+            change_type="healing_patch",
+            source="healing",
+            previous_state=prev_state,
+            diff_summary=f"Healing patch applied: {proposal.title}",
+        )
+    except revs.RevisionWriteError:
+        await db.rollback()
+        return revs.revision_failed()
     proposal.applied_snapshot = current_cfg
     proposal.status = PipelinePatchStatus.ACCEPTED
     proposal.decided_by = user.id
@@ -591,9 +612,26 @@ async def rollback_patch(
             details={"applied_sha256": applied_hash, "current_sha256": current_hash},
         )
 
+    from app.services import agent_revisions as revs
+
+    prev_state = revs.agent_state(pipeline)
     cfg = dict(pipeline.model_config_ or {})
     cfg["pipeline_config"] = restore_cfg
     pipeline.model_config_ = cfg
+    # a rollback is the way back, so it never waits on the eval gate
+    try:
+        await revs.record_revision(
+            db,
+            pipeline,
+            changed_by=user.id,
+            change_type="healing_rollback",
+            source="revert",
+            previous_state=prev_state,
+            diff_summary=f"Healing patch rolled back: {proposal.title}",
+        )
+    except revs.RevisionWriteError:
+        await db.rollback()
+        return revs.revision_failed()
     proposal.rolled_back_at = datetime.now(timezone.utc)
     proposal.rolled_back_by = user.id
     await log_action(

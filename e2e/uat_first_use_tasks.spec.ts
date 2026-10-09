@@ -3,7 +3,8 @@
  *
  *   (a) a brand-new creator starts from the dashboard's Start here, builds an agent with a
  *       knowledge base and gets a correct answer, in under 10 minutes
- *   (b) a brand-new member finds and uses an agent and follows up in the same chat, in under 3 minutes
+ *   (b) a brand-new member finds and uses an agent, follows up in the same chat and gives
+ *       feedback on an answer with the thumbs, in under 3 minutes
  *   (c) an admin finds what is waiting on them from Needs you and clears one approval,
  *       in under 2 minutes
  *
@@ -287,7 +288,7 @@ test('(a) a new creator builds an agent with knowledge and gets a right answer i
   expect(r.ok, r.why || '').toBe(true);
 });
 
-test('(b) a new member finds an agent, uses it and follows up in under 3 minutes', async ({ page }) => {
+test('(b) a new member finds an agent, uses it, follows up and gives feedback in under 3 minutes', async ({ page }) => {
   test.setTimeout(8 * 60_000);
   await signIn(page, member);
   const t = timer('member uses an agent and follows up', 180);
@@ -330,6 +331,26 @@ test('(b) a new member finds an agent, uses it and follows up in under 3 minutes
       await page.getByTestId('chat-send').click();
       const reply = await lastReply(page, 120_000);
       if (reply.trim().length < 3) throw new Lost('follow up', 'the agent gave no answer to the follow-up');
+    });
+
+    await t.step('Start here asks for feedback, and the thumbs take it', async () => {
+      await go(page, '/dashboard');
+      const step = await guidance(
+        'feedback',
+        page.getByTestId('start-here-give_feedback-go'),
+        'Start here has no "Give feedback on an answer" step after the follow-up',
+      );
+      await step.click();
+      await page.waitForURL(/\/chat/, { timeout: 20_000 });
+      const history = page.getByTestId('chat-history-item').first();
+      if (await history.isVisible({ timeout: 5_000 }).catch(() => false)) await history.click();
+      const answer = page.locator('[data-testid="chat-message"][data-role="assistant"]').last();
+      const bar = await guidance('feedback', answer.getByTestId('chat-feedback'), 'the answer has no thumbs to rate it', 30_000);
+      await bar.getByTestId('chat-feedback-down').click();
+      const box = await guidance('feedback', bar.getByTestId('chat-feedback-box'), 'a thumbs down did not ask what it should have said');
+      await box.getByTestId('chat-feedback-correction').fill('It should have answered in five words or fewer.');
+      await box.getByTestId('chat-feedback-send').click();
+      await guidance('feedback', bar.getByTestId('chat-feedback-thanks'), 'the correction was not confirmed', 20_000);
     });
   } catch (e) {
     error = e;

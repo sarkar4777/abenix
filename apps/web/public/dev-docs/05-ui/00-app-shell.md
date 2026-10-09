@@ -149,7 +149,7 @@ The groups, in order:
 | PINNED | always, can't collapse | Needs you (with the live total), Dashboard, My Agents, AI Chat, Alerts |
 | BUILD | yes | Agent Builder, Manage agents, Tools Catalogue, Decisions, Source Watch, Code Runner, ML Models, Knowledge Bases, Persona KB, Portfolio Schemas, BPM Analyzer, Atlas |
 | RUN & TEST | yes | SDK Playground, Load Playground, Triggers, Evaluations, Meetings |
-| MONITOR | yes | Observability, Executions, Live Debug, Analytics, Moderation, Autonomy |
+| MONITOR | yes | Observability, Executions, Live Debug, Analytics, Moderation, Autonomy, Improvements |
 | MARKETPLACE | no | Marketplace, Creator Hub. Both hidden while the marketplace switch is off. The sidebar reads it from `GET /api/platform/features` |
 | ADMIN | no | Cluster Health, Scaling, Tool Scaling, Pipeline Scaling, Archives, Dead Letter Queue, Audit log, Models catalogue, Market data, Model Selection, Tool Configuration, LLM Pricing, Connectors, Marketplace & Billing, Events, Risk & Controls, Team, Roles, Permissions |
 | WORKSPACE | yes | Approvals, Review inbox (with a live count of held content), MCP Servers, Edge, API Keys, Cognify config, GDPR (right to erasure), Integrations, Settings, Help, Developer docs |
@@ -163,7 +163,7 @@ The sidebar has two modes. **Essentials** is the default for every role. It show
 | Who | Items |
 |---|---|
 | everyone | Needs you, Home (`/dashboard`), Agents, AI Chat, Knowledge, Monitor (`/executions`) |
-| creators and admins | Agent Builder, Autonomy |
+| creators and admins | Agent Builder, Autonomy, Improvements (with `improvements.view`) |
 | admins | an Admin entry that opens to the admin pages |
 
 Each essential is the same `NavItem` as in the full list, so the same gates apply. When the current page is not in the short list it shows under "You are here", so a page opened from the palette or a link never leaves the person without a marker.
@@ -234,6 +234,7 @@ The sidebar is UX only. Route handlers enforce access, either with `require_role
 | Tab | Who sees it | What is in it | Reused from |
 |---|---|---|---|
 | Approvals | everyone, the count is what you can sign | agent action cards, autonomy promotions, decision publishes, agent gates | `ApprovalActionRow` and a compact approve or deny row |
+| Proposals | `improvements.approve` | proven agent fixes waiting for release. The agent's author is not counted, unless it is the sample agent or they are the only builder | `ImprovementApprovalCard` |
 | Watching reviews | `actions.review` | autonomy actions in Watching that nobody has answered | `ReviewQueue` |
 | Held content | `moderation.review` | content a moderation policy held for review | `HeldInbox` |
 | Marketplace submissions | admins, while the marketplace is on | agents waiting for approval | `MarketplaceSubmissions` |
@@ -274,12 +275,12 @@ The dashboard shows **Start here**, a short checklist picked by role ([`StartHer
 | Role | Steps |
 |---|---|
 | admin | connect a model, invite the team (more than one user), review risk policies (page visited or a policy changed), turn on moderation |
-| creator | build an agent, run it, give it knowledge (a bound knowledge base), add tests (a suite with cases), enrol an action in Autonomy, list it in the marketplace (only while the marketplace is on) |
-| user | try an agent in chat, give feedback or answer a review |
+| creator | build an agent, run it, give it knowledge (a bound knowledge base), add tests (a suite with cases), enrol an action in Autonomy, review what your agent learned (opened or acted on an Improvements group or proposal), list it in the marketplace (only while the marketplace is on) |
+| user | try an agent in chat, ask a follow-up in the same chat, give feedback on an answer (a feedback row of theirs) |
 
-Each step has a plain title, one line on why it matters, a button to the exact place and a done check. A progress bar sits on top. Hiding the guide calls `PUT /api/me/journey` with `{"dismissed": true}`, and a small "Show the Start here guide" link brings it back. Both live in the user's settings JSON under `journey`. The risk page calls `POST /api/me/journey/seen` with `{"step": "risk"}` on load. When every step is done the card celebrates once and then steps aside.
+Each step has a plain title, one line on why it matters, a button to the exact place and a done check. A progress bar sits on top. Hiding the guide calls `PUT /api/me/journey` with `{"dismissed": true}`, and a small "Show the Start here guide" link brings it back. Both live in the user's settings JSON under `journey`. The risk page calls `POST /api/me/journey/seen` with `{"step": "risk"}` on load. Opening an Improvements group or proposal, proposing, dismissing, asking for approval or rolling back sets the `improvements` marker on the server. When every step is done the card celebrates once and then steps aside.
 
-After a success the page shows [`NextSteps`](../../apps/web/src/components/shared/NextSteps.tsx), two to four cards with an icon, a label and one line each. Examples are publishing an agent (try it in chat, add tests, give it knowledge, enrol its actions), creating a knowledge base, uploading an ML model, a code asset turning ready, a first good run, a new trigger, an enrolled action and a new decision.
+After a success the page shows [`NextSteps`](../../apps/web/src/components/shared/NextSteps.tsx), two to four cards with an icon, a label and one line each. Examples are publishing an agent (try it in chat, add tests, give it knowledge, enrol its actions), creating a knowledge base, uploading an ML model, a code asset turning ready, a first good run, a new trigger, an enrolled action and a new decision. Improvements adds three: "See the lesson" after a thumbs down with a correction, "Propose a fix" when a new group of lessons has nothing proposed yet, and "Watch the release" after a fix is approved.
 
 ---
 

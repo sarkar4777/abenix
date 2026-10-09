@@ -32,6 +32,8 @@ ACTION_LOCK_KEY = 0x4143544E  # "ACTN"
 VACUUM_LOCK_KEY = 0x56414355  # "VACU"
 HOLD_LOCK_KEY = 0x484F4C44  # "HOLD"
 RETAIN_LOCK_KEY = 0x52455441  # "RETA"
+IMPROVE_LOCK_KEY = 0x494D5050  # "IMPP"
+IMPROVE_WATCH_LOCK_KEY = 0x494D5057  # "IMPW"
 
 
 def drift_scan_interval_seconds() -> int:
@@ -712,6 +714,52 @@ def start_scheduler() -> None:
         next_run_time=datetime.now(timezone.utc) + timedelta(seconds=90),
     )
 
+    scheduler.add_job(
+        improvements_tick,
+        trigger="interval",
+        seconds=15,
+        id="improvements_tick",
+        name="Propose fixes for lesson groups over the threshold and drain the proof queue",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=40),
+    )
+
+    scheduler.add_job(
+        improvements_watch,
+        trigger="interval",
+        minutes=5,
+        id="improvements_watch",
+        name="Compare released fixes with the old revision, keep or roll back",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=150),
+    )
+
+    scheduler.add_job(
+        group_lessons,
+        trigger="interval",
+        minutes=2,
+        id="group_lessons",
+        name="Turn new failures and feedback into lessons and group them",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=45),
+    )
+
+    scheduler.add_job(
+        lesson_retention,
+        trigger="interval",
+        minutes=60,
+        id="lesson_retention",
+        name="Purge lessons and feedback past each tenant's retention",
+        replace_existing=True,
+        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=120),
+    )
+
     # Platform alerts arrive by Alertmanager webhook (routers/admin_alerts.py),
     # the Prometheus poller that used to run here is gone.
 
@@ -862,6 +910,66 @@ async def moderation_retention() -> None:
                 logger.info("moderation retention purge: %s", out)
     except Exception:
         logger.exception("moderation retention purge failed")
+
+
+async def improvements_tick() -> None:
+    """Enqueue under IMPP on one replica. Draining claims rows, so every proof worker drains."""
+    from app.services import improvements
+
+    try:
+        async with advisory_lock(IMPROVE_LOCK_KEY) as held:
+            if held:
+                await improvements.propose_tick()
+                return
+        if improvements.drains_here():
+            await improvements.drain_once()
+    except Exception:
+        logger.exception("improvements tick failed")
+
+
+async def improvements_watch() -> None:
+    from app.services import improvements
+
+    try:
+        async with advisory_lock(IMPROVE_WATCH_LOCK_KEY) as held:
+            if not held:
+                return
+            out = await improvements.watch_tick()
+            if out.get("rolled_back") or out.get("kept"):
+                logger.info("improvement watch: %s", out)
+    except Exception:
+        logger.exception("improvements watch failed")
+
+
+async def group_lessons() -> None:
+    from app.core.deps import async_session
+    from app.services.lessons import CLUSTER_LOCK_KEY, run_tick
+
+    try:
+        async with advisory_lock(CLUSTER_LOCK_KEY) as held:
+            if not held:
+                return
+            out = await run_tick(async_session)
+            if out.get("lessons"):
+                logger.info("lessons grouped: %s", out)
+    except Exception:
+        logger.exception("lesson grouping failed")
+
+
+async def lesson_retention() -> None:
+    from app.core.deps import async_session
+    from app.services.lessons import RETAIN_LOCK_KEY, purge_retention
+
+    try:
+        async with advisory_lock(RETAIN_LOCK_KEY) as held:
+            if not held:
+                return
+            async with async_session() as db:
+                out = await purge_retention(db)
+            if any(out.values()):
+                logger.info("lesson retention purge: %s", out)
+    except Exception:
+        logger.exception("lesson retention purge failed")
 
 
 def stop_scheduler() -> None:

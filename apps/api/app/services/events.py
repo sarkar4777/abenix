@@ -172,6 +172,67 @@ CATALOG: dict[str, dict[str, Any]] = {
             "actor": "system",
         },
     },
+    "lesson.captured": {
+        "description": "Something an agent got wrong, or right, was captured as a lesson",
+        "sample": {
+            "lesson_id": "…",
+            "agent_id": "…",
+            "source": "correction",
+            "polarity": "negative",
+            "execution_id": "…",
+        },
+    },
+    "cluster.opened": {
+        "description": "Lessons about the same mistake were grouped for the first time",
+        "sample": {
+            "cluster_id": "…",
+            "agent_id": "…",
+            "title": "Uses last month's price when asked for today's",
+            "count": 2,
+            "severity": "medium",
+        },
+    },
+    "improvement.proposed": {
+        "description": "A fix was drafted for a group of an agent's lessons",
+        "sample": {
+            "proposal_id": "…",
+            "agent_id": "…",
+            "cluster_id": "…",
+            "change_kind": "prompt_edit",
+        },
+    },
+    "improvement.proved": {
+        "description": "A proposed fix finished its proof, passed or not",
+        "sample": {
+            "proposal_id": "…",
+            "agent_id": "…",
+            "passed_bar": True,
+            "fixed": 3,
+            "broken": 0,
+        },
+    },
+    "improvement.released": {
+        "description": "An approved fix was released as a new revision of the agent",
+        "sample": {
+            "proposal_id": "…",
+            "agent_id": "…",
+            "revision_id": "…",
+            "watch_until": "2026-10-15T10:00:00Z",
+        },
+    },
+    "improvement.rolled_back": {
+        "description": "A release was rolled back, by a person or automatically",
+        "sample": {
+            "proposal_id": "…",
+            "agent_id": "…",
+            "reason": "Thumbs down rose from 4% to 30%",
+            "actor": "system",
+        },
+    },
+    "improvement.kept": {
+        "description": "A release did as well or better through its watch period",
+        "sample": {"proposal_id": "…", "agent_id": "…", "runs": 200},
+    },
 }
 
 MAX_ATTEMPTS = 8

@@ -53,6 +53,7 @@ import {
   Bell,
   Radar,
   Milestone,
+  Sprout,
   BellRing,
   Home,
   LayoutGrid,
@@ -155,6 +156,7 @@ const NAV_GROUPS: NavGroup[] = [
       { label: 'Analytics',   icon: BarChart3, href: '/analytics',       feature: 'view_analytics' },
       { label: 'Moderation',  icon: ShieldCheck, href: '/moderation',    feature: 'view_alerts' },
       { label: 'Autonomy',    icon: Milestone, href: '/autonomy',        capability: 'autonomy.view' },
+      { label: 'Improvements', icon: Sprout,   href: '/improvements',    capability: 'improvements.view' },
     ],
   },
   {
@@ -291,6 +293,7 @@ const ESSENTIALS: EssentialSpec[] = [
   { href: '/executions', label: 'Monitor' },
   { href: '/builder', builders: true },
   { href: '/autonomy', builders: true },
+  { href: '/improvements', builders: true },
 ];
 
 const ALL_ITEMS: NavItem[] = NAV_GROUPS.flatMap((g) => g.items);

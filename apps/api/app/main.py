@@ -409,6 +409,14 @@ from app.routers import autonomy as autonomy_router
 
 app.include_router(autonomy_router.router)
 
+from app.routers import lessons as lessons_router
+
+app.include_router(lessons_router.router)
+
+from app.routers import improvements_proposals as improvements_proposals_router
+
+app.include_router(improvements_proposals_router.router)
+
 from app.routers import journey as journey_router
 
 app.include_router(journey_router.router)

@@ -278,7 +278,8 @@ test('follow-ups: shared use, failures, changes and deletes', async ({ page }) =
       const earlier = page.locator('[data-testid^="version-revert-"]');
       if (await earlier.count()) await earlier.first().click();
       else await page.getByTestId('version-restore-original').click();
-      await expect(page.locator('body')).toContainText('Reverted', { timeout: 15_000 });
+      await page.getByTestId('version-revert-confirm').click();
+      await expect(page.locator('body')).toContainText('Restored', { timeout: 15_000 });
       await page.waitForTimeout(2500);
       await go(page, `/agents/${ids.analyst}/chat`);
       t = await chat(page, 'Which plant does Nordtek supply?');

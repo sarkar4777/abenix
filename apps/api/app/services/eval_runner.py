@@ -433,7 +433,10 @@ async def execute_run(run_id: Any) -> None:
                 (
                     await db.execute(
                         select(EvalCase)
-                        .where(EvalCase.suite_id == run.suite_id)
+                        .where(
+                            EvalCase.suite_id == run.suite_id,
+                            EvalCase.state == "accepted",
+                        )
                         .order_by(EvalCase.created_at)
                     )
                 )

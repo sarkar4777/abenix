@@ -81,6 +81,17 @@ SCHEMA_CANONICAL_COLUMNS=(
   "executions.trigger_id"
   "executions.trigger_kind"
   "executions.trigger_name"
+  "feedback.rating"
+  "lessons.capture_key"
+  "lessons.cluster_id"
+  "lesson_clusters.signature"
+  "lesson_clusters.negative_count"
+  "improvement_proposals.proof"
+  "improvement_proposals.watch_until"
+  "eval_cases.state"
+  "eval_cases.source_lesson_id"
+  "agent_revisions.source"
+  "agent_revisions.proposal_id"
 )
 
 SCHEMA_USE_CASE_COLUMNS=(

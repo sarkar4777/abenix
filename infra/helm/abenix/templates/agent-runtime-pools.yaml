@@ -73,7 +73,8 @@ spec:
           args:
             - |
               mkdir -p /data/exports /data/uploads /data/ml-models \
-                       /data/code-assets /data/code-asset-cache
+                       /data/code-assets /data/code-asset-cache \
+                       {{ $.Values.objectStorage.trajectoryDir | default "/data/trajectories" }}
               chown -R 1001:1001 /data
               chmod -R u+rwX,g+rwX /data
           volumeMounts:
@@ -128,6 +129,9 @@ spec:
               value: "/data/code-assets"
             - name: CODE_ASSET_BUILD_CACHE
               value: "/data/code-asset-cache"
+            # recall_trajectory reads where Wingman and other writers write
+            - name: TRAJECTORY_DIR
+              value: {{ $.Values.objectStorage.trajectoryDir | default "/data/trajectories" | quote }}
             {{- /* REDIS_URL deliberately NOT set here. An explicit `env`
                    entry wins over `envFrom`, so hardcoding a credential-free
                    URL here silently overrode the authenticated REDIS_URL in

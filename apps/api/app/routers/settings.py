@@ -261,6 +261,7 @@ NOTIFICATION_DEFAULTS = {
     "team_updates": True,
     "autonomy_updates": True,
     "moderation_reviews": True,
+    "improvement_updates": True,
 }
 
 

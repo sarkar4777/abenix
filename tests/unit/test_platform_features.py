@@ -275,9 +275,17 @@ class AgentDB(SwitchDB):
     async def execute(self, stmt, params=None):
         if "platform_settings" in str(stmt):
             return await super().execute(stmt, params)
+        if "agent_revisions" in str(stmt):
+            return _Res(scalar=None)
         return _Res(scalar=self.agent)
 
     async def refresh(self, _):
+        pass
+
+    async def flush(self):
+        pass
+
+    async def rollback(self):
         pass
 
 

@@ -17,6 +17,7 @@ import {
   type InboxTab,
 } from '@/lib/inbox';
 import ApprovalsPanel from '@/components/inbox/ApprovalsPanel';
+import ProposalsPanel from '@/components/inbox/ProposalsPanel';
 import AlertsPanel from '@/components/inbox/AlertsPanel';
 import ReviewQueue from '@/components/autonomy/ReviewQueue';
 import HeldInbox from '@/components/moderation/HeldInbox';
@@ -24,6 +25,7 @@ import MarketplaceSubmissions from '../review-queue/MarketplaceSubmissions';
 
 const NOT_FOR_YOU: Record<InboxTab, string> = {
   approvals: 'Signing approvals needs the creator or admin role, or the Sign approvals permission.',
+  proposals: 'Approving agent fixes needs the Approve improvements permission. You never approve a fix to an agent you built, unless you are the only builder or it is the sample agent.',
   watching: 'Answering watching reviews needs the Review agent actions permission.',
   held: 'Reviewing held content needs the Review held content permission.',
   marketplace: 'Marketplace submissions are for admins, and only while the marketplace is turned on.',
@@ -56,6 +58,7 @@ function Inbox() {
     [],
   );
   const onApprovals = useMemo(() => reported('approvals'), [reported]);
+  const onProposals = useMemo(() => reported('proposals'), [reported]);
   const onWatching = useMemo(() => reported('watching'), [reported]);
   const onHeld = useMemo(() => reported('held'), [reported]);
   const onMarket = useMemo(() => reported('marketplace'), [reported]);
@@ -77,7 +80,7 @@ function Inbox() {
     <PageHeader
       title="Needs you"
       icon={BellRing}
-      purpose="Everything waiting on you in one place: approvals to sign, agent reviews, held content, submissions and alerts. Act here, or open the full page for more detail."
+      purpose="Everything waiting on you in one place: approvals to sign, proposed agent fixes, agent reviews, held content, submissions and alerts. Act here, or open the full page for more detail."
       primaryAction={
         tab && allowed && !empty
           ? { label: `Open full ${INBOX_TABS[tab].short.toLowerCase()} page`, href: INBOX_TABS[tab].href, icon: ExternalLink, testId: 'inbox-open-full' }
@@ -189,6 +192,8 @@ function Inbox() {
             </div>
           ) : tab === 'approvals' ? (
             <ApprovalsPanel me={me} caps={caps} onCount={onApprovals} />
+          ) : tab === 'proposals' ? (
+            <ProposalsPanel me={me} caps={caps} onCount={onProposals} />
           ) : tab === 'watching' ? (
             <ReviewQueue canReview={holds(caps, 'actions.review')} onCountChange={onWatching} />
           ) : tab === 'held' ? (

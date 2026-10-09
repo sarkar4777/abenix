@@ -24,6 +24,7 @@ import {
   Shield,
   Trash2,
 } from 'lucide-react';
+import { readableInput } from '@/lib/readable-input';
 
 interface ExecutionRecord {
   id: string;
@@ -113,7 +114,7 @@ function ExecutionRow({ exec, onDelete }: { exec: ExecutionRecord; onDelete: () 
                 </span>
               )}
             </div>
-            <p className="text-xs text-slate-500 truncate">{exec.input_message?.slice(0, 80)}</p>
+            <p className="text-xs text-slate-500 truncate">{readableInput(exec.input_message).slice(0, 80)}</p>
             <p className="text-[11px] text-slate-400 truncate mt-0.5" data-testid="execution-started-by" data-kind={exec.trigger_kind || 'unknown'}>
               <span className="text-slate-500">Started by </span>
               <span className={exec.trigger_kind ? 'text-slate-300' : 'text-slate-500'}>{startedByText(exec)}</span>

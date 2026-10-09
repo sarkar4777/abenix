@@ -533,6 +533,23 @@ for g in (await client.autonomy.overview())["ready_to_promote"]:
     print(g["agent"]["name"], g["action_type"]["label"], g["next"]["next_label"])
 ```
 
+### Feedback, lessons and improvements
+
+Tell an agent what it got wrong and follow the fixes that come of it. A lesson never changes an agent by itself, it feeds a proposal that is proven and approved first. See [08-howto/16-self-improvement](../08-howto/16-self-improvement.md).
+
+| Method | Calls |
+|---|---|
+| `feedback.give(rating, *, execution_id=None, conversation_id=None, message_id=None, agent_id=None, correction=None)` | `POST /api/improvements/feedback`. `rating` is 1 or -1, `ValueError` otherwise. A thumbs down with a correction becomes a lesson with it as the right answer |
+| `lessons.report(agent_id, note, *, expected=None, execution_id=None, input=None, output=None)` | `POST /api/improvements/lessons` with `source: "sdk"`. `ValueError` on a blank note |
+| `improvements.list(*, agent_id=None, state=None, limit=50)` | `GET /api/improvements/proposals`, returns the items. `state` is one of `drafting`, `proving`, `failed_proof`, `awaiting_approval`, `approved`, `rejected`, `released`, `kept`, `rolled_back`, `superseded` |
+| `improvements.get(proposal_id)` | `GET /api/improvements/proposals/{id}` with its proof and watch result |
+
+```python
+await client.feedback.give(-1, execution_id=run_id, correction="0 °C is 273.15 K")
+for p in await client.improvements.list(agent_id=agent_id, state="rolled_back"):
+    print(p["cluster"]["title"], p["watch_result"]["reason"])
+```
+
 ---
 
 ## Other sub-clients

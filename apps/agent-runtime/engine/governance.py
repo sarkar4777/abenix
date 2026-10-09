@@ -18,7 +18,17 @@ from engine import risk
 
 logger = logging.getLogger(__name__)
 
-SCOPES = ("all", "agent", "pipeline", "tool", "model", "trigger", "decision", "source")
+SCOPES = (
+    "all",
+    "agent",
+    "pipeline",
+    "tool",
+    "model",
+    "trigger",
+    "decision",
+    "source",
+    "improvements",
+)
 
 _ttl = 5.0
 _policies: dict[tuple[str, str], dict[str, Any]] = {}
@@ -66,6 +76,9 @@ class RunContext:
     agent_id: str = ""
     user_id: str = ""
     agent_config_hash: str = ""
+    # a proof replay: every effect tool is recorded, never run
+    replay: bool = False
+    replay_held: list[dict[str, Any]] = field(default_factory=list)
 
     def chain(self) -> list["RunContext"]:
         out, node = [], self
@@ -256,6 +269,14 @@ def end_run(token: tuple[contextvars.Token, contextvars.Token]) -> None:
 
 def current() -> RunContext | None:
     return _run.get()
+
+
+def replay_root(run: RunContext | None) -> RunContext | None:
+    """The proof replay this run belongs to, nested runs included."""
+    for ctx in run.chain() if run is not None else ():
+        if ctx.replay:
+            return ctx
+    return None
 
 
 def in_tool() -> bool:

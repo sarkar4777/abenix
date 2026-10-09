@@ -256,6 +256,7 @@ export default function BuilderPage() {
   const [loading, setLoading] = useState(!!agentParam);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [saveErrorLink, setSaveErrorLink] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [mcpExtensions, setMcpExtensions] = useState<MCPExtensions | undefined>(undefined);
@@ -796,6 +797,7 @@ export default function BuilderPage() {
 
     setSaving(true);
     setSaveError(null);
+    setSaveErrorLink(null);
 
     // Build model_config depending on mode
     const modelConfig: Record<string, unknown> = {
@@ -899,6 +901,7 @@ export default function BuilderPage() {
       const json = await res.json().catch(() => ({}));
       if (!res.ok || !json.data) {
         setSaveError(json.error?.message || `Save failed (${res.status}). Your changes are still here, try again.`);
+        setSaveErrorLink(json.error?.details?.link || null);
         return;
       }
       if (!agentId && json.data.id) {
@@ -1091,7 +1094,7 @@ export default function BuilderPage() {
         )}
         {saveError && (
           <div role="alert" data-testid="builder-save-error" className="mx-3 mt-2 flex items-start justify-between gap-3 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
-            <span>{saveError}</span>
+            <span>{saveError}{saveErrorLink && <> <a href={saveErrorLink} data-testid="builder-save-error-link" className="underline text-amber-100 hover:text-white">See the failing run</a></>}</span>
             <button onClick={() => setSaveError(null)} aria-label="Dismiss" className="text-amber-300 hover:text-white">×</button>
           </div>
         )}
@@ -1243,7 +1246,7 @@ export default function BuilderPage() {
       )}
       {saveError && (
         <div role="alert" data-testid="builder-save-error" className="mx-3 mt-2 flex items-start justify-between gap-3 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
-          <span>{saveError}</span>
+          <span>{saveError}{saveErrorLink && <> <a href={saveErrorLink} data-testid="builder-save-error-link" className="underline text-amber-100 hover:text-white">See the failing run</a></>}</span>
           <button onClick={() => setSaveError(null)} aria-label="Dismiss" className="text-amber-300 hover:text-white">×</button>
         </div>
       )}

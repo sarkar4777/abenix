@@ -47,7 +47,7 @@
 | `GET` | `/api/me/journey` | signed in | The Start here checklist for your role, each step with a done flag from real data in your tenant |
 | `PUT` | `/api/me/journey` | signed in | Hide or bring back the checklist with `{"dismissed": true}` or `false` |
 | `POST` | `/api/me/journey/seen` | signed in | Record a visit that counts as a step. Only `{"step": "risk"}` today |
-| `GET` | `/api/me/inbox-counts` | signed in | Counts for the Needs you inbox, `{total, counts, available, unavailable, cached}`. Tabs are `approvals` (what you can sign), `watching` (`actions.review`), `held` (`moderation.review`), `marketplace` (admins, marketplace on) and `alerts` (`view_alerts`, failure causes new today or up on the day before). One query per source in your tenant, cached 15 seconds per user. `?fresh=1` skips the cache |
+| `GET` | `/api/me/inbox-counts` | signed in | Counts for the Needs you inbox, `{total, counts, available, unavailable, cached}`. Tabs are `approvals` (what you can sign, improvement releases left out), `proposals` (`improvements.approve`, proven fixes you may release, never your own agent outside the sample and solo builders), `watching` (`actions.review`), `held` (`moderation.review`), `marketplace` (admins, marketplace on) and `alerts` (`view_alerts`, failure causes new today or up on the day before). One query per source in your tenant, cached 15 seconds per user. `?fresh=1` skips the cache |
 | `GET` | `/api/me/inbox/alerts` | signed in, `view_alerts` | The new or rising failure causes behind the alerts count, each with today's count, the day before and `new` or `rising` |
 | `GET` | `/api/me/ui-prefs` | signed in | Your interface choices. `{"sidebar_mode": "essentials"}` by default |
 | `PUT` | `/api/me/ui-prefs` | signed in | Save `{"sidebar_mode": "essentials"}` or `"all"`. Anything else is a 400 |
@@ -459,6 +459,45 @@ Levels, grants, the action ledger, reviews and SDK actions. Detail in [02-runtim
 Self-approval: the agent's author may promote and sign their own promotion only when the action type is the sample, or when no other active user in the tenant holds `autonomy.grant`. The promote approval then carries `payload.self_approval` with the reason. The check runs again at signing, so a teammate with `autonomy.grant` who joined in between makes the author's signoff a 403 `AUTHOR_CANNOT_GRANT`. The level change is recorded as "Self-approved by <name>" with `self_approved: true` in its evidence.
 
 ---
+
+## Improvements, capture side
+
+Feedback, lessons, groups of lessons and suggested test cases. Detail in [02-runtime/22-lessons-and-improvements](../02-runtime/22-lessons-and-improvements.md). Owners see their own agents, `improvements.view` adds shared ones, admins see all. Errors carry an `error_code`: `NOT_FOUND`, `FORBIDDEN`, `BAD_RATING`, `NO_TARGET`, `NOTE_REQUIRED`, `REASON_REQUIRED`, `IN_PROGRESS`, `NOT_SUGGESTED`, `BAD_ASSERTION`, `TOO_MANY`.
+
+| Method | Path | Needs | Notes |
+|---|---|---|---|
+| `POST` | `/api/improvements/feedback` | `feedback.give` | Body `{execution_id?, conversation_id?, message_id?, agent_id?, rating: 1 or -1, correction?}`. Returns `{id, lesson_id, agent_id, can_view_lessons}`. A second rating of the same answer updates it |
+| `GET` | `/api/improvements/overview` | signed in | `{counts: {open_lessons, open_clusters, proposals_waiting, releases_watching, rolled_back_30d}, agents, total_agents}`, worst first. `?q=&limit=` |
+| `GET` | `/api/improvements/agents/{agent_id}` | owner, share or admin | `{agent, can_manage, clusters, suggested_cases, proposals, releases, counts, gate}` |
+| `GET` | `/api/improvements/clusters/{id}` | owner, share or admin | The group with `lessons`, newest first. `?before=&limit=`, returns `next_before` |
+| `POST` | `/api/improvements/clusters/{id}/dismiss` | owner or `improvements.propose` | Body `{reason}`. 409 `IN_PROGRESS` while a fix is being worked on |
+| `GET` | `/api/improvements/lessons` | signed in | `?agent_id=&source=&before=&limit=`, returns `{items, next_before}` |
+| `POST` | `/api/improvements/lessons` | `feedback.give` | "This was wrong because". Body `{agent_id?, execution_id?, note, expected?, input?, output?, source?}`. `source` is `note` or `sdk` |
+| `POST` | `/api/improvements/cases/{id}/accept` | owner or `improvements.propose` | The case runs with every proof. The suite does not become a gate |
+| `PUT` | `/api/improvements/agents/{agent_id}/gate` | owner or `improvements.propose` | Body `{gating}`. Require the Improvement tests to pass before changes to the live agent go through. Off by default, 409 `NO_TESTS` when there are none. Returns `{suite_id, gating, accepted, failing, last_run_at}` |
+| `POST` | `/api/improvements/cases/{id}/drop` | owner or `improvements.propose` | |
+| `PATCH` | `/api/improvements/cases/{id}` | owner or `improvements.propose` | Body `{name?, input_message?, reference_output?, assertions?}`. Suggested cases only |
+| `POST` | `/api/improvements/cases/bulk` | owner or `improvements.propose` | Body `{ids, action: accept or drop}`, up to 100. Returns `{done, skipped}` |
+
+## Improvements, proposal side
+
+Propose, prove, approve, release and watch. Detail in [02-runtime/23-governed-self-improvement](../02-runtime/23-governed-self-improvement.md). Errors carry an `error_code`: `NOT_FOUND`, `FORBIDDEN`, `CLUSTER_CLOSED`, `KILL_SWITCH`, `WRONG_STATE`, `NO_DRAFT`, `CHANGE_NOT_ALLOWED`, `NOT_PROVEN`, `AGENT_CHANGED`, `NO_PREVIOUS`, `BAD_STATE`, `NOT_INSTALLED` (503).
+
+| Method | Path | Needs | What |
+|---|---|---|---|
+| `POST` | `/api/improvements/clusters/{id}/propose` | `improvements.propose` | 202. A ProposalRow in `drafting`, worked on in the background. Idempotent while one is in flight. 409 `KILL_SWITCH` or `CLUSTER_CLOSED` |
+| `GET` | `/api/improvements/proposals` | owner, share or `improvements.view` | `?agent_id=&state=&limit=`. Returns `{items: [ProposalRow]}`, newest first |
+| `GET` | `/api/improvements/proposals/{id}` | owner, share or `improvements.view` | ProposalRow with `progress` (steps with counts), `proof` and `watch_result` |
+| `POST` | `/api/improvements/proposals/{id}/rerun` | `improvements.propose` | 202. Body `{diff?}`. Edit and prove again. A pending approval is withdrawn. 400 `CHANGE_NOT_ALLOWED` with the reason for a diff outside the allow list |
+| `POST` | `/api/improvements/proposals/{id}/request-approval` | `improvements.propose` | Opens the `improvement.release` approval. Automatic when the proof passes, idempotent. 409 `NOT_PROVEN` below the bar |
+| `POST` | `/api/improvements/proposals/{id}/rollback` | owner or `improvements.propose` | Body `{reason}`. At once, no approval. 409 `AGENT_CHANGED` when the agent was edited after the release |
+| `POST` | `/api/improvements/proposals/{id}/watch-check` | owner, share or `improvements.view` | Compare old and new now. May keep or roll back |
+| `GET` | `/api/improvements/budget` | signed in | `{tokens_today, tokens_limit, proofs_today, proofs_limit, queue_depth, stopped}` |
+| `POST` | `/api/improvements/sample` | `improvements.propose` | The sample agent with a planted mistake, its lessons and cases. Idempotent, and resets the mistake after a finished loop. Returns `{agent_id, cluster_id, created, reset}` |
+
+ProposalRow: `{id, agent: {id, name}, cluster: {id, title}, change_kind, change_label, diff, rationale, risk, state, state_label, progress, proof, approval_id, released_revision_id, watch_until, watch_runs_target, watch_result, error, created_at, updated_at}`. `diff.preview` holds the lines to show.
+
+An `improvement.release` approval needs `improvements.approve` and refuses the agent's author with 403 `AUTHOR_CANNOT_APPROVE`, unless it is the sample or a solo builder, when the payload carries `self_approval`. The check runs again at signing. Approving releases the fix as a revision with `source: improvement`. A deny or return with a reason becomes a lesson.
 
 ## Outbound events
 

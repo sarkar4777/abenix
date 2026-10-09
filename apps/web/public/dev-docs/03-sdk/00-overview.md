@@ -204,6 +204,7 @@ Each sub-client on `Abenix` wraps one area of the REST API. Python has the most 
 | `chat` | `/api/conversations` | 7 methods | none | 7 methods |
 | `tools`, `presets` | `/api/tools`, `/api/tool-presets` | yes | none | yes |
 | `ml_models` | `/api/ml-models` | list only | none | list only |
+| `feedback`, `lessons`, `improvements` | `/api/improvements` | give, report, list, get | same | same |
 
 Detail pages: decisions in [08-howto/09-decisions](../08-howto/09-decisions.md), sources in [02-runtime/17-source-watch](../02-runtime/17-source-watch.md), events in [02-runtime/19-outbound-events](../02-runtime/19-outbound-events.md), approvals in [02-runtime/05-approvals-hitl](../02-runtime/05-approvals-hitl.md).
 

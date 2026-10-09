@@ -1262,6 +1262,94 @@ class AutonomyClient:
         return await self._call("GET", f"/api/autonomy/grants/{grant_id}/actions", params=params) or {}
 
 
+class ImprovementsClient:
+    """Fixes proposed from an agent's lessons, their proof, approval and watch."""
+
+    def __init__(self, client: "Abenix"):
+        self._client = client
+
+    async def _call(self, method: str, path: str, **kw: Any) -> Any:
+        return await _call(self._client, AbenixError, method, path, **kw)
+
+    async def list(
+        self, *, agent_id: str | None = None, state: str | None = None, limit: int = 50
+    ) -> list[dict[str, Any]]:
+        """Proposals you may see, newest first. state is one of drafting, proving, failed_proof,
+        awaiting_approval, approved, rejected, released, kept, rolled_back, superseded."""
+        params: dict[str, Any] = {"limit": limit}
+        if agent_id:
+            params["agent_id"] = agent_id
+        if state:
+            params["state"] = state
+        out = await self._call("GET", "/api/improvements/proposals", params=params) or {}
+        return out.get("items") or []
+
+    async def get(self, proposal_id: str) -> dict[str, Any]:
+        """One proposal with its diff, proof, progress and watch result."""
+        return await self._call("GET", f"/api/improvements/proposals/{proposal_id}")
+
+
+class LessonsClient:
+    """Tell an agent what it got wrong. Lessons feed proposals, they never change an agent on their own."""
+
+    def __init__(self, client: "Abenix"):
+        self._client = client
+
+    async def report(
+        self,
+        agent_id: str,
+        note: str,
+        *,
+        expected: str | None = None,
+        execution_id: str | None = None,
+        input: str | None = None,
+        output: str | None = None,
+    ) -> dict[str, Any]:
+        """Say why a run was wrong, and what it should have done when you know.
+        Without an execution_id, pass the input and output the app saw."""
+        if not (note or "").strip():
+            raise ValueError("Say what was wrong.")
+        body: dict[str, Any] = {"agent_id": agent_id, "note": note, "source": "sdk"}
+        for k, v in (("expected", expected), ("input", input), ("output", output)):
+            if v is not None:
+                body[k] = v
+        if execution_id:
+            body["execution_id"] = execution_id
+        return await _call(self._client, AbenixError, "POST", "/api/improvements/lessons", json=body)
+
+
+class FeedbackClient:
+    """Thumbs up or down on an answer, with an optional correction."""
+
+    def __init__(self, client: "Abenix"):
+        self._client = client
+
+    async def give(
+        self,
+        rating: int,
+        *,
+        execution_id: str | None = None,
+        conversation_id: str | None = None,
+        message_id: str | None = None,
+        agent_id: str | None = None,
+        correction: str | None = None,
+    ) -> dict[str, Any]:
+        """rating is 1 or -1. A thumbs down with a correction becomes a lesson with that as the right answer."""
+        if rating not in (1, -1):
+            raise ValueError("rating is 1 for thumbs up or -1 for thumbs down.")
+        body: dict[str, Any] = {"rating": rating}
+        for k, v in (
+            ("execution_id", execution_id),
+            ("conversation_id", conversation_id),
+            ("message_id", message_id),
+            ("agent_id", agent_id),
+            ("correction", correction),
+        ):
+            if v is not None:
+                body[k] = v
+        return await _call(self._client, AbenixError, "POST", "/api/improvements/feedback", json=body)
+
+
 class Abenix:
     """Abenix Python SDK client."""
 
@@ -1295,6 +1383,9 @@ class Abenix:
         self.events = EventsClient(self)
         self.actions = ActionsClient(self)
         self.autonomy = AutonomyClient(self)
+        self.improvements = ImprovementsClient(self)
+        self.lessons = LessonsClient(self)
+        self.feedback = FeedbackClient(self)
         self._http = httpx.AsyncClient(
             base_url=self.base_url,
             headers={"X-API-Key": self.api_key, "Content-Type": "application/json"},

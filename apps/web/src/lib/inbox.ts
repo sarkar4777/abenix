@@ -7,7 +7,10 @@ import { apiFetch } from '@/lib/api-client';
 import { holds } from '@/lib/capabilities';
 import { useNotificationStore } from '@/stores/notificationStore';
 
-export type InboxTab = 'approvals' | 'watching' | 'held' | 'marketplace' | 'alerts';
+export type InboxTab = 'approvals' | 'proposals' | 'watching' | 'held' | 'marketplace' | 'alerts';
+
+// improvement releases have their own tab
+export const RELEASE_GATE = 'improvement.release';
 
 export interface InboxCounts {
   total: number;
@@ -27,6 +30,13 @@ export const INBOX_TABS: Record<InboxTab, { label: string; short: string; href: 
     href: '/approvals',
     hint: 'Agent actions, promotions, rule changes and agent gates you can sign.',
     empty: 'No approvals waiting on you.',
+  },
+  proposals: {
+    label: 'Proposals',
+    short: 'Proposals',
+    href: '/approvals',
+    hint: 'Proven fixes to agents, waiting for you to approve the release.',
+    empty: 'No proposed fixes waiting on you.',
   },
   watching: {
     label: 'Watching reviews',
@@ -72,7 +82,7 @@ export async function refreshInboxCounts(): Promise<void> {
   if (fresh.data) await swrMutate(INBOX_COUNTS_KEY, fresh, { revalidate: false });
 }
 
-const LIVE_TYPES = /approval|review|moderation|autonomy|promotion|marketplace|agent_(submitted|approved|rejected)/i;
+const LIVE_TYPES = /approval|review|moderation|autonomy|promotion|marketplace|improvement|agent_(submitted|approved|rejected)/i;
 
 // SWR polls only while the tab is visible, the socket nudges it sooner
 export function useInboxCounts(enabled = true) {
@@ -149,7 +159,8 @@ export function canSign(row: SignableRow, me: { id: string; role?: string }, cap
   if ((row.signoffs || []).some((s) => String(s.user_id) === me.id)) return false;
   if (row.gate_kind === 'decision_publish' && !holds(caps, 'decisions.review')) return false;
   const p = row.payload || {};
-  if (row.gate_kind === 'autonomy.promote' && String(p.agent_creator_id ?? '') === me.id && !p.self_approval) return false;
+  const authorRule = row.gate_kind === 'autonomy.promote' || row.gate_kind === RELEASE_GATE;
+  if (authorRule && String(p.agent_creator_id ?? '') === me.id && !p.self_approval) return false;
   if (row.policy) {
     if (!holds(caps, row.policy.capability || 'approvals.sign')) return false;
     return !(row.policy.exclude_requester && String(row.requested_by ?? '') === me.id);

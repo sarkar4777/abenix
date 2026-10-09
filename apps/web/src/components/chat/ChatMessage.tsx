@@ -11,6 +11,8 @@ import type { ContentBlock, ToolBlock, PipelineNodeBlock } from '@/stores/chatSt
 import { renderRich } from './RichRenderer';
 import ActionBadge from '@/components/autonomy/ActionBadge';
 import HeldNotice, { type HoldView } from '@/components/moderation/HeldNotice';
+import FeedbackBar from '@/components/improvements/FeedbackBar';
+import { isServerId } from '@/lib/improvements';
 
 function ToolCallCard({ block }: { block: ToolBlock }) {
   const [expanded, setExpanded] = useState(false);
@@ -138,13 +140,17 @@ interface ChatMessageProps {
   requestedModel?: string;
   fallbackReason?: string;
   executionId?: string;
+  // saved message, its thread and agent, for feedback on answers from history
+  messageId?: string;
+  conversationId?: string | null;
+  agentId?: string | null;
   // a held message of theirs a reviewer released, the chat sends it on
   onHoldReleased?: (view: HoldView) => void;
   // shown while the reply is withheld for the moderation check
   status?: string | null;
 }
 
-export default function ChatMessage({ role, blocks, isStreaming, model, requestedModel, fallbackReason, executionId, onHoldReleased, status }: ChatMessageProps) {
+export default function ChatMessage({ role, blocks, isStreaming, model, requestedModel, fallbackReason, executionId, messageId, conversationId, agentId, onHoldReleased, status }: ChatMessageProps) {
   const isUser = role === 'user';
   const hasFallback = !!(model && requestedModel && model !== requestedModel);
   // a hold card is its own panel, it does not sit inside a chat bubble
@@ -289,6 +295,16 @@ export default function ChatMessage({ role, blocks, isStreaming, model, requeste
           >
             View run
           </Link>
+        )}
+
+        {!isUser && !isStreaming && (executionId || isServerId(messageId)) && !blocks.some((b) => b.type === 'moderation_hold') && (
+          <FeedbackBar
+            executionId={executionId}
+            messageId={executionId ? undefined : messageId}
+            conversationId={executionId ? undefined : conversationId}
+            agentId={agentId}
+            testId="chat-feedback"
+          />
         )}
       </div>
 

@@ -1069,8 +1069,65 @@ def _mode_for(level: int) -> str:
     return {1: "watching", 3: "auto", 4: "reported"}.get(level, "proposed")
 
 
+# tools that change state without declaring an effect, held during a proof replay too
+REPLAY_HOLD = frozenset(
+    {
+        "approval_gate",
+        "human_approval",
+        "defer_to_human",
+        "memory_store",
+        "memory_forget",
+        "file_system",
+        "redis_stream_publisher",
+        "invoke_agent",
+        "meeting_leave",
+        "decision_propose",
+    }
+)
+REPLAY_TEXT = (
+    "Recorded during a proof replay, not executed. Nothing changed in the world. "
+    "Answer as if the action is waiting for a person."
+)
+
+
+def replay_hold(tool: Any, arguments: Any, run: Any) -> Action | None:
+    """In a proof replay every effect is recorded and never run, whatever the grant says."""
+    root = governance.replay_root(run)
+    if root is None:
+        return None
+    args_in = arguments if isinstance(arguments, dict) else {}
+    name = getattr(tool, "name", "")
+    eff = resolve_effect(tool, args_in)
+    is_effect = eff is not None and eff.kind != READ_ONLY.kind
+    if not is_effect and name not in REPLAY_HOLD:
+        return None
+    args = {k: v for k, v in args_in.items() if k not in ("_intent", "_prediction")}
+    root.replay_held.append(
+        {"tool": name, "kind": eff.kind if is_effect else "state", "arguments": args}
+    )
+    return Action(
+        id=str(uuid.uuid4()),
+        tenant_id=str(getattr(root, "tenant_id", "") or ""),
+        tool_name=name,
+        arguments=args,
+        mode="watching",
+        level=1,
+        result=ToolResult(
+            content=REPLAY_TEXT,
+            is_error=False,
+            metadata={
+                "autonomy": {"mode": "replay", "status": "watching"},
+                "tool": name,
+            },
+        ),
+    )
+
+
 async def gate(tool: Any, arguments: Any, run: Any, tenant: str) -> Action | None:
     """Apply the agent's level for this action. None means the call is not an effect."""
+    held = replay_hold(tool, arguments, run)
+    if held is not None:
+        return held
     args_in = arguments if isinstance(arguments, dict) else {}
     merge = getattr(tool, "merged_arguments", None)
     eff = resolve_effect(tool, args_in)

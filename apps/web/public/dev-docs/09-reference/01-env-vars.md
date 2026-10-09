@@ -255,6 +255,18 @@ Read by abenix-api. Details in [02-runtime/18-evaluation-suites](../02-runtime/1
 | `EVAL_STALE_MINUTES` | `180` | A run still queued or running after this long is marked failed, most likely its API pod restarted |
 | `EVAL_MAX_PARALLEL_CASES` | `8` | Cases running at once in one API process |
 
+### Agent improvements
+
+Read by abenix-api and the proof worker. Details in [02-runtime/23-governed-self-improvement](../02-runtime/23-governed-self-improvement.md).
+
+| Variable | Default | Notes |
+|---|---|---|
+| `IMPROVEMENTS_PROOF_DRAIN` | `api` | `pool` stops API pods proving fixes, the proof pool does it. The chart sets it from `improvements.proofPool.enabled` |
+| `IMPROVEMENTS_PROOF_WORKER` | unset | `1` on the proof pool, it always drains |
+| `IMPROVEMENTS_PROOF_CONCURRENCY` | `2` | Proofs at once per process |
+| `IMPROVEMENTS_PROOF_POLL_SECONDS` | `5` | How often the proof worker looks for queued proposals |
+| `IMPROVEMENTS_RUN_TIMEOUT_SECONDS` | `180` | Time one offline run in a proof may take |
+
 ### Decisions
 
 Read by the agent-runtime engine, which also runs inside the API.
@@ -343,7 +355,7 @@ Also read by the API in embedded mode, since it imports the same engine.
 | `BROWSER_AUTOMATION_ALLOWED_HOSTS` | `*` | Hosts `browser_automation` may open |
 | `SEARCH_PROVIDER` | `tavily` | Search order for `tavily_search`. Chart from `secrets.searchProvider` |
 | `SENTIMENT_LEXICON_OVERRIDE_PATH` | empty | JSON lexicon merged into `sentiment_analyzer` |
-| `TRAJECTORY_DIR` | `/data/trajectories` | Read by `recall_trajectory` |
+| `TRAJECTORY_DIR` | `/data/trajectories` | Past runs for `recall_trajectory`. Wingman writes here too. Chart from `objectStorage.trajectoryDir` |
 | `DEFER_NOTIFY_WEBHOOK_URL` | empty | `defer_to_human` posts here. Chart from `meeting.deferNotifyWebhookUrl` |
 | `OPENAI_TTS_VOICE` | `alloy` | `meeting_speak` voice. Chart from `meeting.ttsVoice` |
 | `MQTT_URL` | `mqtt://abenix-mosquitto:1883` | `mqtt_publish`, and the API's edge bundle push. `MQTT_BROKER_URL` is the older name. Chart builds it from the release |

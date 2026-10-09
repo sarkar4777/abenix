@@ -1,0 +1,75 @@
+{{- /*
+Proof pool for agent improvements: the API image running only the proof
+worker, so proving proposed fixes never competes with live traffic. Off by
+default, then API pods prove them. The ScaledObject scales on the proof queue
+depth the API publishes as abenix_improvement_proof_queue_depth.
+*/}}
+{{- $imp := default dict .Values.improvements }}
+{{- $pool := default dict $imp.proofPool }}
+{{- if $pool.enabled }}
+{{- $keda := default dict $pool.keda }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-improvements-proof
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: improvements-proof
+    app.kubernetes.io/component: proof-pool
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  replicas: {{ if $keda.enabled }}{{ default 0 $pool.minReplicas }}{{ else }}{{ max 1 (default 1 $pool.minReplicas) }}{{ end }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: improvements-proof
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: improvements-proof
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      terminationGracePeriodSeconds: 90
+      containers:
+        - name: proof-worker
+          image: "{{ .Values.api.image.repository }}:{{ .Values.api.image.tag }}"
+          imagePullPolicy: {{ default "IfNotPresent" .Values.api.image.pullPolicy }}
+          command: ["python", "-m", "app.workers.improvements_proof"]
+          env:
+            - name: IMPROVEMENTS_PROOF_WORKER
+              value: "1"
+            - name: IMPROVEMENTS_PROOF_CONCURRENCY
+              value: {{ default 2 $pool.concurrency | quote }}
+          envFrom:
+            - configMapRef:
+                name: abenix-config
+            - secretRef:
+                name: abenix-secrets
+          resources:
+            {{- toYaml (default dict $pool.resources) | nindent 12 }}
+{{- if $keda.enabled }}
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: {{ .Release.Name }}-improvements-proof
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: improvements-proof
+spec:
+  scaleTargetRef:
+    name: {{ .Release.Name }}-improvements-proof
+  minReplicaCount: {{ default 0 $pool.minReplicas }}
+  maxReplicaCount: {{ default 4 $pool.maxReplicas }}
+  pollingInterval: 15
+  cooldownPeriod: 300
+  triggers:
+    - type: prometheus
+      metadata:
+        serverAddress: {{ default (printf "http://%s-prometheus.%s.svc.cluster.local:9090" .Release.Name .Release.Namespace) $keda.prometheusUrl | quote }}
+        metricName: abenix_improvement_proof_queue_depth
+        query: max(abenix_improvement_proof_queue_depth)
+        threshold: {{ default "3" $keda.queueTrigger | quote }}
+{{- end }}
+{{- end }}

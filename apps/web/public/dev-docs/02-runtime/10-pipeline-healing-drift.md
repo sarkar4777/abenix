@@ -108,9 +108,9 @@ A rejected proposal returns 422 from `/diagnose` with the reason. Nothing is wri
 
 `diagnose` stores `dsl_before_sha256`, the sha256 of the canonical JSON of the live `pipeline_config` at draft time.
 
-- `apply` recomputes the hash of the live config. Mismatch returns 409 `stale_patch` and nothing changes. On match it writes `dsl_after.pipeline_config`, adds any tool a new step calls to `model_config.tools` so the run is not refused, stores the replaced config in `applied_snapshot`, sets `accepted`, `decided_by`, `decided_at`
+- `apply` recomputes the hash of the live config. Mismatch returns 409 `stale_patch` and nothing changes. On match it writes `dsl_after.pipeline_config`, adds any tool a new step calls to `model_config.tools` so the run is not refused, stores the replaced config in `applied_snapshot`, sets `accepted`, `decided_by`, `decided_at`. On a live pipeline the eval gate runs first, the same as publish, and a refusal is 409 `EVAL_GATE` with a link to the failing run. The apply writes an agent revision with source `healing`, so it shows in the pipeline's version history
 - `reject` sets `rejected`, `decided_by`, `decided_at`
-- `rollback` requires the live config to still hash to `dsl_after.pipeline_config`, else 409 `stale_rollback`. On match it restores `applied_snapshot` (falls back to `dsl_before.pipeline_config` for rows older than the snapshot column) and sets `rolled_back_at`, `rolled_back_by`. Status stays `accepted`
+- `rollback` requires the live config to still hash to `dsl_after.pipeline_config`, else 409 `stale_rollback`. On match it restores `applied_snapshot` (falls back to `dsl_before.pipeline_config` for rows older than the snapshot column) and sets `rolled_back_at`, `rolled_back_by`. Status stays `accepted`. It writes a revision with source `revert` and never waits on the eval gate
 
 Each of the three writes an `activity_logs` row through `app.core.audit.log_action` with action `pipeline_patch.applied`, `pipeline_patch.rejected` or `pipeline_patch.rolled_back`, the patch id, title and the before/after hashes.
 

@@ -172,10 +172,12 @@ Defaults in `DEFAULT_POLICY`. An action type's `policy` overrides any of them ke
 | Move | Needs (defaults) |
 |---|---|
 | Watching to Asks first | 20 reviews, agreement lower bound at least 70 percent |
-| Asks first to Acts within limits | 50 scored actions, accuracy lower bound 85 percent, approved without edits 80 percent, no harm for 30 days, 14 days at the level, unknown outcomes at most 20 percent, rejects at most 30 percent, eval suite passing when the agent has one |
+| Asks first to Acts within limits | 50 scored actions, accuracy lower bound 85 percent, approved without edits 80 percent, no harm for 30 days, 14 days at the level, unknown outcomes at most 20 percent, rejects at most 30 percent, eval suites passing for the current version when the agent has any |
 | Acts within limits to Acts and reports | 200 scored actions, accuracy lower bound 95 percent, no harm for 60 days, 14 days at the level, unknown at most 20 percent, rejects at most 20 percent |
 
 Also in the policy: `window` 50, `demote_margin` 0.10, `revision_recheck` 10, `approval_expires_s`.
+
+The eval check reads the same runs as the publish gate. Only completed runs on the agent's own model against its current config hash count, and gating suites decide when the agent has any. After an edit the check fails until the suites run on the new version. It never passes on an older version's result.
 
 Each requirement comes back as a plain sentence with progress and, when unmet, a fix link. For example "34 of 50 scored actions", "Accuracy 91% (needs 85%)", "No harm for 9 days (needs 30)". After an agent change, levels above 2 also need "N of 10 correct actions since the agent changed".
 

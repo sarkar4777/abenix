@@ -24,6 +24,9 @@ data:
   # backend instead of running them inline. Requires per-pool
   # Deployments (scaling.enabled) + a valid queueBackend selection.
   SCALING_EXEC_REMOTE: {{ .Values.scaling.execRemote | default false | quote }}
+  # proofs of agent improvements run on API pods, or only on the proof pool when it is on
+  {{- $proofPool := default dict (default dict .Values.improvements).proofPool }}
+  IMPROVEMENTS_PROOF_DRAIN: {{ if $proofPool.enabled }}"pool"{{ else }}"api"{{ end }}
   # Platform alerts: Alertmanager posts to /api/admin/alerts/webhook, the
   # alerts page reads Alertmanager first and falls back to Prometheus.
   {{- $alerting := default dict .Values.alerting }}
@@ -64,6 +67,7 @@ data:
   ML_MODELS_DIR: {{ .Values.objectStorage.mlModelsDir | default "/data/ml-models" | quote }}
   CODE_ASSET_STORE: {{ .Values.objectStorage.codeAssetStore | default "/data/code-assets" | quote }}
   CODE_ASSET_BUILD_CACHE: {{ .Values.objectStorage.codeAssetBuildCache | default "/data/code-asset-cache" | quote }}
+  TRAJECTORY_DIR: {{ .Values.objectStorage.trajectoryDir | default "/data/trajectories" | quote }}
   {{- if eq (.Values.objectStorage.type | default "local") "s3" }}
   STORAGE_S3_BUCKET: {{ .Values.objectStorage.bucket | quote }}
   STORAGE_S3_REGION: {{ .Values.objectStorage.region | default "us-east-1" | quote }}

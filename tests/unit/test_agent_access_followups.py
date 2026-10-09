@@ -106,6 +106,12 @@ class RecordingDB:
     def add(self, obj):
         self.added.append(obj)
 
+    async def flush(self):
+        return None
+
+    async def rollback(self):
+        return None
+
     async def commit(self):
         return None
 

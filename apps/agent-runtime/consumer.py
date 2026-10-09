@@ -754,13 +754,17 @@ async def _mark_done(
         # for every row this consumer touched.
         row = (
             await db.execute(
-                select(Execution.started_at, Execution.created_at).where(
-                    Execution.id == uuid.UUID(execution_id)
-                )
+                select(
+                    Execution.started_at,
+                    Execution.created_at,
+                    Execution.tenant_id,
+                    Execution.agent_id,
+                    Execution.input_message,
+                ).where(Execution.id == uuid.UUID(execution_id))
             )
         ).one_or_none()
         if row is not None:
-            started_at, created_at = row
+            started_at, created_at = row[0], row[1]
             if started_at is None:
                 started_at = created_at or completed_at
                 values["started_at"] = started_at
@@ -774,12 +778,34 @@ async def _mark_done(
             .values(**values)
         )
         await db.commit()
+    if target_status == ExecutionStatus.FAILED and row is not None:
+        _capture_failed(execution_id, row, output, error, values.get("failure_code"))
     try:
         await _after_terminal(execution_id, status, error, trigger_id)
     except Exception as e:
         logger.warning(
             "consumer: terminal follow-ups failed for %s: %s", execution_id, e
         )
+
+
+def _capture_failed(
+    execution_id: str, row: Any, output: str | None, error: str | None, code: Any
+) -> None:
+    """A failed run becomes a lesson, written behind the run."""
+    try:
+        from engine import lessons
+
+        lessons.capture_run_failed(
+            tenant_id=row[2],
+            agent_id=row[3],
+            execution_id=execution_id,
+            input_text=row[4] or "",
+            output_text=output or "",
+            error=error,
+            failure_code=code,
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.debug("consumer: lesson capture skipped for %s: %s", execution_id, e)
 
 
 async def _write_trigger_outcome_fallback(

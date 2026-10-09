@@ -28,6 +28,13 @@ class AgentRevision(UUIDMixin, Base):
     previous_state: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     new_state: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     diff_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # edit, healing, improvement, revert, import
+    source: Mapped[str] = mapped_column(
+        String(20), default="edit", server_default="edit"
+    )
+    proposal_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

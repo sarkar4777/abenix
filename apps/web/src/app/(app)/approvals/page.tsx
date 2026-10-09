@@ -11,6 +11,8 @@ import { holds, useMyPermissions } from '@/lib/capabilities';
 import { isActionGate, levelLabel, signoffApproval } from '@/lib/autonomy';
 import ApprovalActionRow from '@/components/autonomy/ApprovalActionRow';
 import ReviewQueue from '@/components/autonomy/ReviewQueue';
+import ImprovementApprovalCard, { type Decided } from '@/components/improvements/proposals/ImprovementApprovalCard';
+import ReleasedNext from '@/components/improvements/proposals/ReleasedNext';
 import PageHeader from '@/components/layout/PageHeader';
 
 interface SignoffEntry {
@@ -42,6 +44,7 @@ const GATE_KIND_LABEL: Record<string, string> = {
   human_approval: 'agent gate',
   decision_publish: 'rule change',
   'autonomy.promote': 'promotion',
+  'improvement.release': 'agent improvement',
 };
 
 function gateLabel(kind: string): string {
@@ -371,6 +374,9 @@ export default function ApprovalsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [released, setReleased] = useState<Decided | null>(null);
+  // an edited fix leaves the list while it is proved again, its card stays to say so
+  const [held, setHeld] = useState<Record<string, ApprovalRow>>({});
 
   const load = useCallback(async () => {
     const pendingRes = await apiFetch<ApprovalRow[]>('/api/approvals?mine=1&status=pending', { silent: true });
@@ -392,6 +398,26 @@ export default function ApprovalsPage() {
     return () => clearInterval(id);
   }, [load]);
 
+  const onImprovementDecided = (d: Decided, row: ApprovalRow) => {
+    if (d.decision === 'edit') {
+      const withdrawn = 'The fix was edited, so it is being proved again.';
+      setHeld((h) => ({ ...h, [row.id]: { ...row, status: 'expired', payload: { ...row.payload, withdrawn } } }));
+    }
+    setReleased(d);
+    load();
+  };
+
+  useEffect(() => {
+    const back = (r: ApprovalRow) =>
+      pending.some((p) => p.id !== r.id && p.payload?.proposal_id && p.payload.proposal_id === r.payload?.proposal_id);
+    setHeld((h) => {
+      const keep = Object.fromEntries(Object.entries(h).filter(([, r]) => !back(r)));
+      return Object.keys(keep).length === Object.keys(h).length ? h : keep;
+    });
+  }, [pending]);
+
+  const shown = [...pending, ...Object.values(held).filter((r) => !pending.some((p) => p.id === r.id))];
+
   const handleDecide = async (
     id: string,
     decision: 'approve' | 'deny' | 'return',
@@ -411,7 +437,7 @@ export default function ApprovalsPage() {
       <PageHeader
         className="mb-6"
         title="Approvals"
-        purpose="Sign off on agent actions, rule changes and promotions that need a person before they happen. For approvers and reviewers."
+        purpose="Sign off on agent actions, rule changes, promotions and proven agent fixes that need a person before they happen. For approvers and reviewers."
         icon={ShieldCheck}
         storageKey="approvals"
         docSlug="02-runtime/05-approvals-hitl"
@@ -457,6 +483,8 @@ export default function ApprovalsPage() {
         </div>
       )}
 
+      <ReleasedNext decided={released} onDismiss={() => setReleased(null)} />
+
       <section className="mb-8">
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-sm font-semibold text-white uppercase tracking-wider">Pending</h2>
@@ -466,14 +494,16 @@ export default function ApprovalsPage() {
           <div className="flex items-center gap-2 text-sm text-slate-500 py-8 justify-center">
             <Loader2 className="w-4 h-4 animate-spin" /> Loading approvals
           </div>
-        ) : pending.length === 0 ? (
+        ) : shown.length === 0 ? (
           <div className="rounded-xl border border-dashed border-slate-700/50 bg-slate-800/20 p-8 text-center">
             <CheckCircle2 className="w-8 h-8 text-emerald-400/40 mx-auto mb-2" />
             <p className="text-sm text-slate-400">No approvals waiting on you. Nice.</p>
           </div>
         ) : (
-          pending.map(a => (
-            isActionGate(a.gate_kind)
+          shown.map(a => (
+            a.gate_kind === 'improvement.release'
+              ? <ImprovementApprovalCard key={a.id} approval={a as unknown as Record<string, unknown>} onDecided={(d) => onImprovementDecided(d, a)} />
+              : isActionGate(a.gate_kind)
               ? <ApprovalActionRow key={a.id} row={a} onDecide={handleDecide} busy={busyId === a.id} />
               : <ApprovalCard key={a.id} row={a} onDecide={handleDecide} busy={busyId === a.id} />
           ))
@@ -489,7 +519,9 @@ export default function ApprovalsPage() {
           <p className="text-xs text-slate-600">No decisions yet.</p>
         ) : (
           recent.map(a => (
-            isActionGate(a.gate_kind)
+            a.gate_kind === 'improvement.release'
+              ? <ImprovementApprovalCard key={a.id} approval={a as unknown as Record<string, unknown>} onDecided={(d) => onImprovementDecided(d, a)} />
+              : isActionGate(a.gate_kind)
               ? <ApprovalActionRow key={a.id} row={a} onDecide={handleDecide} busy={busyId === a.id} />
               : <ApprovalCard key={a.id} row={a} onDecide={handleDecide} busy={busyId === a.id} />
           ))

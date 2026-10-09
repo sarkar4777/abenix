@@ -146,20 +146,13 @@ async def _risk_activation_problem(agent: Agent) -> str | None:
     return None
 
 
-async def _eval_gate_problem(db: AsyncSession, agent: Agent) -> JSONResponse | None:
+async def _eval_gate_problem(
+    db: AsyncSession, agent: Agent, *, live_edit: bool = False
+) -> JSONResponse | None:
     """Refuses publishing when the tier policy needs this exact config to pass its gating suites."""
-    from app.services.eval_runner import gate_for_agent
+    from app.services.agent_revisions import eval_gate_refusal
 
-    await db.flush()
-    gate = await gate_for_agent(db, agent)
-    if gate.allowed:
-        return None
-    return error(
-        gate.message,
-        409,
-        error_code="EVAL_GATE",
-        details={"agent_id": str(agent.id), "suites": gate.suites},
-    )
+    return await eval_gate_refusal(db, agent, live_edit=live_edit)
 
 
 def _record_risk(execution: Execution, data: Any) -> None:
@@ -803,6 +796,21 @@ async def import_agent(
         icon_url=icon_url,
     )
     db.add(agent)
+    from app.services import agent_revisions as revs
+
+    try:
+        await revs.record_revision(
+            db,
+            agent,
+            changed_by=user.id,
+            change_type="import",
+            source="import",
+            previous_state=None,
+            diff_summary="Imported from a template",
+        )
+    except revs.RevisionWriteError:
+        await db.rollback()
+        return revs.revision_failed()
     await db.commit()
     await db.refresh(agent)
     await log_action(
@@ -1226,35 +1234,16 @@ async def update_agent(
     if body.icon_url is not None and not is_safe_url(body.icon_url):
         return error("Invalid icon URL", 400)
 
-    # Create revision snapshot BEFORE applying changes
-    try:
-        prev_state = {
-            "name": agent.name,
-            "description": agent.description,
-            "system_prompt": agent.system_prompt,
-            "model_config": agent.model_config_,
-            "category": agent.category,
-            "status": agent.status.value,
-        }
-        # Get next revision number
-        rev_count = await db.execute(
-            select(AgentRevision).where(AgentRevision.agent_id == agent_id)
-        )
-        rev_num = len(rev_count.scalars().all()) + 1
+    from app.services import agent_revisions as revs
 
-        changes = []
-        if body.name is not None and body.name != agent.name:
-            changes.append(f"name: '{agent.name}' → '{body.name}'")
-        if body.system_prompt is not None and body.system_prompt != agent.system_prompt:
-            changes.append("system prompt updated")
-        if body.agent_model_config is not None:
-            changes.append("model config updated")
-        if body.category is not None and body.category != agent.category:
-            changes.append(f"category: {agent.category} → {body.category}")
-    except Exception:
-        rev_num = 1
-        prev_state = {}
-        changes = ["update"]
+    prev_state = revs.agent_state(agent)
+    changes = []
+    if body.name is not None and body.name != agent.name:
+        changes.append(f"name: '{agent.name}' → '{body.name}'")
+    if body.system_prompt is not None and body.system_prompt != agent.system_prompt:
+        changes.append("system prompt updated")
+    if body.category is not None and body.category != agent.category:
+        changes.append(f"category: {agent.category} → {body.category}")
 
     if body.name is not None:
         agent.name = sanitize_input(body.name)
@@ -1287,8 +1276,14 @@ async def update_agent(
         if problem:
             await db.rollback()
             return error(problem, 400)
-    if agent.status == AgentStatus.ACTIVE and prev_state.get("status") != "active":
-        blocked = await _eval_gate_problem(db, agent)
+    new_state = revs.agent_state(agent)
+    if new_state["model_config"] != prev_state["model_config"]:
+        changes.append("model config updated")
+    went_live = prev_state.get("status") != "active"
+    if agent.status == AgentStatus.ACTIVE and (
+        went_live or revs.behaviour_changed(prev_state, new_state)
+    ):
+        blocked = await _eval_gate_problem(db, agent, live_edit=not went_live)
         if blocked:
             await db.rollback()
             return blocked
@@ -1303,31 +1298,25 @@ async def update_agent(
                 return error("Only admins can change agent_type", 403)
             agent.agent_type = wanted_type
 
+    new_state = revs.agent_state(agent)
+    if new_state != prev_state:
+        try:
+            await revs.record_revision(
+                db,
+                agent,
+                changed_by=user.id,
+                change_type="config_update",
+                previous_state=prev_state,
+                new_state=new_state,
+                diff_summary="; ".join(changes) if changes else "Updated",
+            )
+        except revs.RevisionWriteError:
+            await db.rollback()
+            return revs.revision_failed()
     await db.commit()
     await db.refresh(agent)
 
-    # Save revision after changes
     try:
-        new_state = {
-            "name": agent.name,
-            "description": agent.description,
-            "system_prompt": agent.system_prompt,
-            "model_config": agent.model_config_,
-            "category": agent.category,
-            "status": agent.status.value,
-        }
-        revision = AgentRevision(
-            id=uuid.uuid4(),
-            agent_id=agent_id,
-            revision_number=rev_num,
-            changed_by=user.id,
-            change_type="config_update",
-            previous_state=prev_state,
-            new_state=new_state,
-            diff_summary="; ".join(changes) if changes else "Updated",
-        )
-        db.add(revision)
-
         # Notify collaborators (shared users with edit permission)
         share_result = await db.execute(
             select(ResourceShare.shared_with_user_id).where(
@@ -1352,8 +1341,8 @@ async def update_agent(
             except Exception:
                 pass
         await db.commit()
-    except Exception:
-        pass  # Revision tracking failure should not block agent update
+    except Exception as e:  # noqa: BLE001
+        logger.warning("collaborator notify failed for agent %s: %s", agent_id, e)
 
     refused = (
         await _sync_kb_grants(db, agent, user)
@@ -1395,6 +1384,10 @@ async def list_revisions(
                 "revision_number": r.revision_number,
                 "changed_by": str(r.changed_by),
                 "change_type": r.change_type,
+                "source": getattr(r, "source", None) or "edit",
+                "proposal_id": (
+                    str(r.proposal_id) if getattr(r, "proposal_id", None) else None
+                ),
                 "diff_summary": r.diff_summary,
                 "created_at": r.created_at.isoformat() if r.created_at else None,
             }
@@ -1447,14 +1440,9 @@ async def revert_to_revision(
     if not target:
         return error("Revision not found", 404)
 
-    current = {
-        "name": agent.name,
-        "description": agent.description,
-        "system_prompt": agent.system_prompt,
-        "model_config": agent.model_config_,
-        "category": agent.category,
-        "status": agent.status.value,
-    }
+    from app.services import agent_revisions as revs
+
+    current = revs.agent_state(agent)
     if target.get("name"):
         agent.name = target["name"]
     if target.get("description") is not None:
@@ -1466,29 +1454,24 @@ async def revert_to_revision(
     if target.get("category"):
         agent.category = target["category"]
 
-    count = (
-        await db.execute(
-            select(func.count())
-            .select_from(AgentRevision)
-            .where(AgentRevision.agent_id == agent_id)
-        )
-    ).scalar() or 0
-    db.add(
-        AgentRevision(
-            id=uuid.uuid4(),
-            agent_id=agent_id,
-            revision_number=count + 1,
+    # a revert is the way back, so it never waits on the eval gate
+    try:
+        await revs.record_revision(
+            db,
+            agent,
             changed_by=user.id,
             change_type="revert",
+            source="revert",
             previous_state=current,
-            new_state=target,
             diff_summary=(
                 f"Restored the state before version {revision.revision_number}"
                 if which == "before"
                 else f"Restored version {revision.revision_number}"
             ),
         )
-    )
+    except revs.RevisionWriteError:
+        await db.rollback()
+        return revs.revision_failed()
     await log_action(
         db,
         user.tenant_id,
@@ -1628,10 +1611,53 @@ async def duplicate_agent(
         icon_url=source.icon_url,
     )
     db.add(clone)
+    from app.services import agent_revisions as revs
+
+    try:
+        await revs.record_revision(
+            db,
+            clone,
+            changed_by=user.id,
+            change_type="duplicate",
+            source="import",
+            previous_state=None,
+            diff_summary=f"Copied from {source.name}",
+        )
+    except revs.RevisionWriteError:
+        await db.rollback()
+        return revs.revision_failed()
     await db.commit()
     await db.refresh(clone)
 
     return success(_serialize_agent(clone), status_code=201)
+
+
+async def _publish_revision(
+    db: AsyncSession,
+    agent: Agent,
+    user: User,
+    prev_state: dict[str, Any],
+    visibility: str,
+) -> bool:
+    from app.services import agent_revisions as revs
+
+    try:
+        await revs.record_revision(
+            db,
+            agent,
+            changed_by=user.id,
+            change_type="publish",
+            previous_state=prev_state,
+            diff_summary=(
+                "Submitted to the marketplace"
+                if visibility == "public"
+                else f"Published ({visibility})"
+            ),
+        )
+    except revs.RevisionWriteError:
+        await db.rollback()
+        return False
+    return True
 
 
 @router.post("/{agent_id}/publish")
@@ -1666,6 +1692,9 @@ async def publish_agent(
     allowed, why = can_publish_agent(agent, user, visibility)
     if not allowed:
         return error(why, 400 if why.startswith("visibility") else 403)
+    from app.services import agent_revisions as revs
+
+    prev_state = revs.agent_state(agent)
     paid = True
     if visibility == "public":
         from app.core.platform_features import (
@@ -1706,6 +1735,8 @@ async def publish_agent(
         # Marketplace publish — requires admin review
         agent.status = AgentStatus.PENDING_REVIEW
         agent.is_published = False
+        if not await _publish_revision(db, agent, user, prev_state, visibility):
+            return revs.revision_failed()
         await db.commit()
         await db.refresh(agent)
         await log_action(
@@ -1722,6 +1753,8 @@ async def publish_agent(
         # POST /api/agents/{id}/share (ResourceShare rows).
         agent.status = AgentStatus.ACTIVE
         agent.is_published = False
+        if not await _publish_revision(db, agent, user, prev_state, visibility):
+            return revs.revision_failed()
         await db.commit()
         await db.refresh(agent)
         await log_action(

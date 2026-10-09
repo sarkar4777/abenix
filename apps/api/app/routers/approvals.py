@@ -218,7 +218,8 @@ async def _expire_stale(db: AsyncSession, tenant_id: uuid.UUID) -> None:
             if row is not None:
                 await on_approval_resolved(db, row)
         elif gate_kind and (
-            gate_kind.startswith("action:") or gate_kind == "autonomy.promote"
+            gate_kind.startswith("action:")
+            or gate_kind in ("autonomy.promote", "improvement.release")
         ):
             row = await db.get(Approval, aid)
             if row is not None:
@@ -653,6 +654,12 @@ async def sign_off(
         refused = await promotion_denial(db, user, a)
         if refused:
             return error(refused, 403, error_code="AUTHOR_CANNOT_GRANT")
+    if a.gate_kind == "improvement.release" and body.decision == "approve":
+        from app.services.improvements import release_denial
+
+        refused = await release_denial(db, user, a)
+        if refused:
+            return error(refused, 403, error_code="AUTHOR_CANNOT_APPROVE")
 
     denial = await approver_denial(db, user, a.requested_by, a.policy, a.gate_kind)
     if denial:
@@ -714,8 +721,17 @@ async def sign_off(
 
 
 async def _autonomy_resolved(db: AsyncSession, a: Approval, decider: Any) -> None:
-    """Promotions change the level, action gates update their ledger row."""
+    """Promotions change the level, action gates update their ledger row, fixes get released."""
     kind = a.gate_kind or ""
+    if kind == "improvement.release":
+        from app.services import improvements as improvements_svc
+
+        try:
+            await improvements_svc.on_release_resolved(db, a, decider)
+        except Exception:
+            logger.exception("improvement follow-up for approval %s failed", a.id)
+            await db.rollback()
+        return
     if not (kind.startswith("action:") or kind == "autonomy.promote"):
         return
     from app.services import autonomy as autonomy_svc

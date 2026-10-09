@@ -13,6 +13,7 @@ import {
   autonomyApi, fmtDuration, fmtNum, MODE_LABEL, predictionText, relTime, statusMeta,
   type ActionCardData, type ActionRow,
 } from '@/lib/autonomy';
+import FeedbackBar from '@/components/improvements/FeedbackBar';
 
 export type ActionCardContext = 'approval' | 'review' | 'timeline' | 'readonly';
 export type ReviewAnswer = 'agree' | 'different' | 'unsure';
@@ -361,6 +362,10 @@ export default function ActionCard({
             <button type="button" onClick={() => setMode('idle')} className={`${btn} border-slate-600 text-slate-300`}>Cancel</button>
           </div>
         </div>
+      )}
+
+      {(allowHarm || allowOutcome) && action?.execution_id && (
+        <FeedbackBar executionId={action.execution_id} testId="action-card-feedback" />
       )}
 
       {(error || followErr) && <p className="mt-2 text-xs text-rose-300" role="alert" data-testid="action-card-error">{error || followErr}</p>}

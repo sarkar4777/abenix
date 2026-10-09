@@ -15,6 +15,7 @@ import { useApi } from '@/hooks/useApi';
 import RetentionCard from '@/components/moderation/RetentionCard';
 import MaskedText from '@/components/moderation/MaskedText';
 import { holdMinutesError } from '@/lib/moderation-review';
+import { readableInput } from '@/lib/readable-input';
 
 interface Policy {
   id: string;
@@ -624,7 +625,7 @@ export default function ModerationPage() {
                   )}
                   {e.content_preview && (
                     <pre className="mt-1 text-[11px] text-slate-400 whitespace-pre-wrap break-words line-clamp-3">
-                      <MaskedText text={e.content_preview} />
+                      <MaskedText text={readableInput(e.content_preview)} />
                     </pre>
                   )}
                 </div>

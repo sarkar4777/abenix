@@ -380,6 +380,17 @@ if (go) {
 
 All need `autonomy.view`.
 
+### Feedback, lessons and improvements
+
+| Method | Calls |
+|---|---|
+| `feedback.give(rating, opts?: { executionId, conversationId, messageId, agentId, correction })` | `POST /api/improvements/feedback`. `rating` is `1` or `-1` |
+| `lessons.report(agentId, note, opts?: { expected, executionId, input, output })` | `POST /api/improvements/lessons` with `source: 'sdk'`. Rejects on a blank note |
+| `improvements.list(opts?: { agentId, state, limit })` | `GET /api/improvements/proposals`, resolves `ProposalRow[]` |
+| `improvements.get(proposalId)` | `GET /api/improvements/proposals/{id}` |
+
+These throw `AbenixError` like the other platform clients.
+
 ---
 
 ## Other sub-clients

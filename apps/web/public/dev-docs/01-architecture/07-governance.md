@@ -72,11 +72,12 @@ The admin screen stores only the settings that differ from the platform default 
 | Trigger | Schedules and webhooks for the trigger. Webhook senders get 423 |
 | Decision | Evaluations of the decision, target is the decision key |
 | Watched source | Change detection for the source pauses, target is the source id |
+| Agent improvements | Proposing and proving fixes for every agent. Releases in their watch period keep being watched |
 | Everything | Every agent, pipeline and tool call in the tenant, and every check above |
 
 Nothing is deleted. A switch needs a reason, which people who hit the stop see. Setting and resuming are written to the audit log, and setting one emits a `kill_switch.set` event. Seeing the list needs `risk.view`, setting or resuming needs `killswitch.manage`. The API is `GET` and `POST /api/governance/kill-switches` and `POST /api/governance/kill-switches/{id}/clear`. A run refused by a switch fails with `KILL_SWITCH`. A model refused by the tier's model list fails with `MODEL_NOT_ALLOWED`. Both show on `/alerts`.
 
-How it works: [`engine/governance.py`](../../apps/agent-runtime/engine/governance.py) keeps a snapshot of tier policies, active switches and agent tiers, and its `SCOPES` are `all`, `agent`, `pipeline`, `tool`, `model`, `trigger`, `decision` and `source`. Checks read the snapshot synchronously. Once the snapshot is older than five seconds, the next check starts a refresh in the background and keeps serving the old copy, so a tool call never waits on the database. Only a first load waits, or the load right after a change made through the API on that pod. Other pods pick the change up within five seconds. Switches with no tenant are platform-wide. The one wrapper every tool's `execute` passes through runs the checks, so tools need no code for it.
+How it works: [`engine/governance.py`](../../apps/agent-runtime/engine/governance.py) keeps a snapshot of tier policies, active switches and agent tiers, and its `SCOPES` are `all`, `agent`, `pipeline`, `tool`, `model`, `trigger`, `decision`, `source` and `improvements`. Checks read the snapshot synchronously. Once the snapshot is older than five seconds, the next check starts a refresh in the background and keeps serving the old copy, so a tool call never waits on the database. Only a first load waits, or the load right after a change made through the API on that pod. Other pods pick the change up within five seconds. Switches with no tenant are platform-wide. The one wrapper every tool's `execute` passes through runs the checks, so tools need no code for it.
 
 ## Capabilities and permission sets
 

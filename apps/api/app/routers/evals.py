@@ -334,7 +334,7 @@ async def list_suites(
         (
             await db.execute(
                 select(EvalCase.suite_id, func.count())
-                .where(EvalCase.suite_id.in_(ids))
+                .where(EvalCase.suite_id.in_(ids), EvalCase.state == "accepted")
                 .group_by(EvalCase.suite_id)
             )
         ).all()
@@ -452,7 +452,7 @@ async def get_suite(
         (
             await db.execute(
                 select(EvalCase)
-                .where(EvalCase.suite_id == s.id)
+                .where(EvalCase.suite_id == s.id, EvalCase.state == "accepted")
                 .order_by(EvalCase.created_at)
             )
         )

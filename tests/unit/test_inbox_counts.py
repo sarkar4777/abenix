@@ -151,9 +151,23 @@ def _clear_cache():
     inbox.invalidate()
 
 
+def _release(tenant=TENANT, **kw):
+    row = {
+        "gate_kind": "improvement.release",
+        "policy": {"exclude_requester": False, "capability": "improvements.approve"},
+        "creator": str(uuid.uuid4()),
+    }
+    row.update(kw)
+    return _approval(tenant, **row)
+
+
 def _everything(tenant=TENANT):
     return {
-        "approvals": [_approval(tenant), _approval(tenant)],
+        "approvals": [
+            _approval(tenant),
+            _approval(tenant),
+            _release(tenant),
+        ],
         "agent_actions": [{"tenant": tenant}] * 3,
         "moderation_reviews": [{"tenant": tenant}] * 4,
         "agents": [{"tenant": tenant}] * 5,
@@ -185,12 +199,13 @@ async def test_admin_sees_every_tab_when_marketplace_is_on():
     assert data["available"] == list(inbox.TABS)
     assert data["counts"] == {
         "approvals": 2,
+        "proposals": 1,
         "watching": 3,
         "held": 4,
         "marketplace": 5,
         "alerts": 1,
     }
-    assert data["total"] == 15
+    assert data["total"] == 16
 
 
 async def test_marketplace_tab_needs_the_switch_and_admin():
@@ -246,6 +261,31 @@ async def test_signable_rules():
     assert data["counts"]["approvals"] == 4
 
 
+async def test_proposals_tab_follows_release_signing_rules():
+    me = _user(UserRole.CREATOR)
+    mine = str(me.id)
+    db = FakeDB(
+        approvals=[
+            _approval(),
+            _release(),  # someone else's agent
+            _release(creator=mine),  # author refused
+            _release(creator=mine, self_approval="Only builder"),  # solo builder
+            _release(creator=mine, self_approval="Sample agent"),  # the sample
+        ]
+    )
+    # creators do not hold improvements.approve by default
+    data = await _counts(me, db)
+    assert "proposals" not in data["available"]
+    assert data["counts"]["approvals"] == 1
+
+    data = await _counts(me, db, extra={"improvements.approve"})
+    assert data["available"][:2] == ["approvals", "proposals"]
+    # releases never count twice
+    assert data["counts"]["approvals"] == 1 and data["counts"]["proposals"] == 3
+    # one approvals query feeds both tabs
+    assert sum("FROM approvals" in sql for sql, _ in db.statements) == 2
+
+
 async def test_other_tenant_rows_never_count():
     db = FakeDB(
         **{k: v + _everything(OTHER)[k] for k, v in _everything().items()},
@@ -253,6 +293,7 @@ async def test_other_tenant_rows_never_count():
     data = await _counts(_user(UserRole.ADMIN), db)
     assert data["counts"] == {
         "approvals": 2,
+        "proposals": 1,
         "watching": 3,
         "held": 4,
         "marketplace": 5,

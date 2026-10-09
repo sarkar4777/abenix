@@ -1579,6 +1579,7 @@ deploy_wingman() {
   sed \
     -e "s|localhost:5000/abenix/wingman-api:latest|${ACR_LOGIN_SERVER}/wingman-api:${IMAGE_TAG}|g" \
     -e "s|localhost:5000/abenix/wingman-web:latest|${ACR_LOGIN_SERVER}/wingman-web:${IMAGE_TAG}|g" \
+    -e "s|hostPath: { path: /var/lib/abenix/data, type: DirectoryOrCreate }|persistentVolumeClaim: { claimName: abenix-shared-data }|g" \
     -e "s|imagePullPolicy: IfNotPresent|imagePullPolicy: Always|g" \
     "${manifest}" | kubectl apply -f - 2>&1 | tail -5
 

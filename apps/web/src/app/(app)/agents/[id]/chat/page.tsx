@@ -255,6 +255,7 @@ export default function AgentChatPage() {
               requestedModel={msg.requestedModel}
               fallbackReason={msg.fallbackReason}
               executionId={msg.executionId}
+              agentId={agentId}
               onHoldReleased={(view) => {
                 // a reviewer released the message, it goes on to the agent once
                 if (view.content && !useChatStore.getState().isStreaming) sendMessage(agentId, view.content);

@@ -31,6 +31,7 @@ vi.mock('@/lib/capabilities', async (orig) => {
 });
 vi.mock('@/lib/api-client', () => ({ apiFetch: vi.fn(async () => ({ data: null, error: null })) }));
 vi.mock('@/components/inbox/ApprovalsPanel', () => ({ default: () => <div data-testid="stub-approvals" /> }));
+vi.mock('@/components/inbox/ProposalsPanel', () => ({ default: () => <div data-testid="stub-proposals" /> }));
 vi.mock('@/components/inbox/AlertsPanel', () => ({ default: () => <div data-testid="stub-alerts" /> }));
 vi.mock('@/components/autonomy/ReviewQueue', () => ({ default: () => <div data-testid="stub-watching" /> }));
 vi.mock('@/components/moderation/HeldInbox', () => ({ default: () => <div data-testid="stub-held" /> }));
@@ -76,6 +77,22 @@ describe('Needs you page', () => {
     expect(screen.queryByTestId('stub-held')).toBeNull();
   });
 
+  it('has a Proposals tab for proven fixes, explained when the person cannot approve', () => {
+    state.counts = { total: 2, counts: { approvals: 0, proposals: 2 }, available: ['approvals', 'proposals'] };
+    state.caps = ['improvements.approve'];
+    render(<InboxPage />);
+    expect(screen.getByTestId('inbox-tab-proposals')).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByTestId('inbox-count-proposals')).toHaveTextContent('2');
+    expect(screen.getByTestId('stub-proposals')).toBeInTheDocument();
+  });
+
+  it('explains the Proposals tab to someone who cannot approve fixes', () => {
+    state.counts = { total: 0, counts: { approvals: 0 }, available: ['approvals'] };
+    state.tab = 'proposals';
+    render(<InboxPage />);
+    expect(screen.getByTestId('inbox-not-for-you')).toHaveTextContent('Approve improvements permission');
+  });
+
   it('shows the marketplace tab only when the server offers it', () => {
     state.role = 'admin';
     state.counts = { total: 4, counts: { approvals: 1, held: 0, marketplace: 3 }, available: ['approvals', 'held', 'marketplace'] };
@@ -98,5 +115,10 @@ describe('canSign', () => {
     expect(canSign({ id: 'a', policy: { capability: 'approvals.sign:legal' } }, me, ['approvals.sign'])).toBe(true);
     expect(canSign({ id: 'a', policy: { exclude_requester: true }, requested_by: 'u1' }, me, ['approvals.sign'])).toBe(false);
     expect(canSign({ id: 'hitl:e:g' }, me, [])).toBe(true);
+    const release = { id: 'r', gate_kind: 'improvement.release', policy: { capability: 'improvements.approve' } };
+    expect(canSign(release, me, [])).toBe(false);
+    expect(canSign({ ...release, payload: { agent_creator_id: 'someone' } }, me, ['improvements.approve'])).toBe(true);
+    expect(canSign({ ...release, payload: { agent_creator_id: 'u1' } }, me, ['improvements.approve'])).toBe(false);
+    expect(canSign({ ...release, payload: { agent_creator_id: 'u1', self_approval: 'Only builder' } }, me, ['improvements.approve'])).toBe(true);
   });
 });

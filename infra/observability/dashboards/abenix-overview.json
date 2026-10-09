@@ -163,6 +163,28 @@
         {"expr": "histogram_quantile(0.99, sum by (le) (rate(abenix_http_request_duration_seconds_bucket[5m])))", "refId": "B", "legendFormat": "p99"}
       ],
       "fieldConfig": {"defaults": {"unit": "s"}}
+    },
+    {
+      "id": 60, "type": "timeseries", "title": "Agent improvements: lessons, proofs and releases",
+      "gridPos": {"x": 0, "y": 44, "w": 12, "h": 8},
+      "description": "Lessons captured, proofs passed and failed, and releases kept or rolled back, per hour. A rising rolled back line means fixes are not holding up live.",
+      "targets": [
+        {"expr": "sum(increase(abenix_improvement_lessons_captured_total[1h]))", "refId": "A", "legendFormat": "lessons"},
+        {"expr": "sum by (result) (increase(abenix_improvement_proofs_total[1h]))", "refId": "B", "legendFormat": "proofs {{result}}"},
+        {"expr": "sum by (outcome) (increase(abenix_improvement_releases_total[1h]))", "refId": "C", "legendFormat": "releases {{outcome}}"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "short"}}
+    },
+    {
+      "id": 61, "type": "timeseries", "title": "Agent improvements: proof queue, open clusters, proof tokens",
+      "gridPos": {"x": 12, "y": 44, "w": 12, "h": 8},
+      "description": "Proposals waiting for a proof (the proof pool scales on this), open lesson clusters, and tokens spent on proofs per hour.",
+      "targets": [
+        {"expr": "max(abenix_improvement_proof_queue_depth)", "refId": "A", "legendFormat": "proof queue"},
+        {"expr": "max(abenix_improvement_clusters_open)", "refId": "B", "legendFormat": "open clusters"},
+        {"expr": "sum(increase(abenix_improvement_proof_tokens_total[1h]))", "refId": "C", "legendFormat": "proof tokens / h"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "short"}}
     }
   ],
   "templating": {"list": []}

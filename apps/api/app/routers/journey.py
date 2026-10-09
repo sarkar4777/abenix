@@ -19,6 +19,7 @@ from models.conversation import Conversation, Message
 from models.evals import EvalCase, EvalSuite
 from models.execution import Execution
 from models.governance import RiskPolicy
+from models.improvement import Feedback, ImprovementProposal
 from models.knowledge_base import KnowledgeBase
 from models.moderation_policy import ModerationPolicy
 from models.user import User
@@ -27,7 +28,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/me/journey", tags=["journey"])
 
 PREFS_KEY = "journey"
-SEEN_STEPS = {"risk"}
+SEEN_STEPS = {"risk", "improvements"}
 
 
 def role_of(user: User) -> str:
@@ -51,6 +52,24 @@ def _save_prefs(user: User, journey: dict[str, Any]) -> None:
     prefs = dict(getattr(user, "notification_settings", None) or {})
     prefs[PREFS_KEY] = journey
     user.notification_settings = prefs
+
+
+def _seen(user: User, step: str) -> bool:
+    return step in (_prefs(user).get("seen") or [])
+
+
+async def note_seen(db: AsyncSession, user: User, step: str) -> None:
+    # best effort, a failed marker never fails the page that set it
+    if step not in SEEN_STEPS or _seen(user, step):
+        return
+    try:
+        journey = _prefs(user)
+        journey["seen"] = list(journey.get("seen") or []) + [step]
+        _save_prefs(user, journey)
+        await db.commit()
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("journey seen marker failed: %s", exc)
+        await db.rollback()
 
 
 async def _exists(db: AsyncSession, stmt) -> bool:
@@ -92,7 +111,7 @@ async def admin_facts(db: AsyncSession, user: User) -> dict[str, bool]:
     return {
         "connect_model": await _model_connected(db),
         "invite_team": int(users) > 1,
-        "review_risk": risk_changed or "risk" in (_prefs(user).get("seen") or []),
+        "review_risk": risk_changed or _seen(user, "risk"),
         "moderation": moderation_on,
     }
 
@@ -123,6 +142,7 @@ async def builder_facts(db: AsyncSession, user: User) -> dict[str, Any]:
         "add_knowledge": False,
         "add_tests": False,
         "enrol_autonomy": False,
+        "review_improvements": _seen(user, "improvements"),
         "list_marketplace": any(
             bool(r[1]) or r[2] == AgentStatus.PENDING_REVIEW for r in rows
         ),
@@ -161,21 +181,43 @@ async def builder_facts(db: AsyncSession, user: User) -> dict[str, Any]:
             AutonomyGrant.tenant_id == t, AutonomyGrant.agent_id.in_(ids)
         ),
     )
+    # a proposal they asked for counts as acting on Improvements
+    if not facts["review_improvements"]:
+        facts["review_improvements"] = await _exists(
+            db,
+            select(ImprovementProposal.id).where(
+                ImprovementProposal.tenant_id == t,
+                ImprovementProposal.created_by == user.id,
+            ),
+        )
     return facts
 
 
-async def member_facts(db: AsyncSession, user: User) -> dict[str, bool]:
+async def member_facts(db: AsyncSession, user: User) -> dict[str, Any]:
     t = user.tenant_id
-    chatted = await _exists(
-        db,
-        select(Conversation.id).where(
-            Conversation.tenant_id == t, Conversation.user_id == user.id
-        ),
-    ) or await _exists(
-        db,
-        select(Execution.id).where(
-            Execution.tenant_id == t, Execution.user_id == user.id
-        ),
+    # follow-up and feedback steps reopen the newest thread instead of a blank chat
+    latest = (
+        await db.execute(
+            select(Conversation.id)
+            .where(Conversation.tenant_id == t, Conversation.user_id == user.id)
+            .order_by(Conversation.updated_at.desc())
+            .limit(1)
+        )
+    ).scalar()
+    chatted = (
+        latest is not None
+        or await _exists(
+            db,
+            select(Conversation.id).where(
+                Conversation.tenant_id == t, Conversation.user_id == user.id
+            ),
+        )
+        or await _exists(
+            db,
+            select(Execution.id).where(
+                Execution.tenant_id == t, Execution.user_id == user.id
+            ),
+        )
     )
     # a follow-up in the same thread shows the agent remembers the conversation
     followed_up = await _exists(
@@ -190,7 +232,16 @@ async def member_facts(db: AsyncSession, user: User) -> dict[str, bool]:
         .group_by(Message.conversation_id)
         .having(func.count() >= 2),
     )
-    return {"try_chat": chatted, "follow_up": followed_up}
+    gave_feedback = await _exists(
+        db,
+        select(Feedback.id).where(Feedback.tenant_id == t, Feedback.user_id == user.id),
+    )
+    return {
+        "try_chat": chatted,
+        "follow_up": followed_up,
+        "give_feedback": gave_feedback,
+        "latest_conversation": str(latest) if latest else None,
+    }
 
 
 def _step(
@@ -285,6 +336,14 @@ def build_steps(role: str, f: dict[str, Any]) -> list[dict[str, Any]]:
                 "Enrol an action",
                 f["enrol_autonomy"],
             ),
+            _step(
+                "review_improvements",
+                "Review what your agent learned",
+                "Thumbs down, corrections and failed runs become lessons. Proven fixes wait for your approval.",
+                "/improvements",
+                "Open Improvements",
+                f.get("review_improvements"),
+            ),
         ]
         if f.get("marketplace"):
             steps.append(
@@ -298,6 +357,8 @@ def build_steps(role: str, f: dict[str, Any]) -> list[dict[str, Any]]:
                 )
             )
         return steps
+    last = f.get("latest_conversation")
+    thread = f"/chat?id={last}" if last else "/chat"
     return [
         _step(
             "try_chat",
@@ -311,9 +372,17 @@ def build_steps(role: str, f: dict[str, Any]) -> list[dict[str, Any]]:
             "follow_up",
             "Ask a follow-up in the same chat",
             "The agent remembers the conversation, so you can build on its last answer.",
-            "/chat",
+            thread,
             "Continue a chat",
             f["follow_up"],
+        ),
+        _step(
+            "give_feedback",
+            "Give feedback on an answer",
+            "A thumbs up or down, with what it should have said, teaches the agent what to fix.",
+            thread,
+            "Rate an answer",
+            f.get("give_feedback"),
         ),
     ]
 
