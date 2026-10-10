@@ -185,7 +185,7 @@ Two inboxes collect what waits on a person.
 
 Everything in this repo is MIT licensed. The standalone vertical apps live in the same repo because they double as reference implementations of the thin-app pattern. Fork them as starting points.
 
-> **Trap.** The public mirror (`sarkar4777/abenix`) is a filtered copy of the private repo, published by [`scripts/publish-public.sh`](../../scripts/publish-public.sh) on each release. A few paths are left out of it.
+> **Trap.** The public mirror (`sarkar4777/abenix`) is a filtered copy of the private repo, published by the private repo's `scripts/publish-public.sh` on each release. A few paths are left out of it.
 
 ---
 
