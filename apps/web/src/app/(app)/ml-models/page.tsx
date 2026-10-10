@@ -7,7 +7,7 @@ import {
   Brain, Upload, Trash2, Play, Loader2, CheckCircle2, AlertCircle,
   Cloud, Monitor, Server,
   FileCode2, Database, Cpu, Workflow, ArrowRight, Pencil,
-  Share2, FlaskConical, RotateCcw,
+  Share2, FlaskConical, RotateCcw, BarChart3,
 } from 'lucide-react';
 import { useApi } from '@/hooks/useApi';
 import { apiFetch, ApiError } from '@/lib/api-client';
@@ -17,6 +17,7 @@ import InvocationsTable from '@/components/observability/InvocationsTable';
 import ConfirmModal from '@/components/ui/ConfirmModal';
 import PageHeader from '@/components/layout/PageHeader';
 import NextSteps from '@/components/shared/NextSteps';
+import ExplainBars, { type Explanation } from '@/components/ml/ExplainBars';
 import {
   type MLModel, RUNNABLE_EXTENSIONS, UNRUNNABLE_HINTS, FRAMEWORK_LABELS, INPUT_SCHEMA_TEMPLATE,
   fileExt, nextVersion, featureNames, featureCount, defaultInputFor, fmtBytes,
@@ -75,6 +76,8 @@ export default function MLModelsPage() {
   const [predicting, setPredicting] = useState(false);
   const [predInput, setPredInput] = useState('');
   const [predOutcome, setPredOutcome] = useState<PredOutcome | null>(null);
+  const [explaining, setExplaining] = useState(false);
+  const [explainOutcome, setExplainOutcome] = useState<{ ok: true; data: Explanation } | { ok: false; message: string } | null>(null);
   const [invocationsKey, setInvocationsKey] = useState(0);
 
   const [editing, setEditing] = useState(false);
@@ -102,6 +105,7 @@ export default function MLModelsPage() {
     setEditing(false);
     setPredInput(defaultInputFor(selected));
     setPredOutcome(null);
+    setExplainOutcome(null);
   }, [selected?.id]);
 
   const selectModel = (id: string) => {
@@ -314,6 +318,26 @@ export default function MLModelsPage() {
       setPredOutcome({ ok: false, message: e?.message || 'Prediction failed' });
     }
     setPredicting(false);
+    setInvocationsKey(k => k + 1);
+  };
+
+  const handleExplain = async (m: MLModel) => {
+    let input: any;
+    try { input = JSON.parse(predInput); }
+    catch (e: any) { setExplainOutcome({ ok: false, message: `The input is not valid JSON: ${e.message}` }); return; }
+    setExplaining(true);
+    setExplainOutcome(null);
+    try {
+      const res = await apiFetch<any>(`/api/ml-models/${m.id}/explain`, {
+        method: 'POST',
+        body: JSON.stringify({ input_data: input }),
+        silent: true,
+      });
+      setExplainOutcome({ ok: true, data: res.data });
+    } catch (e: any) {
+      setExplainOutcome({ ok: false, message: e?.message || 'Could not explain this prediction' });
+    }
+    setExplaining(false);
     setInvocationsKey(k => k + 1);
   };
 
@@ -698,7 +722,13 @@ export default function MLModelsPage() {
                         data-testid="ml-predict">
                         {predicting ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Predicting...</> : <><Play className="w-3.5 h-3.5" /> Run Prediction</>}
                       </button>
-                      <button onClick={() => { setPredInput(defaultInputFor(selected)); setPredOutcome(null); }} className={btnGhost}>
+                      <button onClick={() => handleExplain(selected)} disabled={explaining || !predInput.trim()}
+                        title="Which inputs pushed this prediction up or down"
+                        className="px-4 py-2 rounded-lg bg-cyan-500/10 border border-cyan-500/30 text-cyan-300 text-xs font-semibold disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 hover:bg-cyan-500/20 transition-colors"
+                        data-testid="ml-explain">
+                        {explaining ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Explaining...</> : <><BarChart3 className="w-3.5 h-3.5" /> Explain</>}
+                      </button>
+                      <button onClick={() => { setPredInput(defaultInputFor(selected)); setPredOutcome(null); setExplainOutcome(null); }} className={btnGhost}>
                         <RotateCcw className="w-3 h-3" /> Reset to example
                       </button>
                     </div>
@@ -723,6 +753,13 @@ export default function MLModelsPage() {
                         <pre className="rounded-lg bg-slate-900/80 border border-slate-700/50 p-3 text-[11px] text-slate-300 font-mono whitespace-pre-wrap break-all max-h-48 overflow-y-auto">{JSON.stringify(predOutcome.data, null, 2)}</pre>
                       </div>
                     )}
+                    {explainOutcome?.ok === false && (
+                      <div role="alert" className="mt-3 rounded-lg bg-amber-500/10 border border-amber-500/30 p-3 text-xs text-amber-200 flex items-start gap-2" data-testid="ml-explain-error">
+                        <AlertCircle className="w-4 h-4 mt-0.5 shrink-0 text-amber-300" />
+                        <span className="min-w-0 break-words">{explainOutcome.message}</span>
+                      </div>
+                    )}
+                    {explainOutcome?.ok && <ExplainBars explanation={explainOutcome.data} />}
                   </div>
                 )}
 

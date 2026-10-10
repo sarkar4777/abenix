@@ -579,7 +579,9 @@ async def list_executions(
     db: AsyncSession = Depends(get_db),
     agent_id: uuid.UUID | None = Query(None),
     status: str | None = Query(None),
-    search: str = Query("", max_length=255, description="Search in input message"),
+    search: str = Query(
+        "", max_length=255, description="Matches the agent's name or the run's input"
+    ),
     sort: str = Query(
         "newest", description="Sort: newest, oldest, cost_high, cost_low, duration"
     ),
@@ -599,7 +601,13 @@ async def list_executions(
     if agent_id:
         where.append(Execution.agent_id == agent_id)
     if search:
-        where.append(Execution.input_message.ilike(f"%{search}%"))
+        named = select(Agent.id).where(Agent.name.ilike(f"%{search}%"))
+        where.append(
+            or_(
+                Execution.input_message.ilike(f"%{search}%"),
+                Execution.agent_id.in_(named),
+            )
+        )
     if trigger_id:
         where.append(Execution.trigger_id == trigger_id)
     if trigger_kind:

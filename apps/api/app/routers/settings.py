@@ -270,9 +270,14 @@ async def change_password(
     db.add(log)
     await db.commit()
 
+    others = (
+        "No other device was signed in."
+        if not signed_out
+        else f"{signed_out} other {'device was' if signed_out == 1 else 'devices were'} signed out."
+    )
     return success(
         {
-            "message": "Password updated successfully",
+            "message": f"Password changed. This device stays signed in. {others}",
             "other_sessions_signed_out": signed_out,
         }
     )

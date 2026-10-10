@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import re
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
@@ -143,6 +144,8 @@ class HybridSearchResponse:
     graph_hops: int = 0
     latency_ms: int = 0
     hidden_documents: int = 0
+    # set when the search had to fall back, says why in words
+    degraded: str = ""
 
 
 def _acl_scope(hidden: set[str]) -> str:
@@ -262,7 +265,20 @@ async def hybrid_search(
         fetch = max(fetch, RERANK_CANDIDATES)
     vector_results: list[SearchResult] = []
     if mode in (SearchMode.VECTOR, SearchMode.HYBRID):
-        vector_results = await _vector_search(query, kb_ids, top_k=fetch, hidden=hidden)
+        try:
+            vector_results = await _vector_search(
+                query, kb_ids, top_k=fetch, hidden=hidden
+            )
+        except EmbeddingProviderError as e:
+            # the chunk text is still in Postgres, match words rather than fail the search
+            vector_results = await _keyword_search_pg(query, kb_ids, fetch, hidden)
+            if not vector_results:
+                raise
+            response.degraded = (
+                "Matched by keywords because the embedding provider is unavailable: "
+                f"{str(e)[:200]}"
+            )
+            response.mode_used = "keyword"
         response.vector_results_count = len(vector_results)
 
     graph_results: list[SearchResult] = []
@@ -295,7 +311,7 @@ async def hybrid_search(
 
     # Stash in cache (best-effort). Only cache hits with results to
     # avoid burning Redis on empty-corpus misses.
-    if cache_k and response.results:
+    if cache_k and response.results and not response.degraded:
         try:
             await search_cache.set(
                 cache_k,
@@ -483,6 +499,83 @@ async def _vector_search_pgvector(
     except Exception as e:
         logger.error("pgvector search failed: %s", e)
         return []
+
+
+_WORD = re.compile(r"[A-Za-z0-9]{3,}")
+
+
+async def _keyword_search_pg(
+    query: str,
+    kb_ids: list[str],
+    top_k: int,
+    hidden: set[str] | frozenset[str] = frozenset(),
+) -> list[SearchResult]:
+    """Postgres full-text match over the stored chunks, any query word counts."""
+    words = list(dict.fromkeys(w.lower() for w in _WORD.findall(query)))[:24]
+    if not words:
+        return []
+    try:
+        import uuid as _uuid
+
+        from sqlalchemy import text as _t
+        from sqlalchemy.ext.asyncio import AsyncSession
+
+        from engine.db_pool import shared_engine
+
+        ids = []
+        for k in kb_ids:
+            try:
+                ids.append(_uuid.UUID(str(k)))
+            except (ValueError, AttributeError):
+                continue
+        if not ids:
+            return []
+        async with AsyncSession(shared_engine(_async_db_url())) as session:
+            rows = (
+                await session.execute(
+                    _t(
+                        """
+                SELECT id::text, collection_id::text, document_id::text,
+                       chunk_index, content, metadata,
+                       ts_rank_cd(to_tsvector('english', content), q) AS score
+                FROM chunks, to_tsquery('english', :q) q
+                WHERE collection_id = ANY(:ids)
+                  AND NOT (document_id = ANY(:hidden))
+                  AND NOT EXISTS (
+                      SELECT 1 FROM documents d
+                      WHERE d.id = chunks.document_id AND d.is_current IS FALSE)
+                  AND to_tsvector('english', content) @@ q
+                ORDER BY score DESC
+                LIMIT :k
+                """
+                    ).bindparams(
+                        q=" | ".join(words),
+                        ids=ids,
+                        hidden=[_uuid.UUID(h) for h in hidden],
+                        k=top_k,
+                    )
+                )
+            ).all()
+    except Exception as e:
+        logger.error("keyword search failed: %s", e)
+        return []
+    out: list[SearchResult] = []
+    for r in rows:
+        meta = r[5] if isinstance(r[5], dict) else {}
+        carried = dict(meta)
+        carried.update(
+            {"kb_id": r[1], "doc_id": r[2], "chunk_index": r[3], "backend": "keyword"}
+        )
+        out.append(
+            SearchResult(
+                content=r[4],
+                score=float(r[6]),
+                source=meta.get("filename") or "unknown",
+                source_type="chunk",
+                metadata=carried,
+            )
+        )
+    return out
 
 
 async def _vector_search(

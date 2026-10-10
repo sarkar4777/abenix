@@ -405,14 +405,25 @@ print(await client.decisions.tests(key))
 | `retire` | `(key, version)` |
 | `diff` | `(key, a, b)` |
 | `tests` | `(key)` |
-| `update` | `(key, *, name=None, description=None, risk_tier=None, tags=None, log_mode=None)` |
-| `list` | `(q="")` |
+| `update` | `(key, *, name=None, description=None, risk_tier=None, tags=None, log_mode=None, reason=None)`. A lowering needs `reason`. When the tier asks for sign-off the result carries `pending_tier_change` with the `approval_id` and the tier stays until it is approved. `TIER_LOCKED` while a version is proposed |
+| `withdraw_tier_change` | `(key)`, drop a lowering that waits for sign-off |
+| `reattest` | `(key)`, the review a version in force waits for after a tier raise, or `None` |
+| `sign_off_info` | `(key, version)`, required sign-offs, `policy_text`, sign-offs so far, `eligible_approvers`, `sole_operator_available` |
+| `list` | `(q="", *, archived=False)` |
+| `check_key` | `(key)`, `{available, valid, archived, suggestion}` |
+| `archive` / `restore` | `(key, *, reason=None)`. At High and Critical a reason is required and the result is `{"pending": {...}}` until someone signs |
+| `retire` | `(key, version, *, reason=None)`, same sign-off rule |
+| `discard_draft` | `(key, version)` |
+| `add_approver` | `(key, user_id)`, put a person in Decision reviewers |
+| `approver_candidates` | `(key)`, people who could be made approvers |
+| `search` | `(q)`, `{"items", "archived_matches"}` |
 | `get` | `(key)`, the decision with its versions |
 | `create` | `(name, *, key=None, rules=None, risk_tier="low", description="")` |
 | `compare` | `(key, facts, targets)`, two or more targets, each `{label, version}` or `{as_of, known_at}` |
 | `versions` | `(key)`, the `versions` list from `get` |
 | `version` | `(key, n)` |
-| `export` | `(key, version=None)` |
+| `export` | `(key, version=None, *, full=False)`. `full=True` gives the whole decision as an `abenix-decision-v1` file |
+| `import_file` | `(data, *, preview=False, as_new_key=None, as_new_name=None)`. `data` is a dict, JSON text or bytes, or a path. Takes an `export(full=True)` file or `{key, name, description, risk_tier, rules, tests}`. Creates the decision or a new draft with its tests, never publishes |
 | `propose_rules` | `(key, rules, *, note, mode="merge")`, new draft, import and propose in one call |
 | `add_test` | `(key, name, facts, *, expected=None, expected_outcome="decided", as_of=None, match="exact")`, `match` is `exact` or `subset` |
 | `update_test` | `(key, test_id, **fields)`, any of `name`, `facts`, `expected`, `expected_outcome`, `as_of`, `match`. The rest stay as they are |
@@ -704,7 +715,7 @@ Besides `by_slug`, `create` and `update` above:
 | `list(*, status=None, execution_id=None, agent_id=None, kind=None, limit=200)` | `GET /api/approvals` |
 | `get(approval_id)` | `GET /api/approvals/{id}` |
 | `create(title, payload, *, required_signoffs=1, expires_seconds=86400, gate_kind=None, agent_id=None, agent_execution_id=None, client_token=None)` | `POST /api/approvals`. A reused `client_token` returns the existing approval |
-| `signoff(approval_id, decision, *, reason="", client_token=None, edited_arguments=None)` | `decision` is `approve`, `deny` or `return`. `edited_arguments` only on an `action:*` approval with `approve` |
+| `signoff(approval_id, decision, *, reason="", client_token=None, edited_arguments=None, sole_operator=False)` | `decision` is `approve`, `deny` or `return`. `edited_arguments` only on an `action:*` approval with `approve`. `sole_operator=True` signs your own decision approval alone when nobody else can, with a reason of at least 10 characters, see [working alone](../02-runtime/05-approvals-hitl.md#working-alone) |
 | `approve(approval_id, *, reason="", client_token=None, edited_arguments=None)` | `signoff` with `approve` |
 | `deny(approval_id, *, reason="", client_token=None)` | `signoff` with `deny` |
 | `return_for_changes(approval_id, reason, *, client_token=None)` | see above |

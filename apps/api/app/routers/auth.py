@@ -132,6 +132,9 @@ async def register(
         created_by=user.id,
     )
     db.add(policy)
+    from app.core.approvers import ensure_decision_reviewers
+
+    await ensure_decision_reviewers(db, tenant.id)
     await db.commit()
     await db.refresh(user)
 
@@ -374,11 +377,23 @@ async def get_invite(token: str, db: AsyncSession = Depends(get_db)):
         if isinstance(invite.status, InviteStatus)
         else str(invite.status)
     )
+    from app.routers.team import invite_sentence, role_label
+
+    inviter = await db.get(User, invite.invited_by) if invite.invited_by else None
+    approves = bool(getattr(invite, "can_approve_decisions", False))
     return success(
         {
             "email": invite.email,
             "tenant_name": tenant.name if tenant else "",
             "role": invite.role,
+            "role_label": role_label(invite.role),
+            "can_approve_decisions": approves,
+            "message": invite_sentence(
+                (inviter.full_name or inviter.email) if inviter else "An admin",
+                tenant.name if tenant else "",
+                invite.role,
+                approves,
+            ),
             "status": status,
             "expired": status == InviteStatus.EXPIRED.value
             or (status == InviteStatus.PENDING.value and invite_is_expired(invite)),
@@ -423,6 +438,11 @@ async def accept_invite(
     )
     db.add(user)
     invite.status = InviteStatus.ACCEPTED
+    await db.flush()
+    if getattr(invite, "can_approve_decisions", False):
+        from app.core.approvers import add_decision_reviewer
+
+        await add_decision_reviewer(db, invite.tenant_id, user.id, by=invite.invited_by)
     await db.commit()
     await db.refresh(user)
 
@@ -431,7 +451,14 @@ async def accept_invite(
         invite.tenant_id,
         user.id,
         "user.invite_accepted",
-        {"email": user.email, "invite_id": str(invite.id), "role": role.value},
+        {
+            "email": user.email,
+            "invite_id": str(invite.id),
+            "role": role.value,
+            "can_approve_decisions": bool(
+                getattr(invite, "can_approve_decisions", False)
+            ),
+        },
         request,
     )
     await db.commit()

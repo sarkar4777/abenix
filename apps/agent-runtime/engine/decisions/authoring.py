@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 FACT_TYPES = ("string", "number", "boolean", "date", "list")
+OUTPUT_TYPES = ("string", "number", "boolean", "date", "object")
 HIT_POLICIES = ("first", "collect")
 PATH_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$")
 KEY_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,159}$")
@@ -59,14 +60,18 @@ class Problem:
     message: str
     severity: str = "error"  # error | warning
     code: str = ""
+    field: str = ""
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        out = {
             "path": self.path,
             "message": self.message,
             "severity": self.severity,
             "code": self.code,
         }
+        if self.field:
+            out["field"] = self.field
+        return out
 
 
 @dataclass
@@ -355,6 +360,125 @@ def _value_ok(t: str, v: Any) -> bool:
     return isinstance(v, str)
 
 
+_OUT_WANT = {
+    "string": "text",
+    "number": "a number",
+    "boolean": "true or false",
+    "date": "a date like 2026-01-01",
+    "object": "a JSON object or list",
+}
+_NUM_RE = re.compile(r"^\s*-?(\d+(\.\d*)?|\.\d+)([eE][-+]?\d+)?\s*$")
+
+
+def cell_value(cell: Any) -> Any:
+    """The literal a rule's outcome cell holds, None for a formula or nothing."""
+    if isinstance(cell, dict):
+        if "formula" in cell:
+            return None
+        return cell.get("value")
+    return cell
+
+
+def _kind(v: Any) -> str:
+    if isinstance(v, bool):
+        return "boolean"
+    if isinstance(v, (int, float)):
+        return "number"
+    if isinstance(v, (dict, list)):
+        return "object"
+    return "string"
+
+
+def _describe(v: Any) -> str:
+    k = _kind(v)
+    if k == "string":
+        return f"the text {json.dumps(v, ensure_ascii=False)[:60]}"
+    if k == "object":
+        return "a JSON object" if isinstance(v, dict) else "a list"
+    return f"{'the number' if k == 'number' else ''} {json.dumps(v)}".strip()
+
+
+def outcome_value_ok(t: str, v: Any) -> bool:
+    if t == "number":
+        return isinstance(v, (int, float)) and not isinstance(v, bool)
+    if t == "boolean":
+        return isinstance(v, bool)
+    if t == "date":
+        return isinstance(v, str) and bool(DATE_RE.match(v))
+    if t == "object":
+        return isinstance(v, (dict, list))
+    return isinstance(v, str)
+
+
+def _outcome_values(doc: dict[str, Any], fld: str) -> list[Any]:
+    out = []
+    for r in doc.get("rules") or []:
+        if not isinstance(r, dict) or not isinstance(r.get("then"), dict):
+            continue
+        if fld in r["then"]:
+            v = cell_value(r["then"][fld])
+            if v is not None:
+                out.append(v)
+    return out
+
+
+def effective_output_type(doc: dict[str, Any], o: dict[str, Any]) -> str | None:
+    """The declared type, or the one every value already has when it was left as the old string default."""
+    t = o.get("type")
+    if t is not None and t not in ("", "string"):
+        return t
+    kinds = {_kind(v) for v in _outcome_values(doc, str(o.get("field") or ""))}
+    if len(kinds) == 1 and (t != "string" or "string" not in kinds):
+        return kinds.pop()
+    return t or None
+
+
+def _to_number(v: str) -> int | float:
+    f = float(v)
+    return int(f) if f.is_integer() and not any(c in v for c in ".eE") else f
+
+
+def tidy_outcomes(doc: dict[str, Any]) -> list[dict[str, Any]]:
+    """Settle outcome types and turn numeric text in number outcomes into numbers. Returns what changed."""
+    changes: list[dict[str, Any]] = []
+    outputs = [o for o in doc.get("outputs") or [] if isinstance(o, dict)]
+    for j, o in enumerate(outputs):
+        t = effective_output_type(doc, o)
+        if t and t != o.get("type"):
+            changes.append(
+                {"field": f"outcomes[{j}].type", "from": o.get("type"), "to": t}
+            )
+            o["type"] = t
+    types = {o.get("field"): o.get("type") for o in outputs}
+    for i, r in enumerate(doc.get("rules") or []):
+        if not isinstance(r, dict) or not isinstance(r.get("then"), dict):
+            continue
+        for fld, cell in r["then"].items():
+            t = types.get(fld)
+            v = cell_value(cell)
+            new: Any = v
+            if t == "number" and isinstance(v, str) and _NUM_RE.match(v):
+                new = _to_number(v.strip())
+            elif (
+                t == "boolean"
+                and isinstance(v, str)
+                and v.strip().lower()
+                in (
+                    "true",
+                    "false",
+                )
+            ):
+                new = v.strip().lower() == "true"
+            if new is v:
+                continue
+            if isinstance(cell, dict):
+                cell["value"] = new
+            else:
+                r["then"][fld] = new
+            changes.append({"field": f"rules[{i}].then.{fld}", "from": v, "to": new})
+    return changes
+
+
 def _check_condition(
     cond: Any,
     at: str,
@@ -556,6 +680,7 @@ def validate_document(
         fact_types[p] = t
 
     out_fields: set[str] = set()
+    out_types: dict[str, str] = {}
     for i, o in enumerate(doc.get("outputs") or []):
         fld = o.get("field") if isinstance(o, dict) else None
         if not fld or not PATH_RE.match(str(fld)):
@@ -584,6 +709,19 @@ def validate_document(
                 )
             )
         out_fields.add(fld)
+        ot = o.get("type")
+        if ot is not None and ot not in OUTPUT_TYPES:
+            out.append(
+                Problem(
+                    f"/outputs/{i}/type",
+                    f"Type must be one of {', '.join(OUTPUT_TYPES)}.",
+                    code="bad_type",
+                )
+            )
+        else:
+            eff = effective_output_type(doc, o)
+            if eff:
+                out_types[fld] = eff
     if not out_fields:
         out.append(
             Problem(
@@ -674,6 +812,19 @@ def validate_document(
                                 code="unknown_fact",
                             )
                         )
+                continue
+            t = out_types.get(fld)
+            v = cell_value(cell)
+            if t and v is not None and not outcome_value_ok(t, v):
+                out.append(
+                    Problem(
+                        f"{at}/then/{fld}",
+                        f"{fld} is a {t} outcome, so the value must be {_OUT_WANT[t]}. "
+                        f"Found {_describe(v)}.",
+                        code="OUTCOME_TYPE",
+                        field=f"rules[{i}].then.{fld}",
+                    )
+                )
         for p in r.get("requires") or []:
             if p not in fact_types:
                 out.append(

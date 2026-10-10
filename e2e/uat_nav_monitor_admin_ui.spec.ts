@@ -196,7 +196,7 @@ test('Executions: filter, search, open a run, replay it while Live Debug watches
   const { ex, agent } = pick!;
 
   // searching must not throw the page into a skeleton, the box keeps focus while typing
-  const search = page.getByPlaceholder('Search executions...');
+  const search = page.getByPlaceholder('Search by agent or input...');
   const needle = ex.input_message.slice(0, 24);
   await search.click();
   await search.pressSequentially(needle, { delay: 15 });
@@ -208,6 +208,9 @@ test('Executions: filter, search, open a run, replay it while Live Debug watches
   const hits = await api(page, 'GET', `/api/executions?search=${encodeURIComponent(needle)}&limit=100`);
   const hitIds = new Set(((hits.json?.data || []) as any[]).map((e) => String(e.id)));
   expect(hitIds.has(String(ex.id)), 'the picked run matches its own input').toBe(true);
+  // the agent's name finds its runs too
+  const byName = await api(page, 'GET', `/api/executions?search=${encodeURIComponent(agent.name)}&limit=100`);
+  expect(((byName.json?.data || []) as any[]).some((e) => String(e.agent_id) === String(agent.id)), 'searching the agent name finds its runs').toBe(true);
   const shown = await list.locator('a[href^="/executions/"]').evaluateAll((els) => els.map((e) => (e.getAttribute('href') || '').split('/')[2]));
   expect(shown.length).toBeGreaterThan(0);
   for (const id of shown) expect(hitIds, `row ${id} is a search hit`).toContain(id);

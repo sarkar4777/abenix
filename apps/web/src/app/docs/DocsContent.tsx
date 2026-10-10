@@ -23,7 +23,7 @@ export default function DocsContent() {
   const [manifest, setManifest] = useState<Manifest | null>(null);
   const [content, setContent] = useState<string>('');
   const [loading, setLoading] = useState(true);
-  const [query, setQuery] = useState('');
+  const [query, setQuery] = useState(params.get('q') || '');
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [searchIndex, setSearchIndex] = useState<Map<string, string>>(new Map());
 
@@ -293,7 +293,19 @@ export default function DocsContent() {
   );
 }
 
+// heading ids so a doc link can open a section by its #anchor
+export function headingId(children: unknown): string {
+  const text = (Array.isArray(children) ? children : [children]).map((c) => (typeof c === 'string' ? c : '')).join('');
+  return text.toLowerCase().trim().replace(/[^a-z0-9\s-]/g, '').replace(/\s+/g, '-');
+}
+
 function DocBody({ markdown, slug }: { markdown: string; slug: string }) {
+  useEffect(() => {
+    const id = decodeURIComponent(window.location.hash.slice(1));
+    if (!id || !markdown) return;
+    const t = setTimeout(() => document.getElementById(id)?.scrollIntoView({ block: 'start' }), 50);
+    return () => clearTimeout(t);
+  }, [markdown]);
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
@@ -309,6 +321,12 @@ function DocBody({ markdown, slug }: { markdown: string; slug: string }) {
               {children}
             </code>
           );
+        },
+        h2({ children }: any) {
+          return <h2 id={headingId(children)}>{children}</h2>;
+        },
+        h3({ children }: any) {
+          return <h3 id={headingId(children)}>{children}</h3>;
         },
         a({ href, children }: any) {
           // relative links resolve against this page, source files open on GitHub

@@ -279,12 +279,23 @@ await client.decisions.update(key, { riskTier: "medium", tags: ["credit"] });
 | `publishPlan` | `(key, version)` |
 | `publish` | `(key, version, opts?: { expectedCurrent })` |
 | `diff` | `(key, a, b)` |
-| `update` | `(key, fields: { name, description, riskTier, tags, logMode })` |
-| `list` | `(q = "")` |
+| `update` | `(key, fields: { name, description, riskTier, tags, logMode, reason })`. A lowering needs `reason`, and when the tier asks for sign-off the result carries `pending_tier_change` |
+| `withdrawTierChange` | `(key)` |
+| `reattest` | `(key)`, a `DecisionReattest` or `null` |
+| `signOffInfo` | `(key, version)` |
+| `list` | `(q = "", opts?: { archived })` |
+| `checkKey` | `(key)` |
+| `archive` / `restore` | `(key, opts?: { reason })`. At High and Critical a reason is required and the result is `{ pending }` |
+| `retire` | `(key, version, opts?: { reason })` |
+| `discardDraft` | `(key, version)` |
+| `addApprover` | `(key, userId)` |
+| `approverCandidates` | `(key)` |
+| `search` | `(q)`, `{ items, archived_matches }` |
+| `importFile` | `(data, opts?: { preview, asNewKey, asNewName })` |
 | `get` | `(key)` |
 | `compare` | `(key, facts, targets)`, each target `{ label, version }` or `{ as_of, known_at }` |
 | `proposeRules` | `(key, rules, note, mode = "merge")`, new draft, import and propose in one call |
-| `export` | `(key, version?)` |
+| `export` | `(key, version?, opts?: { full })`. `full` gives the whole decision as an `abenix-decision-v1` file |
 | `referenceSets` | `()` |
 | `tests` | `(key)` |
 | `addTest` | `(key, name, facts, opts?: { expected, expectedOutcome, asOf, match })`, `match` is `"exact"` (default) or `"subset"` |
@@ -486,14 +497,14 @@ The older sub-clients. Errors behave as described under [Errors](#errors).
 
 ### `approvals`
 
-Every call resolves to an `Approval` (camelCase: `id`, `agentId`, `agentExecutionId`, `title`, `payload`, `requiredSignoffs`, `signoffs`, `status`, `requestedBy`, `expiresAt`, `decidedAt`, `createdAt`, `gateKind`, `clientToken`) unless noted.
+Every call resolves to an `Approval` (camelCase: `id`, `agentId`, `agentExecutionId`, `title`, `payload`, `requiredSignoffs`, `signoffs`, `status`, `requestedBy`, `expiresAt`, `decidedAt`, `createdAt`, `gateKind`, `clientToken`, `selfApproved`, `eligibleApproverCount`, `soleOperatorAvailable`) unless noted.
 
 | Method | Notes |
 |---|---|
 | `list(opts?: { status, executionId, agentId, kind, limit })` | `GET /api/approvals`, `limit` defaults to 200 |
 | `get(approvalId)` | `GET /api/approvals/{id}` |
 | `create(title, payload, opts?: { requiredSignoffs, expiresSeconds, gateKind, agentId, agentExecutionId, clientToken })` | `POST /api/approvals`. Defaults are 1 signoff and 86400 s |
-| `signoff(approvalId, decision, opts?: { reason, clientToken, editedArguments })` | `decision` is `"approve"`, `"deny"` or `"return"`. `editedArguments` only on an `action:*` approval with `approve` |
+| `signoff(approvalId, decision, opts?: { reason, clientToken, editedArguments, soleOperator })` | `decision` is `"approve"`, `"deny"` or `"return"`. `editedArguments` only on an `action:*` approval with `approve`. `soleOperator` signs your own decision approval alone when nobody else can, with a reason of at least 10 characters |
 | `approve(approvalId, opts?)` / `deny(approvalId, opts?)` | `signoff` with that decision |
 | `returnForChanges(approvalId, reason, opts?: { clientToken })` | see above |
 | `waitFor(approvalId, opts?: { timeoutSeconds, pollSeconds })` | Long-polls `/wait` in chunks of up to 120 s, default 60 s total. A busy answer (429, 502, 503, 504) or a dropped connection is retried until the timeout |

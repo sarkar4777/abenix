@@ -39,6 +39,12 @@ class FakeSession:
     def add(self, obj):
         self.added.append(obj)
 
+    async def flush(self):
+        return None
+
+    async def get(self, cls, ident):
+        return None
+
     async def commit(self):
         self.commits += 1
 
@@ -153,6 +159,9 @@ async def test_get_invite_info_without_auth():
         "email": "new.hire@example.com",
         "tenant_name": "Acme Labs",
         "role": "creator",
+        "role_label": "Creator",
+        "can_approve_decisions": False,
+        "message": "An admin invited you to join the Acme Labs workspace on Abenix as a Creator.",
         "status": "pending",
         "expired": False,
         "used": False,
@@ -240,3 +249,45 @@ async def test_existing_account_rejected(tokens):
     )
     assert resp.status_code == 409
     assert inv.status == InviteStatus.PENDING
+
+
+async def test_accept_with_approve_decisions_joins_decision_reviewers(tokens):
+    inv = _invite(role="user")
+    inv.can_approve_decisions = True
+    db = FakeSession(inv, None)
+    with patch("app.core.approvers.add_decision_reviewer", AsyncMock(return_value=True)) as add:
+        resp = await auth.accept_invite(_accept(inv.token), _request(), db)
+    assert resp.status_code == 201
+    created = next(o for o in db.added if isinstance(o, User))
+    add.assert_awaited_once()
+    assert add.call_args.args[1] == TENANT and add.call_args.args[2] == created.id
+
+
+async def test_accept_without_the_grant_adds_nobody(tokens):
+    inv = _invite(role="user")
+    db = FakeSession(inv, None)
+    with patch("app.core.approvers.add_decision_reviewer", AsyncMock()) as add:
+        await auth.accept_invite(_accept(inv.token), _request(), db)
+    add.assert_not_awaited()
+
+
+async def test_invite_records_the_grant_and_says_member():
+    db = FakeSession(None, None)
+    resp = await team.invite_member(
+        InviteMemberRequest(email="rita@example.com", role="user", can_approve_decisions=True),
+        _request(),
+        _admin(),
+        db,
+    )
+    data = _body(resp)["data"]
+    assert data["can_approve_decisions"] is True and data["role_label"] == "Member"
+    inv = next(o for o in db.added if isinstance(o, TeamInvite))
+    assert inv.can_approve_decisions is True
+
+
+def test_invite_wording_uses_team_role_names():
+    s = team.invite_sentence("Ana", "Abenix", "user", False)
+    assert s == "Ana invited you to join Abenix as a Member."
+    assert "on Abenix on Abenix" not in s and "as user" not in s
+    s = team.invite_sentence("Ana", "Northgate", "admin", True)
+    assert s == "Ana invited you to join the Northgate workspace on Abenix as an Admin. You will also be able to approve decisions."

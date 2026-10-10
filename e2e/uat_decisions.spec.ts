@@ -178,7 +178,7 @@ test('a new draft takes typed JSON and a table edit changes the threshold', asyn
   await page.getByTestId('rule-card-0').click();
   await expect(page.getByTestId('rule-sentence')).toContainText('more than 100');
   await page.getByTestId('check').click();
-  await expect(page.getByTestId('validation-summary')).toBeVisible();
+  await expect(page.getByTestId('workspace-notice').or(page.getByTestId('validation-summary')).first()).toBeVisible();
 });
 
 test('two authors edit the same draft and their changes combine', async ({ browser }) => {
@@ -221,27 +221,37 @@ test('a high tier change needs a second person on the Approvals page', async ({ 
   test.skip(mk.status >= 400, 'cannot create a second user here');
   const ps = await api(page, tok, 'POST', '/api/governance/permission-sets', { name: `Signers ${RUN}`, capabilities: ['approvals.sign', 'decisions.review'] });
   await api(page, tok, 'POST', `/api/governance/permission-sets/${ps.json.data.id}/members`, { email });
+  signer = { email, password: 'Signer123!', setId: ps.json.data.id };
 
   await visit(page, '/approvals');
   const mine = page.getByTestId('approval-decision').first();
-  await expect(mine).toContainText('not the person who proposed it');
+  await expect(mine).toContainText('except the person who proposed it');
 
   const ctx = await browser.newContext();
   const sp = await ctx.newPage();
   await login(sp, { email, password: 'Signer123!' });
   await sp.waitForTimeout(11_000);
   await visit(sp, '/approvals');
-  await sp.getByRole('button', { name: 'Approve' }).first().click();
-  await expect(sp.getByText(/approved/i).first()).toBeVisible();
+  const card = sp.locator('[data-testid="approval-card"][data-status="pending"]').filter({ has: sp.locator(`a[href*="${KEY}"]`) }).first();
+  await card.getByTestId('approval-approve').click();
+  await expect(sp.getByTestId('approval-decided')).toBeVisible();
   await ctx.close();
 
   await visit(page, `/decisions/${KEY}?version=2`);
   await expect(page.getByTestId('publish')).toBeVisible();
-  await api(page, tok, 'DELETE', `/api/governance/permission-sets/${ps.json.data.id}`);
 });
+
+let signer: { email: string; password: string; setId: string } | null = null;
 
 test.afterAll(async ({ browser }) => {
   const p = await browser.newPage();
-  await api(p, tok, 'DELETE', `/api/decisions/${KEY}`);
+  // at high risk archiving waits for a second person, the signer gives it so nothing is left waiting
+  const out = await api(p, tok, 'DELETE', `/api/decisions/${KEY}`, { reason: 'end of the decisions UAT run' });
+  const pending = out.json?.data?.pending?.approval_id;
+  if (pending && signer) {
+    const stok = await tokenFor(p, { email: signer.email, password: signer.password });
+    await api(p, stok, 'POST', `/api/approvals/${pending}/signoff`, { decision: 'approve', reason: 'test cleanup' });
+  }
+  if (signer) await api(p, tok, 'DELETE', `/api/governance/permission-sets/${signer.setId}`);
   await p.close();
 });

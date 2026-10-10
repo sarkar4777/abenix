@@ -41,7 +41,7 @@ interface TeamMember {
   is_active: boolean;
 }
 
-const ROLE_LABEL: Record<string, string> = { user: 'User', creator: 'Creator', admin: 'Admin' };
+const ROLE_LABEL: Record<string, string> = { user: 'Member', creator: 'Creator', admin: 'Admin' };
 
 function labelFor(catalog: Cap[], cap: string): string {
   const [base, qual] = cap.split(':');

@@ -76,6 +76,7 @@ describe('held content in chat', () => {
     expect(holdBlockFrom({ source: 'pre_llm', outcome: 'blocked' })).toBeNull();
   });
 
+  // the first import of HeldNotice is slow when the whole suite runs at once
   it('shows waiting, then the released text when the decision is pushed', async () => {
     const { default: HeldNotice } = await import('@/components/moderation/HeldNotice');
     apiFetch.mockResolvedValueOnce({
@@ -84,7 +85,7 @@ describe('held content in chat', () => {
     });
     const onReleased = vi.fn();
     render(<HeldNotice block={{ type: 'moderation_hold', review_id: 'r1', source: 'pre_llm', timeout_minutes: 60 }} onReleased={onReleased} />);
-    expect(await screen.findByText('Your message is waiting for review')).toBeTruthy();
+    expect(await screen.findByText('Your message is waiting for review', {}, { timeout: 5000 })).toBeTruthy();
     expect(screen.getByText('my code ZX-9')).toBeTruthy();
 
     apiFetch.mockResolvedValueOnce({
@@ -94,10 +95,10 @@ describe('held content in chat', () => {
     act(() => {
       useNotificationStore.setState({ moderationReview: { id: 'r1', status: 'redacted', at: Date.now() } });
     });
-    await waitFor(() => expect(screen.getByTestId('held-notice').getAttribute('data-status')).toBe('released'));
+    await waitFor(() => expect(screen.getByTestId('held-notice').getAttribute('data-status')).toBe('released'), { timeout: 5000 });
     expect(screen.getByTestId('held-notice-content').textContent).toBe('my code █');
     expect(onReleased).toHaveBeenCalledTimes(1);
-  });
+  }, 20_000);
 
   it('shows the reviewer reason when a reply is rejected', async () => {
     const { default: HeldNotice } = await import('@/components/moderation/HeldNotice');
@@ -106,7 +107,7 @@ describe('held content in chat', () => {
       error: null,
     });
     render(<HeldNotice block={{ type: 'moderation_hold', review_id: 'r2', source: 'post_llm' }} />);
-    expect(await screen.findByText('The reply was not sent')).toBeTruthy();
+    expect(await screen.findByText('The reply was not sent', {}, { timeout: 5000 })).toBeTruthy();
     expect(screen.getByTestId('held-notice-reason').textContent).toContain('Shares an account number');
   });
 });

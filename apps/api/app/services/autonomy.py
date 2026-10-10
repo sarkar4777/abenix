@@ -411,7 +411,29 @@ async def unmanaged_rows(db: AsyncSession, tenant_id: Any) -> list[tuple]:
     )
 
 
-async def pending_reviews(db: AsyncSession, tenant_id: Any, limit: int) -> list[Any]:
+def review_scope(user: Any) -> list[Any]:
+    """Watching reviews a person is asked for: an admin sees all, others their own agents."""
+    from app.core.permissions import is_admin
+
+    if user is None or is_admin(user):
+        return []
+    from sqlalchemy import or_
+
+    return [
+        or_(
+            AgentAction.agent_id.in_(
+                select(Agent.id).where(Agent.creator_id == user.id)
+            ),
+            AgentAction.grant_id.in_(
+                select(AutonomyGrant.id).where(AutonomyGrant.granted_by == user.id)
+            ),
+        )
+    ]
+
+
+async def pending_reviews(
+    db: AsyncSession, tenant_id: Any, limit: int, user: Any = None
+) -> list[Any]:
     return list(
         (
             await db.execute(
@@ -420,6 +442,7 @@ async def pending_reviews(db: AsyncSession, tenant_id: Any, limit: int) -> list[
                     AgentAction.tenant_id == tenant_id,
                     AgentAction.status == "watching",
                     AgentAction.reviewer_answer.is_(None),
+                    *review_scope(user),
                 )
                 .order_by(AgentAction.created_at.asc())
                 .limit(limit)
@@ -2383,7 +2406,7 @@ async def enrol(
 
 
 async def reviews(db: AsyncSession, user: Any, limit: int) -> dict[str, Any]:
-    rows = await pending_reviews(db, user.tenant_id, limit)
+    rows = await pending_reviews(db, user.tenant_id, limit, user)
     settings = await tenant_settings(db, user.tenant_id)
     # off by default, an admin can hide the proposal to avoid anchoring
     hide = (settings.get("autonomy") or {}).get("hide_until_answered") is True

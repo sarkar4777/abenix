@@ -334,7 +334,7 @@ test('Decisions: the hard limits are written as rules, tested and published', as
   await page.getByTestId('rule1-c0-op').selectOption('lt');
   await page.getByTestId('rule1-c0-value').fill('10');
   await page.getByTestId('rule1-then-ok-set').click();
-  await page.getByTestId('rule1-then-ok-value').fill('false');
+  await page.getByTestId('rule1-then-ok-value').selectOption('false');
   await page.getByTestId('rule1-then-reason-set').click();
   await page.getByTestId('rule1-then-reason-value').fill('State of charge is below the 10% floor');
   await saved(page);
@@ -346,7 +346,7 @@ test('Decisions: the hard limits are written as rules, tested and published', as
   await page.getByTestId('rule2-c0-op').selectOption('gt');
   await page.getByTestId('rule2-c0-value').fill('90');
   await page.getByTestId('rule2-then-ok-set').click();
-  await page.getByTestId('rule2-then-ok-value').fill('false');
+  await page.getByTestId('rule2-then-ok-value').selectOption('false');
   await page.getByTestId('rule2-then-reason-set').click();
   await page.getByTestId('rule2-then-reason-value').fill('State of charge is above the 90% ceiling');
   await saved(page);
@@ -355,7 +355,7 @@ test('Decisions: the hard limits are written as rules, tested and published', as
   await page.getByTestId('rule-key').fill('battery.inside');
   await page.getByTestId('rule-description').fill('Inside every limit');
   await page.getByTestId('rule3-then-ok-set').click();
-  await page.getByTestId('rule3-then-ok-value').fill('true');
+  await page.getByTestId('rule3-then-ok-value').selectOption('true');
   await page.getByTestId('rule3-then-reason-set').click();
   await page.getByTestId('rule3-then-reason-value').fill('Inside the limits');
   await saved(page);

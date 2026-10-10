@@ -16,6 +16,7 @@ from models.agent import Agent, AgentStatus, AgentType
 from models.autonomy import AutonomyGrant
 from models.collection_grant import AgentCollectionGrant
 from models.conversation import Conversation, Message
+from models.decision import DecisionModel
 from models.evals import EvalCase, EvalSuite
 from models.execution import Execution
 from models.governance import RiskPolicy
@@ -35,7 +36,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/me/journey", tags=["journey"])
 
 PREFS_KEY = "journey"
-SEEN_STEPS = {"risk", "improvements"}
+SEEN_STEPS = {"risk", "improvements", "approvals"}
 
 
 def role_of(user: User) -> str:
@@ -121,11 +122,18 @@ async def admin_facts(db: AsyncSession, user: User) -> dict[str, bool]:
             ModerationPolicy.tenant_id == t, ModerationPolicy.is_active.is_(True)
         ),
     )
+    wrote_rule = await _exists(
+        db,
+        select(DecisionModel.id).where(
+            DecisionModel.tenant_id == t, DecisionModel.archived_at.is_(None)
+        ),
+    )
     return {
         "connect_model": await _model_connected(db),
         "invite_team": invited or int(users) > 1,
         "review_risk": risk_changed or _seen(user, "risk"),
         "moderation": moderation_on,
+        "write_rule": wrote_rule,
     }
 
 
@@ -305,6 +313,14 @@ def build_steps(role: str, f: dict[str, Any]) -> list[dict[str, Any]]:
                 "Open moderation",
                 f["moderation"],
             ),
+            _step(
+                "write_rule",
+                "Write a business rule",
+                "Decisions hold rules people can read, such as limits and thresholds, and give agents the same answer every time.",
+                "/decisions",
+                "Open Decisions",
+                f.get("write_rule", False),
+            ),
         ]
     if role == "builder":
         agent = f.get("first_agent_id")
@@ -400,6 +416,44 @@ def build_steps(role: str, f: dict[str, Any]) -> list[dict[str, Any]]:
     ]
 
 
+async def approver_step(
+    db: AsyncSession, user: User, role: str
+) -> dict[str, Any] | None:
+    """People who can approve rule changes learn where the requests wait, whatever their role."""
+    from app.core.approvers import can_approve_decisions
+    from app.core.capabilities import ROLE_DEFAULTS, capabilities_for
+    from models.approval import Approval
+
+    try:
+        granted = await capabilities_for(db, user)
+    except Exception:  # noqa: BLE001
+        granted = ROLE_DEFAULTS.get(
+            {"builder": "creator", "member": "user"}.get(role, role), frozenset()
+        )
+    if not can_approve_decisions(granted):
+        return None
+    done = _seen(user, "approvals")
+    if not done:
+        try:
+            done = await _exists(
+                db,
+                select(Approval.id).where(
+                    Approval.tenant_id == user.tenant_id,
+                    Approval.signoffs.contains([{"user_id": str(user.id)}]),
+                ),
+            )
+        except Exception:  # noqa: BLE001
+            done = False
+    return _step(
+        "approve_changes",
+        "You can approve rule changes",
+        "Requests to publish or change a rule wait in Needs you until someone who can approve signs them.",
+        "/inbox?tab=approvals",
+        "Open Needs you",
+        done,
+    )
+
+
 async def journey_view(db: AsyncSession, user: User) -> dict[str, Any]:
     role = role_of(user)
     if role == "admin":
@@ -409,6 +463,9 @@ async def journey_view(db: AsyncSession, user: User) -> dict[str, Any]:
     else:
         facts = await member_facts(db, user)
     steps = build_steps(role, facts)
+    extra = await approver_step(db, user, role)
+    if extra is not None:
+        steps.append(extra)
     done = sum(1 for s in steps if s["done"])
     return {
         "role": role,

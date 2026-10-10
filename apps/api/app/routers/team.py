@@ -5,12 +5,15 @@ import sys
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.capabilities import require_capability
 from app.core.deps import get_current_user, get_db, require_role
 from app.core.responses import error, success
 from app.schemas.settings import InviteMemberRequest, UpdateMemberRoleRequest
@@ -21,6 +24,27 @@ from models.team_invite import InviteStatus, TeamInvite
 from models.user import User, UserRole
 
 router = APIRouter(prefix="/api/team", tags=["team"])
+
+# the names Team, the invite email and the accept page all use
+ROLE_LABELS = {"admin": "Admin", "creator": "Creator", "user": "Member"}
+
+
+def role_label(role: str | None) -> str:
+    return ROLE_LABELS.get(str(role or "user").lower(), str(role or "Member").title())
+
+
+def invite_sentence(who: str, workspace: str, role: str, approves: bool) -> str:
+    """One plain line for the email and the accept page, without "Abenix on Abenix"."""
+    place = (
+        "Abenix"
+        if not workspace or workspace.strip().lower() == "abenix"
+        else f"the {workspace} workspace on Abenix"
+    )
+    article = "an" if role_label(role)[0] in "AEIOU" else "a"
+    out = f"{who} invited you to join {place} as {article} {role_label(role)}."
+    if approves:
+        out += " You will also be able to approve decisions."
+    return out
 
 
 def _serialize_member(u: User) -> dict:
@@ -66,6 +90,8 @@ def _serialize_invite(inv: TeamInvite, request: Request | None = None) -> dict:
         "id": str(inv.id),
         "email": inv.email,
         "role": inv.role,
+        "role_label": role_label(inv.role),
+        "can_approve_decisions": bool(getattr(inv, "can_approve_decisions", False)),
         "status": (
             inv.status.value
             if isinstance(inv.status, InviteStatus)
@@ -87,10 +113,20 @@ async def list_members(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
+    from app.core.approvers import can_approve_decisions, tenant_people
+
     result = await db.execute(
         select(User).where(User.tenant_id == user.tenant_id).order_by(User.created_at)
     )
     members = result.scalars().all()
+    try:
+        approvers = {
+            str(u.id)
+            for u, c in await tenant_people(db, user.tenant_id)
+            if can_approve_decisions(c)
+        }
+    except Exception:  # noqa: BLE001
+        approvers = set()
 
     inv_result = await db.execute(
         select(TeamInvite).where(
@@ -102,7 +138,13 @@ async def list_members(
 
     return success(
         {
-            "members": [_serialize_member(m) for m in members],
+            "members": [
+                {
+                    **_serialize_member(m),
+                    "can_approve_decisions": str(m.id) in approvers,
+                }
+                for m in members
+            ],
             "pending_invites": [
                 _serialize_invite(i, request if user.role == UserRole.ADMIN else None)
                 for i in invites
@@ -197,6 +239,7 @@ async def invite_member(
         invited_by=user.id,
         email=email,
         role=body.role,
+        can_approve_decisions=bool(body.can_approve_decisions),
         token=secrets.token_urlsafe(32),
         expires_at=datetime.now(timezone.utc) + timedelta(days=7),
     )
@@ -220,25 +263,110 @@ async def _email_invite(
     if not link or not mailer.available():
         return False
     tenant = await db.get(Tenant, invite.tenant_id)
-    workspace = tenant.name if tenant else "an Abenix workspace"
+    workspace = tenant.name if tenant else ""
     who = inviter.full_name or inviter.email
+    line = invite_sentence(
+        who,
+        workspace,
+        invite.role,
+        bool(getattr(invite, "can_approve_decisions", False)),
+    )
     text = (
-        f"{who} invited you to join {workspace} on Abenix as {invite.role}.\n\n"
+        f"{line}\n\n"
         f"Accept the invite and choose your password here:\n\n{link}\n\n"
         "The link works for 7 days.\n"
     )
     html = (
-        f"<p>{escape(who)} invited you to join <b>{escape(workspace)}</b> on Abenix "
-        f"as {escape(invite.role)}.</p>"
+        f"<p>{escape(line)}</p>"
         f'<p><a href="{escape(link)}">Accept the invite</a></p>'
         "<p>The link works for 7 days.</p>"
     )
+    place = (
+        "Abenix"
+        if not workspace or workspace.strip().lower() == "abenix"
+        else f"{workspace} on Abenix"
+    )
     return await mailer.send(
         to=invite.email,
-        subject=f"{who} invited you to {workspace} on Abenix",
+        subject=f"{who} invited you to {place}",
         text=text,
         html=html,
     )
+
+
+class ApproverRequest(BaseModel):
+    can_approve_decisions: bool
+
+
+@router.put("/{member_id}/approver")
+async def set_approver(
+    member_id: uuid.UUID,
+    body: ApproverRequest,
+    request: Request,
+    user: User = Depends(require_capability("permissions.manage")),
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """Add someone to Decision reviewers, or take them out, from the Team page."""
+    from app.core import capabilities as caps
+    from app.core.approvers import (
+        REVIEWERS_NAME,
+        add_decision_reviewer,
+        can_approve_decisions,
+        decision_approvers,
+        real_person,
+        remove_decision_reviewer,
+        tenant_people,
+    )
+    from app.core.audit import log_action
+
+    member = await db.get(User, member_id)
+    if member is None or member.tenant_id != user.tenant_id:
+        return error("Member not found", 404)
+    if body.can_approve_decisions and (not member.is_active or not real_person(member)):
+        return error(
+            "Only an active member of this workspace can approve decisions.", 400
+        )
+    if body.can_approve_decisions:
+        changed = await add_decision_reviewer(db, user.tenant_id, member.id, by=user.id)
+        action = "permission_set.member_added"
+    else:
+        changed = await remove_decision_reviewer(db, user.tenant_id, member.id)
+        action = "permission_set.member_removed"
+    if changed:
+        await log_action(
+            db,
+            user.tenant_id,
+            user.id,
+            action,
+            {"set": REVIEWERS_NAME, "member": member.email, "from": "team"},
+            request,
+            resource_type="permission_set",
+            resource_id=REVIEWERS_NAME,
+        )
+    await db.commit()
+    caps.invalidate(member.id)
+    people = await tenant_people(db, user.tenant_id)
+    mine = next((c for u, c in people if u.id == member.id), frozenset())
+    approvers = decision_approvers(people)
+    out: dict[str, Any] = {
+        "user_id": str(member.id),
+        "changed": changed,
+        "can_approve_decisions": can_approve_decisions(mine),
+        "approver_count": len(approvers),
+        "warning": None,
+    }
+    if not body.can_approve_decisions and out["can_approve_decisions"]:
+        out["warning"] = (
+            f"{member.full_name or member.email} can still approve decisions through their role "
+            "or another permission set."
+        )
+    elif not body.can_approve_decisions and len(approvers) <= 1:
+        who = "Nobody" if not approvers else "Only one person"
+        out["warning"] = (
+            f"{who} in this workspace can approve decisions now. High-risk changes will need "
+            "a sole-operator sign-off or a new approver."
+        )
+    return success(out)
 
 
 @router.put("/members/{member_id}/role")
@@ -269,6 +397,9 @@ async def update_member_role(
 
     member.role = UserRole(body.role)
     await db.commit()
+    from app.core import capabilities as caps
+
+    caps.invalidate(member.id)
     await db.refresh(member)
 
     return success(_serialize_member(member))
@@ -298,6 +429,9 @@ async def remove_member(
 
     member.is_active = False
     await db.commit()
+    from app.core import capabilities as caps
+
+    caps.invalidate(member.id)
 
     return success({"id": str(member.id), "status": "removed"})
 

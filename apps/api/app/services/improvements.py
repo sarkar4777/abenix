@@ -575,7 +575,9 @@ async def rerun(
             raise ImprovementError(str(e), 400, "CHANGE_NOT_ALLOWED") from e
         p.diff = {**R.clean_diff(diff), "preview": R.preview(base, new)}
         p.base_config_hash = await current_hash(db, agent.id)
-    await _withdraw_approval(db, p, "The fix was edited, so it is being proved again.")
+    await _withdraw_approval(
+        db, p, "The fix was edited, so it is being proved again.", user.id
+    )
     p.state = "proving"
     p.proof = {}
     p.error = None
@@ -585,14 +587,16 @@ async def rerun(
     return await row_for(db, p)
 
 
-async def _withdraw_approval(db: AsyncSession, p: Any, note: str) -> None:
+async def _withdraw_approval(
+    db: AsyncSession, p: Any, note: str, by: Any = None
+) -> None:
     if p.approval_id is None:
         return
     a = await db.get(Approval, p.approval_id)
     if a is not None and a.status == ApprovalStatus.pending:
-        a.status = ApprovalStatus.expired
-        a.decided_at = _now()
-        a.payload = {**(a.payload or {}), "withdrawn": note}
+        from app.core.approvers import mark_withdrawn
+
+        mark_withdrawn(a, note, by)
     p.approval_id = None
 
 

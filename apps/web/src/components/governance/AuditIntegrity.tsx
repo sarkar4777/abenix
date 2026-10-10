@@ -16,7 +16,7 @@ interface Result {
   broken_at?: { id: string; chain_pos: number; action: string; created_at: string | null };
 }
 
-export default function AuditIntegrity({ canVerify }: { canVerify: boolean }) {
+export default function AuditIntegrity({ canVerify, canExport = true }: { canVerify: boolean; canExport?: boolean }) {
   const [exporting, setExporting] = useState(false);
   async function exportLog() {
     setExporting(true);
@@ -68,11 +68,15 @@ export default function AuditIntegrity({ canVerify }: { canVerify: boolean }) {
           {busy ? 'Checking every entry…' : 'Verify the audit log'}
         </button>
       ) : (
-        <p className="text-xs text-slate-500">Verifying needs the audit.verify capability.</p>
+        <p className="text-xs text-slate-500">Verifying needs Verify the audit log, which an admin can give you.</p>
       )}
-        <button type="button" onClick={exportLog} disabled={exporting} className="inline-flex items-center gap-2 px-4 py-2 rounded-md text-sm border border-slate-700 text-slate-200 hover:bg-slate-800 disabled:opacity-50" data-testid="audit-export">
-          {exporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />} Export with hashes
-        </button>
+        {canExport ? (
+          <button type="button" onClick={exportLog} disabled={exporting} className="inline-flex items-center gap-2 px-4 py-2 rounded-md text-sm border border-slate-700 text-slate-200 hover:bg-slate-800 disabled:opacity-50" data-testid="audit-export">
+            {exporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />} Export with hashes
+          </button>
+        ) : (
+          <p className="text-xs text-slate-500" data-testid="audit-export-needs">Exporting the log needs View the audit log, which an admin can give you.</p>
+        )}
       </div>
       <p className="text-[11px] text-slate-500">The export holds every linked entry with its hashes, so an auditor can check the chain without access to Abenix.</p>
       {err && <p className="text-sm text-rose-300">{err}</p>}

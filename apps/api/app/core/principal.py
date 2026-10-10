@@ -203,10 +203,9 @@ def principal_with(cap: str) -> Callable:
         except _INFRA:
             raise _busy() from None
         if not ok:
-            raise HTTPException(
-                status_code=403,
-                detail=f"This needs the {cap} capability. An admin can grant it under Admin, Permissions.",
-            )
+            from app.core.capabilities import missing
+
+            raise missing(cap)
         return p
 
     return _check

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { GitCompare, Loader2 } from 'lucide-react';
 import { apiFetch } from '@/lib/api-client';
 import { STATE_LABEL, STATE_STYLE, type VersionSummary } from '@/lib/decisions';
+import { SelfApprovedBadge, type SignOffInfo } from './SignOff';
 
 interface Diff {
   from: number; to: number; same_content: boolean; mode: 'rules' | 'content';
@@ -21,7 +22,7 @@ function Timeline({ versions, onOpen }: { versions: VersionSummary[]; onOpen: (n
   const lo = Math.min(...dates, now - 365 * 864e5);
   const hi = Math.max(...dates, now + 365 * 864e5);
   const pct = (t: number) => ((t - lo) / (hi - lo)) * 100;
-  if (!shown.length) return <p className="text-sm text-slate-500">Nothing has been published yet. Published versions appear here with the period they cover.</p>;
+  if (!shown.length) return <p className="text-sm text-slate-500" data-testid="history-empty">Nothing has been published yet. Once a version is signed off and published it appears here with the dates it covers, so any past answer can be traced to the rules that gave it.</p>;
   return (
     <div className="space-y-2" data-testid="history-timeline">
       <div className="relative h-5 text-[10px] text-slate-500">
@@ -50,7 +51,15 @@ function Timeline({ versions, onOpen }: { versions: VersionSummary[]; onOpen: (n
   );
 }
 
-export default function HistoryTab({ decisionKey, versions, current, onOpen }: { decisionKey: string; versions: VersionSummary[]; current: number; onOpen: (n: number) => void }) {
+function SignedBy({ info }: { info: SignOffInfo }) {
+  const ok = info.signoffs.filter((s) => (s.decision ?? 'approve') === 'approve');
+  const sole = ok.find((s) => s.sole_operator);
+  if (sole || info.self_approved) return <SelfApprovedBadge name={sole?.name} reason={sole?.reason} />;
+  if (!ok.length) return null;
+  return <span className="text-[11px] text-emerald-300" data-testid="history-signed">Approved by {ok.map((s) => s.name).join(', ')}</span>;
+}
+
+export default function HistoryTab({ decisionKey, versions, current, onOpen, authors = {} }: { decisionKey: string; versions: VersionSummary[]; current: number; onOpen: (n: number) => void; authors?: Record<string, string> }) {
   const sorted = useMemo(() => [...versions].sort((a, b) => b.version - a.version), [versions]);
   const [a, setA] = useState<number>(sorted[1]?.version ?? sorted[0]?.version ?? 1);
   const [b, setB] = useState<number>(current);
@@ -58,6 +67,17 @@ export default function HistoryTab({ decisionKey, versions, current, onOpen }: {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => setB(current), [current]);
+
+  // who signed each version, so a self-approval is plain to see
+  const [signed, setSigned] = useState<Record<number, SignOffInfo>>({});
+  const ids = sorted.filter((v) => v.approval_id).slice(0, 20).map((v) => v.version).join(',');
+  useEffect(() => {
+    let off = false;
+    const ns = ids ? ids.split(',').map(Number) : [];
+    Promise.all(ns.map((n) => apiFetch<SignOffInfo>(`/api/decisions/${encodeURIComponent(decisionKey)}/versions/${n}/sign-off`, { throwOnError: false, silent: true }).then((r) => [n, r.data] as const)))
+      .then((rows) => { if (!off) setSigned(Object.fromEntries(rows.filter(([, d]) => d)) as Record<number, SignOffInfo>); });
+    return () => { off = true; };
+  }, [decisionKey, ids]);
 
   async function compare() {
     setBusy(true);
@@ -80,7 +100,11 @@ export default function HistoryTab({ decisionKey, versions, current, onOpen }: {
               <button type="button" onClick={() => onOpen(v.version)} className={`w-full flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2 text-left hover:border-slate-500 ${v.version === current ? 'border-cyan-500/50' : 'border-slate-800'}`}>
                 <span className="text-sm text-white font-medium w-10">v{v.version}</span>
                 <span className={`text-[11px] px-1.5 py-0.5 rounded border ${STATE_STYLE[v.state]}`}>{STATE_LABEL[v.state]}</span>
-                <span className="text-xs text-slate-400 truncate flex-1">{v.change_note}</span>
+                <span className="text-xs text-slate-400 truncate flex-1 min-w-[120px]">{v.change_note}</span>
+                {(v.author_name || (v.author_id && authors[v.author_id])) && (
+                  <span className="text-[11px] text-slate-500" data-testid="history-author">by {v.author_name || authors[v.author_id!]}</span>
+                )}
+                {signed[v.version] && <SignedBy info={signed[v.version]} />}
                 <span className="text-[11px] text-slate-500">{day(v.published_at || v.updated_at)}</span>
               </button>
             </li>
@@ -94,7 +118,7 @@ export default function HistoryTab({ decisionKey, versions, current, onOpen }: {
             <select value={a} onChange={(e) => setA(Number(e.target.value))} className="bg-slate-950 border border-slate-700 rounded px-2 py-1 text-white" aria-label="From version">{sorted.map((v) => <option key={v.version} value={v.version}>v{v.version}</option>)}</select>
             <span className="text-slate-500">to</span>
             <select value={b} onChange={(e) => setB(Number(e.target.value))} className="bg-slate-950 border border-slate-700 rounded px-2 py-1 text-white" aria-label="To version">{sorted.map((v) => <option key={v.version} value={v.version}>v{v.version}</option>)}</select>
-            <button type="button" onClick={compare} disabled={busy || a === b} className="inline-flex items-center gap-1 px-3 py-1 rounded bg-slate-800 text-white text-xs disabled:opacity-40" data-testid="history-compare">
+            <button type="button" onClick={compare} disabled={busy || a === b} title={a === b ? 'Pick two different versions to compare' : ''} className="inline-flex items-center gap-1 px-3 py-1 rounded bg-slate-800 text-white text-xs disabled:opacity-40" data-testid="history-compare">
               {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <GitCompare className="w-3.5 h-3.5" />} Compare
             </button>
           </div>

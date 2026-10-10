@@ -82,7 +82,7 @@ Grouped by area. The source column is the model file under `packages/db/models/`
 | `tenants` | `tenant.py` | One row per organisation. Plan, settings, cost limits, encrypted `slack_webhook_url` (TEXT since `a3c4d5e6f7a8`) | this page |
 | `users` | `user.py` | One row per user. Role, SSO `auth_provider` / `external_id`, token and cost quotas, voice clone consent | this page |
 | `workspaces` | `workspace.py` | Sub-tenant grouping with `is_default` | this page |
-| `team_invites` | `team_invite.py` | Pending invites with token, role and expiry | this page |
+| `team_invites` | `team_invite.py` | Pending invites with token, role, expiry and `can_approve_decisions` | this page |
 | `api_keys` | `api_key.py` | Hashed keys with prefix, scopes, monthly token and cost caps | this page |
 | `subject_policies` | `subject_policy.py` | Rules for an acting subject under one API key, used by actAs | this page |
 | `resource_shares` | `resource_share.py` | Polymorphic per-user share with `VIEW` / `EXECUTE` / `EDIT` | [04](04-resource-shares.md) |

@@ -116,7 +116,7 @@ function AppShell({ children }) {
 
 - **TopBar** shows a breadcrumb label for the current route (from the sidebar's exported `NAV_ROUTE_LABELS`, then a small `ROUTE_LABELS` map, then the longest known prefix, then the last path segment), a Use Cases menu fed by `GET /api/use-cases`, the Cognify indicator, notifications and the user menu.
 - **StatusBar** is a thin footer on desktop. Its counters are static text today.
-- **CommandPalette** opens with Cmd/Ctrl+K. It matches a fixed list of pages and actions and also queries `GET /api/search?q=` for agents, pipelines, KBs and the rest. Cmd/Ctrl+N goes to `/builder`.
+- **CommandPalette** opens with Cmd/Ctrl+K. It finds pages and settings by plain words, so decision or rules finds Decisions and approve finds Approvals, Team and Permissions, and also queries `GET /api/search?q=` for agents, pipelines, KBs and the rest. Cmd/Ctrl+N goes to `/builder`.
 
 `/settings/*` pages get a second layout ([`(app)/settings/layout.tsx`](../../apps/web/src/app/(app)/settings/layout.tsx)) with its own left nav. That nav is not gated.
 
@@ -164,7 +164,7 @@ The sidebar has two modes. **Essentials** is the default for every role. It show
 |---|---|
 | everyone | Needs you, Home (`/dashboard`), Agents, AI Chat, Knowledge, Monitor (`/executions`) |
 | reviewers (`moderation.review`) | Review inbox with its count, right under Needs you |
-| creators and admins | Agent Builder, Autonomy (with `autonomy.view`), Improvements (with `improvements.view`) |
+| creators and admins | Agent Builder, Decisions, Approvals, Autonomy (with `autonomy.view`), Improvements (with `improvements.view`) |
 | admins | an Admin entry that opens to the admin pages |
 
 Each essential is the same `NavItem` as in the full list, so the same gates apply. When the current page is not in the short list it shows under "You are here", so a page opened from the palette or a link never leaves the person without a marker.
@@ -275,7 +275,8 @@ The dashboard shows **Start here**, a short checklist picked by role ([`StartHer
 
 | Role | Steps |
 |---|---|
-| admin | connect a model, invite the team (more than one user), review risk policies (page visited or a policy changed), turn on moderation |
+| admin | connect a model, invite the team (more than one user), review risk policies (page visited or a policy changed), turn on moderation, write a business rule (at least one decision) |
+| anyone who can approve decisions | you can approve rule changes, linking to `/inbox?tab=approvals`, done once they have signed an approval or opened Needs you (`POST /api/me/journey/seen` with `{"step": "approvals"}`) |
 | creator | build an agent, run it, give it knowledge (a bound knowledge base), add tests (a suite with cases), enrol an action in Autonomy, review what your agent learned (opened or acted on an Improvements group or proposal), list it in the marketplace (only while the marketplace is on) |
 | user | try an agent in chat, ask a follow-up in the same chat, give feedback on an answer (a feedback row of theirs) |
 

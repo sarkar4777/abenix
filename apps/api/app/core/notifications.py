@@ -255,8 +255,12 @@ async def create_notification(
     metadata: dict | None = None,
     push: bool = True,
     slack: bool = True,
+    email: bool = False,
 ) -> Notification | None:
-    """Persist, push and fan out a notification, None when the user turned its type off."""
+    """Persist, push and fan out a notification, None when the user turned its type off.
+
+    email=True sends the email copy whatever the severity, still subject to the person's channel settings.
+    """
     # Load the user + tenant config so we know who to notify and where.
     prefs: dict | None = None
     user_email: str = ""
@@ -329,7 +333,8 @@ async def create_notification(
     # noise. Operators can override per-user via prefs.email_for_info=true
     # if they really want everything.
     email_eligible = (
-        severity == "error"
+        email
+        or severity == "error"
         or str(type) in EMAIL_ALWAYS
         or bool(prefs and prefs.get("email_for_info") is True)
     )

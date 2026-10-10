@@ -1,5 +1,132 @@
 # Changelog
 
+## v2.5.7 — 2026-10-10
+
+### Added
+
+- Start here tells anyone who can approve decisions, Members included, where requests wait. Ctrl+K search returns matching decisions under Decisions, by name, key or description. Pending decision cards name who can approve them in eligible_approvers, and the approvals list says has_more
+- Approvals rows say what is asked in plain words, with summary, kind_label, agent_name and run_label, so cards no longer show gw.plan.change or a raw run id. Recently resolved pages with status=resolved, offset and a total in meta. The SDKs add approvals.resolved
+- Start here for admins has a Write a business rule step, done once the workspace has a decision. Sign-offs carry user_name, every decision version carries author_name, and a review after a tier raise names who approved it in approved_by_names
+- Team shows who can approve decisions and an admin can turn it on or off per member with PUT /api/team/{user_id}/approver, warned when that leaves too few approvers. GET /api/decisions/{key}/approver-candidates lists only people who could be made approvers. The SDKs add team.members, team.set_approver and decisions.approver_candidates
+- Every workspace has a Decision reviewers permission set, holding Review decisions and Sign approvals. A Team invite can tick Can approve decisions so the new person joins it on accept, and an admin can add someone from the decision page with POST /api/decisions/{key}/approvers. /api/me/permissions says can_approve_decisions
+- Decisions: discard a draft with DELETE /api/decisions/{key}/versions/{n}, for its author or someone who can publish
+- Decisions: the list and the decision say where a decision stands, in_force, retired, draft_only or never_published, the version in force, every version waiting for sign-off and who proposed it, and drafts with their author. A search reports how many archived decisions match too
+- Decisions: a whole decision exports as one abenix-decision-v1 file with facts, typed outcomes, rules and golden tests, and imports back, with a preview first. The plain {key, name, description, risk_tier, rules, tests} shape imports too, as a new decision at the file's tier or a new draft of an existing one. Nothing is published by an import
+- Decisions: GET /api/decisions/{key}/versions/{n}/sign-off says how many sign-offs a version needs, the tier rule in words, who has signed, who could, and whether the author may sign it alone
+- Sole-operator sign-off: in a workspace where nobody else can approve, the author of a decision publish or tier change can sign it alone with a written reason of at least 10 characters. It is recorded as a self-approval, logged as approval.self_approved, and every admin is told. On by default, admins can turn it off with governance.sole_operator_signoff
+- Decisions: GET /api/decisions/check-key says whether a key is free and suggests the next one, such as gw.safety.exclusion.2. The list takes ?archived=1
+- ML Models page: an Explain button beside Run Prediction draws how each input pushed the prediction up or down from its baseline, from /api/ml-models/{id}/explain, with the method named in words
+- Decisions: Paste from Excel works on an empty decision. Paste the rows with their header row and the columns that are new become facts and outcomes, with their types worked out from the names and values, and you check them before anything changes. Pasting unknown columns into a table offers the same review instead of skipping them
+- Decisions: the table can show each rule's description, sources, facts it needs and valid from and to, picked under Columns, so a whole rule can be written in the table
+- Decisions: Import a decision on the list takes a file or pasted JSON, ours or Groundwork's, previews what it creates and any problems, and can import under another key. Export offers the full decision with its tests and tier, or the rules only
+- Decisions: retire the version in force, archive a decision and restore it from the list with Show archived, each with a confirmation that says what happens next
+- Decisions: the lifecycle bar and Approvals say what the tier needs and who can approve, and that the author can't. In a one-person workspace the author can approve as the only approver with a written reason and a confirmation, shown as self-approved on Approvals, the decision page and History. Risk and Controls has the switch for it
+- Decisions: a problem list under the lifecycle bar says where each problem lives and jumps there. The Rules and Facts tabs, the list and Try it all count the same problems
+- Decisions: a what-now guide on every version shows the steps from rules to publish, where this version is, and one plain next step with a button: paste the rules, keep a golden test, run Check, propose, wait for a named approver, sign as the only approver, publish, or how to call it once it is in force
+- Decisions: a version in force that needs a review after a tier raise says so on the decision page, with a link to the review, and the only approver can sign it there
+- Approvals: a reviewer is told what approving a rule change does before they press it and what happens after, with a way back to the decision. Refusals on the decision screens say what happened and what to do instead of an error code
+- The in-app docs open at a section when the link names one, so help links on the decision screens land on the right part of the how-to
+- Team: the invite form has Can approve decisions, which puts the new member in Decision reviewers. On a decision, an admin can give a teammate the right to approve with Someone missing, without leaving the page
+- Decisions: retire, archive and restore ask for a reason and say what happens after. At high and critical risk they wait for a second person, the decision page shows the request waiting, and the only approver in a one-person workspace can sign it there
+- Decisions: one banner lists every version waiting for sign-off or ready to publish, with who proposed it and a way to open it. A draft can be discarded. The last denial and its reason show on the decision
+- Approvals: Deny asks for a reason, and the person who asked sees it. Every request says what it is about, and requests with no details say so before anyone approves
+- Needs you rows say who asked, why, what kind of request it is and what changes, link to the decision, and offer Return for changes beside Approve and Deny. Approving the retire or archive of a High or Critical rule asks first, there and on Approvals
+- Team shows a Can approve decisions badge on each person and a row menu item to let them approve decisions or stop them, with a warning when too few approvers are left
+- Decisions and Approvals are in the essentials sidebar for admins and creators, and Ctrl K finds pages and settings such as Decisions, Approvals, Team, Permissions and Risk and Controls by name or by words like rules or sign off
+- A Then value of the wrong type offers Make it Text in one click
+- Pages a Member can open but not change say so at the top: Team, Decisions, a decision, Approvals, Needs you and Risk and Controls each name who can act and how to get the right, and controls that would be refused are not shown
+- Ctrl K finds decisions by name, key or description, maps words like approve, approver, sign off and who can approve to Team and Approvals, and offers Search the docs and Open Help when nothing matches. Team reads Team (view only) for a Member
+- Approving a tier lowering or a restore on Needs you asks first, like retire and archive, and every approval there says what it did once the row is gone
+- A Member who can approve decisions gets Approvals in the essentials sidebar. Recently resolved on Approvals has Show more
+
+### Changed
+
+- Withdrawn approvals carry the real reason in withdraw_reason and who did it in withdrawn_by_name, null when the platform did it, on every path: taken back by the author, archived, retired, replaced by a newer version, a tier raised or lowered, and an improvement edited
+- Decision search matches every word in the name, key or description, so machine stop finds machine-stop
+- An agent proposing a change to a decision where it already has an open draft updates that draft and adds to its change note, instead of stacking a new version each time. Agent proposals also record the tier they were proposed under and carry their change note and rule count
+- Approvals rows say who asked (requested_by_name), what changed and why (change_note), and how many rules changed (changes), counting every rule of a first version
+- The person who asked for a decision approval is sent to the decision when it is resolved, and gets an email with the outcome and the reviewer's reason when email delivery is on
+- Approvals and Needs you show the same thing: what you can sign, what you asked for and what you signed, each row with can_sign and a plain reason when you can't. Admins can ask for every row with ?all=1. Needs you no longer counts watching reviews of other people's agents for a Member
+- Messages that named a capability id, such as decisions.review, say it in plain words and keep the id in details.capability
+- Import says where a file lands, offers a free key and a new name for a copy, and creates nothing when the file matches the latest version. An import into an existing decision returns the new draft's number
+- The invite email and accept page name the role as Team does, Admin, Creator or Member, and no longer say Abenix on Abenix. A password change says this device stays signed in and how many others were signed out
+- Approvals list and detail carry eligible_approver_count, sole_operator_available and self_approved. The platform's own system account no longer counts as someone who can approve
+- Decision outcomes have a type: text, number, true or false, date or object. A value of the wrong type is a problem on that rule, and numeric text in a number outcome is saved as a number and reported under normalized. Outcomes saved as text before types existed are read as the type their values hold
+- Decisions: outcomes have a type, guessed from the name or the first value and changeable beside it, with an input to match. New facts get a type from their name, such as _m, _kg, speed or count for Number, date for Date and is_ or has_ for Yes or no, and the type can be changed from the picker and the condition
+- Decisions: changing the risk tier asks first. Lowering it asks for a reason and shows the sign-off it now waits for, the change waiting is shown on the decision, and the tier can't change while a version waits for sign-off
+- Decisions: opening a decision shows the version in force, with a pointer to any draft. Keep as test checks a case as of the day the tests run unless it is pinned to a date
+- Decisions: published versions hide the editing controls and offer a new draft from that version. Placeholders no longer look like filled-in values or carry examples from another domain, and the New decision dialog checks the key as it is typed and says why Create waits
+- Approvals lists the requests you can sign and your own. A request you can see but not sign says why in plain words, never with a capability name. Admins can show everyone's. Refresh is a secondary button since the page refreshes itself
+- Decisions list cards say Retired, nothing in force, and v4 approved, ready to publish, instead of Not published yet and awaiting sign-off. A search that only matches archived decisions says so and offers to show them
+- Decisions: importing a file whose key is taken now defaults to a new decision under a free key with an editable name. Drafting into the existing decision needs a tick, and the import opens the new draft. An identical file is not offered as a draft
+- Decisions: golden tests show the facts they give and the answer they expect. Pasted facts that any rule tests are required, the same as facts added by hand. A fact name with spaces is offered as tip_speed instead of refused
+- Decisions: copy in a one-person workspace no longer says the proposer can't approve. Raising the tier explains the review it creates and what Deny does. Propose says how many approvers it needs, or that none are needed
+- Role names match everywhere: Admin, Creator and Member
+- Approvals splits what you can sign from your own requests waiting on someone else, and the tab says how many of each. The Needs you badge says what its total is made of, and Needs you points to your own waiting requests. Recent decisions is now Recently resolved
+- A denied or returned approval leads with who denied it and their reason. The requester's own text is labelled Asked because, and the tier line shows only while the request is open. Sign-off history names people instead of emails
+- In a one-person workspace the retire and archive dialogs say up front that you sign it yourself, and so does the restore notice. Archiving a decision that was never published says nothing was ever live and needs no sign-off, and Undo says ask to restore when the restore waits for sign-off
+- An archived decision shows its risk tier and a restore already waiting for sign-off, with no second request offered. An empty list with archived decisions says so instead of No decisions yet
+- Every pasted or typed new fact and outcome gets a lowercase key, such as clearance for Clearance, and keeps the header as its label
+- Golden tests show facts and answers by their labels. History says who wrote each version. A version in force always shows its tier rule, without the line that the proposer can't approve. The review after a tier raise says who approved it
+- The raise tier dialog lists what happens to the version in force as short points. Use in an agent is a quiet button until something is in force. The accept invite page says when the new person can approve decisions
+- An outcome saved as Text whose every value is a number shows as Number
+- In a one-person workspace, retire and archive are one step: the reason and a self-approval tick in the same dialog, with no second form. Restoring from the list says it is step 1 of 2 and opens step 2 with the same reason
+- Archiving a decision with a version waiting for sign-off says the request is withdrawn, and the withdrawn card on Approvals gives the real reason
+- Inviting an approver from a decision opens Team with Can approve decisions ticked and a way back to the decision. Pending invites say when the person will be able to approve
+- Try it shows the answer as labelled lines, with the JSON one click away. Golden test facts, Looked at and read as use labels. A paste onto the table always shows the check first
+- Tiers read High, Low and so on everywhere. A denied version reads Denied, and the list names it. The raise dialog says whether the version in force needs a review. Retire and Archive are off while the same request waits
+- Who can sign on Risk and Controls is said in words beside the capability. Proposers are told approvers see the request in Needs you
+- Import on the decisions list reads Import a decision file and Start from JSON rules
+
+### Fixed
+
+- The person who signed their own request alone was notified about it. Only the other admins are
+- A second retire, archive or restore request named the decision by its key. It now names the decision and says who already asked and when
+- Archiving a decision left its waiting publish approval open, so reviewers were asked to approve a decision already archived. Archiving withdraws every open approval for it and tells whoever asked, versions waiting go back to drafts, signing one answers that the decision was archived, and leftovers from before are withdrawn the next time Approvals or Needs you load
+- deploy.sh forwards gave up on a port after 6 seconds while the forward stopped a moment earlier still held it on Windows, so the webhook catcher was sometimes left unforwarded until a second run. It now waits up to 15 seconds and says it is waiting
+- A brand-new decision version's approval said 0 changes. The payload and the row count every rule of a first version, and proposals saved earlier read right too
+- Archiving a High or Critical decision that was never published waited for a second person, though nothing was in force. It acts at once, and so does restoring it
+- Pick a teammate offered erased accounts, the system account, people who could already approve and the author
+- Summaries saved before the wording fix still said 1 golden test pass on Approvals and Needs you. They read 1 golden test passes everywhere
+- A human_approval gate whose run had ended, cancelled or timed out, stayed on Approvals for up to an hour, so a later Deny for the same kind of request could land on the dead gate and leave the live run waiting. The gate is cleared whenever the run stops waiting, a gate without a live run is no longer listed, and answering one says the run already ended
+- A permission granted from Someone missing or Admin, Permissions could take up to 10 seconds to reach the API worker that served the next Approve. Every worker now drops its cached view of that person at once, also on a role change or removal
+- A reviewer's Recent approvals listed every settled request in the workspace. It shows what you asked for, signed, or could have signed while it was open
+- A Member's Needs you counted failure alerts from everyone's runs. People who see only their own runs are alerted about their own failures
+- Check said 1 golden test pass, 1 pair of rules disagree and 1 result change. The wording agrees with the count
+- One admin could retire, archive or restore a High or Critical decision alone. These now need a reason and the tier's sign-off, with the same sole-operator path in a one-person workspace, and the action happens only once approved
+- Deny took no reason and the requester never learned why. A reason of at least 5 characters is required, the requester's notice carries it, and a denied version keeps it
+- Restoring a decision whose only version was retired said its published version answered again. Restore returns the real state, retired with nothing in force
+- A decision created at low risk, published with no sign-off and then raised to high kept running rules nobody had reviewed. Raising a tier now opens a review of each version in force whose sign-off falls short, signed under the new tier's rules with the same sole-operator path. The version stays in force, records attested_under once the review is approved, and the decision shows the review while it waits
+- Editing an improvement and proving it again marked its open approval expired. It is now withdrawn
+- A decision's risk tier could be lowered while a version waited for sign-off, then the version withdrawn, proposed again under the low tier where it approved itself, published and the tier raised back, all unrecorded. Tier changes are now refused while a version is proposed, a lowering needs a reason and the current tier's sign-off before it applies, raises and lowerings are audited, and publishing needs the sign-off of the higher of the tier a version was proposed under and the tier now
+- Withdrawing a decision proposal marked its approval expired. It is now withdrawn, and expired only means the time ran out
+- A golden test saved with an empty date kept the empty date. It is stored as no date and runs as of the day the tests run
+- Knowledge search failed outright when the embedding provider was down or out of credits, so agents said they could not reach their knowledge base. It now falls back to a full-text keyword match over the same chunks and says so in the result and its warnings. With no keyword hit the embedding error is still reported, never a fake no match
+- A pipeline saved from the builder with an assemble-output step was flagged as using a tool the agent lacks, and all three execute paths refused it. Steps the engine runs itself (agent_step, wait, state_get, state_set, __structured__) need no grant
+- When every provider in the fallback chain failed, the run reported the last one's error, so a revoked Claude token showed up as Gemini's API key not valid. The first provider that answered with an error is reported, which is the real cause
+- Searching Executions matched only the run's input, so an agent's name found nothing. The search matches the agent name too
+- The pipeline builder showed a type: structured step as tool unknown and counted errors on a valid pipeline. It loads as the built-in output step, labelled assemble output, and saves in the form the engine runs. agent_step reads as agent on the canvas
+- Typing a decimal key by key in a decision dropped the point, so 0.5 saved as 5, 2.50 as 250 and 4.5 in Try it as 45. The text typed is kept while typing and only its number is passed on
+- A decision rule's source was only kept on Enter, and text left in the field showed up on the next rule. Each rule has its own field, kept on Enter, Add or moving away
+- Retyping the same value in a decision table cell did not save it
+- A decision rule's dates overlapped the facts it needs at narrow widths, the Check result showed twice, and a withdrawn proposal showed as expired on Approvals
+- Opening a decision version whose last check was only partly stored left the page loading forever
+- The profile page said other devices stay signed in after a password change. They are signed out, and the page now says so
+- At phone width the Use Cases button wrapped onto two lines, and condition rows stacked awkwardly
+- Paste notices stayed on the table after a version was proposed or published
+- Wingman: denying a desk request sent a canned reason. The desk now types the reason
+- Deny on Needs you never sent the typed reason, so every deny there failed with Write a reason first. The reason is sent, and a reason the server did not receive says Couldn't send your reason, try again
+- Reject on an agent action and on a proposed agent fix took a reason shorter than 5 characters, which the server then refused
+- Wingman: Deny on one row while other rows were ticked denied all the ticked rows
+- Open Try it and Paste from Excel scrolled the whole app frame, pushing the top bar off screen. Only the page content scrolls now
+- An empty number outcome said it found the text "" and the rule read margin = “”. An empty number or date is not set
+- A decision page open while someone else approved its archive kept saying waiting. It checks again while a request waits and says the decision was archived
+- A Member saw an enabled Invite Member and row menus with Set as Admin and Remove on Team, which the server refused only after Send
+- The Needs you list did not refresh when its count went up
+- The Publish step stayed unticked and the Decision created banner stayed after a version was published
+- Native scrollbar arrows showed beside the Needs you tabs
+- Approval cards showed raw kinds like gw.plan.change and execution ids, now plan change and Open the run
+
 ## v2.5.6 — 2026-10-10
 
 ### Added

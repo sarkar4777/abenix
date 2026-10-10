@@ -12,6 +12,7 @@ import asyncio
 import logging
 import sys
 import uuid
+from types import SimpleNamespace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -33,6 +34,19 @@ from app.core.hitl import (
     parse_hitl_id,
     write_hitl_decision,
 )
+from app.core.approvers import (
+    DECISION_KINDS,
+    SOLE_OPERATOR_KINDS,
+    can_sign,
+    eligible_from,
+    is_self_approved,
+    people_words,
+    sign_check,
+    sole_operator_enabled,
+    sole_operator_refusal,
+    tenant_people,
+    visible_to,
+)
 from app.core.notifications import create_notification
 from app.core.responses import error, success
 from app.schemas.connectors import (
@@ -50,19 +64,129 @@ from models.user import User  # noqa: E402
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/approvals", tags=["approvals"])
+MIN_DENY_REASON = 5
 
 
-def _serialize(a: Approval) -> dict[str, Any]:
+def _signoff_rows(
+    signoffs: list[dict[str, Any]] | None, names: dict[str, str] | None
+) -> list[dict[str, Any]]:
+    """Each sign-off with the signer's name, the email when no name is known."""
+    out = []
+    for s in signoffs or []:
+        uid = str(s.get("user_id") or "")
+        name = (names or {}).get(uid) or s.get("user_name") or s.get("user_email")
+        out.append({**s, "user_name": name})
+    return out
+
+
+KIND_LABELS = {
+    "human_approval": "Agent paused for a person",
+    "autonomy.promote": "Autonomy promotion",
+    "improvement.release": "Proven fix to release",
+    "decision_publish": "Publish a rule change",
+    "decision_tier_change": "Lower a risk tier",
+    "decision_reattest": "Review after a tier raise",
+    "decision_retire": "Retire a version",
+    "decision_archive": "Archive a decision",
+    "decision_restore": "Restore a decision",
+}
+
+
+def kind_label(kind: str | None) -> str:
+    """A gate kind in plain words: gw.plan.change reads Plan change."""
+    if not kind:
+        return "Request"
+    if kind in KIND_LABELS:
+        return KIND_LABELS[kind]
+    if kind.startswith("action:"):
+        return "Agent action"
+    parts = kind.replace("_", " ").replace("-", " ").split(".")
+    words = " ".join(parts[1:] if len(parts) > 1 else parts).strip()
+    return (words[:1].upper() + words[1:]) or "Request"
+
+
+def _first_text(p: dict[str, Any], keys: tuple[str, ...]) -> str:
+    for k in keys:
+        v = p.get(k)
+        if isinstance(v, str) and v.strip():
+            return v.strip()
+        if isinstance(v, list) and v and isinstance(v[0], str):
+            return v[0].strip()
+    return ""
+
+
+def row_summary(a: Any, agent_name: str | None) -> str:
+    """One plain sentence on what is being asked, whatever kind of approval it is."""
+    p = a.payload if isinstance(a.payload, dict) else {}
+    kind = a.gate_kind or ""
+    who = agent_name or (p.get("agent") or {}).get("name") or p.get("agent_name")
+    title = (a.title or "").strip()
+    if kind.startswith("decision_"):
+        text = fix_wording(_first_text(p, ("summary", "reason")))
+        return text or title
+    if kind == "human_approval":
+        detail = _first_text(p, ("details",))
+        head = f"{who} paused and asks a person: {title}" if who else title
+        return f"{head}. {detail}".strip() if detail else head
+    if kind.startswith("action:"):
+        intent = _first_text(p, ("intent", "summary"))
+        if who and intent:
+            return f"{who} wants to act: {intent}"
+        return intent or title
+    if kind == "autonomy.promote":
+        record = (p.get("record") or {}).get("text")
+        return f"{title}. {record}." if record else title
+    text = _first_text(
+        p, ("summary", "why", "details", "detail", "description", "reason")
+    )
+    changes = p.get("changes")
+    if isinstance(changes, list) and changes and isinstance(changes[0], str):
+        more = f" and {len(changes) - 1} more" if len(changes) > 1 else ""
+        text = (
+            f"{text}. First change: {changes[0]}{more}"
+            if text
+            else f"{changes[0]}{more}"
+        )
+    head = f"{who} asks: {title}" if who else title
+    return f"{head}. {text}" if text else head
+
+
+def _serialize(
+    a: Approval,
+    names: dict[str, str] | None = None,
+    agents: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    p = a.payload if isinstance(a.payload, dict) else {}
+    status = a.status.value if hasattr(a.status, "value") else str(a.status)
+    withdrawn_by = p.get("withdrawn_by")
+    agent_name = (agents or {}).get(str(a.agent_id)) if a.agent_id else None
+    agent_name = agent_name or (p.get("agent") or {}).get("name") or p.get("agent_name")
     return {
+        "kind_label": kind_label(a.gate_kind),
+        "summary": row_summary(a, agent_name),
+        "agent_name": agent_name,
+        "run_label": (
+            f"Run of {agent_name}" if a.agent_execution_id and agent_name else None
+        ),
+        "withdraw_reason": p.get("withdrawn") if status == "withdrawn" else None,
+        "withdrawn_by_name": (
+            (names or {}).get(str(withdrawn_by))
+            if status == "withdrawn" and withdrawn_by
+            else None
+        ),
         "id": str(a.id),
         "agent_id": str(a.agent_id) if a.agent_id else None,
         "agent_execution_id": (
             str(a.agent_execution_id) if a.agent_execution_id else None
         ),
         "title": a.title or "",
-        "payload": a.payload or {},
+        "payload": (
+            {**a.payload, "summary": fix_wording(a.payload.get("summary"))}
+            if isinstance(a.payload, dict) and "summary" in a.payload
+            else (a.payload or {})
+        ),
         "required_signoffs": a.required_signoffs,
-        "signoffs": a.signoffs or [],
+        "signoffs": _signoff_rows(a.signoffs, names),
         "status": a.status.value if hasattr(a.status, "value") else str(a.status),
         "requested_by": str(a.requested_by) if a.requested_by else None,
         "expires_at": a.expires_at.isoformat() if a.expires_at else None,
@@ -71,7 +195,270 @@ def _serialize(a: Approval) -> dict[str, Any]:
         "gate_kind": a.gate_kind,
         "policy": a.policy,
         "client_token": a.client_token,
+        "self_approved": is_self_approved(a),
     }
+
+
+_WORDING = (
+    (r"\b1 golden test pass\b", "1 golden test passes"),
+    (r"\b1 of (\d+) golden tests fail\b", r"1 of \1 golden tests fails"),
+    (r"\b1 pair of rules disagree\b", "1 pair of rules disagrees"),
+    (r"\b1 result change compared\b", "1 result changes compared"),
+)
+
+
+def fix_wording(text: Any) -> Any:
+    """Older summaries said "1 golden test pass", they read right now."""
+    import re
+
+    if not isinstance(text, str):
+        return text
+    for pat, rep in _WORDING:
+        text = re.sub(pat, rep, text)
+    return text
+
+
+def _check_row(viewer: Any, granted: frozenset[str], a: Approval) -> Any:
+    p = a.payload or {}
+    return sign_check(
+        viewer,
+        granted,
+        requested_by=a.requested_by,
+        policy=a.policy,
+        gate_kind=a.gate_kind,
+        signoffs=a.signoffs,
+        agent_creator_id=p.get("agent_creator_id"),
+        self_approval=p.get("self_approval"),
+    )
+
+
+def _with_viewer(
+    row: dict[str, Any], a: Approval, check: Any, sole: bool
+) -> dict[str, Any]:
+    pending = a.status == ApprovalStatus.pending
+    mine = sole and check is not None and check[0] in ("OWN_REQUEST", "NOT_SIGNER")
+    row["can_sign"] = bool(pending and (check is None or sole))
+    if row["can_sign"]:
+        row["cannot_sign_reason"] = None
+    elif not pending:
+        status = a.status.value if hasattr(a.status, "value") else str(a.status)
+        row["cannot_sign_reason"] = f"This is already {status}."
+    else:
+        row["cannot_sign_reason"] = check[1] if check else None
+    row["sign_alone"] = bool(pending and mine)
+    return row
+
+
+async def _serialize_many(
+    db: AsyncSession, rows: list[Approval], viewer: Any = None
+) -> list[dict[str, Any]]:
+    """Rows with who could sign each one, whether the requester may sign alone, and what the viewer can do."""
+    if not rows:
+        return []
+    from app.core.capabilities import _role, capabilities_for
+
+    tenant_id = rows[0].tenant_id
+    try:
+        people = await tenant_people(db, tenant_id)
+        enabled = await sole_operator_enabled(db, tenant_id)
+        granted = await capabilities_for(db, viewer) if viewer is not None else None
+    except Exception as e:  # noqa: BLE001
+        # the counts help the reader, a failure to work them out must not hide the approval
+        logger.warning("approver counts unavailable: %s", e)
+        return [
+            {
+                **_serialize(a),
+                "eligible_approver_count": None,
+                "sole_operator_available": False,
+            }
+            for a in rows
+        ]
+    caps_of = {str(u.id): (u, c) for u, c in people}
+    names = await _requester_names(db, rows, caps_of)
+    details = await _decision_details(db, rows)
+    agents = await _agent_names(db, rows)
+    out = []
+    for a in rows:
+        row = _serialize(a, names, agents)
+        row["requested_by_name"] = (
+            names.get(str(a.requested_by)) if a.requested_by else None
+        )
+        extra = details.get(str(a.id)) or {}
+        row["change_note"] = extra.get(
+            "change_note", (a.payload or {}).get("change_note")
+        )
+        row["changes"] = extra.get("changes", (a.payload or {}).get("changes"))
+        if "changes" in extra and isinstance(row.get("payload"), dict):
+            # proposals saved before the count was fixed said 0 for a first version
+            row["payload"] = {**row["payload"], "changes": row["changes"]}
+        eligible = eligible_from(people, a.policy, a.gate_kind, a.requested_by)
+        req = caps_of.get(str(a.requested_by)) if a.requested_by else None
+        row["eligible_approver_count"] = len(eligible)
+        if a.gate_kind in SOLE_OPERATOR_KINDS and a.status == ApprovalStatus.pending:
+            # every decision card can say who can approve it, by name
+            row["eligible_approvers"] = [
+                {"id": str(u.id), "name": u.full_name or u.email} for u in eligible[:25]
+            ]
+        row["sole_operator_available"] = bool(
+            a.status == ApprovalStatus.pending
+            and a.gate_kind in SOLE_OPERATOR_KINDS
+            and enabled
+            and not eligible
+            and req is not None
+            and can_sign(_role(req[0]), req[1], a.policy, a.gate_kind)
+        )
+        if viewer is not None:
+            check = _check_row(viewer, granted, a)
+            own = a.requested_by is not None and str(a.requested_by) == str(viewer.id)
+            row = _with_viewer(
+                row, a, check, bool(own and row["sole_operator_available"])
+            )
+            row["visible"] = _visible_row(viewer, a, check)
+        out.append(row)
+    return out
+
+
+def _visible_row(viewer: Any, a: Approval, check: Any) -> bool:
+    """Pending: what you can sign or asked for. Settled: what you asked for, signed, or could have signed then."""
+    me = str(viewer.id)
+    if a.requested_by is not None and str(a.requested_by) == me:
+        return True
+    if any(str(s.get("user_id")) == me for s in a.signoffs or []):
+        return True
+    if not visible_to(viewer, check, a.requested_by):
+        return False
+    if a.status == ApprovalStatus.pending:
+        return True
+    # a request settled before you joined was never yours to sign
+    joined = getattr(viewer, "created_at", None)
+    return joined is None or a.created_at is None or a.created_at >= joined
+
+
+async def _requester_names(
+    db: AsyncSession, rows: list[Approval], known: dict[str, Any]
+) -> dict[str, str]:
+    out = {k: (u.full_name or u.email) for k, (u, _) in known.items()}
+    missing = {
+        a.requested_by
+        for a in rows
+        if a.requested_by and str(a.requested_by) not in out
+    }
+    for a in rows:
+        wb = (
+            (a.payload or {}).get("withdrawn_by")
+            if isinstance(a.payload, dict)
+            else None
+        )
+        if wb and str(wb) not in out:
+            try:
+                missing.add(uuid.UUID(str(wb)))
+            except ValueError:
+                pass
+        for so in a.signoffs or []:
+            uid = so.get("user_id")
+            if uid and str(uid) not in out:
+                try:
+                    missing.add(uuid.UUID(str(uid)))
+                except ValueError:
+                    pass
+    if missing:
+        try:
+            for uid, name, email in (
+                await db.execute(
+                    select(User.id, User.full_name, User.email).where(
+                        User.id.in_(missing)
+                    )
+                )
+            ).all():
+                out[str(uid)] = name or email
+        except Exception as e:  # noqa: BLE001
+            logger.debug("requester names unavailable: %s", e)
+    return out
+
+
+async def _agent_names(db: AsyncSession, rows: list[Approval]) -> dict[str, str]:
+    ids = {a.agent_id for a in rows if a.agent_id}
+    if not ids:
+        return {}
+    try:
+        from models.agent import Agent
+
+        return {
+            str(i): n
+            for i, n in (
+                await db.execute(select(Agent.id, Agent.name).where(Agent.id.in_(ids)))
+            ).all()
+        }
+    except Exception as e:  # noqa: BLE001
+        logger.debug("agent names unavailable: %s", e)
+        return {}
+
+
+async def _decision_details(
+    db: AsyncSession, rows: list[Approval]
+) -> dict[str, dict[str, Any]]:
+    """The change note and rule change count of each decision version waiting to publish."""
+    wanted = [
+        a
+        for a in rows
+        if a.gate_kind == "decision_publish"
+        and (a.payload or {}).get("decision_key")
+        and (a.payload or {}).get("version") is not None
+    ]
+    if not wanted:
+        return {}
+    from models.decision import DecisionModel, DecisionVersion
+
+    from app.routers.decisions import rule_changes
+
+    out: dict[str, dict[str, Any]] = {}
+    try:
+        keys = {(a.payload or {})["decision_key"] for a in wanted}
+        found = (
+            await db.execute(
+                select(DecisionModel.key, DecisionVersion)
+                .join(DecisionVersion, DecisionVersion.model_id == DecisionModel.id)
+                .where(
+                    DecisionModel.tenant_id == wanted[0].tenant_id,
+                    DecisionModel.key.in_(keys),
+                )
+            )
+        ).all()
+        by = {(k, v.version): v for k, v in found}
+        by_id = {str(v.id): v for _, v in found}
+        for a in wanted:
+            p = a.payload or {}
+            v = by.get((p["decision_key"], p["version"]))
+            if v is None:
+                continue
+            base = by_id.get(str(v.base_version_id)) if v.base_version_id else None
+            n = rule_changes(v, base)
+            out[str(a.id)] = {
+                "change_note": p.get("change_note") or v.change_note or "",
+                "changes": n if n is not None else p.get("changes"),
+            }
+    except Exception as e:  # noqa: BLE001
+        logger.debug("decision details unavailable: %s", e)
+    return out
+
+
+async def _sweep_archived(db: AsyncSession, tenant_id: Any) -> None:
+    """Withdraw approvals left open on decisions that were archived since."""
+    try:
+        from app.routers.decisions import sweep_archived
+
+        await sweep_archived(db, tenant_id)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("archived decision sweep failed: %s", e)
+        await db.rollback()
+
+
+async def _serialize_one(
+    db: AsyncSession, a: Approval, viewer: Any = None
+) -> dict[str, Any]:
+    row = (await _serialize_many(db, [a], viewer))[0]
+    row.pop("visible", None)
+    return row
 
 
 def _evaluate_status(a: Approval) -> ApprovalStatus:
@@ -214,7 +601,7 @@ async def _expire_stale(db: AsyncSession, tenant_id: uuid.UUID) -> None:
         )
     await db.commit()
     for aid, _, gate_kind in expired:
-        if gate_kind == "decision_publish":
+        if gate_kind in DECISION_KINDS:
             from app.routers.decisions import on_approval_resolved
 
             row = await db.get(Approval, aid)
@@ -295,7 +682,8 @@ async def list_approvals(
         description="If 1, restrict to approvals the caller has rights to act on (tenant scope today)",
     ),
     status: str | None = Query(
-        None, description="pending | approved | denied | expired"
+        None,
+        description="pending | approved | denied | expired | returned | withdrawn, or resolved for every settled row, paged with offset",
     ),
     execution_id: uuid.UUID | None = Query(
         None, description="Filter to approvals linked to a specific execution"
@@ -305,11 +693,32 @@ async def list_approvals(
     ),
     kind: str | None = Query(None, description="Filter by gate_kind discriminator"),
     limit: int = Query(200, ge=1, le=500),
+    offset: int = Query(0, ge=0, description="Rows to skip, with status=resolved"),
+    resolved_offset: int | None = Query(
+        None, ge=0, description="Same as status=resolved with this offset"
+    ),
+    all: int = Query(
+        0,
+        ge=0,
+        le=1,
+        description="Admins only: every row, not just what you can sign and your own requests",
+    ),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
+    # called directly, the Query defaults are not values
+    offset = offset if isinstance(offset, int) else 0
+    resolved_offset = resolved_offset if isinstance(resolved_offset, int) else None
+    all = all if isinstance(all, int) else 0
     await _expire_stale(db, user.tenant_id)
+    await _sweep_archived(db, user.tenant_id)
+    if resolved_offset is not None:
+        status, offset = "resolved", resolved_offset
     stmt = select(Approval).where(Approval.tenant_id == user.tenant_id)
+    if status == "resolved":
+        return await _resolved_page(
+            db, user, stmt, execution_id, agent_id, kind, limit, offset, all
+        )
     if status:
         try:
             stmt = stmt.where(Approval.status == ApprovalStatus(status))
@@ -321,11 +730,29 @@ async def list_approvals(
         stmt = stmt.where(Approval.agent_id == agent_id)
     if kind:
         stmt = stmt.where(Approval.gate_kind == kind)
-    stmt = stmt.order_by(Approval.created_at.desc()).limit(limit)
+    from app.core.permissions import is_admin
+
+    everything = bool(all) and is_admin(user)
+    # rows the viewer cannot see are dropped after the read, so read past the page
+    stmt = stmt.order_by(Approval.created_at.desc()).limit(
+        limit if everything else min(limit * 4, 2000)
+    )
     result = await db.execute(stmt)
     rows = result.scalars().all()
-    _ = mine  # tenant scope is enough for now; keep param for future per-user routing
-    items = [_serialize(a) for a in rows]
+    _ = mine  # the default view is already what you can act on
+    items = await _serialize_many(db, list(rows), user)
+    if not everything:
+        items = [r for r in items if r.get("visible", True)]
+    for r in items:
+        r.pop("visible", None)
+    found = len(items)
+    scanned_all = len(rows) < (limit if everything else min(limit * 4, 2000))
+    items = items[:limit]
+    meta = {
+        "total": found if scanned_all else None,
+        "has_more": found > limit or not scanned_all,
+        "limit": limit,
+    }
 
     # Runtime human_approval gates live in Redis, not in the approvals table
     include_hitl = (
@@ -334,6 +761,9 @@ async def list_approvals(
         and agent_id is None
     )
     if include_hitl:
+        from app.core.capabilities import capabilities_for
+
+        hitl_caps = await capabilities_for(db, user)
         try:
             gates = await list_pending_hitl(str(user.tenant_id))
         except Exception as e:
@@ -344,10 +774,100 @@ async def list_approvals(
                 execution_id
             ):
                 continue
-            items.append(hitl_to_approval_row(g))
+            row = hitl_to_approval_row(g)
+            row.setdefault("self_approved", False)
+            row.setdefault("sole_operator_available", False)
+            row.setdefault("eligible_approver_count", None)
+            gate_agent = (row.get("payload") or {}).get("agent_name") or g.get(
+                "agent_name"
+            )
+            row.setdefault("kind_label", kind_label("human_approval"))
+            row.setdefault("agent_name", gate_agent)
+            row.setdefault(
+                "summary",
+                row_summary(
+                    SimpleNamespace(
+                        payload=row.get("payload") or {},
+                        gate_kind="human_approval",
+                        title=row.get("title") or "",
+                    ),
+                    gate_agent,
+                ),
+            )
+            row.setdefault("withdraw_reason", None)
+            row.setdefault("withdrawn_by_name", None)
+            check = sign_check(
+                user,
+                hitl_caps,
+                requested_by=row.get("requested_by"),
+                policy=None,
+                gate_kind="human_approval",
+                signoffs=[],
+            )
+            if not everything and not visible_to(user, check, row.get("requested_by")):
+                continue
+            row["can_sign"] = check is None
+            row["cannot_sign_reason"] = check[1] if check else None
+            row["sign_alone"] = False
+            items.append(row)
         items.sort(key=lambda r: r.get("created_at") or "", reverse=True)
         items = items[:limit]
-    return success(items)
+    return success(items, meta=meta)
+
+
+RESOLVED_SCAN = 5000
+
+
+async def _resolved_page(
+    db: AsyncSession,
+    user: User,
+    stmt: Any,
+    execution_id: Any,
+    agent_id: Any,
+    kind: str | None,
+    limit: int,
+    offset: int,
+    everything_asked: int,
+) -> JSONResponse:
+    """Settled approvals the viewer may see, a page at a time with the total."""
+    from app.core.capabilities import capabilities_for
+    from app.core.permissions import is_admin
+
+    stmt = stmt.where(Approval.status != ApprovalStatus.pending)
+    if execution_id is not None:
+        stmt = stmt.where(Approval.agent_execution_id == execution_id)
+    if agent_id is not None:
+        stmt = stmt.where(Approval.agent_id == agent_id)
+    if kind:
+        stmt = stmt.where(Approval.gate_kind == kind)
+    rows = list(
+        (
+            await db.execute(
+                stmt.order_by(
+                    Approval.decided_at.desc().nullslast(), Approval.created_at.desc()
+                ).limit(RESOLVED_SCAN)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if not (bool(everything_asked) and is_admin(user)):
+        granted = await capabilities_for(db, user)
+        rows = [a for a in rows if _visible_row(user, a, _check_row(user, granted, a))]
+    page = rows[offset : offset + limit]
+    items = await _serialize_many(db, page, user)
+    for r in items:
+        r.pop("visible", None)
+    return success(
+        items,
+        meta={
+            "total": len(rows),
+            "offset": offset,
+            "limit": limit,
+            "has_more": offset + len(page) < len(rows),
+            "capped": len(rows) >= RESOLVED_SCAN,
+        },
+    )
 
 
 async def _hitl_execution(
@@ -481,7 +1001,7 @@ async def get_approval(
         a.decided_at = datetime.now(timezone.utc)
         await db.commit()
         await db.refresh(a)
-    return success(_serialize(a))
+    return success(await _serialize_one(db, a, user))
 
 
 @router.get("/{approval_id}/wait")
@@ -554,7 +1074,20 @@ async def _sign_off_hitl(
         return error(f"Approval is already {history.status.value}", 409)
     pending = await get_pending_hitl(str(user.tenant_id), execution_id, gate_id)
     if pending is None:
-        return error("Approval not found", 404)
+        return error(
+            "This run is no longer waiting for an answer, it ended or the request expired.",
+            409,
+            error_code="GATE_CLOSED",
+        )
+    status = getattr(
+        getattr(exec_row, "status", None), "value", getattr(exec_row, "status", None)
+    )
+    if str(status).lower() in ("completed", "failed", "cancelled", "canceled"):
+        return error(
+            f"This run already {str(status).lower()}, so nothing is waiting for this answer.",
+            409,
+            error_code="GATE_CLOSED",
+        )
     denial = await approver_denial(db, user, exec_row.user_id)
     if denial:
         return error(denial, 403)
@@ -626,6 +1159,12 @@ async def sign_off(
         return error("decision must be approve, deny or return", 400)
     if body.decision == "return" and not (body.reason or "").strip():
         return error("Say what needs to change, so the requester can correct it.", 400)
+    if body.decision == "deny" and len((body.reason or "").strip()) < MIN_DENY_REASON:
+        return error(
+            f"Say why you are denying it, at least {MIN_DENY_REASON} characters. The requester is told.",
+            422,
+            error_code="REASON_REQUIRED",
+        )
     hitl = parse_hitl_id(approval_id)
     if hitl:
         return await _sign_off_hitl(db, user, hitl[0], hitl[1], body)
@@ -649,6 +1188,16 @@ async def sign_off(
     if a.status != ApprovalStatus.pending:
         return error(f"Approval is already {a.status.value}", 409)
 
+    if a.gate_kind in DECISION_KINDS and a.gate_kind != "decision_restore":
+        from app.routers import decisions as decisions_router
+
+        key = (a.payload or {}).get("decision_key")
+        if await decisions_router.archived_key(db, a.tenant_id, key):
+            await decisions_router.sweep_archived(db, a.tenant_id)
+            return error(
+                decisions_router.ARCHIVED_REFUSAL, 409, error_code="DECISION_ARCHIVED"
+            )
+
     edited = body.edited_arguments
     if edited is not None:
         if not (a.gate_kind or "").startswith("action:"):
@@ -668,9 +1217,40 @@ async def sign_off(
         if refused:
             return error(refused, 403, error_code="AUTHOR_CANNOT_APPROVE")
 
-    denial = await approver_denial(db, user, a.requested_by, a.policy, a.gate_kind)
-    if denial:
-        return error(denial, 403)
+    sole = bool(body.sole_operator)
+    if sole:
+        from app.core.capabilities import _role, capabilities_for
+
+        people = await tenant_people(db, a.tenant_id)
+        eligible = eligible_from(people, a.policy, a.gate_kind, a.requested_by)
+        refused = sole_operator_refusal(
+            gate_kind=a.gate_kind,
+            decision=body.decision,
+            reason=body.reason,
+            is_requester=is_self_approval(user, a.requested_by),
+            requester_can_sign=can_sign(
+                _role(user), await capabilities_for(db, user), a.policy, a.gate_kind
+            ),
+            enabled=await sole_operator_enabled(db, a.tenant_id),
+            eligible_count=len(eligible),
+        )
+        if refused:
+            status_code, code, message = refused
+            return error(message, status_code, error_code=code)
+    else:
+        denial = await approver_denial(db, user, a.requested_by, a.policy, a.gate_kind)
+        if denial:
+            cap = getattr(denial, "capability", None)
+            if a.gate_kind in SOLE_OPERATOR_KINDS and is_self_approval(
+                user, a.requested_by
+            ):
+                denial = await _sole_hint(db, a, denial)
+            return error(
+                str(denial),
+                403,
+                error_code="CANNOT_SIGN" if cap else None,
+                details={"capability": cap} if cap else None,
+            )
 
     if edited is not None:
         from app.services.autonomy import validate_edited_arguments
@@ -687,22 +1267,46 @@ async def sign_off(
     record: dict[str, Any] = {
         "user_id": str(user.id),
         "user_email": user.email,
+        "user_name": user.full_name or user.email,
         "decision": body.decision,
         "reason": body.reason or "",
         "at": datetime.now(timezone.utc).isoformat(),
         "self_approved": is_self_approval(user, a.requested_by),
+        "sole_operator": sole,
     }
     if body.client_token:
         record["client_token"] = body.client_token
     signoffs.append(record)
     a.signoffs = signoffs
     prev_status = a.status
-    new_status = _evaluate_status(a)
+    # nobody else can sign, so the one recorded sign-off settles it whatever the count
+    new_status = ApprovalStatus.approved if sole else _evaluate_status(a)
     a.status = new_status
     if new_status != ApprovalStatus.pending:
         a.decided_at = datetime.now(timezone.utc)
+    if sole:
+        from app.core.audit import log_action
+
+        await log_action(
+            db,
+            a.tenant_id,
+            user.id,
+            "approval.self_approved",
+            {
+                "approval_id": str(a.id),
+                "gate_kind": a.gate_kind,
+                "title": a.title,
+                "reason": (body.reason or "").strip(),
+                "eligible_approvers": 0,
+                "required_signoffs": a.required_signoffs,
+            },
+            resource_type="approval",
+            resource_id=str(a.id),
+        )
     await db.commit()
     await db.refresh(a)
+    if sole:
+        await _notify_self_approved(db, a, user, (body.reason or "").strip())
     if prev_status == ApprovalStatus.pending and new_status != ApprovalStatus.pending:
         from app.services.events import emit
 
@@ -718,13 +1322,65 @@ async def sign_off(
             },
         )
         await db.commit()
-        if a.gate_kind == "decision_publish":
+        if a.gate_kind in DECISION_KINDS:
             from app.routers.decisions import on_approval_resolved
 
             await on_approval_resolved(db, a)
         await _autonomy_resolved(db, a, user)
         await _notify_resolved(db, a, decider=user)
-    return success(_serialize(a))
+    return success(await _serialize_one(db, a, user))
+
+
+async def _sole_hint(db: AsyncSession, a: Approval, denial: str) -> str:
+    """Tell the requester who else can sign, or that they may sign alone."""
+    people = await tenant_people(db, a.tenant_id)
+    n = len(eligible_from(people, a.policy, a.gate_kind, a.requested_by))
+    if n:
+        return f"{denial} {people_words(n)}"
+    if await sole_operator_enabled(db, a.tenant_id):
+        return f"{denial} Nobody else in this workspace can, so you can sign it alone with a written reason."
+    return denial
+
+
+async def _notify_self_approved(
+    db: AsyncSession, a: Approval, user: User, reason: str
+) -> None:
+    admins = (
+        (
+            await db.execute(
+                select(User.id).where(
+                    User.tenant_id == a.tenant_id,
+                    User.role == "admin",
+                    User.is_active.is_(True),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    who = user.full_name or user.email
+    for uid in admins:
+        # you know you signed it, the other admins are the ones to tell
+        if uid == user.id:
+            continue
+        try:
+            await create_notification(
+                db,
+                tenant_id=a.tenant_id,
+                user_id=uid,
+                type="system_alert",
+                title=f"Self-approved: {(a.title or 'an approval')[:80]}",
+                message=f"{who} approved their own request because nobody else in the workspace can. Reason: {reason}",
+                link="/approvals",
+                metadata={
+                    "approval_id": str(a.id),
+                    "gate_kind": a.gate_kind,
+                    "self_approved": True,
+                },
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.warning("self-approval notice failed: %s", e)
+    await db.commit()
 
 
 async def _autonomy_resolved(db: AsyncSession, a: Approval, decider: Any) -> None:
@@ -863,6 +1519,17 @@ async def _notify_resolved(
     truncated_title = title if len(title) <= 80 else title[:77] + "..."
     decider_name = decider.full_name or decider.email or "A reviewer"
     message = f"{decider_name} {status_value} this request."
+    why = next(
+        (
+            (s.get("reason") or "").strip()
+            for s in reversed(approval.signoffs or [])
+            if s.get("decision") in ("deny", "return")
+            and (s.get("reason") or "").strip()
+        ),
+        "",
+    )
+    if why and status_value in ("denied", "returned"):
+        message = f"{message} Reason: {why}"
     targets: set[uuid.UUID] = {approval.requested_by}
     for s in approval.signoffs or []:
         sid = s.get("user_id")
@@ -878,6 +1545,10 @@ async def _notify_resolved(
         "agent_id": str(approval.agent_id) if approval.agent_id else None,
         "gate_kind": approval.gate_kind,
     }
+    decision_gate = approval.gate_kind in DECISION_KINDS
+    link = "/approvals"
+    if decision_gate and isinstance((approval.payload or {}).get("link"), str):
+        link = approval.payload["link"]
     for target_id in targets:
         await create_notification(
             db,
@@ -886,8 +1557,10 @@ async def _notify_resolved(
             type="approval_resolved",
             title=truncated_title,
             message=message,
-            link="/approvals",
+            link=link,
             metadata=metadata,
+            # the person who asked always hears the outcome, by email too when it is on
+            email=decision_gate and target_id == approval.requested_by,
         )
     if targets:
         await db.commit()

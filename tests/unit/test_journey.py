@@ -87,6 +87,8 @@ class FakeDB:
             "conversations",
             "risk_policies",
             "moderation_policies",
+            "decision_models",
+            "approvals",
             "users",
             "agents",
         ):
@@ -130,8 +132,10 @@ async def test_admin_fresh_tenant(monkeypatch):
         "invite_team": False,
         "review_risk": False,
         "moderation": False,
+        "write_rule": False,
+        "approve_changes": False,
     }
-    assert view["done"] == 0 and view["total"] == 4 and not view["complete"]
+    assert view["done"] == 0 and view["total"] == 6 and not view["complete"]
 
 
 async def test_admin_all_done():
@@ -141,6 +145,8 @@ async def test_admin_all_done():
                 "users": [3],
                 "risk_policies": [uuid.uuid4()],
                 "moderation_policies": [uuid.uuid4()],
+                "decision_models": [uuid.uuid4()],
+                "approvals": [uuid.uuid4()],
             }
         }
     )
@@ -161,8 +167,8 @@ async def test_builder_no_agents():
     assert view["role"] == "builder"
     assert not any(_flags(view).values())
     assert [s["id"] for s in view["steps"]][-1] == "list_marketplace"
-    # nothing else is asked once there is no agent
-    assert len(db.statements) == 1
+    # nothing else is asked once there is no agent, the permission read decides the approver step
+    assert len([st for st in db.statements if "permission" not in str(st)]) == 1
 
 
 async def test_builder_progress():
@@ -285,6 +291,8 @@ async def test_tenant_isolation():
         "users": [5],
         "risk_policies": [uuid.uuid4()],
         "moderation_policies": [uuid.uuid4()],
+        "decision_models": [uuid.uuid4()],
+        "approvals": [uuid.uuid4()],
         "agents": [(aid, True, AgentStatus.ACTIVE)],
         "executions": [uuid.uuid4()],
         "knowledge_collections": [uuid.uuid4()],
@@ -352,3 +360,23 @@ async def test_invite_step_needs_a_real_invite_or_colleague():
     assert (
         _flags(await J.journey_view(db, _user(UserRole.ADMIN)))["invite_team"] is True
     )
+
+
+async def test_an_approver_learns_where_requests_wait():
+    db = FakeDB({TENANT_A: {"users": [1]}})
+    view = await J.journey_view(db, _user(UserRole.ADMIN))
+    step = next(s for s in view["steps"] if s["id"] == "approve_changes")
+    assert step["href"] == "/inbox?tab=approvals" and step["done"] is False
+    seen = _user(UserRole.ADMIN, prefs={"journey": {"seen": ["approvals"]}})
+    assert _flags(await J.journey_view(db, seen))["approve_changes"] is True
+    signed = FakeDB({TENANT_A: {"users": [1], "approvals": [uuid.uuid4()]}})
+    assert (
+        _flags(await J.journey_view(signed, _user(UserRole.ADMIN)))["approve_changes"]
+        is True
+    )
+
+
+async def test_a_member_who_cannot_approve_is_not_told_to():
+    db = FakeDB({TENANT_A: {}})
+    view = await J.journey_view(db, _user(UserRole.USER))
+    assert "approve_changes" not in _flags(view)

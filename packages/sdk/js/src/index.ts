@@ -137,13 +137,28 @@ export interface Approval {
   payload: Record<string, unknown>;
   requiredSignoffs: number;
   signoffs: Array<Record<string, unknown>>;
-  status: 'pending' | 'approved' | 'denied' | 'expired' | 'returned';
+  status: 'pending' | 'approved' | 'denied' | 'expired' | 'returned' | 'withdrawn';
   requestedBy: string | null;
   expiresAt: string | null;
   decidedAt: string | null;
   createdAt: string | null;
   gateKind: string | null;
   clientToken: string | null;
+  /** someone approved their own request, sole-operator sign-offs included */
+  selfApproved: boolean;
+  /** people other than the requester who may sign it, null when unknown */
+  eligibleApproverCount: number | null;
+  /** whether the caller can sign it now, and why not in plain words */
+  canSign: boolean;
+  cannotSignReason: string | null;
+  /** what is being asked, in plain words */
+  summary: string;
+  kindLabel: string;
+  /** why it was withdrawn and by whom, null when the platform did it */
+  withdrawReason: string | null;
+  withdrawnByName: string | null;
+  /** nobody else can sign, so the requester may sign alone with a reason */
+  soleOperatorAvailable: boolean;
 }
 
 export interface LiveExecution {
@@ -234,6 +249,7 @@ export class Abenix {
   public codeAssets: CodeAssetsClient;
   public killSwitches: KillSwitchesClient;
   public apiKeys: ApiKeysClient;
+  public team: TeamClient;
 
   constructor(config: AbenixConfig) {
     this.apiKey = config.apiKey;
@@ -256,6 +272,7 @@ export class Abenix {
     this.codeAssets = new CodeAssetsClient(this);
     this.killSwitches = new KillSwitchesClient(this);
     this.apiKeys = new ApiKeysClient(this);
+    this.team = new TeamClient(this);
   }
 
   /** The user this key acts as, as { user: {...} }. */
@@ -770,6 +787,16 @@ export class AbenixDecisionError extends Error {
 
 export type DecisionOutcome = 'decided' | 'no_match' | 'missing_facts' | 'invalid_facts';
 
+/** The review a version in force waits for after its decision's tier was raised. */
+export interface DecisionReattest {
+  approval_id: string;
+  version: number;
+  from_tier: string;
+  to_tier: string;
+  status: 'pending' | 'approved' | 'denied' | 'expired' | 'returned' | 'withdrawn';
+  required_signoffs: number;
+}
+
 export interface DecisionResult {
   decision: { key: string; name: string; risk_tier: string };
   version: { id: string; version: number; content_hash: string; valid_from: string | null; valid_to: string | null };
@@ -797,8 +824,91 @@ export class DecisionsClient {
     return json?.data as T;
   }
 
-  list(q = ''): Promise<any[]> {
-    return this.call('GET', `/api/decisions${q ? `?q=${encodeURIComponent(q)}` : ''}`);
+  list(q = '', opts: { archived?: boolean } = {}): Promise<any[]> {
+    const params = new URLSearchParams();
+    if (q) params.set('q', q);
+    if (opts.archived) params.set('archived', '1');
+    const qs = params.toString();
+    return this.call('GET', `/api/decisions${qs ? `?${qs}` : ''}`);
+  }
+
+  /** available, valid, suggestion (the next free key) and archived */
+  checkKey(key: string): Promise<{ available: boolean; valid: boolean; suggestion: string | null; archived?: boolean; message?: string }> {
+    return this.call('GET', `/api/decisions/check-key?key=${encodeURIComponent(key)}`);
+  }
+
+  /** At a tier that asks for sign-off this needs a reason and resolves to { pending: {...} }. */
+  archive(key: string, opts: { reason?: string } = {}): Promise<any> {
+    return this.call('DELETE', `/api/decisions/${encodeURIComponent(key)}`, opts.reason ? { reason: opts.reason } : undefined);
+  }
+
+  /** At a tier that asks for sign-off this needs a reason and resolves to { pending: {...} }. */
+  restore(key: string, opts: { reason?: string } = {}): Promise<any> {
+    return this.call('POST', `/api/decisions/${encodeURIComponent(key)}/restore`, opts.reason ? { reason: opts.reason } : undefined);
+  }
+
+  /** The list for a search plus how many archived decisions match too. */
+  async search(q: string): Promise<{ items: any[]; archived_matches: number }> {
+    const res = await this.client._fetch(`/api/decisions?q=${encodeURIComponent(q)}`, { method: 'GET' });
+    const json: any = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const err = typeof json?.error === 'object' && json.error ? json.error : { message: `HTTP ${res.status}` };
+      throw new AbenixDecisionError(res.status, err.message, err.error_code, err.details);
+    }
+    return { items: json?.data ?? [], archived_matches: json?.meta?.archived_matches ?? 0 };
+  }
+
+  /** Retire the version in force. At a tier that asks for sign-off this needs a reason and resolves to { pending: {...} }. */
+  retire(key: string, version: number, opts: { reason?: string } = {}): Promise<any> {
+    return this.call('POST', `/api/decisions/${encodeURIComponent(key)}/versions/${version}/retire`, opts.reason ? { reason: opts.reason } : undefined);
+  }
+
+  /** Delete a draft. Only its author or someone who can publish may. */
+  discardDraft(key: string, version: number): Promise<any> {
+    return this.call('DELETE', `/api/decisions/${encodeURIComponent(key)}/versions/${version}`);
+  }
+
+  /** Teammates who could be made approvers: active, real people who cannot approve yet. */
+  approverCandidates(key: string): Promise<Array<{ id: string; name: string; email: string }>> {
+    return this.call('GET', `/api/decisions/${encodeURIComponent(key)}/approver-candidates`);
+  }
+
+  /** Put a person in the Decision reviewers set. Admins only. */
+  addApprover(key: string, userId: string): Promise<any> {
+    return this.call('POST', `/api/decisions/${encodeURIComponent(key)}/approvers`, { user_id: userId });
+  }
+
+  /** Who must sign this version, who has, who could, and whether the author may sign it alone. */
+  signOffInfo(key: string, version: number): Promise<any> {
+    return this.call('GET', `/api/decisions/${encodeURIComponent(key)}/versions/${version}/sign-off`);
+  }
+
+  /**
+   * A decision file into a new decision, or a new draft when the key exists, with its tests.
+   * Takes an export({ full: true }) file or the plain { key, name, description, risk_tier, rules, tests } shape.
+   * Nothing is published. preview returns what would happen without writing.
+   */
+  importFile(data: unknown, opts: { preview?: boolean; asNewKey?: string; asNewName?: string } = {}): Promise<any> {
+    const params = new URLSearchParams();
+    if (opts.preview) params.set('preview', '1');
+    if (opts.asNewKey) params.set('as_new_key', opts.asNewKey);
+    if (opts.asNewName) params.set('as_new_name', opts.asNewName);
+    const qs = params.toString();
+    return this.call('POST', `/api/decisions/import${qs ? `?${qs}` : ''}`, typeof data === 'string' ? JSON.parse(data) : data);
+  }
+
+  /** Drop a lowering that waits for sign-off. */
+  withdrawTierChange(key: string): Promise<any> {
+    return this.call('DELETE', `/api/decisions/${encodeURIComponent(key)}/tier-change`);
+  }
+
+  /**
+   * The review a version in force waits for after a tier raise, or null. Sign it with approvals.signoff,
+   * soleOperator included when nobody else can. Once approved the version records attested_under.
+   */
+  async reattest(key: string): Promise<DecisionReattest | null> {
+    const d: any = await this.get(key);
+    return (d?.reattest as DecisionReattest | null) ?? null;
   }
 
   get(key: string): Promise<any> {
@@ -828,16 +938,28 @@ export class DecisionsClient {
     return this.call('POST', `/api/decisions/${k}/versions/${draft.version}/propose`, { note });
   }
 
-  export(key: string, version?: number): Promise<any> {
-    return this.call('GET', `/api/decisions/${encodeURIComponent(key)}/export${version ? `?version=${version}` : ''}`);
+  /** full gives the whole decision as an abenix-decision-v1 file that importFile takes back. */
+  export(key: string, version?: number, opts: { full?: boolean } = {}): Promise<any> {
+    const params = new URLSearchParams();
+    if (version) params.set('version', String(version));
+    if (opts.full) params.set('full', '1');
+    const qs = params.toString();
+    return this.call('GET', `/api/decisions/${encodeURIComponent(key)}/export${qs ? `?${qs}` : ''}`);
   }
 
   referenceSets(): Promise<any[]> {
     return this.call('GET', '/api/decision-reference-sets');
   }
 
-  update(key: string, fields: { name?: string; description?: string; riskTier?: string; tags?: string[]; logMode?: string }): Promise<any> {
+  /**
+   * Raising riskTier applies at once, and a version in force whose sign-off falls short gets a review,
+   * returned as reattest. Lowering needs a reason, and when the current tier asks for sign-off
+   * the tier stays: the result carries pending_tier_change with the approval to sign. Refused with
+   * TIER_LOCKED while a version waits for sign-off.
+   */
+  update(key: string, fields: { name?: string; description?: string; riskTier?: string; tags?: string[]; logMode?: string; reason?: string }): Promise<any> {
     const body: Record<string, unknown> = {};
+    if (fields.reason !== undefined) body.reason = fields.reason;
     if (fields.name !== undefined) body.name = fields.name;
     if (fields.description !== undefined) body.description = fields.description;
     if (fields.riskTier !== undefined) body.risk_tier = fields.riskTier;
@@ -1340,6 +1462,21 @@ export interface ApiKey {
 }
 
 /** API keys of the calling user, or of the whole tenant for an admin. */
+/** Members of the workspace and who of them can approve decisions. */
+export class TeamClient {
+  constructor(private client: Abenix) {}
+
+  async members(): Promise<any[]> {
+    const r: any = await platformCall<any>(this.client, 'GET', '/api/team/members');
+    return r?.members || [];
+  }
+
+  /** Add someone to Decision reviewers or take them out. warning says when few people are left who can approve. */
+  setApprover(userId: string, canApproveDecisions: boolean): Promise<any> {
+    return platformCall(this.client, 'PUT', `/api/team/${encodeURIComponent(userId)}/approver`, { can_approve_decisions: canApproveDecisions });
+  }
+}
+
 export class ApiKeysClient {
   constructor(private client: Abenix) {}
 
@@ -1679,11 +1816,20 @@ export class ApprovalsClient {
       createdAt: (raw.created_at as string | null) ?? null,
       gateKind: (raw.gate_kind as string | null) ?? null,
       clientToken: (raw.client_token as string | null) ?? null,
+      selfApproved: !!raw.self_approved,
+      eligibleApproverCount: (raw.eligible_approver_count as number | null | undefined) ?? null,
+      soleOperatorAvailable: !!raw.sole_operator_available,
+      canSign: !!raw.can_sign,
+      cannotSignReason: (raw.cannot_sign_reason as string | null | undefined) ?? null,
+      summary: (raw.summary as string | undefined) ?? '',
+      kindLabel: (raw.kind_label as string | undefined) ?? '',
+      withdrawReason: (raw.withdraw_reason as string | null | undefined) ?? null,
+      withdrawnByName: (raw.withdrawn_by_name as string | null | undefined) ?? null,
     };
   }
 
   async list(opts?: {
-    status?: 'pending' | 'approved' | 'denied' | 'expired';
+    status?: 'pending' | 'approved' | 'denied' | 'expired' | 'returned' | 'withdrawn';
     executionId?: string;
     agentId?: string;
     kind?: string;
@@ -1699,6 +1845,19 @@ export class ApprovalsClient {
     if (!res.ok) throw new Error(`Failed to list approvals: HTTP ${res.status}`);
     const data = await res.json();
     return (data.data || []).map((row: Record<string, unknown>) => this._normalize(row));
+  }
+
+  /** Settled approvals you asked for, signed or could have signed, a page at a time. */
+  async resolved(opts: { offset?: number; limit?: number } = {}): Promise<{ items: Approval[]; total: number; hasMore: boolean }> {
+    const params = new URLSearchParams({ status: 'resolved', offset: String(opts.offset ?? 0), limit: String(opts.limit ?? 50) });
+    const res = await this.client._fetch(`/api/approvals?${params.toString()}`);
+    if (!res.ok) throw new Error(`Failed to list approvals: HTTP ${res.status}`);
+    const data = await res.json();
+    return {
+      items: (data.data || []).map((row: Record<string, unknown>) => this._normalize(row)),
+      total: data.meta?.total ?? 0,
+      hasMore: !!data.meta?.has_more,
+    };
   }
 
   async get(approvalId: string): Promise<Approval> {
@@ -1751,12 +1910,19 @@ export class ApprovalsClient {
   async signoff(
     approvalId: string,
     decision: 'approve' | 'deny' | 'return',
-    options?: { reason?: string; clientToken?: string; editedArguments?: Record<string, unknown> },
+    options?: { reason?: string; clientToken?: string; editedArguments?: Record<string, unknown>; soleOperator?: boolean },
   ): Promise<Approval> {
     const body: Record<string, unknown> = {
       decision,
       reason: options?.reason || '',
     };
+    // signing your own request alone, only when nobody else in the workspace can
+    if (options?.soleOperator) {
+      if ((options.reason || '').trim().length < 10) {
+        return Promise.reject(new Error('A sole-operator sign-off needs a reason of at least 10 characters.'));
+      }
+      body.sole_operator = true;
+    }
     if (options?.clientToken) body.client_token = options.clientToken;
     // action approvals only, the agent runs with these values instead
     if (options?.editedArguments) body.edited_arguments = options.editedArguments;
@@ -1776,7 +1942,11 @@ export class ApprovalsClient {
     return this.signoff(approvalId, 'approve', options);
   }
 
+  /** A reason of at least 5 characters is required, the requester is told it. */
   deny(approvalId: string, options?: { reason?: string; clientToken?: string }): Promise<Approval> {
+    if ((options?.reason || '').trim().length < 5) {
+      return Promise.reject(new Error('Say why you are denying it, at least 5 characters. The requester is told.'));
+    }
     return this.signoff(approvalId, 'deny', options);
   }
 

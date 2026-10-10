@@ -4,7 +4,7 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Enum, ForeignKey, String, func
+from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, String, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -25,6 +25,10 @@ class TeamInvite(UUIDMixin, TenantMixin, Base):
     )
     email: Mapped[str] = mapped_column(String(255), index=True)
     role: Mapped[str] = mapped_column(String(50), default="user")
+    # joins the Decision reviewers permission set on accept
+    can_approve_decisions: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false"
+    )
     status: Mapped[InviteStatus] = mapped_column(
         Enum(InviteStatus, name="invite_status"), default=InviteStatus.PENDING
     )

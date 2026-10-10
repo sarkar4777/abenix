@@ -38,7 +38,8 @@ async def test_decision_publish_needs_review_on_top_of_signing():
     u = _user()
     with patch.object(caps, "capabilities_for", _granted("approvals.sign")):
         why = await approver_denial(None, u, uuid.uuid4(), POLICY, "decision_publish")
-    assert why and "decisions.review" in why
+    assert why and why.capability == "decisions.review"
+    assert "decisions.review" not in why and "review decisions" in why
 
 
 @pytest.mark.asyncio
@@ -47,7 +48,8 @@ async def test_review_alone_does_not_bypass_the_tier_capability():
     pol = {"capability": "approvals.sign:legal"}
     with patch.object(caps, "capabilities_for", _granted("decisions.review")):
         why = await approver_denial(None, u, uuid.uuid4(), pol, "decision_publish")
-    assert why and "approvals.sign:legal" in why
+    assert why and why.capability == "approvals.sign:legal"
+    assert '"Sign approvals" permission for legal' in why
 
 
 @pytest.mark.asyncio
@@ -130,4 +132,4 @@ async def test_signing_granted_by_a_permission_set_opens_gates_without_a_policy(
         assert await approver_denial(None, u, uuid.uuid4(), None, "human_approval") is None
     with patch.object(caps, "capabilities_for", _granted()):
         why = await approver_denial(None, u, uuid.uuid4(), None, "human_approval")
-    assert why and "admins and creators" in why
+    assert why and "admins, creators" in why and why.capability == "approvals.sign"

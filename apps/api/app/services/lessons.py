@@ -1793,7 +1793,7 @@ async def set_gate(
     agent = await _agent(db, user, agent_id)
     if not await can_manage(db, user, agent):
         raise LessonError(
-            "Only the agent's owner, or someone with the improvements.propose permission, can change this.",
+            'Only the agent\'s owner, or someone with the "Propose improvements" permission, can change this.',
             403,
             "FORBIDDEN",
         )

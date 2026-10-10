@@ -306,7 +306,7 @@ function ExecutionsView() {
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
           <input
             type="text"
-            placeholder="Search executions..."
+            placeholder="Search by agent or input..."
             aria-label="Search executions"
             data-testid="exec-search"
             value={search}

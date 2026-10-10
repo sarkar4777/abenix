@@ -828,10 +828,10 @@ async def test_signoff_route_refuses_the_author(world, monkeypatch):
     resp = await approvals_router.sign_off(
         str(approval.id), ApprovalSignoffRequest(decision="approve"), grace, world.db
     )
-    assert (
-        resp.status_code == 403
-        and "improvements.approve" in _body(resp)["error"]["message"]
-    )
+    err = _body(resp)["error"]
+    assert resp.status_code == 403
+    assert err["details"]["capability"] == "improvements.approve"
+    assert "Approve improvements" in err["message"]
 
     async def has_all(db, user, cap):
         return True

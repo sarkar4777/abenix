@@ -1559,6 +1559,8 @@ class LLMRouter:
         # gets one shot so a dead primary doesn't multiply latency.
         chain = self.candidate_chain(model)
         last_error: Exception | None = None
+        # the first provider that answered with an error holds the cause, later ones are fallback noise
+        first_call_error: Exception | None = None
         logger.debug(
             "llm_complete chain for %s: %s",
             model,
@@ -1646,6 +1648,8 @@ class LLMRouter:
                     return result
                 except Exception as e:
                     last_error = e
+                    if first_call_error is None:
+                        first_call_error = e
                     llm_errors_total.labels(
                         model=attempt_model,
                         error_type=type(e).__name__,
@@ -1688,4 +1692,11 @@ class LLMRouter:
         except ImportError:
             pass
 
+        if first_call_error is not None and first_call_error is not last_error:
+            logger.warning(
+                "llm_complete every provider failed, reporting the first: %s (last was %s)",
+                first_call_error,
+                last_error,
+            )
+            raise first_call_error
         raise last_error  # type: ignore[misc]

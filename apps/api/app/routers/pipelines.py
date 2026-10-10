@@ -36,6 +36,11 @@ from models.user import User
 
 router = APIRouter(prefix="/api/pipelines", tags=["pipelines"])
 
+# steps the engine runs itself, an agent never needs them granted
+ENGINE_STEPS = frozenset(
+    {"agent_step", "wait", "state_get", "state_set", "__structured__"}
+)
+
 
 async def _budget_error(db: AsyncSession, agent: Agent, user: User) -> Any:
     from engine.agent_budget import BUDGET_EXCEEDED, check_agent_budget
@@ -142,13 +147,12 @@ async def execute_pipeline(
     tool_names = list(model_config.get("tools", []))
     tool_nodes = [n for n in body.nodes if n.type == "tool"]
     agent_nodes = [n for n in body.nodes if n.type == "agent"]
-    if not tool_names and tool_nodes:
-        return error("Agent has no tools configured", 400)
-
     # Tool nodes must reference tools available on the agent. Agent nodes
     # auto-add `agent_step` to the registry below — they don't need it on
     # the parent agent's tool list.
-    requested_tools = {n.tool_name for n in tool_nodes if n.tool_name}
+    requested_tools = {n.tool_name for n in tool_nodes if n.tool_name} - ENGINE_STEPS
+    if not tool_names and requested_tools:
+        return error("Agent has no tools configured", 400)
     available = set(tool_names)
     missing = requested_tools - available
     if missing:
@@ -377,11 +381,12 @@ async def execute_saved_pipeline(
     saved_agent_nodes = [
         n for n in raw_nodes if (n.get("type") or "tool").lower() == "agent"
     ]
-    if not tool_names and saved_tool_nodes:
-        return error("Agent has no tools configured", 400)
-
     # Tool nodes must reference tools available on the agent.
-    requested_tools = {n["tool_name"] for n in saved_tool_nodes if n.get("tool_name")}
+    requested_tools = {
+        n["tool_name"] for n in saved_tool_nodes if n.get("tool_name")
+    } - ENGINE_STEPS
+    if not tool_names and requested_tools:
+        return error("Agent has no tools configured", 400)
     available = set(tool_names)
     missing = requested_tools - available
     if missing:
@@ -529,10 +534,11 @@ async def execute_pipeline_stream(
     tool_names = list(model_config.get("tools", []))
     stream_tool_nodes = [n for n in body.nodes if n.type == "tool"]
     stream_agent_nodes = [n for n in body.nodes if n.type == "agent"]
-    if not tool_names and stream_tool_nodes:
+    requested_tools = {
+        n.tool_name for n in stream_tool_nodes if n.tool_name
+    } - ENGINE_STEPS
+    if not tool_names and requested_tools:
         return error("Agent has no tools configured", 400)
-
-    requested_tools = {n.tool_name for n in stream_tool_nodes if n.tool_name}
     available_tools = set(tool_names)
     missing = requested_tools - available_tools
     if missing:
@@ -994,7 +1000,7 @@ async def validate_pipeline_endpoint(
             if not isinstance(n, dict):
                 continue
             t = n.get("tool") or n.get("tool_name") or n.get("tool_slug")
-            if isinstance(t, str) and t and t not in granted and t != "agent_step":
+            if isinstance(t, str) and t and t not in granted and t not in ENGINE_STEPS:
                 payload.setdefault("errors", []).append(
                     {
                         "node_id": n.get("id", ""),

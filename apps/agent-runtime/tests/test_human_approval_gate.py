@@ -130,3 +130,48 @@ async def test_mark_and_clear_waiting(fake_redis):
     assert "hitl:waiting:exec-9" not in fake_redis.kv
     await ha.mark_waiting("", 120)
     assert fake_redis.kv == {}
+
+
+@pytest.mark.asyncio
+async def test_a_denial_with_a_reason_reaches_the_run(fake_redis):
+    tool = _tool()
+
+    async def deny_when_listed():
+        while True:
+            for member in list(fake_redis.sets.get("hitl:pending:tenant-1", set())):
+                gate = json.loads(member)["gate_id"]
+                fake_redis.kv[ha._approval_key("exec-1", gate)] = json.dumps(
+                    {
+                        "decision": "rejected",
+                        "reviewer": "Ana",
+                        "comment": "Over the refund limit",
+                    }
+                )
+                return
+            await asyncio.sleep(0.01)
+
+    denier = asyncio.create_task(deny_when_listed())
+    result = await asyncio.wait_for(tool.execute({"action": "refund"}), timeout=10)
+    await denier
+    assert result.is_error and result.metadata["decision"] == "rejected"
+    assert "Over the refund limit" in result.content
+    assert fake_redis.sets["hitl:pending:tenant-1"] == set()
+    assert "hitl:waiting:exec-1" not in fake_redis.kv
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_run_leaves_no_gate_behind(fake_redis):
+    tool = _tool()
+    task = asyncio.create_task(tool.execute({"action": "refund"}))
+    for _ in range(100):
+        if fake_redis.sets.get("hitl:pending:tenant-1"):
+            break
+        await asyncio.sleep(0.01)
+    assert fake_redis.sets["hitl:pending:tenant-1"]
+    assert fake_redis.kv.get("hitl:waiting:exec-1") == "1"
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    # nobody can answer a gate whose run is gone
+    assert fake_redis.sets["hitl:pending:tenant-1"] == set()
+    assert "hitl:waiting:exec-1" not in fake_redis.kv

@@ -2,9 +2,11 @@ import { useApi } from '@/hooks/useApi';
 
 export interface MyPermissions {
   role: string;
+  user_id?: string;
   is_admin: boolean;
   features: Record<string, boolean>;
   capabilities?: string[];
+  can_approve_decisions?: boolean;
 }
 
 // Mirrors app/core/capabilities.py holds(): "*", exact, "group.*", and a grant

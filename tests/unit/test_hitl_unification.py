@@ -296,7 +296,7 @@ async def test_deny_on_hitl_id_maps_to_rejected(fake_redis):
     with patch.object(approvals_router, "_notify_resolved", AsyncMock()):
         resp = await approvals_router.sign_off(
             approval_id=f"hitl:{execution_id}:gate-abc",
-            body=ApprovalSignoffRequest(decision="deny", reason="nope"),
+            body=ApprovalSignoffRequest(decision="deny", reason="not this one"),
             user=user,
             db=FakeDB(executions=[exec_row]),
         )

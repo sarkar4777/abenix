@@ -84,7 +84,7 @@ On approval it returns `Approved by <reviewer>.` with the comment if any. A reje
 
 The gate needs an execution context. A tool registry built without `execution_id` and `tenant_id` gets an error instead of an invisible wait.
 
-Signing one off through `/api/approvals/{id}/signoff` writes the decision to Redis, which resumes the run, and writes an `approvals` history row with `gate_kind: human_approval` and status `approved` or `denied`, so the decision shows under recent decisions and reaches the notification path. The older `POST /api/executions/{execution_id}/approve?gate_id=…` with `decision: approved | rejected` still works, and `GET /api/executions/approvals` lists the raw Redis gates.
+Signing one off through `/api/approvals/{id}/signoff` writes the decision to Redis, which resumes the run with the answer and any reason in the tool result, and writes an `approvals` history row with `gate_kind: human_approval` and status `approved` or `denied`, so the decision shows under recent decisions and reaches the notification path. A deny needs a reason, and the tool result the agent reads is `Rejected by <name>. Reason: <reason>`. A gate whose run already stopped waiting, because it ended, was cancelled or timed out, is dropped from the list, and answering it returns 409 `GATE_CLOSED`. The older `POST /api/executions/{execution_id}/approve?gate_id=…` with `decision: approved | rejected` still works, and `GET /api/executions/approvals` lists the raw Redis gates.
 
 To make an agent fail rather than answer when it skips the gate, set `model_config.require_tools: [human_approval]`. See [00-agent-execution](00-agent-execution.md#required-tools).
 
@@ -140,7 +140,7 @@ The `approvals` table ([`packages/db/models/approval.py`](../../packages/db/mode
 | `payload` | JSONB the reviewer sees |
 | `required_signoffs` | How many approvals settle it |
 | `signoffs` | JSONB array, one entry per signer |
-| `status` | `approval_status` enum: `pending`, `approved`, `denied`, `expired`, `returned` |
+| `status` | `approval_status` enum: `pending`, `approved`, `denied`, `expired`, `returned`, `withdrawn` |
 | `requested_by` | User who created it |
 | `expires_at`, `decided_at`, `escalated_at` | |
 | `client_token` | Idempotency key. A second create with the same token returns the first row |
@@ -151,8 +151,16 @@ A signoff entry:
 
 ```json
 {"user_id": "…", "user_email": "…", "decision": "approve", "reason": "", "at": "2026-10-03T09:14:02+00:00",
- "self_approved": false, "client_token": "optional"}
+ "self_approved": false, "sole_operator": false, "client_token": "optional"}
 ```
+
+Reads add `user_name` to each entry, the signer's full name or their email when no name is set.
+
+```json
+{"user_id": "…", "user_name": "Rita Reviewer", "user_email": "…", "decision": "deny", "reason": "Cite the 2026 plan"}
+```
+
+Reads of a row also carry `self_approved` (someone approved their own request), `eligible_approver_count` (active people other than the requester who may sign it) and `sole_operator_available` (the requester may sign it alone, see [Working alone](#working-alone)). `eligible_approver_count` is null on merged `human_approval` gates.
 
 ### Status transitions
 
@@ -163,6 +171,8 @@ stateDiagram-v2
   pending --> denied: any deny
   pending --> returned: any return
   pending --> expired: read after expires_at
+  pending --> withdrawn: requester withdraws
+  withdrawn --> [*]
   approved --> [*]
   denied --> [*]
   returned --> [*]
@@ -170,6 +180,8 @@ stateDiagram-v2
 ```
 
 After each signoff the status is worked out from the whole array. A deny wins over everything, then a return, then the approval count. Once terminal, an approval cannot be reopened. A signoff on a settled row gets 409 "Approval is already <status>". A user can sign each approval once, a second attempt gets 409. A retry with the same `client_token` returns the row unchanged.
+
+Every withdrawn row says why in `withdraw_reason` and who in `withdrawn_by_name`, which is null when the platform withdrew it on its own, for example sweeping a request left on an archived decision. The reason is a whole sentence, the real one, such as "The decision was archived." or "Version 2 was taken back to a draft before sign-off.", and the same text sits in `payload.withdrawn`. Withdrawn means the request was taken back, for example a decision version withdrawn to a draft, a tier change dropped, a review closed because its version left force, or an improvement edited and proved again. Expired only ever means the time ran out.
 
 Expiry is applied when the row is read. `GET /api/approvals` sweeps the tenant's overdue pending rows to `expired` and emits `approval.resolved` for each. `GET /api/approvals/{id}` and the `/wait` long-poll flip a single overdue row. There is no separate expiry job.
 
@@ -185,7 +197,13 @@ A signer can send an approval back instead of denying it. `POST /api/approvals/{
 
 ## Who may sign
 
-Without a policy on the row, admins and creators sign off, and so does anyone whose permission set grants `approvals.sign`. A sign-off by the user who requested it is allowed and recorded with `self_approved: true`, because most tenants have one admin. Anyone else gets 403 "Only admins and creators can sign off on approvals".
+Without a policy on the row, admins and creators sign off, and so does anyone whose permission set grants `approvals.sign`. A sign-off by the user who requested it is allowed and recorded with `self_approved: true`, because most tenants have one admin. Anyone else gets 403 "Only admins, creators and people who can sign approvals can approve this."
+
+Every decision approval (`decision_publish`, `decision_tier_change`, `decision_reattest`, `decision_retire`, `decision_archive`, `decision_restore`) needs both Review decisions and Sign approvals. The seeded **Decision reviewers** permission set holds the two, see [who can approve](../08-howto/09-decisions.md#who-can-approve). Someone who lacks them is told so in plain words, "Only people who can review decisions can approve this. An admin can add you under Admin, Permissions, Decision reviewers.", with the capability id kept in `details.capability`.
+
+**What the list shows.** `GET /api/approvals` returns the rows you can sign, the rows you asked for, and the rows you already signed. Settled rows follow the same rule, and a settled row you could have signed only shows when it was raised after you joined the workspace. Each row carries `can_sign` and `cannot_sign_reason` in plain words. Admins can pass `?all=1` to see every row. Needs you counts the pending rows with `can_sign`, including your own request when you may sign it alone, so the two always agree.
+
+**Deny needs a reason** of at least 5 characters, otherwise 422 `REASON_REQUIRED`. The requester's notification carries the reason, and a denied decision version keeps it.
 
 With a policy, the capability check replaces the role rule. See below.
 
@@ -194,6 +212,8 @@ Some gate kinds add their own rule on top:
 | `gate_kind` | Extra rule |
 |---|---|
 | `decision_publish` | The signer needs `decisions.review` |
+| `decision_tier_change` | The signer needs `decisions.review`. The requester can never sign it the usual way |
+| `decision_reattest` | The signer needs `decisions.review`. Signed under the new tier's rules after a raise, see [the decisions how-to](../08-howto/09-decisions.md#review-after-a-raise) |
 | `autonomy.promote` | The agent's creator gets 403 `AUTHOR_CANNOT_GRANT` while someone else in the tenant could sign. See [self-approval](21-earned-autonomy.md#self-approval) |
 | `improvement.release` | The agent's creator gets 403 `AUTHOR_CANNOT_APPROVE` on an approve, same rule |
 | `action:<key>` | The approver may send `edited_arguments` with an approve. The runtime runs the action with them |
@@ -267,6 +287,18 @@ TypeScript has the same surface in camelCase (`pausedAt`, `approvals.returnForCh
 
 ---
 
+### Working alone
+
+A `decision_publish`, `decision_tier_change` or `decision_reattest` approval that nobody but the requester could ever sign would be a wall in a one-person workspace. The requester may sign it alone when all of these hold:
+
+- no other active person in the tenant holds the policy's capability (default `approvals.sign`) and `decisions.review`
+- the tenant setting `governance.sole_operator_signoff` is on, which it is by default
+- the requester holds those capabilities themselves
+
+They send `{"decision": "approve", "sole_operator": true, "reason": "..."}`. The reason needs at least 10 characters, otherwise 422 `REASON_REQUIRED`. The one sign-off settles the approval whatever `required_signoffs` says. It is recorded with `sole_operator: true`, the row reads `self_approved: true`, the audit log gets `approval.self_approved` and every other admin gets a notification. The person who signed is not told about their own sign-off.
+
+When another person could sign, the call gets 403 `OTHER_APPROVERS_EXIST` with "2 people can approve this. Ask one of them." With the setting off it gets 403 `SOLE_OPERATOR_OFF`. Other gate kinds get 403 `SOLE_OPERATOR_NOT_ALLOWED`. The platform's own `system@abenix.dev` account never counts as an approver.
+
 ## REST
 
 All under `/api/approvals`.
@@ -277,7 +309,7 @@ All under `/api/approvals`.
 | GET | `/api/approvals` | List. Filters `status`, `execution_id`, `agent_id`, `kind`, `limit` (1 to 500). Pending `human_approval` gates are merged in when the filters allow |
 | GET | `/api/approvals/{id}` | One row. Takes a UUID or a `hitl:` id |
 | GET | `/api/approvals/{id}/wait` | Long-poll until the status leaves `pending`, `timeout_seconds` 1 to 120, default 30 |
-| POST | `/api/approvals/{id}/signoff` | `decision` (`approve`, `deny`, `return`), `reason` (up to 1,000 characters), `client_token`, and `edited_arguments` for `action:` gates only |
+| POST | `/api/approvals/{id}/signoff` | `decision` (`approve`, `deny`, `return`), `reason` (up to 1,000 characters), `client_token`, `edited_arguments` for `action:` gates only, and `sole_operator` for [working alone](#working-alone) |
 | GET | `/api/approvals/webhooks` | The tenant's approval webhook URL and whether a secret is set |
 | PUT | `/api/approvals/webhooks` | Set or clear the URL and secret. Admins only |
 
@@ -291,14 +323,23 @@ flowchart LR
   C --> P[Payload key/value view<br/>+ raw JSON toggle]
   C --> S[Approve / Deny / Return for changes]
   C --> E[Live expiry counter]
-  C --> H[Signoff history]
+  C --> H[Details and sign-off history]
 ```
 
-The `/approvals` page (sidebar **Approvals**) shows pending and recent rows, including `human_approval` gates from running agents, marked with a gate kind badge. Payload renders as a key/value grid so a reviewer can scan vendor, amount and risk at a glance. **Return for changes** is hidden on `human_approval` gates. A second tab, **Reviews**, holds earned-autonomy watching reviews. See the [page catalogue](../05-ui/03-page-catalogue.md).
+The `/approvals` page (sidebar **Approvals**) is split into sections:
+
+- **To sign.** Requests you can approve now, the same rows Needs you counts.
+- **Your requests waiting on someone else.** What you asked for, with who can approve it.
+- **Everyone else's.** Admins only, every other open request in the workspace.
+- **Recently resolved.** Settled requests you asked for, signed, or could have signed.
+
+Rows include `human_approval` gates from running agents, marked with a gate kind badge. Every row carries `kind_label`, the kind in plain words such as Plan change for `gw.plan.change`, `summary`, one sentence on what is asked built on the server, `agent_name`, and `run_label` instead of a raw execution id. **Recently resolved** pages with `GET /api/approvals?status=resolved&offset=N&limit=M`, and `meta.total` and `meta.has_more` say how many there are and whether to offer more. The default list also returns `meta.has_more`. Pending decision cards carry `eligible_approvers: [{id, name}]`, the people who can approve each one. A denied or returned card leads with who decided and their reason, and labels the requester's own text as what they asked for. Approving a retire or archive at High or Critical asks you to confirm first, because it takes a rule out of service. **Details and sign-off history** opens the payload and every sign-off. Payload renders as a key/value grid so a reviewer can scan vendor, amount and risk at a glance. **Return for changes** is hidden on `human_approval` gates. A second tab, **Reviews**, holds earned-autonomy watching reviews. See the [page catalogue](../05-ui/03-page-catalogue.md).
 
 ### Needs you inbox
 
-Pending approvals also show in the **Needs you** inbox at `/inbox`, the first sidebar item, with a count badge. Its **Approvals** tab lists only the rows the caller can sign, using the same rules as the signoff route (role or capability, the policy's capability and requester exclusion, `decisions.review`, a user who already signed). Pending `human_approval` gates are added for admins, creators and holders of `approvals.sign`. Improvement releases sit under the separate **Proposals** tab for holders of `improvements.approve`. The inbox offers Approve and Deny. Return for changes stays on `/approvals`.
+Pending approvals also show in the **Needs you** inbox at `/inbox`, the first sidebar item, with a count badge. Its **Approvals** tab lists only the rows the caller can sign, using the same rules as the signoff route (role or capability, the policy's capability and requester exclusion, `decisions.review`, a user who already signed). Pending `human_approval` gates are added for admins, creators and holders of `approvals.sign`. Improvement releases sit under the separate **Proposals** tab for holders of `improvements.approve`. The inbox offers Approve, Deny and Return for changes. Deny and Return for changes ask for a reason, which the requester is told. Retire, archive and restore rows show the reason, the requester and a link to the decision. Approving anything that takes effect at once, a tier lowering, a restore, or a retire or archive at High or Critical, asks to confirm first, and every approval ends with a note saying what it did and who was told. The list reloads when its count changes and every 30 seconds. Anyone who can approve decisions has Approvals in the essentials sidebar.
+
+Withdrawn cards say who withdrew the request, or that the system did, and why, for example "The decision was archived." **Recently resolved** shows the newest 20 with **Show more**, paged by `offset` and `limit` with `meta.has_more`.
 
 `GET /api/me/inbox-counts` ([`inbox.py`](../../apps/api/app/routers/inbox.py)) returns `total`, `counts` per tab, `available` and `unavailable`. Counts are cached per user for 15 seconds, `?fresh=true` skips the cache. The tabs are `approvals`, `proposals`, `watching`, `held`, `marketplace` and `alerts`, each shown only to users who can act on it.
 

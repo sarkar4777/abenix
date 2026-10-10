@@ -21,6 +21,13 @@ TENANT = uuid.uuid4()
 OTHER = uuid.uuid4()
 
 
+@pytest.fixture(autouse=True)
+def _no_archived_sweep():
+    # the sweep of approvals on archived decisions is covered in test_decisions_257_wave5
+    with patch("app.routers.approvals._sweep_archived", AsyncMock()):
+        yield
+
+
 def _user(role=UserRole.USER, tenant=TENANT, settings=None):
     return SimpleNamespace(
         id=uuid.uuid4(), tenant_id=tenant, role=role, notification_settings=settings

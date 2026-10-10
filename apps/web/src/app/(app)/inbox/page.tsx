@@ -1,7 +1,8 @@
 'use client';
 
-import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
+import { apiFetch } from '@/lib/api-client';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { AlertTriangle, BellRing, CheckCircle2, ExternalLink, Loader2, Lock } from 'lucide-react';
 import PageHeader from '@/components/layout/PageHeader';
@@ -146,7 +147,7 @@ function Inbox() {
     <div className="mx-auto max-w-5xl space-y-5" data-testid="inbox">
       {header}
 
-      <div role="tablist" aria-label="What is waiting" className="-mx-1 flex gap-1 overflow-x-auto border-b border-slate-800 px-1">
+      <div role="tablist" aria-label="What is waiting" className="scrollbar-none -mx-1 flex gap-1 overflow-x-auto border-b border-slate-800 px-1">
         {available.map((t) => {
           const n = countOf(t);
           return (
@@ -191,7 +192,15 @@ function Inbox() {
               </p>
             </div>
           ) : tab === 'approvals' ? (
-            <ApprovalsPanel me={me} caps={caps} onCount={onApprovals} />
+            <>
+              <SeenApprovals on={!!perms?.can_approve_decisions} />
+              {perms && !perms.is_admin && !perms.can_approve_decisions && (
+                <p className="mb-3 rounded-lg border border-slate-700 bg-slate-800/30 px-3 py-2 text-xs text-slate-300" data-testid="inbox-cannot-approve-rules">
+                  Rule changes are signed by people in Decision reviewers, and you are not one yet. Ask an admin to tick Can approve decisions for you on Team.
+                </p>
+              )}
+              <ApprovalsPanel me={me} caps={caps} onCount={onApprovals} />
+            </>
           ) : tab === 'proposals' ? (
             <ProposalsPanel me={me} caps={caps} onCount={onProposals} />
           ) : tab === 'watching' ? (
@@ -215,4 +224,15 @@ export default function InboxPage() {
       <Inbox />
     </Suspense>
   );
+}
+
+// an approver who opens this tab has seen where rule changes wait for them
+function SeenApprovals({ on }: { on: boolean }) {
+  const sent = useRef(false);
+  useEffect(() => {
+    if (!on || sent.current) return;
+    sent.current = true;
+    apiFetch('/api/me/journey/seen', { method: 'POST', body: JSON.stringify({ step: 'approvals' }), silent: true, throwOnError: false }).catch(() => {});
+  }, [on]);
+  return null;
 }

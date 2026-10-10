@@ -19,6 +19,7 @@ class ApprovalStatus(str, enum.Enum):
     denied = "denied"
     expired = "expired"
     returned = "returned"
+    withdrawn = "withdrawn"
 
 
 class Approval(UUIDMixin, TenantMixin, TimestampMixin, Base):

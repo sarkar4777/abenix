@@ -396,13 +396,14 @@ export default function TopBar() {
       <div ref={useCasesRef} className="relative">
         <button
           onClick={() => setUseCasesOpen(!useCasesOpen)}
+          aria-label="Use Cases"
           className={cn(
-            'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm transition-colors',
+            'flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-lg text-sm whitespace-nowrap transition-colors',
             useCasesOpen ? 'bg-cyan-500/10 text-cyan-400' : 'text-slate-400 hover:text-white hover:bg-slate-800/50',
           )}
         >
           <Sparkles className="w-4 h-4" />
-          Use Cases
+          <span className="hidden sm:inline">Use Cases</span>
           <ChevronDown className={cn('w-3 h-3 transition-transform', useCasesOpen && 'rotate-180')} />
         </button>
 

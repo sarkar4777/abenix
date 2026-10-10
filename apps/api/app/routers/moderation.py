@@ -748,7 +748,7 @@ async def _can_review(db: AsyncSession, user: User) -> bool:
 
 
 _NO_REVIEW = (
-    "Reviewing held content needs the moderation.review capability. "
+    'Reviewing held content needs the "Review held content" permission. '
     "An admin can grant it under Admin, Permissions."
 )
 

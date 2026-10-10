@@ -1,0 +1,232 @@
+{
+  "key": "gw.safety.exclusion",
+  "name": "Groundwork exclusion zones",
+  "description": "Exclusion zone around every slewing machine. The zone is the swing radius plus a margin that grows with how fast the bucket or hook tip is moving. Facts come from the site twin every 10 ms. First rule that matches wins.",
+  "risk_tier": "high",
+  "rules": [
+    {
+      "ruleKey": "stop.fast_swing",
+      "description": "Tip moving faster than 2 m/s, a worker within 4 m of the swing radius",
+      "requiresFacts": [
+        "machine.tip_speed_ms",
+        "worker.clearance_m"
+      ],
+      "when": {
+        "all": [
+          {
+            "gte": [
+              {
+                "fact": "machine.tip_speed_ms"
+              },
+              2
+            ]
+          },
+          {
+            "lt": [
+              {
+                "fact": "worker.clearance_m"
+              },
+              4
+            ]
+          }
+        ]
+      },
+      "then": {
+        "action": "stop",
+        "margin_m": 4,
+        "reason": "Worker inside the swing radius plus 4 m while the tip moves over 2 m/s"
+      },
+      "provenance": {
+        "citations": [
+          "Northgate Yard site safety plan, section 3.2 Exclusion zones"
+        ]
+      }
+    },
+    {
+      "ruleKey": "stop.medium_swing",
+      "description": "Tip moving 0.5 to 2 m/s, a worker within 3 m of the swing radius",
+      "requiresFacts": [
+        "machine.tip_speed_ms",
+        "worker.clearance_m"
+      ],
+      "when": {
+        "all": [
+          {
+            "gte": [
+              {
+                "fact": "machine.tip_speed_ms"
+              },
+              0.5
+            ]
+          },
+          {
+            "lt": [
+              {
+                "fact": "worker.clearance_m"
+              },
+              3
+            ]
+          }
+        ]
+      },
+      "then": {
+        "action": "stop",
+        "margin_m": 3,
+        "reason": "Worker inside the swing radius plus 3 m while the tip moves"
+      },
+      "provenance": {
+        "citations": [
+          "Northgate Yard site safety plan, section 3.2 Exclusion zones"
+        ]
+      }
+    },
+    {
+      "ruleKey": "stop.any",
+      "description": "Any worker within 2 m of the swing radius, moving or not",
+      "requiresFacts": [
+        "worker.clearance_m"
+      ],
+      "when": {
+        "all": [
+          {
+            "lt": [
+              {
+                "fact": "worker.clearance_m"
+              },
+              2
+            ]
+          }
+        ]
+      },
+      "then": {
+        "action": "stop",
+        "margin_m": 2,
+        "reason": "Worker inside the swing radius plus 2 m"
+      },
+      "provenance": {
+        "citations": [
+          "Northgate Yard site safety plan, section 3.2 Exclusion zones"
+        ]
+      }
+    },
+    {
+      "ruleKey": "warn.approach",
+      "description": "A worker within 7 m of the swing radius",
+      "requiresFacts": [
+        "worker.clearance_m"
+      ],
+      "when": {
+        "all": [
+          {
+            "lt": [
+              {
+                "fact": "worker.clearance_m"
+              },
+              7
+            ]
+          }
+        ]
+      },
+      "then": {
+        "action": "warn",
+        "margin_m": 7,
+        "reason": "Worker approaching the exclusion zone"
+      },
+      "provenance": {
+        "citations": [
+          "Northgate Yard site safety plan, section 3.3 Warning zone"
+        ]
+      }
+    },
+    {
+      "ruleKey": "ok.clear",
+      "description": "Everyone clear",
+      "requiresFacts": [
+        "worker.clearance_m"
+      ],
+      "when": {
+        "all": [
+          {
+            "gte": [
+              {
+                "fact": "worker.clearance_m"
+              },
+              7
+            ]
+          }
+        ]
+      },
+      "then": {
+        "action": "ok",
+        "margin_m": 7,
+        "reason": ""
+      }
+    }
+  ],
+  "tests": [
+    {
+      "name": "fast swing, worker 3 m out",
+      "facts": {
+        "machine": {
+          "tip_speed_ms": 4.5
+        },
+        "worker": {
+          "clearance_m": 3
+        }
+      },
+      "expected": {
+        "action": "stop",
+        "margin_m": 4,
+        "reason": "Worker inside the swing radius plus 4 m while the tip moves over 2 m/s"
+      }
+    },
+    {
+      "name": "slow swing, worker 2.5 m out",
+      "facts": {
+        "machine": {
+          "tip_speed_ms": 0.2
+        },
+        "worker": {
+          "clearance_m": 2.5
+        }
+      },
+      "expected": {
+        "action": "warn",
+        "margin_m": 7,
+        "reason": "Worker approaching the exclusion zone"
+      }
+    },
+    {
+      "name": "parked, worker inside",
+      "facts": {
+        "machine": {
+          "tip_speed_ms": 0
+        },
+        "worker": {
+          "clearance_m": 1
+        }
+      },
+      "expected": {
+        "action": "stop",
+        "margin_m": 2,
+        "reason": "Worker inside the swing radius plus 2 m"
+      }
+    },
+    {
+      "name": "clear",
+      "facts": {
+        "machine": {
+          "tip_speed_ms": 6
+        },
+        "worker": {
+          "clearance_m": 20
+        }
+      },
+      "expected": {
+        "action": "ok",
+        "margin_m": 7,
+        "reason": ""
+      }
+    }
+  ]
+}

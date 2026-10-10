@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import asyncio
-
+import logging
 import time
 import uuid
 from dataclasses import dataclass
-from typing import Callable
+from typing import Any, Callable
 
 from fastapi import Depends, HTTPException
 from sqlalchemy import select
@@ -15,6 +15,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.governance import PermissionAssignment, PermissionSet
 from models.user import User
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -244,11 +247,94 @@ def holds(granted: frozenset[str] | set[str], cap: str) -> bool:
     return f"{group}.*" in granted
 
 
-def invalidate(user_id: uuid.UUID | None = None) -> None:
+CHANNEL = "abenix:capabilities:changed"
+_gen = 0
+_listener: asyncio.Task | None = None
+
+
+def _drop(user_id: Any) -> None:
+    global _gen
+    _gen += 1
     if user_id is None:
         _cache.clear()
     else:
         _cache.pop(user_id, None)
+    # Needs you counts depend on what the person may sign
+    try:
+        from app.routers import inbox
+
+        inbox.invalidate(user_id)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def invalidate(user_id: uuid.UUID | None = None) -> None:
+    """Forget cached capabilities here and in every other API worker."""
+    _drop(user_id)
+    try:
+        asyncio.get_running_loop().create_task(_publish(user_id))
+    except RuntimeError:
+        pass
+
+
+async def _publish(user_id: Any) -> None:
+    try:
+        import redis.asyncio as aioredis
+
+        from app.core.config import settings
+
+        r = aioredis.from_url(settings.redis_url)
+        try:
+            await r.publish(CHANNEL, str(user_id) if user_id else "*")
+        finally:
+            await r.aclose()
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("capability change broadcast failed: %s", exc)
+
+
+def _parse(text: str) -> uuid.UUID | None:
+    if text in ("", "*"):
+        return None
+    try:
+        return uuid.UUID(text)
+    except ValueError:
+        return None
+
+
+async def _listen() -> None:
+    import redis.asyncio as aioredis
+
+    from app.core.config import settings
+
+    while True:
+        try:
+            r = aioredis.from_url(settings.redis_url)
+            ps = r.pubsub()
+            await ps.subscribe(CHANNEL)
+            # anything cached before the subscription took hold may have missed a change
+            _drop(None)
+            async for msg in ps.listen():
+                if msg.get("type") != "message":
+                    continue
+                data = msg.get("data")
+                text = data.decode() if isinstance(data, bytes) else str(data)
+                _drop(_parse(text))
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("capability change listener restarting: %s", exc)
+            await asyncio.sleep(5)
+
+
+def start_listener() -> None:
+    """Each API worker listens for permission changes made in any other worker."""
+    global _listener
+    if _listener is not None and not _listener.done():
+        return
+    try:
+        _listener = asyncio.get_running_loop().create_task(_listen())
+    except RuntimeError:
+        _listener = None
 
 
 async def capabilities_for(db: AsyncSession, user: User) -> frozenset[str]:
@@ -267,6 +353,7 @@ async def capabilities_for(db: AsyncSession, user: User) -> frozenset[str]:
 
 async def _load(db: AsyncSession, user: User) -> frozenset[str]:
     now = time.monotonic()
+    gen = _gen
     rows = (
         await db.execute(
             select(PermissionSet.capabilities)
@@ -284,12 +371,56 @@ async def _load(db: AsyncSession, user: User) -> frozenset[str]:
     for (granted,) in rows:
         caps.update(c for c in (granted or []) if isinstance(c, str))
     out = frozenset(caps)
-    _cache[user.id] = (now, out)
+    # a change that landed while this read was in flight wins, so do not keep it
+    if gen == _gen:
+        _cache[user.id] = (now, out)
     return out
 
 
 async def has_capability(db: AsyncSession, user: User, cap: str) -> bool:
     return holds(await capabilities_for(db, user), cap)
+
+
+_LABELS = {c.key: c.label for c in CATALOG}
+REVIEWER_REFUSAL = (
+    "Only people who can review decisions can approve this. "
+    "An admin can add you under Admin, Permissions, Decision reviewers."
+)
+
+
+def cap_words(cap: str) -> str:
+    """A capability as people read it, such as the "Review decisions" permission."""
+    base, _, qual = str(cap).partition(":")
+    label = _LABELS.get(base) or base.replace(".", " ").replace("_", " ")
+    return f'the "{label}" permission' + (f" for {qual}" if qual else "")
+
+
+def need_words(cap: str) -> str:
+    return (
+        f"This needs {cap_words(cap)}. An admin can grant it under Admin, Permissions."
+    )
+
+
+class Refusal(str):
+    """A refusal in plain words that still knows the capability behind it."""
+
+    capability: str | None = None
+
+    def __new__(cls, message: str, capability: str | None = None) -> "Refusal":
+        r = super().__new__(cls, message)
+        r.capability = capability
+        return r
+
+
+def missing(cap: str, message: str | None = None) -> HTTPException:
+    return HTTPException(
+        status_code=403,
+        detail={
+            "message": message or need_words(cap),
+            "error_code": "MISSING_PERMISSION",
+            "details": {"capability": cap},
+        },
+    )
 
 
 def require_capability(cap: str) -> Callable:
@@ -301,10 +432,7 @@ def require_capability(cap: str) -> Callable:
         db: AsyncSession = Depends(get_db),
     ) -> User:
         if not await has_capability(db, user, cap):
-            raise HTTPException(
-                status_code=403,
-                detail=f"This needs the {cap} capability. An admin can grant it under Admin, Permissions.",
-            )
+            raise missing(cap)
         return user
 
     return _check

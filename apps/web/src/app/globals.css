@@ -39,6 +39,14 @@ body {
 }
 
 @layer utilities {
+  /* scrolls sideways when it must, without a native scrollbar */
+  .scrollbar-none {
+    scrollbar-width: none;
+  }
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
+
   .glass {
     background: rgba(30, 41, 59, 0.8);
     backdrop-filter: blur(12px);

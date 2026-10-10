@@ -83,7 +83,7 @@ export default function EvalsPage() {
               <Plus className="w-4 h-4" /> Create the first suite
             </button>
           ) : (
-            <p className="text-xs text-slate-500 mt-4">Creating suites needs the evals.manage capability.</p>
+            <p className="text-xs text-slate-500 mt-4">Creating suites needs Manage evals, which an admin can give you.</p>
           )}
         </div>
       ) : rows.length === 0 ? (

@@ -444,6 +444,9 @@ async def on_startup():
     from app.core.secret_storage import check_at_startup
 
     check_at_startup()
+    from app.core import capabilities as _caps
+
+    _caps.start_listener()
 
     import sys
     from pathlib import Path

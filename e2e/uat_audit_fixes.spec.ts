@@ -258,7 +258,7 @@ test.describe('Pass 2 — k8s deploy config + share dialogs + KB multi-file + ap
       await page.waitForLoadState('domcontentloaded');
       const card = page.locator('div', { hasText: /e2e payload renderer/ }).first();
       await expect(card).toBeVisible({ timeout: 15_000 });
-      const payloadBtn = card.locator('button', { hasText: 'Payload, signoff history' }).first();
+      const payloadBtn = card.locator('button', { hasText: 'Details and sign-off history' }).first();
       await payloadBtn.click();
       const view = page.getByTestId('approval-payload-view').first();
       await expect(view).toBeVisible();

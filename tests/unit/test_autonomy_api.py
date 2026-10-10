@@ -249,7 +249,7 @@ def store(monkeypatch):
     async def unmanaged(db, tid):
         return []
 
-    async def pending(db, tid, limit):
+    async def pending(db, tid, limit, user=None):
         return [
             a
             for a in s.actions
@@ -759,9 +759,9 @@ async def test_promotion_needs_the_grant_capability_to_sign(store):
     resp = await approvals_router.sign_off(
         appr["id"], ApprovalSignoffRequest(decision="approve"), plain, db
     )
-    assert (
-        resp.status_code == 403 and "autonomy.grant" in _body(resp)["error"]["message"]
-    )
+    err = _body(resp)["error"]
+    assert resp.status_code == 403 and err["details"]["capability"] == "autonomy.grant"
+    assert "autonomy.grant" not in err["message"] and "Approve promotions" in err["message"]
 
 
 async def test_turning_back_on_from_off_needs_no_approval(store):

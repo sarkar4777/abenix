@@ -87,7 +87,7 @@ A proposal below the bar stays as `failed_proof` with its proof, so people can s
 A passing proof opens an approval with gate kind `improvement.release`, policy capability `improvements.approve`, expiring in 7 days. The payload is the ProposalRow plus `agent_creator_id`, `is_sample`, `self_approval` and a link to the proof.
 
 - **Separation of duties.** The agent's author is refused with 403 `AUTHOR_CANNOT_APPROVE` and a pointer to invite a teammate. Two exceptions match Earned Autonomy, both labelled in the payload: the sample agent, and a solo builder when no other active user holds `improvements.approve`. The check runs again at signing.
-- **Edit and approve.** The approver edits the diff, the proof runs again (`POST /proposals/{id}/rerun`), the open approval is withdrawn and a new one opens when the edited fix passes.
+- **Edit and approve.** The approver edits the diff, the proof runs again (`POST /proposals/{id}/rerun`), the open approval is marked `withdrawn`, not expired, and a new one opens when the edited fix passes.
 - **Reject.** A deny or return with a reason closes the proposal as `rejected`, reopens the cluster and adds a `note` lesson with the reason and the rejected diff, so the next draft knows.
 
 ## Release

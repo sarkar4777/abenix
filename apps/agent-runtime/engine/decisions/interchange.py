@@ -10,7 +10,15 @@ from __future__ import annotations
 import copy
 from typing import Any
 
-from engine.decisions.authoring import DATE_RE, normalize
+from engine.decisions.authoring import (
+    DATE_RE,
+    HIT_POLICIES,
+    effective_output_type,
+    empty_document,
+    normalize,
+)
+
+FILE_FORMAT = "abenix-decision-v1"
 
 # interchange operator -> builder operator, by fact type where it differs
 _IN = {
@@ -89,6 +97,7 @@ _RULE_KEYS = {
     "validFrom",
     "validTo",
     "description",
+    "enabled",
 }
 _FORMULA_KEYS = ("formula", "expression", "expr")
 
@@ -278,7 +287,7 @@ def import_rules(payload: Any, base: dict[str, Any] | None = None) -> dict[str, 
             "id": f"r{len(doc['rules']) + 1}",
             "key": str(raw["ruleKey"]),
             "description": raw.get("description") or "",
-            "enabled": True,
+            "enabled": raw.get("enabled") is not False,
             "requires": [str(p) for p in raw.get("requiresFacts") or []],
             "when": cond,
             "then": then,
@@ -313,7 +322,9 @@ def import_rules(payload: Any, base: dict[str, Any] | None = None) -> dict[str, 
                     f["required"] = True
     have = {o["field"] for o in doc["outputs"]}
     for o in sorted(outputs - have):
-        doc["outputs"].append({"field": o, "type": "string", "label": o})
+        out = {"field": o, "label": o}
+        out["type"] = effective_output_type(doc, out) or "string"
+        doc["outputs"].append(out)
     return doc
 
 
@@ -326,6 +337,8 @@ def export_rules(doc: dict[str, Any]) -> list[dict[str, Any]]:
         item.update({k: v for k, v in meta.items()})
         if r.get("description"):
             item["description"] = r["description"]
+        if r.get("enabled") is False:
+            item["enabled"] = False
         if r.get("valid_from"):
             item["validFrom"] = r["valid_from"]
         if r.get("valid_to"):
@@ -340,3 +353,157 @@ def export_rules(doc: dict[str, Any]) -> list[dict[str, Any]]:
             item["provenance"] = r["provenance"]
         out.append(item)
     return out
+
+
+TEST_OUTCOMES = ("decided", "no_match", "missing_facts", "invalid_facts")
+
+
+def export_file(
+    model: dict[str, Any],
+    doc: dict[str, Any] | None,
+    content: dict[str, Any] | None,
+    tests: list[dict[str, Any]],
+    version: int | None,
+) -> dict[str, Any]:
+    """A whole decision as one JSON file that read_file takes back."""
+    out: dict[str, Any] = {
+        "format": FILE_FORMAT,
+        "key": model.get("key"),
+        "name": model.get("name"),
+        "description": model.get("description") or "",
+        "risk_tier": model.get("risk_tier") or "low",
+        "hit_policy": (doc or {}).get("hit_policy") or "first",
+        "tags": list(model.get("tags") or []),
+        "facts": copy.deepcopy((doc or {}).get("facts") or []),
+        "outcomes": copy.deepcopy((doc or {}).get("outputs") or []),
+        "rules": export_rules(doc) if doc is not None else [],
+        "tests": [
+            {
+                "name": t.get("name"),
+                "facts": t.get("facts") or {},
+                "expected": t.get("expected"),
+                "expected_outcome": t.get("expected_outcome") or "decided",
+                "match": t.get("match") or "exact",
+                "as_of": t.get("as_of") or None,
+            }
+            for t in tests
+        ],
+        "exported_from_version": version,
+    }
+    if doc is None and content is not None:
+        # a version built in the flow view has no rules list, its flow travels instead
+        out["content"] = copy.deepcopy(content)
+    return out
+
+
+def _merge_by(
+    declared: Any, inferred: list[dict[str, Any]], key: str, at: str
+) -> list[dict[str, Any]]:
+    if declared is None:
+        return inferred
+    if not isinstance(declared, list):
+        raise InterchangeError(at, "must be a list")
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for i, item in enumerate(declared):
+        if not isinstance(item, dict) or not item.get(key):
+            raise InterchangeError(f"{at}/{i}", f"each entry needs a {key}")
+        out.append(copy.deepcopy(item))
+        seen.add(str(item[key]))
+    out.extend(x for x in inferred if str(x.get(key)) not in seen)
+    return out
+
+
+def _tests_in(raw: Any) -> list[dict[str, Any]]:
+    if raw is None:
+        return []
+    if not isinstance(raw, list):
+        raise InterchangeError("/tests", "tests must be a list")
+    out = []
+    for i, t in enumerate(raw):
+        at = f"/tests/{i}"
+        if not isinstance(t, dict) or not str(t.get("name") or "").strip():
+            raise InterchangeError(at, "each test needs a name")
+        facts = t.get("facts") or {}
+        if not isinstance(facts, dict):
+            raise InterchangeError(f"{at}/facts", "facts must be an object")
+        outcome = t.get("expected_outcome") or "decided"
+        if outcome not in TEST_OUTCOMES:
+            raise InterchangeError(
+                f"{at}/expected_outcome", f"must be one of {', '.join(TEST_OUTCOMES)}"
+            )
+        match = t.get("match") or "exact"
+        if match not in ("exact", "subset"):
+            raise InterchangeError(f"{at}/match", "must be exact or subset")
+        as_of = t.get("as_of") or None
+        if as_of is not None and not DATE_RE.match(str(as_of)):
+            raise InterchangeError(f"{at}/as_of", "use a date like 2026-01-01")
+        out.append(
+            {
+                "name": str(t["name"]).strip()[:255],
+                "facts": facts,
+                "expected": t.get("expected"),
+                "expected_outcome": outcome,
+                "match": match,
+                "as_of": as_of,
+            }
+        )
+    return out
+
+
+def read_file(payload: Any) -> dict[str, Any]:
+    """A decision file, ours or the plain {key, name, rules, tests} shape, as parts ready to save."""
+    if (
+        isinstance(payload, dict)
+        and isinstance(payload.get("data"), dict)
+        and "rules" not in payload
+        and "key" not in payload
+    ):
+        payload = payload["data"]
+    if not isinstance(payload, dict):
+        raise InterchangeError("", "the file must be a JSON object")
+    fmt = payload.get("format")
+    if fmt not in (None, FILE_FORMAT, "rules"):
+        raise InterchangeError("/format", f"{fmt} is not a decision file this can read")
+    rules = payload.get("rules")
+    content = payload.get("content")
+    has_flow = (
+        isinstance(content, dict)
+        and content.get("nodes") is not None
+        and content.get("edges") is not None
+    )
+    if rules is None and not has_flow:
+        raise InterchangeError("/rules", "the file has no rules")
+    if rules is not None and not isinstance(rules, list):
+        raise InterchangeError("/rules", "rules must be a list")
+    doc: dict[str, Any] | None = None
+    if rules or not has_flow:
+        doc = import_rules({"rules": rules or []}) if rules else empty_document()
+        doc = normalize(doc)
+        doc["facts"] = _merge_by(payload.get("facts"), doc["facts"], "path", "/facts")
+        doc["outputs"] = _merge_by(
+            payload.get("outcomes", payload.get("outputs")),
+            doc["outputs"],
+            "field",
+            "/outcomes",
+        )
+        hp = payload.get("hit_policy")
+        if hp is not None:
+            if hp not in HIT_POLICIES:
+                raise InterchangeError(
+                    "/hit_policy", f"must be one of {', '.join(HIT_POLICIES)}"
+                )
+            doc["hit_policy"] = hp
+    tags = payload.get("tags") or []
+    if not isinstance(tags, list) or not all(isinstance(t, str) for t in tags):
+        raise InterchangeError("/tags", "tags must be a list of words")
+    return {
+        "key": (str(payload["key"]).strip() if payload.get("key") else None),
+        "name": str(payload.get("name") or "").strip() or None,
+        "description": str(payload.get("description") or ""),
+        "risk_tier": payload.get("risk_tier"),
+        "tags": tags,
+        "doc": doc,
+        "content": copy.deepcopy(content) if doc is None else None,
+        "tests": _tests_in(payload.get("tests")),
+    }

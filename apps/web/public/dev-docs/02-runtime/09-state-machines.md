@@ -104,10 +104,12 @@ stateDiagram-v2
   approved --> [*]
   denied --> [*]
   returned --> [*]
+  pending --> withdrawn: requester withdraws
+  withdrawn --> [*]
   expired --> [*]
 ```
 
-Defined as `ApprovalStatus` in [`packages/db/models/approval.py`](../../packages/db/models/approval.py), Postgres enum `approval_status`: `pending`, `approved`, `denied`, `expired`, `returned`.
+Defined as `ApprovalStatus` in [`packages/db/models/approval.py`](../../packages/db/models/approval.py), Postgres enum `approval_status`: `pending`, `approved`, `denied`, `expired`, `returned`, `withdrawn`. `withdrawn` is set when a request is taken back: a decision version withdrawn to draft, a tier change dropped, a review after a tier raise closed, or an improvement edited and proved again. `expired` only means the time ran out.
 
 The interesting columns:
 

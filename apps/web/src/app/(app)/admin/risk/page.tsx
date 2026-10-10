@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { FileCheck2, Layers, OctagonX, ShieldAlert, Wrench } from 'lucide-react';
 import { useApi } from '@/hooks/useApi';
+import ViewOnlyBanner from '@/components/shared/ViewOnlyBanner';
 import { apiFetch } from '@/lib/api-client';
 import PageHeader from '@/components/layout/PageHeader';
 import NoAccess from '@/components/layout/NoAccess';
@@ -11,6 +12,7 @@ import TierPolicies, { type TierRow } from '@/components/governance/TierPolicies
 import KillSwitches from '@/components/governance/KillSwitches';
 import ToolTiers from '@/components/governance/ToolTiers';
 import AuditIntegrity from '@/components/governance/AuditIntegrity';
+import SoleOperatorSetting from '@/components/governance/SoleOperatorSetting';
 
 type Tab = 'tiers' | 'switches' | 'tools' | 'audit';
 
@@ -87,7 +89,7 @@ export default function RiskPage() {
         icon={ShieldAlert}
         storageKey="admin-risk"
         docSlug="08-howto/11-governance"
-        primaryAction={{ label: 'Open kill switches', icon: OctagonX, onClick: () => pick('switches'), testId: 'risk-open-switches' }}
+        primaryAction={holds(caps, 'killswitch.manage') ? { label: 'Open kill switches', icon: OctagonX, onClick: () => pick('switches'), testId: 'risk-open-switches' } : undefined}
         steps={[
           'Tier policies set what each risk tier needs, such as sign-offs before a new version goes live or a person approving a risky tool call.',
           'Kill switches stop an agent, a tool or everything at once, straight away.',
@@ -95,6 +97,12 @@ export default function RiskPage() {
           'Audit integrity checks that no one has changed the activity log. Every change here is recorded there too.',
         ]}
       />
+
+      {!holds(caps, 'risk.manage') && (
+        <ViewOnlyBanner testId="risk-view-only">
+          You can see what each risk tier needs, which kill switches are on and whether the activity log is intact. Admins and risk owners change them. Ask an admin for Manage risk if you own a risk area.
+        </ViewOnlyBanner>
+      )}
 
       <div className="flex flex-wrap gap-1 border-b border-slate-800 mb-6" role="tablist" aria-label="Risk and Controls">
         {TABS.map((t) => {
@@ -129,10 +137,15 @@ export default function RiskPage() {
           </div>
         ) : data ? (
           <>
-            {tab === 'tiers' && <TierPolicies tiers={data.tiers} canManage={holds(caps, 'risk.manage')} onSaved={mutate} />}
+            {tab === 'tiers' && (
+              <>
+                <SoleOperatorSetting canChange={!!perms?.is_admin} />
+                <TierPolicies tiers={data.tiers} canManage={holds(caps, 'risk.manage')} onSaved={mutate} />
+              </>
+            )}
             {tab === 'switches' && <KillSwitches canManage={holds(caps, 'killswitch.manage')} tools={data.tools} />}
             {tab === 'tools' && <ToolTiers tools={data.tools} />}
-            {tab === 'audit' && <AuditIntegrity canVerify={holds(caps, 'audit.verify')} />}
+            {tab === 'audit' && <AuditIntegrity canVerify={holds(caps, 'audit.verify')} canExport={holds(caps, 'audit.view')} />}
           </>
         ) : null}
       </div>

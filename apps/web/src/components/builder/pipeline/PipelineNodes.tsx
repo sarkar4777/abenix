@@ -3,6 +3,7 @@
 import { memo } from 'react';
 import { Handle, Position, type NodeProps } from 'reactflow';
 import { Zap, GitBranch, Flag, X, AlertCircle, Repeat, Bot, Activity, Merge } from 'lucide-react';
+import { toolDisplayName } from './pipelineUtils';
 
 // Data interfaces
 
@@ -172,7 +173,7 @@ export const PipelineStepNode = memo(function PipelineStepNode({
         </div>
         <div className="min-w-0">
           <p className="text-xs font-medium text-white truncate">{data.label}</p>
-          <p className="text-[10px] text-slate-500 truncate">{data.toolName}</p>
+          <p className="text-[10px] text-slate-500 truncate">{toolDisplayName(data.toolName)}</p>
         </div>
       </div>
 
@@ -376,7 +377,7 @@ export const ForEachStepNode = memo(function ForEachStepNode({
         </div>
         <div className="min-w-0">
           <p className="text-xs font-medium text-white truncate">{data.label}</p>
-          <p className="text-[10px] text-slate-500 truncate">{data.toolName}</p>
+          <p className="text-[10px] text-slate-500 truncate">{toolDisplayName(data.toolName)}</p>
         </div>
       </div>
 

@@ -4,6 +4,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { CheckCircle2, Loader2, Pencil, Sparkles, XCircle } from 'lucide-react';
 import { signoffApproval } from '@/lib/autonomy';
+import { MIN_DENY_REASON } from '@/lib/approvalText';
 import { asProposal, editableDiff, fixedText, parseDiff, proposalsApi } from '@/lib/improvement-proposals';
 import { BeforeAfter, DiffView, Examples, FixedBroken } from './parts';
 
@@ -48,8 +49,8 @@ export default function ImprovementApprovalCard({
 
   async function decide(decision: 'approve' | 'deny') {
     setMsg(null);
-    if (decision === 'deny' && !text.trim()) {
-      setMsg({ ok: false, text: 'Say why in a sentence. It goes back to the improver as a lesson.' });
+    if (decision === 'deny' && text.trim().length < MIN_DENY_REASON) {
+      setMsg({ ok: false, text: `Say why in a sentence, at least ${MIN_DENY_REASON} characters. It goes back to the improver as a lesson.` });
       return;
     }
     setBusy(decision);

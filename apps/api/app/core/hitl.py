@@ -21,6 +21,8 @@ APPROVER_ROLES = ("admin", "creator")
 
 HITL_ID_PREFIX = "hitl:"
 DECISION_TTL_SECONDS = 7200
+# a fresh gate may be listed a moment before its waiting marker lands
+STALE_GRACE_SECONDS = 30
 
 _redis: aioredis.Redis | None = None
 
@@ -80,6 +82,13 @@ async def list_pending_hitl(tenant_id: str) -> list[dict[str, Any]]:
             approval_key(str(data.get("execution_id")), str(data.get("gate_id")))
         )
         if decided:
+            continue
+        # a gate whose run stopped waiting, cancelled or timed out, can no longer be answered
+        requested = float(data.get("requested_at") or 0)
+        if now - requested > STALE_GRACE_SECONDS and not await r.exists(
+            waiting_key(str(data.get("execution_id")))
+        ):
+            await r.srem(key, member)
             continue
         out.append(data)
     out.sort(key=lambda d: d.get("requested_at") or 0, reverse=True)
@@ -200,26 +209,38 @@ async def approver_denial(
     asked, no approving your own change. Publishing a decision also needs
     decisions.review.
     """
-    if gate_kind == "decision_publish":
-        from app.core.capabilities import has_capability
+    from app.core.approvers import DECISION_KINDS
+    from app.core.capabilities import (
+        REVIEWER_REFUSAL,
+        Refusal,
+        has_capability,
+        need_words,
+    )
 
-        if not await has_capability(db, user, "decisions.review"):
-            return "Approving a decision for publication needs the decisions.review capability. An admin can grant it under Admin, Permissions."
+    decision = gate_kind in DECISION_KINDS
+    if decision and not await has_capability(db, user, "decisions.review"):
+        return Refusal(REVIEWER_REFUSAL, "decisions.review")
     if policy:
-        from app.core.capabilities import has_capability
-
         cap = str(policy.get("capability") or "approvals.sign")
         if not await has_capability(db, user, cap):
-            return f"This approval needs the {cap} capability. An admin can grant it under Admin, Permissions."
+            if decision and cap == "approvals.sign":
+                return Refusal(REVIEWER_REFUSAL, cap)
+            return Refusal(
+                need_words(cap).replace("This needs", "Approving this needs"), cap
+            )
         if policy.get("exclude_requester") and is_self_approval(user, requester_id):
-            return "You requested this change, so someone else has to approve it."
+            return Refusal(
+                "You requested this change, so someone else has to approve it."
+            )
         return None
     if not can_approve(user):
         # a permission set that grants approvals.sign counts as much as the role
-        from app.core.capabilities import has_capability
-
         if not await has_capability(db, user, "approvals.sign"):
-            return "Only admins and creators can sign off on approvals"
+            return Refusal(
+                "Only admins, creators and people who can sign approvals can approve this. "
+                "An admin can grant it under Admin, Permissions.",
+                "approvals.sign",
+            )
     return None
 
 

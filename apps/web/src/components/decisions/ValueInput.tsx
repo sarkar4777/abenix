@@ -3,53 +3,59 @@
 import { useState } from 'react';
 import { X } from 'lucide-react';
 import { OPERATORS, type Condition, type FactType } from '@/lib/decisions';
+import { coerceTo } from '@/lib/decisionValues';
+import { NumberInput } from './DraftInput';
 
 const base = 'bg-slate-950 border rounded-md px-2 py-1.5 text-sm text-white outline-none focus:border-cyan-500';
 
-function coerce(type: FactType, raw: string): any {
-  if (type === 'number') {
-    if (raw.trim() === '' || raw.trim() === '-') return raw;
-    const n = Number(raw);
-    return Number.isFinite(n) ? n : raw;
-  }
-  return raw;
-}
-
-function Scalar({ type, value, onChange, invalid, testId, placeholder }: { type: FactType; value: any; onChange: (v: any) => void; invalid?: boolean; testId?: string; placeholder?: string }) {
+function Scalar({ type, value, onChange, invalid, testId, placeholder, readOnly }: { type: FactType; value: any; onChange: (v: any) => void; invalid?: boolean; testId?: string; placeholder?: string; readOnly?: boolean }) {
   const border = invalid ? 'border-rose-500/60' : 'border-slate-700';
   if (type === 'date') {
-    return <input type="date" value={value ?? ''} onChange={(e) => onChange(e.target.value)} className={`${base} ${border} [color-scheme:dark]`} aria-invalid={invalid} data-testid={testId} />;
+    return <input type="date" value={value ?? ''} disabled={readOnly} onChange={(e) => onChange(e.target.value)} className={`${base} ${border} [color-scheme:dark] disabled:opacity-70`} aria-invalid={invalid} data-testid={testId} />;
   }
   if (type === 'boolean') {
     return (
-      <select value={String(value ?? 'true')} onChange={(e) => onChange(e.target.value === 'true')} className={`${base} ${border}`} data-testid={testId}>
-        <option value="true">true</option>
-        <option value="false">false</option>
+      <select value={String(value ?? 'true')} disabled={readOnly} onChange={(e) => onChange(e.target.value === 'true')} className={`${base} ${border}`} data-testid={testId}>
+        <option value="true">yes</option>
+        <option value="false">no</option>
       </select>
+    );
+  }
+  if (type === 'number') {
+    return (
+      <NumberInput
+        value={value}
+        onValue={onChange}
+        disabled={readOnly}
+        placeholder={placeholder || 'number'}
+        className={`${base} ${border} w-36 placeholder:text-slate-600 placeholder:italic disabled:opacity-70`}
+        aria-invalid={invalid}
+        data-testid={testId}
+      />
     );
   }
   return (
     <input
       type="text"
-      inputMode={type === 'number' ? 'decimal' : undefined}
       value={value ?? ''}
-      onChange={(e) => onChange(coerce(type, e.target.value))}
-      placeholder={placeholder || (type === 'number' ? '0' : 'value')}
-      className={`${base} ${border} w-36`}
+      disabled={readOnly}
+      onChange={(e) => onChange(e.target.value)}
+      placeholder={placeholder || 'text'}
+      className={`${base} ${border} w-36 placeholder:text-slate-600 placeholder:italic disabled:opacity-70`}
       aria-invalid={invalid}
       data-testid={testId}
     />
   );
 }
 
-function Chips({ type, values, onChange, invalid, testId }: { type: FactType; values: any[]; onChange: (v: any[]) => void; invalid?: boolean; testId?: string }) {
+function Chips({ type, values, onChange, invalid, testId, readOnly }: { type: FactType; values: any[]; onChange: (v: any[]) => void; invalid?: boolean; testId?: string; readOnly?: boolean }) {
   const [draft, setDraft] = useState('');
   function commit(text: string) {
     const parts = text.split(/[,\n\t]/).map((s) => s.trim()).filter(Boolean);
     if (!parts.length) return;
     const next = [...values];
     for (const p of parts) {
-      const v = coerce(type, p);
+      const v = coerceTo(type, p);
       if (!next.some((x) => String(x) === String(v))) next.push(v);
     }
     onChange(next);
@@ -60,10 +66,10 @@ function Chips({ type, values, onChange, invalid, testId }: { type: FactType; va
       {values.map((v, i) => (
         <span key={`${v}-${i}`} className="inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded bg-slate-800 text-slate-200">
           {String(v)}
-          <button type="button" aria-label={`Remove ${v}`} onClick={() => onChange(values.filter((_, j) => j !== i))} className="text-slate-400 hover:text-white"><X className="w-3 h-3" /></button>
+          {!readOnly && <button type="button" aria-label={`Remove ${v}`} onClick={() => onChange(values.filter((_, j) => j !== i))} className="text-slate-400 hover:text-white"><X className="w-3 h-3" /></button>}
         </span>
       ))}
-      <input
+      {!readOnly && <input
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
         onKeyDown={(e) => {
@@ -73,9 +79,9 @@ function Chips({ type, values, onChange, invalid, testId }: { type: FactType; va
         onPaste={(e) => { const t = e.clipboardData.getData('text'); if (/[,\n\t]/.test(t)) { e.preventDefault(); commit(t); } }}
         onBlur={() => commit(draft)}
         placeholder={values.length ? '' : 'Type, then Enter. Paste a list to add many.'}
-        className="flex-1 min-w-[90px] bg-transparent text-sm text-white outline-none py-0.5"
+        className="flex-1 min-w-[90px] bg-transparent text-sm text-white outline-none py-0.5 placeholder:text-slate-600"
         data-testid={testId}
-      />
+      />}
     </div>
   );
 }
@@ -87,6 +93,7 @@ export default function ValueInput({
   invalid,
   referenceSets,
   testId,
+  readOnly,
 }: {
   cond: Condition;
   type: FactType;
@@ -94,6 +101,7 @@ export default function ValueInput({
   invalid?: boolean;
   referenceSets: { key: string; name: string; count: number }[];
   testId?: string;
+  readOnly?: boolean;
 }) {
   const shape = OPERATORS[cond.op]?.shape ?? 'one';
   if (shape === 'none') return null;
@@ -101,21 +109,21 @@ export default function ValueInput({
     const vs = cond.values ?? [];
     return (
       <span className="inline-flex items-center gap-1.5">
-        <Scalar type={type} value={vs[0]} onChange={(v) => onChange({ values: [v, vs[1]] })} invalid={invalid} testId={testId && `${testId}-lo`} placeholder="from" />
+        <Scalar type={type} value={vs[0]} onChange={(v) => onChange({ values: [v, vs[1]] })} invalid={invalid} testId={testId && `${testId}-lo`} placeholder="from" readOnly={readOnly} />
         <span className="text-xs text-slate-500">and</span>
-        <Scalar type={type} value={vs[1]} onChange={(v) => onChange({ values: [vs[0], v] })} invalid={invalid} testId={testId && `${testId}-hi`} placeholder="to" />
+        <Scalar type={type} value={vs[1]} onChange={(v) => onChange({ values: [vs[0], v] })} invalid={invalid} testId={testId && `${testId}-hi`} placeholder="to" readOnly={readOnly} />
       </span>
     );
   }
-  if (shape === 'many') return <Chips type={type} values={cond.values ?? []} onChange={(values) => onChange({ values })} invalid={invalid} testId={testId} />;
+  if (shape === 'many') return <Chips type={type} values={cond.values ?? []} onChange={(values) => onChange({ values })} invalid={invalid} testId={testId} readOnly={readOnly} />;
   if (shape === 'set') {
     return (
-      <select value={cond.set ?? ''} onChange={(e) => onChange({ set: e.target.value })} className={`${base} ${invalid ? 'border-rose-500/60' : 'border-slate-700'} max-w-xs`} data-testid={testId}>
-        <option value="">Pick a reference set</option>
+      <select title="A reference set is a named list of values, such as postcodes, kept under Decisions, Reference sets" value={cond.set ?? ''} disabled={readOnly} onChange={(e) => onChange({ set: e.target.value })} className={`${base} ${invalid ? 'border-rose-500/60' : 'border-slate-700'} max-w-xs`} data-testid={testId}>
+        <option value="">{referenceSets.length ? 'Pick a reference set (a named list)' : 'No reference sets yet. Add one under Decisions, Reference sets'}</option>
         {referenceSets.map((s) => <option key={s.key} value={s.key}>{s.name} ({s.count})</option>)}
         {cond.set && !referenceSets.some((s) => s.key === cond.set) && <option value={cond.set}>{cond.set} (not found)</option>}
       </select>
     );
   }
-  return <Scalar type={type === 'list' ? 'string' : type} value={cond.value} onChange={(value) => onChange({ value })} invalid={invalid} testId={testId} />;
+  return <Scalar type={type === 'list' ? 'string' : type} value={cond.value} onChange={(value) => onChange({ value })} invalid={invalid} testId={testId} readOnly={readOnly} />;
 }

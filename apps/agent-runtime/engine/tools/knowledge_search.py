@@ -240,6 +240,8 @@ class KnowledgeSearchTool(BaseTool):
             parts = [
                 f"Knowledge Search Results ({response.mode_used} mode, {len(response.results)} results):"
             ]
+            if response.degraded:
+                parts.append(response.degraded)
             parts.append("")
 
             for i, r in enumerate(response.results, 1):
@@ -276,6 +278,7 @@ class KnowledgeSearchTool(BaseTool):
                     "graph_count": response.graph_results_count,
                     "entities": response.entities_found,
                     "latency_ms": response.latency_ms,
+                    **({"warnings": [response.degraded]} if response.degraded else {}),
                 },
             )
 

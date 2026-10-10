@@ -89,6 +89,8 @@ class ApprovalSignoffRequest(BaseModel):
     client_token: str | None = Field(default=None, max_length=120)
     # action:* gates only, the arguments the approver changed before approving
     edited_arguments: dict[str, Any] | None = None
+    # the requester signs alone, only when nobody else in the workspace can
+    sole_operator: bool = False
 
 
 class ApprovalWebhookConfig(BaseModel):

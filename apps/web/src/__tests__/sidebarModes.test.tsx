@@ -85,14 +85,22 @@ describe('sidebar essentials mode', () => {
     expect(screen.queryByTestId('sidebar-admin-toggle')).toBeNull();
   });
 
-  it('adds Agent Builder and Autonomy for creators', () => {
+  it('adds Agent Builder, Decisions, Approvals and Autonomy for creators', () => {
     nav(as('creator'));
-    expect(labels()).toEqual(['Needs you', 'Home', 'Agents', 'AI Chat', 'Knowledge', 'Monitor', 'Agent Builder', 'Autonomy']);
+    expect(labels()).toEqual(['Needs you', 'Home', 'Agents', 'AI Chat', 'Knowledge', 'Monitor', 'Agent Builder', 'Decisions', 'Approvals', 'Autonomy']);
+  });
+
+  it('adds Approvals for a member who can approve decisions', () => {
+    nav(as('user'));
+    state.perms.can_approve_decisions = true;
+    cleanup();
+    nav('user');
+    expect(labels()).toEqual(['Needs you', 'Home', 'Agents', 'AI Chat', 'Knowledge', 'Monitor', 'Approvals']);
   });
 
   it('adds Improvements for builders who can view it, never for members', () => {
     nav(as('creator', [...USER_CAPS, 'improvements.view']));
-    expect(labels()).toEqual(['Needs you', 'Home', 'Agents', 'AI Chat', 'Knowledge', 'Monitor', 'Agent Builder', 'Autonomy', 'Improvements']);
+    expect(labels()).toEqual(['Needs you', 'Home', 'Agents', 'AI Chat', 'Knowledge', 'Monitor', 'Agent Builder', 'Decisions', 'Approvals', 'Autonomy', 'Improvements']);
     cleanup();
     nav(as('user', [...USER_CAPS, 'improvements.view']));
     expect(labels()).not.toContain('Improvements');
@@ -112,6 +120,12 @@ describe('sidebar essentials mode', () => {
     state.counts = { total: 7, counts: { approvals: 7 }, available: ['approvals'] };
     nav(as('user'));
     expect(screen.getByTestId('sidebar-inbox-count')).toHaveTextContent('7');
+  });
+
+  it('says what the Needs you total is made of', () => {
+    state.counts = { total: 121, counts: { approvals: 1, watching: 120 }, available: ['approvals', 'watching'] };
+    nav(as('user'));
+    expect(screen.getByTestId('sidebar-inbox-count')).toHaveAttribute('title', 'Waiting on you: 1 to sign, 120 watching reviews');
   });
 
   it('caps the badge at 99+', () => {

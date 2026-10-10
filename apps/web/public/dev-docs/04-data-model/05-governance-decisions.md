@@ -37,6 +37,7 @@ erDiagram
 | `name` | varchar(120) | Unique per tenant (`uq_permission_set_name`). |
 | `description` | text | |
 | `capabilities` | jsonb | List of capability keys, for example `["decisions.author", "approvals.sign:legal"]`. |
+| `builtin_key` | varchar(64) null | Set on sets the platform seeds, `decision_reviewers` for Decision reviewers, so a rename keeps it. Added by `dec257a02`, which also seeds the set for every tenant. |
 | `created_by` | uuid | `ON DELETE SET NULL`. |
 | `created_at` / `updated_at` | timestamptz | |
 
@@ -134,7 +135,7 @@ How it works:
 | `title` / `payload` | text / jsonb | What is being approved. Decision gates put `kind`, `decision_key`, `version`, `risk_tier` and a link in `payload`. |
 | `required_signoffs` | int | Default 1. Raised to the tier's `min_approvers` when the run or request carries a tier above low. |
 | `signoffs` | jsonb | List of `{user_id, user_email, decision, reason, at, self_approved, client_token?}`. `decision` is `approve`, `deny` or `return`. |
-| `status` | enum `approval_status` | `pending`, `approved`, `denied`, `expired`, `returned`. Indexed. `returned` added by `20a44346bdda`. |
+| `status` | enum `approval_status` | `pending`, `approved`, `denied`, `expired`, `returned`, `withdrawn`. Indexed. `returned` added by `20a44346bdda`, `withdrawn` by `dec257a01`. |
 | `requested_by` / `expires_at` / `decided_at` | | |
 | `client_token` / `gate_kind` | varchar(120) | Idempotency token and gate type, added by `z6a7b8c9d0e1`. Partial unique index `uq_approvals_tenant_client_token` on `(tenant_id, client_token)` where not NULL. Index `ix_approvals_tenant_kind` on `(tenant_id, gate_kind)`. |
 | `policy` | jsonb | Separation of duties, added by `30c306d107f4`. `{exclude_requester, capability, risk_tier, escalate_after_hours}`. |
@@ -181,6 +182,8 @@ Immutable once proposed. A correction is a new version.
 | `base_version_id` | uuid | The version this draft was started from. |
 | `lock_version` | int | Optimistic lock for draft saves, sent as an ETag. |
 | `author_id` / `editing_by` / `proposed_by` / `proposed_at` / `published_by` | | `editing_by` is presence for the draft editor. |
+| `risk_tier_at_proposal` | varchar(16) null | The decision's tier when this version was proposed. Publishing needs the sign-off of the higher of it and the tier now. Cleared on withdraw and return. |
+| `validation.attested` | JSONB key | Set on a version in force when its review after a tier raise is approved: `{tier, approval_id, at, approved_by, self_approved}`. Read as `attested_under`. |
 
 Lifecycle, under `/api/decisions/{key}`:
 

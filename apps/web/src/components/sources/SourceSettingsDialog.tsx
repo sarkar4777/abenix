@@ -89,7 +89,7 @@ export default function SourceSettingsDialog({
             <div>Most frequent check: <span className="text-slate-200">every {L.min_cadence_minutes} minutes</span></div>
             {settings.private_targets_allowed && <div className="sm:col-span-2 text-amber-300">This install allows private addresses (SOURCE_WATCH_ALLOW_PRIVATE_TARGETS).</div>}
           </div>
-          {!canEdit && <p className="text-xs text-slate-500">Changing these needs the risk.manage capability.</p>}
+          {!canEdit && <p className="text-xs text-slate-500">Changing these needs Manage risk, which an admin can give you.</p>}
           {err && <p className="text-sm text-rose-300" role="alert">{err}</p>}
         </div>
         <div className="flex items-center justify-end gap-2 px-6 py-4 border-t border-slate-800">

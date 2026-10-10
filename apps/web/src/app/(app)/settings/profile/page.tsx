@@ -384,7 +384,7 @@ export default function ProfilePage() {
         <div>
           <h2 className="text-sm font-semibold text-white">Change password</h2>
           <p className="text-xs text-slate-500 mt-1">
-            Takes effect at once. Sessions already signed in stay signed in.
+            Takes effect at once. This device stays signed in, and every other device is signed out and needs the new password.
           </p>
         </div>
 

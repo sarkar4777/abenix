@@ -335,7 +335,7 @@ function EmptyState({ canManage, onAdd }: { canManage: boolean; onAdd: () => voi
           <Plus className="w-4 h-4" /> Add your first source
         </button>
       ) : (
-        <p className="text-xs text-slate-500 mt-4 flex items-center gap-1.5"><AlertTriangle className="w-3.5 h-3.5" /> Adding sources needs the sources.manage capability.</p>
+        <p className="text-xs text-slate-500 mt-4 flex items-center gap-1.5"><AlertTriangle className="w-3.5 h-3.5" /> Adding sources needs Manage sources, which an admin can give you.</p>
       )}
     </div>
   );

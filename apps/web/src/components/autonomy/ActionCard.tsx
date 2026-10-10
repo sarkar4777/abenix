@@ -6,6 +6,7 @@ import {
   AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, Flag, HelpCircle, Loader2,
   PencilLine, RotateCcw, Target, ThumbsUp, Undo2, XCircle,
 } from 'lucide-react';
+import { MIN_DENY_REASON } from '@/lib/approvalText';
 import ConfirmModal from '@/components/ui/ConfirmModal';
 import LevelPill from './LevelPill';
 import ArgumentForm, { initialDrafts, parseDrafts } from './ArgumentForm';
@@ -295,8 +296,8 @@ export default function ActionCard({
           <div className="mt-2 flex flex-col gap-2 sm:flex-row">
             <button
               type="button"
-              disabled={busy || !note.trim()}
-              title={!note.trim() ? 'Say why first, so the agent and its record know' : undefined}
+              disabled={busy || note.trim().length < MIN_DENY_REASON}
+              title={note.trim().length < MIN_DENY_REASON ? 'Say why first, so the agent and its record know' : undefined}
               onClick={() => onReject?.(note.trim())}
               className={`${btn} border-rose-500/40 bg-rose-500/15 text-rose-300 hover:bg-rose-500/25`}
               data-testid="action-card-reject-submit"
@@ -305,7 +306,7 @@ export default function ActionCard({
             </button>
             <button type="button" onClick={() => setMode('idle')} className={`${btn} border-slate-600 text-slate-300 hover:bg-slate-700/50`}>Cancel</button>
           </div>
-          {!note.trim() && <p className="mt-1 text-[11px] text-slate-500">A short reason is needed to reject.</p>}
+          {note.trim().length < MIN_DENY_REASON && <p className="mt-1 text-[11px] text-slate-500">A short reason is needed to reject, at least {MIN_DENY_REASON} characters.</p>}
         </div>
       )}
 

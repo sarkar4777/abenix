@@ -253,15 +253,16 @@ test('a reviewer is invited, the author cannot sign their own high tier decision
   await go(admin, '/approvals');
   const own = approvalCard(admin, DECISION);
   await expect(own).toBeVisible({ timeout: 30_000 });
-  await own.getByRole('button', { name: 'Approve' }).click();
-  await expect(own.getByTestId('approval-error')).toContainText(/someone else/i);
+  // no Approve button is offered to the author, the card says why and who can
+  await expect(own.getByTestId('approval-author-note')).toContainText("you can't approve it yourself");
+  await expect(own.getByTestId('approval-approve')).toHaveCount(0);
   await expect(own).toHaveAttribute('data-status', 'pending');
 
   // the reviewer returns it with a reason
   await go(reviewer, '/approvals');
   const card = approvalCard(reviewer, DECISION);
   await expect(card).toBeVisible({ timeout: 30_000 });
-  await card.getByRole('button', { name: /Payload, signoff history/ }).click();
+  await card.getByRole('button', { name: /Details and sign-off history/ }).click();
   await card.getByPlaceholder('Why are you approving, denying or returning it?').fill('Cite the refund policy version in rule 1 as well.');
   await card.getByTestId('approval-return').click();
   await expect(approvalCard(reviewer, DECISION)).toHaveAttribute('data-status', /returned/, { timeout: 20_000 });
@@ -377,6 +378,11 @@ test('an agent pauses for a person, one refund is approved and one denied on the
     await expect(card).toBeVisible({ timeout: 180_000 });
     await expect(card.getByTestId('approval-gate-kind')).toBeVisible();
     await card.getByRole('button', { name: button }).click();
+    // a deny always carries a reason, so whoever asked learns why
+    if (button === 'Deny') {
+      await approvals.getByTestId('deny-dialog-reason').fill('The amount is over the refund limit for damaged parcels.');
+      await approvals.getByTestId('deny-dialog-confirm').click();
+    }
     return pending;
   };
 
@@ -540,6 +546,11 @@ test.afterAll(async ({ browser }) => {
   for (const t of trig) if (t.agent_id === ids.echoAgent) await call('DELETE', `/api/triggers/${t.id}`);
   for (const id of [ids.kbAgent, ids.hitlAgent, ids.echoAgent].filter(Boolean)) await call('DELETE', `/api/agents/${id}`);
   if (ids.kb) await call('DELETE', `/api/knowledge-bases/${ids.kb}`);
-  await call('DELETE', `/api/decisions/${KEY}`);
+  const arch = await (await call('DELETE', `/api/decisions/${KEY}`, { reason: 'end of the platform journeys UAT run' }))?.json().catch(() => null);
+  const pending = arch?.data?.pending?.approval_id;
+  if (pending) {
+    const rtok = (await (await page.request.post(`${API}/api/auth/login`, { data: { email: REVIEWER.email, password: REVIEWER.password } })).json().catch(() => null))?.data?.access_token;
+    if (rtok) await page.request.post(`${API}/api/approvals/${pending}/signoff`, { headers: { Authorization: `Bearer ${rtok}` }, data: { decision: 'approve', reason: 'test cleanup' } });
+  }
   await page.close();
 });

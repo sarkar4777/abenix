@@ -36,6 +36,10 @@ export default function ApprovalsPage() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // a deny always carries the desk's reason, so whoever asked learns why
+  const [denyFor, setDenyFor] = useState<string[] | null>(null);
+  const [denyReason, setDenyReason] = useState('');
+  const [denyBulk, setDenyBulk] = useState(false);
 
   const load = async (f: string) => {
     setLoading(true);
@@ -50,14 +54,15 @@ export default function ApprovalsPage() {
 
   useEffect(() => { load(filter); }, [filter]);
 
-  const decide = async (id: string, action: 'approve' | 'deny') => {
+  const decide = async (id: string, action: 'approve' | 'deny', reason?: string) => {
+    if (action === 'deny' && !reason) { setDenyReason(''); setDenyBulk(false); setDenyFor([id]); return; }
     setActing(id);
     setError(null);
     try {
       const r = await fetch(`/api/wingman/approvals/${id}/${action}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reason: action === 'approve' ? 'desk-approved' : 'desk-denied' }),
+        body: JSON.stringify({ reason: action === 'approve' ? 'desk-approved' : reason }),
       });
       if (!r.ok) {
         const j = await r.json().catch(() => null);
@@ -83,8 +88,9 @@ export default function ApprovalsPage() {
       return new Set(items.map((i) => i.id));
     });
 
-  const bulkDecide = async (action: 'approve' | 'deny') => {
+  const bulkDecide = async (action: 'approve' | 'deny', reason?: string) => {
     if (selected.size === 0) return;
+    if (action === 'deny' && !reason) { setDenyReason(''); setDenyBulk(true); setDenyFor(Array.from(selected)); return; }
     setBulkBusy(true);
     const ids = Array.from(selected);
     // Fire all in parallel; the SDK takes one decision per gate.
@@ -93,7 +99,7 @@ export default function ApprovalsPage() {
       fetch(`/api/wingman/approvals/${id}/${action}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reason: action === 'approve' ? 'desk-bulk-approved' : 'desk-bulk-denied' }),
+        body: JSON.stringify({ reason: action === 'approve' ? 'desk-bulk-approved' : reason }),
       }).then((r) => r.ok).catch(() => false),
     ));
     const failed = results.filter((ok) => !ok).length;
@@ -102,8 +108,42 @@ export default function ApprovalsPage() {
     await load(filter);
   };
 
+  const denyOk = denyReason.trim().length >= 5;
+  const confirmDeny = async () => {
+    if (!denyFor || !denyOk) return;
+    const ids = denyFor;
+    const why = denyReason.trim();
+    setDenyFor(null);
+    // a row's own Deny never sweeps up the other ticked rows
+    if (!denyBulk) await decide(ids[0], 'deny', why);
+    else await bulkDecide('deny', why);
+  };
+
   return (
     <div className="p-6">
+      {denyFor && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true" aria-labelledby="deny-title" data-testid="deny-dialog">
+          <div className="w-full max-w-md rounded-2xl border border-slate-700 bg-slate-900 p-5 space-y-3">
+            <h2 id="deny-title" className="text-base font-semibold text-white">Deny {denyFor.length === 1 ? 'this request' : `${denyFor.length} requests`}?</h2>
+            <p className="text-sm text-slate-300">Say why, so whoever asked knows what to change. It is recorded with the decision.</p>
+            <textarea
+              value={denyReason}
+              onChange={(e) => setDenyReason(e.target.value)}
+              rows={3}
+              autoFocus
+              placeholder="for example, the size is over today's limit"
+              className="w-full bg-slate-950 border border-slate-700 rounded-md px-2 py-1.5 text-sm text-white placeholder:text-slate-600 placeholder:italic"
+              aria-label="Reason"
+              data-testid="deny-reason"
+            />
+            <p className="text-[11px] text-slate-500">{denyOk ? 'They will see this.' : `At least 5 characters, ${5 - denyReason.trim().length} more to go.`}</p>
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setDenyFor(null)} className="px-3 py-1.5 rounded-lg text-xs text-slate-300 hover:bg-slate-800">Cancel</button>
+              <button onClick={confirmDeny} disabled={!denyOk} data-testid="deny-confirm" className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-rose-600 text-white hover:bg-rose-500 disabled:opacity-40">Deny</button>
+            </div>
+          </div>
+        </div>
+      )}
       <HeroBar
         eyebrow="HITL APPROVALS"
         title="The desk's gate queue"
@@ -242,7 +282,7 @@ function ApprovalCard({
 }: {
   approval: Approval;
   acting: boolean;
-  decide: (id: string, action: 'approve' | 'deny') => void;
+  decide: (id: string, action: 'approve' | 'deny', reason?: string) => void;
   filter: string;
   selected?: boolean;
   onToggle?: () => void;

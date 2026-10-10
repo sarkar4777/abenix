@@ -117,7 +117,7 @@ test('33-approvals-payload.png — structured approval payload renderer', async 
     await page.goto(`${BASE}/approvals`);
     await page.waitForLoadState('domcontentloaded');
     const card = page.locator('div', { hasText: 'docs sample — trade ticket approval' }).first();
-    await card.locator('button', { hasText: 'Payload, signoff history' }).first().click();
+    await card.locator('button', { hasText: 'Details and sign-off history' }).first().click();
     await page.waitForTimeout(400);
     await shoot(page, '33-approvals-payload.png');
   } finally {

@@ -4,11 +4,25 @@ import { useState } from 'react';
 import { CheckCircle2, Loader2, Pencil, Play, Trash2, XCircle } from 'lucide-react';
 import { apiFetch } from '@/lib/api-client';
 import { useApi } from '@/hooks/useApi';
-import type { TestResult, Validation } from '@/lib/decisions';
+import type { RuleDoc, TestResult, Validation } from '@/lib/decisions';
 
 interface GoldenTest { id: string; name: string; facts: any; expected_outcome: string; expected: any; match?: 'exact' | 'subset'; as_of: string | null }
 
 const OUTCOMES = ['decided', 'no_match', 'missing_facts', 'invalid_facts'];
+const OUTCOME_WORDS: Record<string, string> = { no_match: 'no rule applies', missing_facts: 'missing facts', invalid_facts: 'facts with the wrong type', decided: 'a decision' };
+
+// facts and answers as short a = b pairs, nested objects by their dotted path
+// a fact or outcome by the name people gave it, the key when it has none
+export function pairs(v: any, labels: Record<string, string> = {}, prefix = ''): string {
+  if (v === null || v === undefined) return '';
+  const name = (k: string) => labels[k] || k;
+  if (typeof v !== 'object' || Array.isArray(v)) return `${name(prefix) || 'value'} = ${JSON.stringify(v)}`;
+  return Object.entries(v).map(([k, x]) => {
+    const path = prefix ? `${prefix}.${k}` : k;
+    if (x && typeof x === 'object' && !Array.isArray(x) && !labels[path]) return pairs(x, labels, path);
+    return `${name(path)} = ${typeof x === 'string' ? `“${x}”` : JSON.stringify(x)}`;
+  }).filter(Boolean).join(', ');
+}
 const MATCH_HELP: Record<string, string> = {
   exact: 'The result must equal the expected JSON, nothing more and nothing less.',
   subset: 'Every key in the expected JSON must be in the result with the same value. Extra keys are ignored.',
@@ -45,8 +59,10 @@ function Editor({ t, decisionKey, onDone }: { t: GoldenTest; decisionKey: string
           <select value={outcome} onChange={(e) => setOutcome(e.target.value)} className="bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-white" aria-label="Expected outcome">
             {OUTCOMES.map((o) => <option key={o} value={o}>{o.replace('_', ' ')}</option>)}
           </select>
-          <input type="date" value={asOf} onChange={(e) => setAsOf(e.target.value)} className="bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-white [color-scheme:dark]" aria-label="As of" />
+          <input type="date" value={asOf} onChange={(e) => setAsOf(e.target.value)} className="bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-white [color-scheme:dark]" aria-label="Pinned to date" title="Leave empty to check it as of the day the tests run" />
+          {asOf && <button type="button" onClick={() => setAsOf('')} className="text-[11px] text-slate-400 hover:text-white">Unpin</button>}
         </div>
+        <p className="text-[11px] text-slate-500">{asOf ? `Always checked as of ${asOf}.` : 'Checked as of the day the tests run. Pick a date to pin it.'}</p>
         <textarea value={facts} onChange={(e) => setFacts(e.target.value)} rows={7} spellCheck={false} className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200 font-mono" aria-label="Facts" />
       </div>
       <div className="space-y-2">
@@ -70,9 +86,11 @@ function Editor({ t, decisionKey, onDone }: { t: GoldenTest; decisionKey: string
   );
 }
 
-export default function TestsTab({ decisionKey, version, validation, onRun, canEdit }: {
-  decisionKey: string; version: number; validation: Validation | null; onRun: () => Promise<void>; canEdit: boolean;
+export default function TestsTab({ decisionKey, version, validation, onRun, canEdit, onOpenTry, doc }: {
+  decisionKey: string; version: number; validation: Validation | null; onRun: () => Promise<void>; canEdit: boolean; onOpenTry?: () => void; doc?: RuleDoc | null;
 }) {
+  const factLabels = Object.fromEntries((doc?.facts || []).filter((f) => f.label).map((f) => [f.path, f.label!]));
+  const outLabels = Object.fromEntries((doc?.outputs || []).filter((o) => o.label).map((o) => [o.field, o.label!]));
   const { data: tests, mutate, isLoading, error } = useApi<GoldenTest[]>(`/api/decisions/${encodeURIComponent(decisionKey)}/tests`);
   const [running, setRunning] = useState(false);
   const [editing, setEditing] = useState<string | null>(null);
@@ -111,7 +129,11 @@ export default function TestsTab({ decisionKey, version, validation, onRun, canE
       ) : isLoading && !tests ? (
         <div className="h-20 rounded-xl bg-slate-800/40 animate-pulse" />
       ) : !tests?.length ? (
-        <div className="rounded-xl border border-dashed border-slate-700 p-6 text-center text-sm text-slate-400">No golden tests yet. Open Try it, enter facts, check the answer, then Keep as test.</div>
+        <div className="rounded-xl border border-dashed border-slate-700 p-6 text-center text-sm text-slate-400" data-testid="tests-empty">
+          <p className="text-slate-300">No golden tests yet.</p>
+          <p className="mt-1">A golden test is a case with the answer it must always give, so a later change can&apos;t quietly break it. Enter facts in Try it, check the answer, then press Keep as test.</p>
+          {onOpenTry && <button type="button" onClick={onOpenTry} className="mt-3 inline-flex items-center gap-1 px-3 py-1.5 rounded-md text-sm bg-cyan-500 text-white hover:bg-cyan-400" data-testid="tests-open-try">Open Try it</button>}
+        </div>
       ) : (
         <ul className="space-y-2">
           {tests.map((t) => {
@@ -121,7 +143,7 @@ export default function TestsTab({ decisionKey, version, validation, onRun, canE
                 <div className="flex flex-wrap items-center gap-2">
                   {r ? (r.passed ? <CheckCircle2 className="w-4 h-4 text-emerald-400" /> : <XCircle className="w-4 h-4 text-rose-400" />) : <span className="w-4 h-4 rounded-full border border-slate-600" />}
                   <span className="text-sm text-white font-medium">{t.name}</span>
-                  <span className="text-xs text-slate-500">expects {t.expected_outcome.replace('_', ' ')}{t.expected_outcome === 'decided' && t.match === 'subset' ? ', subset match' : ''}{t.as_of ? ` on ${t.as_of}` : ''}</span>
+                  <span className="text-xs text-slate-500">expects {t.expected_outcome.replace('_', ' ')}{t.expected_outcome === 'decided' && t.match === 'subset' ? ', subset match' : ''}{t.as_of ? `, pinned to ${t.as_of.slice(0, 10)}` : ', as of the day the tests run'}</span>
                   {canEdit && (
                     <span className="ml-auto flex items-center gap-1">
                       <button type="button" onClick={() => setEditing(editing === t.id ? null : t.id)} className="p-1 text-slate-400 hover:text-white" aria-label={`Edit ${t.name}`}><Pencil className="w-4 h-4" /></button>
@@ -133,6 +155,12 @@ export default function TestsTab({ decisionKey, version, validation, onRun, canE
                     </span>
                   )}
                 </div>
+                <dl className="mt-1.5 grid gap-x-3 gap-y-0.5 text-[11px] sm:grid-cols-[auto_minmax(0,1fr)]" data-testid="test-detail">
+                  <dt className="text-slate-500">Given</dt>
+                  <dd className="text-slate-300 break-words">{pairs(t.facts, factLabels) || 'no facts'}</dd>
+                  <dt className="text-slate-500">Expects</dt>
+                  <dd className="text-slate-300 break-words">{t.expected_outcome === 'decided' ? pairs(t.expected, outLabels) || 'a decision' : OUTCOME_WORDS[t.expected_outcome] || t.expected_outcome}</dd>
+                </dl>
                 {r && !r.passed && (
                   <div className="mt-2 grid gap-2 md:grid-cols-2 text-xs">
                     <div><div className="text-slate-500 mb-0.5">Expected{t.match === 'subset' && t.expected_outcome === 'decided' ? ' (these keys at least)' : ''}</div><pre className="text-slate-200 whitespace-pre-wrap">{t.expected_outcome === 'decided' ? JSON.stringify(t.expected, null, 2) : t.expected_outcome}</pre></div>

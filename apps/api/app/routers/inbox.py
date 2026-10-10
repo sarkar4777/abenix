@@ -69,23 +69,22 @@ def can_sign(
     agent_creator_id: str | None = None,
     self_approval: str | None = None,
 ) -> bool:
-    """Mirrors approver_denial and promotion_denial without touching the database."""
-    me = str(user.id)
-    if any(str(s.get("user_id")) == me for s in signoffs or []):
-        return False
-    if gate_kind == "decision_publish" and not holds(caps, "decisions.review"):
-        return False
-    if (
-        gate_kind in ("autonomy.promote", RELEASE_GATE)
-        and agent_creator_id == me
-        and not self_approval
-    ):
-        return False
-    if policy:
-        if not holds(caps, str(policy.get("capability") or "approvals.sign")):
-            return False
-        return not (policy.get("exclude_requester") and str(requested_by) == me)
-    return _signer(user, caps)
+    """The same rule the approvals list uses for can_sign, without touching the database."""
+    from app.core.approvers import sign_check
+
+    return (
+        sign_check(
+            user,
+            caps,
+            requested_by=requested_by,
+            policy=policy,
+            gate_kind=gate_kind,
+            signoffs=signoffs,
+            agent_creator_id=agent_creator_id,
+            self_approval=self_approval,
+        )
+        is None
+    )
 
 
 async def _signable_kinds(
@@ -110,9 +109,9 @@ async def _signable_kinds(
             .limit(500)
         )
     ).all()
-    return [
-        r[2]
-        for r in rows
+    out: list[str | None] = []
+    alone: list[Any] = []
+    for r in rows:
         if can_sign(
             user,
             caps,
@@ -122,7 +121,37 @@ async def _signable_kinds(
             signoffs=r[3],
             agent_creator_id=r[4],
             self_approval=r[5],
-        )
+        ):
+            out.append(r[2])
+        elif str(r[0]) == str(user.id) and not r[3]:
+            alone.append(r)
+    if alone:
+        out.extend(await _sole_kinds(db, user, alone))
+    return out
+
+
+async def _sole_kinds(db: AsyncSession, user: Any, rows: list[Any]) -> list[str | None]:
+    """Own requests the requester may sign alone count as waiting on them, as on Approvals."""
+    from app.core.approvers import (
+        SOLE_OPERATOR_KINDS,
+        can_sign as person_signs,
+        eligible_from,
+        sole_operator_enabled,
+        tenant_people,
+    )
+
+    rows = [r for r in rows if r[2] in SOLE_OPERATOR_KINDS]
+    if not rows or not await sole_operator_enabled(db, user.tenant_id):
+        return []
+    people = await tenant_people(db, user.tenant_id)
+    mine = next((c for u, c in people if str(u.id) == str(user.id)), None)
+    if mine is None:
+        return []
+    return [
+        r[2]
+        for r in rows
+        if not eligible_from(people, r[1], r[2], r[0])
+        and person_signs(_role(user), mine, r[1], r[2])
     ]
 
 
@@ -139,6 +168,8 @@ async def _approvals(db: AsyncSession, user: Any, caps: frozenset[str], kinds) -
 
 
 async def _watching(db: AsyncSession, user: Any) -> int:
+    from app.services.autonomy import review_scope
+
     return int(
         (
             await db.execute(
@@ -146,6 +177,7 @@ async def _watching(db: AsyncSession, user: Any) -> int:
                     AgentAction.tenant_id == user.tenant_id,
                     AgentAction.status == "watching",
                     AgentAction.reviewer_answer.is_(None),
+                    *review_scope(user),
                 )
             )
         ).scalar()
@@ -181,6 +213,15 @@ async def _marketplace(db: AsyncSession, user: Any) -> int:
     )
 
 
+def _own_runs(user: Any) -> list[Any]:
+    """People who only see their own runs are only alerted about their own failures."""
+    from app.core.permissions import sees_other_users_resources
+
+    if is_admin(user) or sees_other_users_resources(user):
+        return []
+    return [Execution.user_id == user.id]
+
+
 async def rising_failures(db: AsyncSession, user: Any) -> list[dict[str, Any]]:
     """Failure causes that are new today or up on the day before."""
     now = datetime.now(timezone.utc)
@@ -198,6 +239,7 @@ async def rising_failures(db: AsyncSession, user: Any) -> list[dict[str, Any]]:
                 Execution.tenant_id == user.tenant_id,
                 Execution.status == ExecutionStatus.FAILED,
                 Execution.created_at >= now - timedelta(hours=48),
+                *_own_runs(user),
             )
             .group_by(Execution.failure_code)
         )
@@ -288,6 +330,10 @@ async def inbox_counts(
     hit = _cache.get(user.id)
     if hit and not fresh and now - hit[0] < TTL_SECONDS:
         return success({**hit[1], "cached": True})
+    # approvals left open on archived decisions are withdrawn before anything is counted
+    from app.routers.approvals import _sweep_archived
+
+    await _sweep_archived(db, user.tenant_id)
     data = await compute_counts(db, user)
     if len(_cache) >= _MAX_CACHED:
         _cache.clear()

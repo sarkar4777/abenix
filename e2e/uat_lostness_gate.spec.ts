@@ -72,7 +72,7 @@ const RAW_ERROR: Array<{ re: RegExp; what: string; outsideCode?: boolean }> = [
   { re: /\bNaN\b|\bundefined\b/, what: 'NaN or undefined in the text' },
 ];
 // "nothing to do here" or a permission explanation, both count as a way forward
-const EXPLAINED = /nothing (to do|here|needs you|waiting)|no .{1,40} yet|you (do not|don't|cannot|can't) |needs? the .{1,60}(permission|capability|role)|ask (an|your) admin|only (admins|an admin)|not available|turned off|not (turned|switched) on|is off\b/i;
+const EXPLAINED = /view only\.|an admin can give you|nothing (to do|here|needs you|waiting)|no .{1,40} yet|you (do not|don't|cannot|can't) |needs? the .{1,60}(permission|capability|role)|ask (an|your) admin|only (admins|an admin)|not available|turned off|not (turned|switched) on|is off\b/i;
 const NOT_FOR_ROLE = /not available|(do not|don't) have (access|permission)|needs? the .{1,60}(permission|capability|role)|only (admins|an admin)|ask (an|your) admin|admin(s)? only|not allowed/i;
 
 async function go(page: Page, route: string) {

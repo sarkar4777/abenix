@@ -5,7 +5,8 @@ export type Shape = 'one' | 'two' | 'many' | 'set' | 'none';
 export type Tier = 'low' | 'medium' | 'high' | 'critical';
 
 export interface Fact { path: string; type: FactType; label?: string; required?: boolean }
-export interface Outcome { field: string; type?: string; label?: string }
+export type OutcomeType = 'string' | 'number' | 'boolean' | 'date' | 'object';
+export interface Outcome { field: string; type?: OutcomeType | string; label?: string }
 export interface Condition { fact: string; op: string; value?: any; values?: any[]; set?: string }
 export interface Group { all?: Node[]; any?: Node[]; negate?: boolean }
 export type Node = Condition | Group;
@@ -44,6 +45,10 @@ export interface VersionSummary {
   superseded_at: string | null;
   change_note: string;
   approval_id: string | null;
+  author_id?: string | null;
+  author_name?: string | null;
+  risk_tier_at_proposal?: Tier | null;
+  attested_under?: Tier | null;
   has_builder: boolean;
   etag: string;
   updated_at: string | null;
@@ -161,7 +166,8 @@ export function factLabel(doc: RuleDoc, path: string): string {
   return doc.facts.find((f) => f.path === path)?.label || path;
 }
 
-function fmtValue(v: any): string {
+function fmtValue(v: any, emptyIsValue = false): string {
+  if (v === '' && emptyIsValue) return '“”';
   if (v === null || v === undefined || v === '') return '…';
   if (typeof v === 'string') return `“${v}”`;
   return String(v);
@@ -174,7 +180,7 @@ export function conditionText(doc: RuleDoc, c: Condition): string {
   switch (op.shape) {
     case 'one': return `${f} ${op.label} ${fmtValue(c.value)}`;
     case 'two': return `${f} ${op.label} ${fmtValue(c.values?.[0])} and ${fmtValue(c.values?.[1])}`;
-    case 'many': return `${f} ${op.label} ${(c.values || []).map(fmtValue).join(', ') || '…'}`;
+    case 'many': return `${f} ${op.label} ${(c.values || []).map((x) => fmtValue(x)).join(', ') || '…'}`;
     case 'set': return `${f} ${op.label} ${c.set || '…'}`;
     default: return `${f} ${op.label}`;
   }
@@ -188,11 +194,30 @@ export function groupText(doc: RuleDoc, g: Group, top = true): string {
   return g.negate ? `not (${inner})` : inner;
 }
 
+// the store does not keep key order, so outcomes follow the order they are listed in
+export function orderedThen(doc: RuleDoc, then: Record<string, ThenCell> | undefined): [string, ThenCell][] {
+  const entries = Object.entries(then || {});
+  const pos = (k: string) => {
+    const i = doc.outputs.findIndex((o) => o.field === k);
+    return i < 0 ? doc.outputs.length : i;
+  };
+  return entries.sort((a, b) => pos(a[0]) - pos(b[0]));
+}
+
+export function orderedResult(doc: RuleDoc | null, result: any): any {
+  if (!doc || !result || typeof result !== 'object' || Array.isArray(result)) return result;
+  const known = doc.outputs.map((o) => o.field).filter((f) => f in result);
+  const rest = Object.keys(result).filter((k) => !known.includes(k));
+  return Object.fromEntries([...known, ...rest].map((k) => [k, result[k]]));
+}
+
 export function thenText(doc: RuleDoc, r: Rule): string {
-  const parts = Object.entries(r.then || {}).map(([k, cell]) => {
+  // an empty number or date is not set yet, an empty text is a real answer
+  const blank = (k: string, cell: any) => cell && typeof cell === 'object' && !('formula' in cell) && (cell.value === '' || cell.value === undefined) && (doc.outputs.find((o) => o.field === k)?.type ?? 'string') !== 'string';
+  const parts = orderedThen(doc, r.then).filter(([k, cell]) => !blank(k, cell)).map(([k, cell]) => {
     const label = doc.outputs.find((o) => o.field === k)?.label || k;
     if (cell && typeof cell === 'object' && 'formula' in cell) return `${label} = ${cell.formula}`;
-    return `${label} = ${fmtValue(cell?.value)}`;
+    return `${label} = ${fmtValue(cell?.value, true)}`;
   });
   return parts.join(', ') || 'nothing yet';
 }
@@ -215,6 +240,59 @@ export function problemsAt(problems: Problem[], prefix: string): Problem[] {
 
 export function problemAt(problems: Problem[], path: string): Problem | undefined {
   return problems.find((p) => p.path === path);
+}
+
+// the API may point at a field as rules[0].then.x or as /rules/0/then/x, the screens use the second
+export function normProblemPath(path: string): string {
+  if (!path || path.startsWith('/')) return path || '';
+  return '/' + path.replace(/\[(\d+)\]/g, '.$1').split('.').filter(Boolean).join('/');
+}
+
+const PLAIN_MESSAGE: Record<string, string> = {
+  no_outputs: 'Add at least one outcome, the answer this decision gives back.',
+  bad_output: 'An outcome needs a name made of letters, digits and _.',
+};
+
+export function normProblems(problems: Problem[] | undefined | null): Problem[] {
+  return (problems || []).map((p) => {
+    const field = (p as any).path ?? (p as any).field ?? '';
+    const code = p.code || '';
+    return { ...p, path: normProblemPath(field), severity: p.severity || 'error', message: PLAIN_MESSAGE[code] || p.message };
+  });
+}
+
+export type ProblemTab = 'rules' | 'facts';
+
+export interface ProblemPlace { tab: ProblemTab; ruleIndex: number | null; ruleId: string | null; where: string }
+
+// where a problem lives, in words a rule owner would use
+export function problemPlace(doc: RuleDoc | null, p: Problem): ProblemPlace {
+  const parts = p.path.split('/').filter(Boolean);
+  if (parts[0] === 'facts') {
+    const f = doc?.facts[Number(parts[1])];
+    return { tab: 'facts', ruleIndex: null, ruleId: null, where: f ? `Facts · ${f.label || f.path}` : 'Facts' };
+  }
+  if (parts[0] === 'outputs') {
+    const o = doc?.outputs[Number(parts[1])];
+    return { tab: 'facts', ruleIndex: null, ruleId: null, where: o ? `Outcomes · ${o.label || o.field}` : 'Outcomes' };
+  }
+  if (parts[0] === 'rules' && parts.length > 1) {
+    const i = Number(parts[1]);
+    const r = doc?.rules[i];
+    const name = r ? r.key || r.description || `Rule ${i + 1}` : `Rule ${i + 1}`;
+    let section = '';
+    if (parts[2] === 'when') section = ' · When';
+    else if (parts[2] === 'then') section = parts[3] ? ` · Then ${parts[3]}` : ' · Then';
+    else if (parts[2] === 'key') section = ' · Rule key';
+    else if (parts[2] === 'valid_from' || parts[2] === 'valid_to') section = ' · Dates';
+    else if (parts[2] === 'requires') section = ' · Facts it needs';
+    return { tab: 'rules', ruleIndex: i, ruleId: r?.id ?? null, where: `Rule ${i + 1} ${name === `Rule ${i + 1}` ? '' : `(${name})`}${section}`.replace(/\s+/g, ' ').trim() };
+  }
+  return { tab: 'rules', ruleIndex: null, ruleId: null, where: 'Rules' };
+}
+
+export function errorsOf(problems: Problem[]): Problem[] {
+  return problems.filter((p) => p.severity === 'error');
 }
 
 // table cells: a small grammar people can type or paste from a spreadsheet
@@ -360,6 +438,15 @@ export function getPath(obj: any, path: string): any {
   return path.split('.').reduce((cur, p) => (cur && typeof cur === 'object' ? cur[p] : undefined), obj);
 }
 
+// open what is in force; a draft only when nothing is
+export function pickDefault(vs: VersionSummary[]): number {
+  const live = vs.filter((v) => v.state === 'published');
+  if (live.length) return Math.max(...live.map((v) => v.version));
+  const drafts = vs.filter((v) => v.state === 'draft');
+  if (drafts.length) return Math.max(...drafts.map((v) => v.version));
+  return Math.max(0, ...vs.map((v) => v.version));
+}
+
 export const STATE_STYLE: Record<VersionSummary['state'], string> = {
   draft: 'text-slate-300 border-slate-600 bg-slate-700/30',
   proposed: 'text-amber-300 border-amber-500/40 bg-amber-500/10',
@@ -371,7 +458,7 @@ export const STATE_STYLE: Record<VersionSummary['state'], string> = {
 };
 
 export const STATE_LABEL: Record<VersionSummary['state'], string> = {
-  draft: 'Draft', proposed: 'Waiting for sign-off', approved: 'Approved, ready to publish', rejected: 'Rejected',
+  draft: 'Draft', proposed: 'Waiting for sign-off', approved: 'Approved, ready to publish', rejected: 'Denied',
   published: 'In force', superseded: 'Replaced', retired: 'Retired',
 };
 
@@ -465,4 +552,10 @@ export function readTryPreload(key: string, raw: string | null): TryPreload | nu
 export function formatDuration(us?: number | null): string {
   if (!us) return '';
   return us < 1000 ? `${us} µs` : `${(us / 1000).toFixed(1)} ms`;
+}
+
+// a tier as a name, High rather than high
+export function tierName(t: string | null | undefined): string {
+  const s = String(t ?? '');
+  return s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
 }

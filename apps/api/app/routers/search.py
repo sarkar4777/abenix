@@ -264,6 +264,7 @@ _ROUTES: list[dict[str, Any]] = [
 async def search(
     q: str = Query(..., min_length=1, max_length=80, description="Query string"),
     limit: int = Query(8, ge=1, le=20, description="Max results per category"),
+    archived: int = Query(0, ge=0, le=1, description="Include archived decisions"),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -303,6 +304,32 @@ async def search(
 
     like = f"%{needle}%"
     admin = is_admin(user)
+
+    # decisions by name, key or description, for people who can see decisions
+    try:
+        from app.core.capabilities import has_capability
+        from app.routers.decisions import search_terms
+        from models.decision import DecisionModel
+
+        if await has_capability(db, user, "decisions.view"):
+            stmt = select(
+                DecisionModel.key, DecisionModel.name, DecisionModel.archived_at
+            ).where(DecisionModel.tenant_id == tenant_id, *search_terms(q))
+            if not archived:
+                stmt = stmt.where(DecisionModel.archived_at.is_(None))
+            for r in (
+                await db.execute(stmt.order_by(DecisionModel.name).limit(limit))
+            ).all():
+                out.append(
+                    {
+                        "category": "Decisions",
+                        "label": r.name,
+                        "subtitle": r.key + (" (archived)" if r.archived_at else ""),
+                        "href": f"/decisions/{r.key}",
+                    }
+                )
+    except Exception:
+        logger.exception("search: decisions failed")
 
     # 2. Agents and pipelines the caller can open, platform ones included
     try:
@@ -446,6 +473,9 @@ async def search(
         for r in rows:
             status = getattr(r.status, "value", r.status)
             asked = (r.input_message or "").strip().replace("\n", " ")
+            # a run whose input is mostly symbols, a pasted log line, is noise here
+            if asked and sum(ch.isalnum() for ch in asked[:80]) < len(asked[:80]) * 0.4:
+                continue
             out.append(
                 {
                     "category": "Runs",

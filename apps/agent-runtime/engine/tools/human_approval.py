@@ -181,14 +181,26 @@ class HumanApprovalTool(BaseTool):
             }
         )
         pending_key = _pending_key(self._tenant_id)
+        # the waiting marker goes first, a gate listed without it reads as left behind
+        await mark_waiting(self._execution_id, timeout)
         await r.sadd(pending_key, pending_data)
         # Sets have no per-member TTL, so keep the set alive at least as long as this gate
         current_ttl = await r.ttl(pending_key)
         if current_ttl is None or current_ttl < timeout:
             await r.expire(pending_key, timeout)
-        await mark_waiting(self._execution_id, timeout)
+        try:
+            return await self._wait(r, gate_id, start, timeout, action)
+        finally:
+            # a run cancelled or timed out mid-wait must not leave a gate people can still answer
+            try:
+                await r.srem(pending_key, pending_data)
+            except Exception:  # noqa: BLE001
+                pass
+            await clear_waiting(self._execution_id)
 
-        # Poll for approval
+    async def _wait(
+        self, r: Any, gate_id: str, start: float, timeout: int, action: str
+    ) -> ToolResult:
         approval_key = _approval_key(self._execution_id, gate_id)
         poll_interval = 2  # seconds
 
@@ -196,9 +208,6 @@ class HumanApprovalTool(BaseTool):
             result = await r.get(approval_key)
             if result:
                 decision = json.loads(result)
-                # Clean up pending
-                await r.srem(pending_key, pending_data)
-                await clear_waiting(self._execution_id)
 
                 if decision["decision"] == "approved":
                     reviewer = decision.get("reviewer", "unknown")
@@ -229,9 +238,6 @@ class HumanApprovalTool(BaseTool):
 
             await asyncio.sleep(poll_interval)
 
-        # Timeout — clean up and fail
-        await r.srem(pending_key, pending_data)
-        await clear_waiting(self._execution_id)
         return ToolResult(
             content=f"Approval timed out after {timeout}s. Action '{action}' was not approved.",
             is_error=True,

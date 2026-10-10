@@ -46,8 +46,10 @@ async def my_permissions(
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
     """Return the current user's role + per-feature flags + UI hints."""
+    from app.core.approvers import can_approve_decisions
     from app.core.capabilities import capabilities_for
 
+    granted = await capabilities_for(db, user)
     return success(
         {
             "user_id": str(user.id),
@@ -59,7 +61,8 @@ async def my_permissions(
             ).lower(),
             "is_admin": is_admin(user),
             "features": features_for(user),
-            "capabilities": sorted(await capabilities_for(db, user)),
+            "capabilities": sorted(granted),
+            "can_approve_decisions": can_approve_decisions(granted),
         }
     )
 

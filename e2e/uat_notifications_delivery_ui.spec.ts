@@ -35,7 +35,7 @@ const DECISION = `uat.notify.${RUN}`;
 const PII = 'Please file this. My SSN is 123-45-6789.';
 const SHOTS = path.join(__dirname, 'uat_notifications_delivery_ui', 'shots');
 
-const state: { agentId?: string; before?: any; slackWasSet?: boolean; mateId?: string; grantId?: string } = {};
+const state: { agentId?: string; before?: any; slackWasSet?: boolean; mateId?: string; grantId?: string; dlp?: any } = {};
 
 test.describe.configure({ mode: 'serial' });
 test.use({ viewport: { width: 1440, height: 900 } });
@@ -113,6 +113,9 @@ test.beforeAll(async ({ browser }) => {
   await signIn(page);
   state.before = (await api(page, 'GET', '/api/settings/notifications')).data;
   state.slackWasSet = !!(await api(page, 'GET', '/api/settings/tenant')).data?.slack_webhook_is_set;
+  // the failing run sends personal data on purpose, block mode would refuse it before any run exists
+  state.dlp = (await api(page, 'GET', '/api/settings/dlp')).data;
+  await api(page, 'PUT', '/api/settings/dlp', { mode: 'detect', enabled: !!state.dlp?.enabled });
   await ctx.close();
 });
 
@@ -156,12 +159,14 @@ test('2. an emailed invite brings in a teammate', async ({ page, browser }) => {
   await page.getByPlaceholder(/email/i).first().fill(MATE.email);
   const role = page.locator('select').filter({ has: page.locator('option[value="creator"]') }).first();
   await role.selectOption('creator');
+  // the teammate signs off rule changes later, so they can approve decisions
+  await page.getByTestId('invite-can-approve').check();
   await page.getByRole('button', { name: 'Send', exact: true }).click();
   await expect(page.getByTestId('invite-result')).toContainText(`Invite emailed to ${MATE.email}`, { timeout: 20_000 });
   await shot(page, '02-invite-emailed');
 
   const mail = await waitForMail(page.request, MATE.email, /invited you to/);
-  expect(mail.text).toContain('as creator');
+  expect(mail.text).toMatch(/as a Creator/i);
   const link = firstLink(mail.text, '/auth/accept-invite?token=');
   expect(link.startsWith(`${BASE}/auth/accept-invite`)).toBeTruthy();
 
@@ -244,6 +249,7 @@ test('4. a high risk decision asks the teammate to sign off in Slack and by emai
   // the tier picker next to the title
   const tier = page.locator('select').filter({ has: page.locator('option[value="high"]') }).first();
   await tier.selectOption('high');
+  await page.getByTestId('tier-confirm').click();
   await expect(tier).toHaveValue('high');
   await page.waitForTimeout(1_500);
   await page.getByTestId('check').click();
@@ -343,7 +349,16 @@ test.afterAll(async ({ browser }) => {
     await api(page, 'PUT', '/api/settings/notifications', prefs);
   }
   if (!state.slackWasSet) await api(page, 'PUT', '/api/settings/tenant', { slack_webhook_url: '' });
-  await api(page, 'DELETE', `/api/decisions/${DECISION}`);
+  if (state.dlp) await api(page, 'PUT', '/api/settings/dlp', { mode: state.dlp.mode || 'detect', enabled: !!state.dlp.enabled });
+  // the proposal left waiting is withdrawn first, so no reviewer is asked about an archived decision
+  await api(page, 'POST', `/api/decisions/${DECISION}/versions/1/withdraw`, { reason: 'end of the notifications UAT run' });
+  // at high risk archiving waits for a second person, the teammate signs it before they are removed
+  const arch = await api(page, 'DELETE', `/api/decisions/${DECISION}`, { reason: 'end of the notifications UAT run' });
+  const pending = arch.data?.pending?.approval_id;
+  if (pending && state.mateId) {
+    const mtok = (await (await page.request.post(`${API}/api/auth/login`, { data: { email: MATE.email, password: MATE.password } })).json())?.data?.access_token;
+    if (mtok) await page.request.post(`${API}/api/approvals/${pending}/signoff`, { headers: { Authorization: `Bearer ${mtok}` }, data: { decision: 'approve', reason: 'test cleanup' } });
+  }
   if (state.agentId) await api(page, 'DELETE', `/api/agents/${state.agentId}`);
   if (state.mateId) await api(page, 'DELETE', `/api/team/members/${state.mateId}`);
   await ctx.close();

@@ -560,12 +560,18 @@ test('CRIT #24 — UI: /marketplace renders cards', async ({ page }) => {
 
 test('CRIT #25 — UI persistence: change DLP via API, reload UI shows current state', async ({ page }) => {
   const tok = await login(page);
+  const before = (await (await page.request.get(`${API}/api/settings/dlp`, { headers: auth(tok) })).json()).data;
   await page.request.put(`${API}/api/settings/dlp`, { headers: auth(tok), data: { mode: 'block', enabled: true } });
-  await page.goto(`${BASE}/settings/data`);
-  await page.waitForLoadState('domcontentloaded');
-  await page.waitForTimeout(2500);
-  const t = (await page.locator('body').innerText()).toLowerCase();
-  expect(t).toMatch(/dlp|retention|days|mode/);
+  try {
+    await page.goto(`${BASE}/settings/data`);
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForTimeout(2500);
+    const t = (await page.locator('body').innerText()).toLowerCase();
+    expect(t).toMatch(/dlp|retention|days|mode/);
+  } finally {
+    // block mode refuses chat with personal data, later specs must not inherit it
+    await page.request.put(`${API}/api/settings/dlp`, { headers: auth(tok), data: { mode: before?.mode || 'detect', enabled: !!before?.enabled } });
+  }
 });
 
 // ─── Resource isolation: viewer/admin role gate on admin endpoints ─────────

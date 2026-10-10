@@ -549,8 +549,26 @@ function agentNodeTool(node: PipelineNodeConfig): string | null {
   return isAgent && !node.tool_name ? 'agent_step' : null;
 }
 
+// type: structured calls no tool, the engine runs it as __structured__ with its output map as arguments
+function structuredNodeTool(node: PipelineNodeConfig): string | null {
+  const raw = node as unknown as Record<string, unknown>;
+  return String(raw.type || '').toLowerCase() === 'structured' && !node.tool_name ? '__structured__' : null;
+}
+
+/** What the canvas shows for a step's tool, so built-in steps read in words. */
+export function toolDisplayName(toolName: string): string {
+  if (toolName === '__structured__') return 'assemble output';
+  if (toolName === 'agent_step') return 'agent';
+  return toolName;
+}
+
 function agentNodeArguments(node: PipelineNodeConfig): Record<string, unknown> {
   const args: Record<string, unknown> = { ...(node.arguments || {}) };
+  if (structuredNodeTool(node)) {
+    const raw = node as unknown as Record<string, unknown>;
+    const out = (raw.output || raw.fields) as Record<string, unknown> | undefined;
+    return out && typeof out === 'object' ? { ...out, ...args } : args;
+  }
   if (!agentNodeTool(node)) return args;
   const raw = node as unknown as Record<string, unknown>;
   if (raw.input !== undefined && args.input_message === undefined) args.input_message = raw.input;
@@ -650,7 +668,7 @@ export function deserializeConfig(
 
   const steps: PipelineStep[] = config.nodes.map((node) => ({
     id: node.id,
-    toolName: agentNodeTool(node) || node.tool_name || (node as unknown as Record<string, string>).toolName || 'unknown',
+    toolName: agentNodeTool(node) || structuredNodeTool(node) || node.tool_name || (node as unknown as Record<string, string>).toolName || 'unknown',
     label: node.label || node.id.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
     arguments: agentNodeArguments(node),
     dependsOn: [...(node.depends_on || [])],

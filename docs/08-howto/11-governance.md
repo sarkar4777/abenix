@@ -77,6 +77,14 @@ curl -s -X PUT "$API/api/governance/risk/high" \
   -d '{"tool_call_action": "block", "allowed_models": ["claude-sonnet-4-5*"], "publish_approvals": {"min_approvers": 2}}'
 ```
 
+A decision's own tier is guarded the same way. Raising it applies at once, lowering it needs a reason and the current tier's sign-off, and neither is allowed while a version waits for sign-off. See [09-decisions](09-decisions.md#changing-the-risk-tier).
+
+A change to a permission set, its members, or someone's role takes effect at once in every API worker, each one drops its cached view of that person when told over Redis.
+
+**Decision reviewers.** Every workspace has this permission set ready, holding Review decisions and Sign approvals, the two a person needs to approve any decision approval. Admins can add people to it under Admin, Permissions, from **Someone missing?** on a decision, or by ticking **Can approve decisions** on a Team invite. It is a normal set, so it can be renamed or changed, and it is created again if deleted. Team shows a **Can approve decisions** badge on each member who can, and an admin turns it on or off from the row menu with **Let them approve decisions** or **Stop them approving decisions**. Archiving a decision that was never published needs no sign-off at any tier, because nothing was ever in force.
+
+**Sole-operator sign-off.** In a workspace where nobody else can approve, the person who proposed a decision version or a tier change can sign it alone with a written reason. It is recorded as a self-approval and every admin is told. It is on by default. Turn it off with `PUT /api/governance/settings` and `{"sole_operator_signoff": false}`, admins only. `GET /api/governance/settings` and `GET /api/governance/risk` (under `settings`) show the current value. See [Working alone](../02-runtime/05-approvals-hitl.md#working-alone).
+
 An unknown key or a bad value is refused with 400 naming it. The policy also accepts an `autonomy` object, the thresholds for earned autonomy at that tier, see [02-runtime/21-earned-autonomy](../02-runtime/21-earned-autonomy.md). `GET /api/governance/risk` returns each tier's guide text, default, overrides and the effective policy, plus every tool's tier. `DELETE /api/governance/risk/{tier}` goes back to the default. Reading needs `risk.view`, writing `risk.manage`. Runtime pods pick a change up within five seconds.
 
 ---
@@ -110,6 +118,8 @@ Resume with `POST /api/governance/kill-switches/{id}/clear`. `GET /api/governanc
 ## Step 4. Grant capabilities with a permission set
 
 Each role carries defaults. A permission set adds to them, it never takes away.
+
+Pages show a person only what they can do. A Member opening Team, Decisions, a decision, Approvals or Risk and Controls sees the page view only, with a line saying who can act and how to get the right, and no control that would be refused after the click. Ctrl+K lists Team as view only for them and leaves Permissions out. An invite started from a decision's approver list arrives with **Can approve decisions** already ticked and a way back to the decision, and pending invites say when the person will be able to approve.
 
 | Capability | user | creator | admin |
 |---|---|---|---|

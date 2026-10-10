@@ -22,7 +22,7 @@ erDiagram
   USER ||--o{ RESOURCE_SHARE : creates
 ```
 
-Tenant IDs are UUIDs. The seed script creates the first tenant. Every new sign-up through [`POST /api/auth/register`](../09-reference/00-rest-api.md#auth-and-sso), or a first SSO sign-in, creates a fresh tenant with that user as its admin. People join an existing tenant only by invite, from the Team page.
+Tenant IDs are UUIDs. The seed script creates the first tenant. Every new sign-up through [`POST /api/auth/register`](../09-reference/00-rest-api.md#auth-and-sso), or a first SSO sign-in, creates a fresh tenant with that user as its admin. People join an existing tenant only by invite, from the Team page. The invite names the role as Team does, Admin, Creator or Member, and **Can approve decisions** puts the new person in the Decision reviewers permission set when they accept. Every tenant gets that set when it is created.
 
 Almost every domain table carries a non-null `tenant_id` through `TenantMixin` ([`packages/db/models/base.py`](../../packages/db/models/base.py)). A few child tables are scoped through their parent instead, for example `subject_policies` hangs off `api_keys`.
 

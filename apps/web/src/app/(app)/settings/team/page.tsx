@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Bot,
@@ -10,7 +10,9 @@ import {
   Loader2,
   Mail,
   MoreHorizontal,
+  ArrowLeft,
   Plus,
+  ShieldCheck,
   Trash2,
   UserCog,
   UserPlus,
@@ -25,6 +27,9 @@ import { apiFetch } from '@/lib/api-client';
 import ConfirmModal from '@/components/ui/ConfirmModal';
 import { toastSuccess, toastError } from '@/stores/toastStore';
 import { roleLabel } from '@/lib/monitor-format';
+import { holds, useMyPermissions } from '@/lib/capabilities';
+import ViewOnlyBanner from '@/components/shared/ViewOnlyBanner';
+import Link from 'next/link';
 
 interface Member {
   id: string;
@@ -34,6 +39,7 @@ interface Member {
   role: string;
   is_active: boolean;
   created_at: string;
+  can_approve_decisions?: boolean;
 }
 
 interface Invite {
@@ -46,6 +52,7 @@ interface Invite {
   expired?: boolean;
   invite_url?: string;
   emailed?: boolean;
+  can_approve_decisions?: boolean;
 }
 
 const ROLE_COLORS: Record<string, string> = {
@@ -75,8 +82,17 @@ export default function TeamPage() {
   const members = teamData?.members ?? [];
   const invites = teamData?.pending_invites ?? [];
   const [showInvite, setShowInvite] = useState(false);
+  // ?invite=1 comes from the "Invite an approver" links
+  const [fromDecision, setFromDecision] = useState<string | null>(null);
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search);
+    if (q.get('invite') === '1') setShowInvite(true);
+    if (q.get('approver') === '1') setCanApprove(true);
+    if (q.get('from')) setFromDecision(q.get('from'));
+  }, []);
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState('user');
+  const [canApprove, setCanApprove] = useState(false);
   const [inviting, setInviting] = useState(false);
   const [inviteError, setInviteError] = useState('');
   const [menuOpen, setMenuOpen] = useState<string | null>(null);
@@ -86,6 +102,34 @@ export default function TeamPage() {
   const [invitedTo, setInvitedTo] = useState<{ email: string; emailed: boolean } | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
   const [showNext, setShowNext] = useState(false);
+  const { perms } = useMyPermissions();
+  const canManageApprovers = holds(perms?.capabilities, 'permissions.manage');
+  // the server refuses invites, role changes and removals to anyone without Manage team
+  const canManageTeam = !perms || !!perms.is_admin || perms.features?.manage_team === true;
+  const [approverNote, setApproverNote] = useState<string | null>(null);
+  const [approverBusy, setApproverBusy] = useState<string | null>(null);
+
+  const setApprover = async (member: Member, on: boolean) => {
+    setMenuOpen(null);
+    setApproverBusy(member.id);
+    const res = await apiFetch<{ can_approve_decisions: boolean; warning?: string | null }>(`/api/team/${member.id}/approver`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ can_approve_decisions: on }),
+      throwOnError: false,
+    });
+    setApproverBusy(null);
+    if (res.error || !res.data) {
+      toastError(on ? 'Could not let them approve decisions' : 'Could not stop them approving decisions', res.error || undefined);
+      return;
+    }
+    mutateTeam();
+    setApproverNote(res.data.warning || null);
+    toastSuccess(
+      on ? `${member.full_name || member.email} can approve decisions` : `${member.full_name || member.email} no longer approves decisions`,
+      on ? 'It shows in their Needs you within a few seconds.' : undefined,
+    );
+  };
 
   const copyLink = async (url: string, key: string) => {
     try {
@@ -105,7 +149,7 @@ export default function TeamPage() {
       const res = await apiFetch<Invite>('/api/team/invite', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: inviteEmail.trim(), role: inviteRole }),
+        body: JSON.stringify({ email: inviteEmail.trim(), role: inviteRole, can_approve_decisions: inviteRole === 'admin' || canApprove }),
         throwOnError: false,
       });
       if (res.data) {
@@ -213,19 +257,30 @@ export default function TeamPage() {
         title="Team"
         icon={Users}
         purpose="Who is in this workspace, the role each person has, and invitations still waiting to be accepted. For workspace admins."
-        primaryAction={{ label: 'Invite Member', icon: Plus, onClick: () => setShowInvite(true) }}
-        steps={[
+        primaryAction={canManageTeam ? { label: 'Invite Member', icon: Plus, onClick: () => setShowInvite(true) } : undefined}
+        steps={!canManageTeam ? [
+          'This page lists everyone in the workspace and the role each person has.',
+          'Admins manage everything, creators build agents, members use what is shared with them.',
+          'A Can approve decisions badge marks the people who sign off rule changes.',
+          'Ask an admin to invite someone, change a role or let someone approve decisions.',
+        ] : [
           'Invite someone by email and pick their role.',
           'The invite link is emailed to them when email is set up, or copy it and send it yourself. It works once and expires in 7 days.',
-          'Admins manage everything, creators build agents, members use what is shared with them.',
-          'Use the menu on a person to change their role or remove them.',
+          'Admins manage everything, creators build agents, members use what is shared with them. Tick Can approve decisions for anyone who should sign off rule changes.',
+          'Use the menu on a person to change their role, let them approve decisions or stop them, or remove them.',
         ]}
         docSlug="01-architecture/01-tenants-rbac"
         storageKey="settings-team"
       />
 
+      {!canManageTeam && (
+        <ViewOnlyBanner testId="team-view-only">
+          Admins invite people, change roles and choose who can approve decisions. Ask an admin if someone is missing or needs a different role.
+        </ViewOnlyBanner>
+      )}
+
       <AnimatePresence>
-        {showInvite && (
+        {showInvite && canManageTeam && (
           <motion.div
             initial={{ opacity: 0, height: 0 }}
             animate={{ opacity: 1, height: 'auto' }}
@@ -281,6 +336,24 @@ export default function TeamPage() {
                 Cancel
               </button>
             </div>
+            <label className="mt-3 flex items-start gap-2 text-sm text-slate-300">
+              <input
+                type="checkbox"
+                checked={inviteRole === 'admin' || canApprove}
+                disabled={inviteRole === 'admin'}
+                onChange={(e) => setCanApprove(e.target.checked)}
+                className="mt-0.5 accent-cyan-500"
+                data-testid="invite-can-approve"
+              />
+              <span>
+                Can approve decisions
+                <span className="block text-xs text-slate-500">
+                  {inviteRole === 'admin'
+                    ? 'Admins can always approve rule changes, except their own.'
+                    : 'Adds them to Decision reviewers, so they can sign off rule changes someone else proposed. Without it they can see requests but not approve them.'}
+                </span>
+              </span>
+            </label>
             {inviteError && (
               <p className="text-xs text-red-400 mt-2">{inviteError}</p>
             )}
@@ -326,11 +399,20 @@ export default function TeamPage() {
           testId="invite-next-steps"
           onDismiss={() => setShowNext(false)}
           steps={[
+            ...(fromDecision ? [{ id: 'back-decision', label: `Back to ${fromDecision}`, hint: 'They can approve once they accept the invite.', icon: ArrowLeft, href: `/decisions/${encodeURIComponent(fromDecision)}` }] : []),
             { id: 'invite-another', label: 'Invite someone else', hint: 'Add the next teammate while you are here.', icon: UserPlus, onClick: () => setShowInvite(true) },
             { id: 'permissions', label: 'Give extra abilities', hint: 'Add a permission set without making them an admin.', icon: UserCog, href: '/admin/permissions' },
             { id: 'share-agent', label: 'Share an agent', hint: 'Pick an agent and share it so they can use it.', icon: Bot, href: '/agents' },
           ]}
         />
+      )}
+
+      {approverNote && (
+        <div className="flex items-start gap-2 rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-100" role="status" data-testid="approver-warning">
+          <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" />
+          <span className="flex-1">{approverNote}</span>
+          <button type="button" onClick={() => setApproverNote(null)} className="text-xs text-amber-200 hover:text-white">Dismiss</button>
+        </div>
       )}
 
       <div className="bg-slate-800/30 border border-slate-700/50 rounded-xl overflow-hidden">
@@ -363,7 +445,19 @@ export default function TeamPage() {
               >
                 {roleLabel(member.role)}
               </span>
-              <div className="relative">
+              {member.can_approve_decisions && (
+                <span
+                  className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full shrink-0 text-emerald-300 bg-emerald-500/10"
+                  title={member.role === 'admin' ? 'Admins can always approve decisions' : 'In Decision reviewers, so they can sign off rule changes'}
+                  data-testid="member-approver"
+                >
+                  <ShieldCheck className="w-3 h-3" aria-hidden />
+                  <span className="hidden sm:inline">Can approve decisions</span>
+                  <span className="sm:hidden">Approver</span>
+                </span>
+              )}
+              {approverBusy === member.id && <Loader2 className="w-4 h-4 animate-spin text-slate-400 shrink-0" aria-label="Saving" />}
+              {canManageTeam && <div className="relative">
                 <button
                   onClick={() =>
                     setMenuOpen(menuOpen === member.id ? null : member.id)
@@ -374,7 +468,7 @@ export default function TeamPage() {
                   <MoreHorizontal className="w-4 h-4" />
                 </button>
                 {menuOpen === member.id && (
-                  <div className="absolute right-0 top-full mt-1 w-40 bg-slate-800 border border-slate-700/50 rounded-lg shadow-xl z-10 py-1">
+                  <div className="absolute right-0 top-full mt-1 w-60 bg-slate-800 border border-slate-700/50 rounded-lg shadow-xl z-10 py-1">
                     {ROLES.filter((r) => r.value !== member.role).map((r) => (
                       <button
                         key={r.value}
@@ -382,6 +476,17 @@ export default function TeamPage() {
                         className="w-full text-left px-3 py-2 text-xs text-slate-300 hover:bg-slate-700/50 hover:text-white transition-colors"
                       >
                         Set as {r.label}
+                      </button>
+                    ))}
+                    {canManageApprovers && (member.role === 'admin' ? (
+                      <p className="px-3 py-2 text-[11px] text-slate-500" data-testid="member-approver-admin">Admins can always approve decisions.</p>
+                    ) : (
+                      <button
+                        onClick={() => setApprover(member, !member.can_approve_decisions)}
+                        className="w-full text-left px-3 py-2 text-xs text-slate-300 hover:bg-slate-700/50 hover:text-white transition-colors"
+                        data-testid="member-approver-toggle"
+                      >
+                        {member.can_approve_decisions ? 'Stop them approving decisions' : 'Let them approve decisions'}
                       </button>
                     ))}
                     <button
@@ -392,7 +497,7 @@ export default function TeamPage() {
                     </button>
                   </div>
                 )}
-              </div>
+              </div>}
             </div>
           ))}
 
@@ -420,11 +525,11 @@ export default function TeamPage() {
                   </span>
                 )}
               </div>
-              <p className="text-xs text-slate-600">
-                Invited as {roleLabel(invite.role)}
+              <p className="text-xs text-slate-500" data-testid="invite-row-role">
+                Invited as {roleLabel(invite.role)}{invite.can_approve_decisions || invite.role === 'admin' ? ', will be able to approve decisions' : ''}
               </p>
             </div>
-            {invite.invite_url && !invite.expired && (
+            {canManageTeam && invite.invite_url && !invite.expired && (
               <button
                 onClick={() => copyLink(invite.invite_url!, invite.id)}
                 data-testid={`invite-copy-${invite.id}`}
@@ -434,13 +539,13 @@ export default function TeamPage() {
                 {copied === invite.id ? 'Copied' : 'Copy link'}
               </button>
             )}
-            <button
+            {canManageTeam && <button
               onClick={() => handleCancelInvite(invite.id)}
               aria-label={`Cancel invite for ${invite.email}`}
               className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-400 hover:text-red-400 hover:bg-red-500/10 transition-colors"
             >
               <X className="w-4 h-4" />
-            </button>
+            </button>}
           </div>
         ))}
       </div>

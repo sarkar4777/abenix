@@ -18,6 +18,7 @@ import { CSS } from '@dnd-kit/utilities';
 import { FolderPlus, GripVertical, Plus, Trash2 } from 'lucide-react';
 import {
   OPERATORS,
+  TYPE_LABEL,
   conditionText,
   defaultOp,
   groupItems,
@@ -28,11 +29,13 @@ import {
   withItems,
   type Condition,
   type Fact,
+  type FactType,
   type Group,
   type Node,
   type Problem,
   type RuleDoc,
 } from '@/lib/decisions';
+import { numberDraft } from '@/lib/decisionValues';
 import FactPicker from './FactPicker';
 import ValueInput from './ValueInput';
 
@@ -94,9 +97,11 @@ interface Ctx {
   base: string;
   referenceSets: { key: string; name: string; count: number }[];
   onAddFact: (f: Fact) => void;
+  onFactType: (path: string, type: FactType) => void;
   set: (path: Path, fn: (n: Node) => Node | null) => void;
   add: (groupPath: Path, node: Node) => void;
   testPrefix: string;
+  readOnly: boolean;
 }
 
 function pathStr(ctx: Ctx, root: Group, path: Path): string {
@@ -121,13 +126,18 @@ function Row({ ctx, root, path, cond }: { ctx: Ctx; root: Group; path: Path; con
   const pVal = problemAt(ctx.problems, `${at}/value`) || problemAt(ctx.problems, `${at}/values`) || problemAt(ctx.problems, `${at}/set`);
   const msg = pFact || pOp || pVal;
   const tid = `${ctx.testPrefix}-c${path.join('-')}`;
+  const ro = ctx.readOnly;
+  const looksNumeric = type === 'string' && !!fact && [cond.value, ...(cond.values || [])].some((v) => v !== undefined && v !== '' && numberDraft(String(v)).kind === 'number');
 
   return (
     <div ref={setNodeRef} style={{ transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.4 : 1 }} className="group/row">
       <div className="flex flex-wrap items-center gap-1.5">
-        <button type="button" {...attributes} {...listeners} className="p-1 rounded text-slate-600 hover:text-slate-300 cursor-grab active:cursor-grabbing" aria-label="Drag to move this condition">
-          <GripVertical className="w-4 h-4" />
-        </button>
+        {ro ? <span className="w-6" /> : (
+          <button type="button" {...attributes} {...listeners} className="p-1 rounded text-slate-600 hover:text-slate-300 cursor-grab active:cursor-grabbing" aria-label="Drag to move this condition">
+            <GripVertical className="w-4 h-4" />
+          </button>
+        )}
+        <div className="flex-1 min-w-[160px] sm:flex-none">
         <FactPicker
           facts={ctx.doc.facts}
           value={cond.fact}
@@ -137,10 +147,26 @@ function Row({ ctx, root, path, cond }: { ctx: Ctx; root: Group; path: Path; con
             ctx.set(path, () => (keep ? { ...cond, fact: p } : { fact: p, op: defaultOp(t) }));
           }}
           onAddFact={ctx.onAddFact}
+          onFactType={ctx.onFactType}
           invalid={!!pFact}
           testId={`${tid}-fact`}
+          readOnly={ro}
         />
+        </div>
+        {fact && !ro && (
+          <select
+            value={fact.type}
+            onChange={(e) => ctx.onFactType(fact.path, e.target.value as FactType)}
+            className="bg-slate-950 border border-slate-700 rounded-md px-1.5 py-1.5 text-xs text-slate-300"
+            aria-label={`Type of ${fact.path}`}
+            title="What kind of value this fact holds. Changing it here changes it everywhere."
+            data-testid={`${tid}-type`}
+          >
+            {(Object.keys(TYPE_LABEL) as FactType[]).map((t) => <option key={t} value={t}>{TYPE_LABEL[t]}</option>)}
+          </select>
+        )}
         <select
+          disabled={ro}
           value={cond.op}
           onChange={(e) => {
             const op = e.target.value;
@@ -158,13 +184,22 @@ function Row({ ctx, root, path, cond }: { ctx: Ctx; root: Group; path: Path; con
         >
           {!OPERATORS[cond.op] && <option value="">Pick a comparison</option>}
           {opsFor(type).map((op) => <option key={op} value={op}>{OPERATORS[op].label}</option>)}
+          {type === 'string' && <option disabled value="__number">more than, less than: switch to Number to compare amounts</option>}
         </select>
-        <ValueInput cond={cond} type={type} onChange={(patch) => ctx.set(path, () => ({ ...cond, ...patch }))} invalid={!!pVal} referenceSets={ctx.referenceSets} testId={`${tid}-value`} />
-        <button type="button" onClick={() => ctx.set(path, () => null)} className="p-1 rounded text-slate-600 hover:text-rose-300 opacity-60 group-hover/row:opacity-100" aria-label="Remove this condition" data-testid={`${tid}-remove`}>
-          <Trash2 className="w-4 h-4" />
-        </button>
+        <ValueInput cond={cond} type={type} onChange={(patch) => ctx.set(path, () => ({ ...cond, ...patch }))} invalid={!!pVal} referenceSets={ctx.referenceSets} testId={`${tid}-value`} readOnly={ro} />
+        {!ro && (
+          <button type="button" onClick={() => ctx.set(path, () => null)} className="p-1 rounded text-slate-600 hover:text-rose-300 opacity-60 group-hover/row:opacity-100" aria-label="Remove this condition" data-testid={`${tid}-remove`}>
+            <Trash2 className="w-4 h-4" />
+          </button>
+        )}
       </div>
       {msg && <p className="ml-7 mt-0.5 text-xs text-rose-300" role="alert">{msg.message}</p>}
+      {!msg && looksNumeric && !ro && (
+        <p className="ml-7 mt-0.5 text-xs text-amber-200" data-testid={`${tid}-text-hint`}>
+          {fact!.label || fact!.path} is Text, so this compares words, not amounts. Switch to Number to compare amounts.{' '}
+          <button type="button" onClick={() => ctx.onFactType(fact!.path, 'number')} className="text-cyan-300 underline hover:text-cyan-200">Switch to Number</button>
+        </p>
+      )}
     </div>
   );
 }
@@ -178,7 +213,9 @@ function GroupBox({ ctx, root, path, group, depth }: { ctx: Ctx; root: Group; pa
   const ids = items.map((_, i) => idOf([...path, i]));
   const at = pathStr(ctx, root, path);
   const empty = problemAt(ctx.problems, `${at}/${kind}`);
-  const firstFact = ctx.doc.facts[0];
+  // a new condition starts on a fact this group does not test yet, so it is not a copy of the last one
+  const usedHere = new Set(items.filter((n) => !isGroup(n)).map((n) => (n as Condition).fact));
+  const firstFact = ctx.doc.facts.find((f) => !usedHere.has(f.path));
 
   function setMode(m: 'all' | 'any' | 'none') {
     ctx.set(path, (g) => {
@@ -198,19 +235,19 @@ function GroupBox({ ctx, root, path, group, depth }: { ctx: Ctx; root: Group; pa
       className={depth === 0 ? '' : 'rounded-lg border border-slate-700/80 bg-slate-950/40 pl-1 pr-2 py-2'}
     >
       <div className="flex items-center gap-1.5 mb-2">
-        {depth > 0 && (
+        {depth > 0 && !ctx.readOnly && (
           <button type="button" {...sortable.attributes} {...sortable.listeners} className="p-1 rounded text-slate-600 hover:text-slate-300 cursor-grab" aria-label="Drag to move this group">
             <GripVertical className="w-4 h-4" />
           </button>
         )}
         <span className="text-xs text-slate-400">{depth === 0 ? 'When' : ''}</span>
-        <select value={mode} onChange={(e) => setMode(e.target.value as any)} className="bg-slate-900 border border-slate-700 rounded px-1.5 py-1 text-xs text-white" aria-label="How the conditions combine" data-testid={`${ctx.testPrefix}-g${path.join('-')}-mode`}>
+        <select value={mode} disabled={ctx.readOnly} onChange={(e) => setMode(e.target.value as any)} className="bg-slate-900 border border-slate-700 rounded px-1.5 py-1 text-xs text-white" aria-label="How the conditions combine" data-testid={`${ctx.testPrefix}-g${path.join('-')}-mode`}>
           <option value="all">{depth === 0 ? 'all of these are true' : 'all of'}</option>
           <option value="any">{depth === 0 ? 'any of these is true' : 'any of'}</option>
           <option value="none">{depth === 0 ? 'none of these is true' : 'none of'}</option>
         </select>
         {depth === 0 && !items.length && <span className="text-xs text-slate-500">No conditions, so this rule always applies. Useful as a default at the end.</span>}
-        {depth > 0 && (
+        {depth > 0 && !ctx.readOnly && (
           <button type="button" onClick={() => ctx.set(path, () => null)} className="ml-auto p-1 rounded text-slate-600 hover:text-rose-300" aria-label="Remove this group">
             <Trash2 className="w-4 h-4" />
           </button>
@@ -227,9 +264,9 @@ function GroupBox({ ctx, root, path, group, depth }: { ctx: Ctx; root: Group; pa
             ),
           )}
         </SortableContext>
-        {!items.length && depth > 0 && <p className="text-xs text-slate-500 py-1">Drop a condition here, or add one.</p>}
+        {!items.length && depth > 0 && !ctx.readOnly && <p className="text-xs text-slate-500 py-1">Drop a condition here, or add one.</p>}
         {empty && <p className="text-xs text-rose-300" role="alert">{empty.message}</p>}
-        <div className="flex items-center gap-2 pt-1">
+        {!ctx.readOnly && <div className="flex items-center gap-2 pt-1">
           <button
             type="button"
             onClick={() => ctx.add(path, firstFact ? { fact: firstFact.path, op: defaultOp(firstFact.type) } : { fact: '', op: 'eq' })}
@@ -243,7 +280,7 @@ function GroupBox({ ctx, root, path, group, depth }: { ctx: Ctx; root: Group; pa
               <FolderPlus className="w-3.5 h-3.5" /> Group
             </button>
           )}
-        </div>
+        </div>}
       </div>
     </div>
   );
@@ -257,7 +294,9 @@ export default function ConditionGroup({
   base,
   referenceSets,
   onAddFact,
+  onFactType,
   testPrefix,
+  readOnly = false,
 }: {
   doc: RuleDoc;
   when: Group;
@@ -266,7 +305,9 @@ export default function ConditionGroup({
   base: string;
   referenceSets: { key: string; name: string; count: number }[];
   onAddFact: (f: Fact) => void;
+  onFactType: (path: string, type: FactType) => void;
   testPrefix: string;
+  readOnly?: boolean;
 }) {
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }));
   const [dragging, setDragging] = useState<Path | null>(null);
@@ -277,11 +318,13 @@ export default function ConditionGroup({
       base,
       referenceSets,
       onAddFact,
+      onFactType,
       testPrefix,
-      set: (path, fn) => onChange(replaceAt(when, path, fn)),
-      add: (groupPath, node) => onChange(insertAt(when, groupPath, 1e9, node)),
+      readOnly,
+      set: (path, fn) => { if (!readOnly) onChange(replaceAt(when, path, fn)); },
+      add: (groupPath, node) => { if (!readOnly) onChange(insertAt(when, groupPath, 1e9, node)); },
     }),
-    [doc, problems, base, referenceSets, onAddFact, onChange, when, testPrefix],
+    [doc, problems, base, referenceSets, onAddFact, onFactType, onChange, when, testPrefix, readOnly],
   );
 
   function onDragStart(e: DragStartEvent) {
@@ -313,7 +356,7 @@ export default function ConditionGroup({
   const ghost = dragging ? getAt(when, dragging) : null;
 
   return (
-    <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={onDragStart} onDragEnd={onDragEnd} onDragCancel={() => setDragging(null)}>
+    <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={readOnly ? undefined : onDragStart} onDragEnd={readOnly ? undefined : onDragEnd} onDragCancel={() => setDragging(null)}>
       <GroupBox ctx={ctx} root={when} path={[]} group={when} depth={0} />
       <DragOverlay>
         {ghost && (

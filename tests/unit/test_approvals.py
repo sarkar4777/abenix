@@ -112,6 +112,7 @@ def test_approval_status_enum_values() -> None:
         "denied",
         "expired",
         "returned",
+        "withdrawn",
     }
 
 

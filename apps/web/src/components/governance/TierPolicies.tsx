@@ -252,7 +252,7 @@ function TierCard({ row, canManage, onSaved }: { row: TierRow; canManage: boolea
         )}
       </header>
 
-      <div className="grid gap-5 md:grid-cols-2">
+      <fieldset className="grid gap-5 md:grid-cols-2 min-w-0" disabled={!canManage} title={canManage ? undefined : 'View only. Changing this needs Manage risk.'}>
         <Field
           label="Sign-offs before a new version goes live"
           help="Applies when a decision model or an agent at this tier is published. 0 means no sign-off."
@@ -296,6 +296,7 @@ function TierCard({ row, canManage, onSaved }: { row: TierRow; canManage: boolea
             className="w-full bg-slate-950 border border-slate-700 rounded-md px-2 py-1.5 text-sm text-white font-mono disabled:opacity-60"
             data-testid={`tier-capability-${row.tier}`}
           />
+          <p className="mt-1 text-[11px] text-slate-400" data-testid={`tier-capability-words-${row.tier}`}>{capabilityWords(edit.publish_approvals.capability)}</p>
         </Field>
 
         <Field
@@ -444,7 +445,7 @@ function TierCard({ row, canManage, onSaved }: { row: TierRow; canManage: boolea
             </div>
           </Field>
         </div>
-      </div>
+      </fieldset>
 
       {msg && (
         <p
@@ -456,7 +457,7 @@ function TierCard({ row, canManage, onSaved }: { row: TierRow; canManage: boolea
         </p>
       )}
       {!canManage && (
-        <p className="mt-4 text-xs text-slate-500">You can view these policies. Changing them needs the risk.manage capability.</p>
+        <p className="mt-4 text-xs text-slate-500">You can view these policies. Changing them needs Manage risk, which an admin can give you.</p>
       )}
 
       <ConfirmModal
@@ -471,6 +472,15 @@ function TierCard({ row, canManage, onSaved }: { row: TierRow; canManage: boolea
       />
     </section>
   );
+}
+
+// the capability in words a rule owner knows
+export function capabilityWords(cap: string): string {
+  const [base, group] = String(cap || '').split(':');
+  if (base !== 'approvals.sign') return `People granted ${cap} under Admin, Permissions.`;
+  return group
+    ? `People with Sign approvals for ${group}, granted under Admin, Permissions.`
+    : 'Anyone with Sign approvals, which includes everyone in Decision reviewers.';
 }
 
 function Field({

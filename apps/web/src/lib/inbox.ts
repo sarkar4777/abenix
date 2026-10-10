@@ -76,6 +76,16 @@ export function badgeText(n: number): string {
   return n > 99 ? '99+' : String(n);
 }
 
+// the badge is a sum, its label says what it is made of
+export function inboxBreakdown(c: InboxCounts | null | undefined): string | undefined {
+  if (!c || !c.total) return undefined;
+  const parts = (Object.keys(INBOX_TABS) as InboxTab[])
+    .map((t) => [t, c.counts?.[t] ?? 0] as const)
+    .filter(([, n]) => n > 0)
+    .map(([t, n]) => `${n} ${t === 'approvals' ? 'to sign' : INBOX_TABS[t].label.toLowerCase()}`);
+  return parts.length ? `Waiting on you: ${parts.join(', ')}` : undefined;
+}
+
 // skips the server cache, used after a socket event or an inline decision
 export async function refreshInboxCounts(): Promise<void> {
   const fresh = await apiFetch<InboxCounts>(`${INBOX_COUNTS_KEY}?fresh=1`, { silent: true });
@@ -157,7 +167,8 @@ export function canSign(row: SignableRow, me: { id: string; role?: string }, cap
   const signer = me.role === 'admin' || me.role === 'creator' || holds(caps, 'approvals.sign');
   if (row.id.startsWith('hitl:')) return signer;
   if ((row.signoffs || []).some((s) => String(s.user_id) === me.id)) return false;
-  if (row.gate_kind === 'decision_publish' && !holds(caps, 'decisions.review')) return false;
+  const decisionGate = row.gate_kind === 'decision_publish' || row.gate_kind === 'decision_tier_change' || row.gate_kind === 'decision_reattest';
+  if (decisionGate && !holds(caps, 'decisions.review')) return false;
   const p = row.payload || {};
   const authorRule = row.gate_kind === 'autonomy.promote' || row.gate_kind === RELEASE_GATE;
   if (authorRule && String(p.agent_creator_id ?? '') === me.id && !p.self_approval) return false;

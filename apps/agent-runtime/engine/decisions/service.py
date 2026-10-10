@@ -619,6 +619,47 @@ def current_versions_filter(model_id: Any) -> Any:
     )
 
 
+def own_open_draft(versions: list[Any], actor_label: str, actor_id: Any) -> Any:
+    """The newest draft this same agent wrote for this same person and has not proposed yet."""
+    mine = [
+        x
+        for x in versions
+        if x.state == "draft"
+        and (x.provenance or {}).get("proposed_by") == actor_label
+        and str(x.author_id or "") == str(actor_id or "")
+    ]
+    return max(mine, key=lambda x: x.version) if mine else None
+
+
+def append_note(old: str | None, new: str, when: dt.datetime) -> str:
+    """Change notes only grow, each later edit is added under the earlier ones."""
+    stamp = when.strftime("%Y-%m-%d %H:%M UTC")
+    if not old:
+        return new
+    return f"{old}\n{stamp}: {new}"
+
+
+def rule_change_count(doc: dict[str, Any] | None, base: dict[str, Any] | None) -> int:
+    """Rules added, removed or changed against the base, every rule when there is none."""
+    from engine.decisions.authoring import canonical_json
+
+    rules = [r for r in (doc or {}).get("rules") or [] if isinstance(r, dict)]
+    if not base:
+        return len(rules)
+    a = {
+        r.get("key") or r.get("id"): r
+        for r in base.get("rules") or []
+        if isinstance(r, dict)
+    }
+    b = {r.get("key") or r.get("id"): r for r in rules}
+    changed = [k for k in a if k in b and canonical_json(a[k]) != canonical_json(b[k])]
+    return (
+        len([k for k in b if k not in a])
+        + len([k for k in a if k not in b])
+        + len(changed)
+    )
+
+
 async def create_proposal(
     db: AsyncSession,
     tenant_id: str,
@@ -703,28 +744,51 @@ async def create_proposal(
     )
     failed = [r for r in results if not r["passed"]]
     now = dt.datetime.now(dt.timezone.utc)
-    v = DecisionVersion(
-        tenant_id=tid,
-        model_id=m.id,
-        version=max((x.version for x in versions), default=0) + 1,
-        state="draft" if failed else "proposed",
-        authoring=doc,
-        content=c.jdm,
-        content_hash=c.content_hash,
-        required_facts=c.required_facts,
-        fact_types=c.fact_types,
-        reference_versions=c.reference_versions,
-        valid_from=base.valid_from if base else None,
-        valid_to=base.valid_to if base else None,
-        change_note=note or f"Proposed by {actor_label}",
-        provenance={"proposed_by": actor_label},
-        author_id=uuid.UUID(actor_id) if actor_id else None,
-        base_version_id=base.id if base else None,
-        proposed_by=uuid.UUID(actor_id) if actor_id and not failed else None,
-        proposed_at=None if failed else now,
-        validation={"tests": results, "tests_failed": len(failed)},
-    )
-    db.add(v)
+    note = note or f"Proposed by {actor_label}"
+    own = own_open_draft(versions, actor_label, actor_id)
+    if own is not None:
+        # the same agent keeps working on its own draft instead of stacking new versions
+        v = own
+        v.authoring = doc
+        v.content = c.jdm
+        v.content_hash = c.content_hash
+        v.required_facts = c.required_facts
+        v.fact_types = c.fact_types
+        v.reference_versions = c.reference_versions
+        v.change_note = append_note(v.change_note, note, now)
+        v.base_version_id = base.id if base else v.base_version_id
+        v.lock_version = (v.lock_version or 1) + 1
+        v.validation = {"tests": results, "tests_failed": len(failed)}
+        if not failed:
+            v.state = "proposed"
+            v.proposed_by = uuid.UUID(actor_id) if actor_id else None
+            v.proposed_at = now
+    else:
+        v = DecisionVersion(
+            tenant_id=tid,
+            model_id=m.id,
+            version=max((x.version for x in versions), default=0) + 1,
+            state="draft" if failed else "proposed",
+            authoring=doc,
+            content=c.jdm,
+            content_hash=c.content_hash,
+            required_facts=c.required_facts,
+            fact_types=c.fact_types,
+            reference_versions=c.reference_versions,
+            valid_from=base.valid_from if base else None,
+            valid_to=base.valid_to if base else None,
+            change_note=note,
+            provenance={"proposed_by": actor_label},
+            author_id=uuid.UUID(actor_id) if actor_id else None,
+            base_version_id=base.id if base else None,
+            proposed_by=uuid.UUID(actor_id) if actor_id and not failed else None,
+            proposed_at=None if failed else now,
+            validation={"tests": results, "tests_failed": len(failed)},
+            lock_version=1,
+        )
+        db.add(v)
+    if not failed:
+        v.risk_tier_at_proposal = m.risk_tier
     await db.flush()
     need = 0
     if not failed:
@@ -743,6 +807,15 @@ async def create_proposal(
                 "version": v.version,
                 "risk_tier": m.risk_tier,
                 "proposed_by": actor_label,
+                "change_note": v.change_note or "",
+                "changes": rule_change_count(
+                    doc, base.authoring if base is not None else None
+                ),
+                "summary": (
+                    f"Ready. {len(results)} golden test{'s pass' if len(results) != 1 else ' passes'}."
+                    if results
+                    else "Ready. There are no golden tests yet."
+                ),
                 "link": f"/decisions/{key}?version={v.version}",
             },
             required_signoffs=need,
@@ -764,6 +837,7 @@ async def create_proposal(
         "decision": key,
         "version": v.version,
         "state": v.state,
+        "updated_own_draft": own is not None,
         "approvals_needed": need,
         "tests_failed": len(failed),
         "failed_tests": [r["name"] for r in failed],

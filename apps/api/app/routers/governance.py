@@ -58,6 +58,7 @@ def _set_json(ps: PermissionSet, members: list[dict[str, Any]]) -> dict[str, Any
         "name": ps.name,
         "description": ps.description,
         "capabilities": list(ps.capabilities or []),
+        "builtin_key": getattr(ps, "builtin_key", None),
         "members": members,
         "created_at": ps.created_at.isoformat() if ps.created_at else None,
         "updated_at": ps.updated_at.isoformat() if ps.updated_at else None,
@@ -73,6 +74,11 @@ async def list_permission_sets(
     user: User = Depends(require_capability("permissions.manage")),
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
+    from app.core.approvers import ensure_decision_reviewers
+
+    # a workspace made before the set existed gets it the first time anyone looks
+    await ensure_decision_reviewers(db, user.tenant_id)
+    await db.commit()
     sets = (
         (
             await db.execute(
@@ -347,8 +353,70 @@ async def risk_overview(
             "tiers": tiers,
             "tool_call_actions": list(risk.TOOL_CALL_ACTIONS),
             "tools": _tool_tiers(),
+            "settings": await _governance_settings(db, user.tenant_id),
         }
     )
+
+
+async def _governance_settings(db: AsyncSession, tenant_id: Any) -> dict[str, Any]:
+    from app.core.approvers import sole_operator_enabled
+
+    return {"sole_operator_signoff": await sole_operator_enabled(db, tenant_id)}
+
+
+class GovernanceSettingsBody(BaseModel):
+    sole_operator_signoff: bool | None = None
+
+
+@router.get("/settings")
+async def get_governance_settings(
+    user: User = Depends(require_capability("risk.view")),
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    return success(await _governance_settings(db, user.tenant_id))
+
+
+@router.put("/settings")
+async def set_governance_settings(
+    body: GovernanceSettingsBody,
+    request: Request,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    from sqlalchemy.orm.attributes import flag_modified
+
+    from app.core.approvers import SOLE_OPERATOR_SETTING
+    from models.tenant import Tenant
+
+    role = user.role.value if hasattr(user.role, "value") else str(user.role)
+    if role not in ("admin", "owner"):
+        return error("Only an admin can change governance settings.", 403)
+    tenant = await db.get(Tenant, user.tenant_id)
+    if tenant is None:
+        return error("Tenant not found", 404)
+    old = await _governance_settings(db, user.tenant_id)
+    settings = dict(tenant.settings or {})
+    gov = dict(settings.get("governance") or {})
+    if body.sole_operator_signoff is not None:
+        gov[SOLE_OPERATOR_SETTING] = bool(body.sole_operator_signoff)
+    settings["governance"] = gov
+    tenant.settings = settings
+    flag_modified(tenant, "settings")
+    new = {"sole_operator_signoff": gov.get(SOLE_OPERATOR_SETTING, True)}
+    await log_action(
+        db,
+        user.tenant_id,
+        user.id,
+        "governance.settings_updated",
+        None,
+        request,
+        resource_type="governance",
+        resource_id="settings",
+        old_value=old,
+        new_value=new,
+    )
+    await db.commit()
+    return success(new)
 
 
 def _tool_tiers() -> list[dict[str, str]]:

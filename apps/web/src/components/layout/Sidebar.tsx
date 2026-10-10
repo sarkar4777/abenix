@@ -74,6 +74,7 @@ import { usePlatformFeatures } from '@/hooks/usePlatformFeatures';
 import {
   badgeText,
   cacheMode,
+  inboxBreakdown,
   readCachedMode,
   saveSidebarMode,
   useInboxCounts,
@@ -282,7 +283,7 @@ export function visibleNavGroups(ctx: NavContext): NavGroup[] {
     .filter((g) => g.items.length > 0);
 }
 
-interface EssentialSpec { href: string; label?: string; icon?: NavItem['icon']; builders?: boolean; capability?: string }
+interface EssentialSpec { href: string; label?: string; icon?: NavItem['icon']; builders?: boolean; capability?: string; orApprover?: boolean }
 
 const ESSENTIALS: EssentialSpec[] = [
   { href: '/inbox' },
@@ -294,6 +295,9 @@ const ESSENTIALS: EssentialSpec[] = [
   { href: '/knowledge', label: 'Knowledge' },
   { href: '/executions', label: 'Monitor' },
   { href: '/builder', builders: true },
+  // business rules and their sign-off, so a new owner finds them without all tools
+  { href: '/decisions', builders: true },
+  { href: '/approvals', builders: true, orApprover: true },
   { href: '/autonomy', builders: true },
   { href: '/improvements', builders: true },
 ];
@@ -304,7 +308,8 @@ export function essentialItems(ctx: NavContext, role?: string): NavItem[] {
   const builder = ctx.isAdmin || role === 'creator';
   return ESSENTIALS.flatMap((spec) => {
     const item = ALL_ITEMS.find((i) => i.href === spec.href);
-    if (!item || (spec.builders && !builder) || !itemVisible(item, ctx)) return [];
+    const approver = !!spec.orApprover && !!ctx.perms?.can_approve_decisions;
+    if (!item || (spec.builders && !builder && !approver) || !itemVisible(item, ctx)) return [];
     if (spec.capability && !holds(ctx.perms?.capabilities, spec.capability)) return [];
     return [{ ...item, label: spec.label ?? item.label, icon: spec.icon ?? item.icon }];
   });
@@ -349,6 +354,7 @@ function CountBadge({ n, testId, label }: { n: number; testId: string; label: st
     <span
       data-testid={testId}
       aria-label={label}
+      title={label}
       className="text-[10px] min-w-[18px] text-center px-1.5 py-0.5 rounded-full bg-amber-500/25 text-amber-200"
     >
       {badgeText(n)}
@@ -367,7 +373,7 @@ function NavLink({
   collapsed: boolean;
   active: boolean;
   onLinkClick?: () => void;
-  counts: { reviews: number; inbox: number };
+  counts: { reviews: number; inbox: number; inboxLabel?: string };
 }) {
   const live = item.liveCount ? counts[item.liveCount] : 0;
   const linkCls = `flex items-center gap-3 px-3 py-2 rounded-lg transition-colors relative group ${
@@ -396,7 +402,7 @@ function NavLink({
             <CountBadge n={live} testId="sidebar-review-count" label={`${live} waiting for review`} />
           )}
           {item.liveCount === 'inbox' && (
-            <CountBadge n={live} testId="sidebar-inbox-count" label={`${live} waiting on you`} />
+            <CountBadge n={live} testId="sidebar-inbox-count" label={counts.inboxLabel || `${live} waiting on you`} />
           )}
           {item.external && <ExternalLink className="w-3 h-3 text-slate-600" />}
         </>
@@ -432,7 +438,7 @@ export function SidebarNav({
   const ctx: NavContext = { perms, isAdmin, switches };
   const reviewCount = useReviewCount(holds(perms?.capabilities, 'moderation.review'));
   const { counts: inbox } = useInboxCounts();
-  const counts = { reviews: reviewCount, inbox: inbox?.total ?? 0 };
+  const counts = { reviews: reviewCount, inbox: inbox?.total ?? 0, inboxLabel: inboxBreakdown(inbox) };
   const [mode, setMode] = useSidebarMode();
   const [adminOpen, setAdminOpen] = useState(false);
 

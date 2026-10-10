@@ -147,6 +147,12 @@ test.describe.serial('Abenix HITL — end-to-end', () => {
     expect(second.status).toBe(200);
     expect(second.data?.id).toBe(first.data.id);
     expect(second.data?.title).toBe(titleB);
+    // the probe is not a real request, close it so it doesn't wait on anyone's Approvals page
+    const closed = await authedJson(request, token, `/api/approvals/${first.data.id}/signoff`, {
+      method: 'POST',
+      body: { decision: 'deny', reason: 'test leftover, idempotency probe only' },
+    });
+    expect([200, 201]).toContain(closed.status);
   });
 
   test('list filter by kind picks the gate up', async ({ request }) => {

@@ -28,6 +28,8 @@ class CreateApiKeyRequest(BaseModel):
 class InviteMemberRequest(BaseModel):
     email: EmailStr
     role: str = "user"
+    # the new member joins Decision reviewers when they accept
+    can_approve_decisions: bool = False
 
 
 class UpdateMemberRoleRequest(BaseModel):

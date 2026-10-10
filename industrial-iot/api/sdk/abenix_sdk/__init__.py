@@ -354,6 +354,20 @@ class ApprovalsClient:
         res.raise_for_status()
         return (res.json() or {}).get("data") or []
 
+    async def resolved(self, *, offset: int = 0, limit: int = 50) -> dict[str, Any]:
+        """Settled approvals you asked for, signed or could have signed, a page at a time.
+
+        {"items": [...], "total": n, "has_more": bool}. Each row says withdraw_reason and
+        withdrawn_by_name when it was withdrawn, and a summary of what was asked.
+        """
+        res = await self._client._http.get(
+            "/api/approvals", params={"status": "resolved", "offset": offset, "limit": limit}
+        )
+        res.raise_for_status()
+        body = res.json() or {}
+        meta = body.get("meta") or {}
+        return {"items": body.get("data") or [], "total": meta.get("total", 0), "has_more": bool(meta.get("has_more"))}
+
     async def get(self, approval_id: str) -> dict[str, Any]:
         return await self._client._get(f"/api/approvals/{approval_id}") or {}
 
@@ -395,8 +409,18 @@ class ApprovalsClient:
         reason: str = "",
         client_token: str | None = None,
         edited_arguments: dict[str, Any] | None = None,
+        sole_operator: bool = False,
     ) -> dict[str, Any]:
+        """Sign an approval. sole_operator=True signs your own request alone, allowed only when
+        nobody else in the workspace can approve it, with a reason of at least 10 characters.
+        It is recorded as self_approved and every admin is told."""
         body: dict[str, Any] = {"decision": decision, "reason": reason}
+        if decision == "deny" and len((reason or "").strip()) < 5:
+            raise ValueError("Say why you are denying it, at least 5 characters. The requester is told.")
+        if sole_operator:
+            if len((reason or "").strip()) < 10:
+                raise ValueError("A sole-operator sign-off needs a reason of at least 10 characters.")
+            body["sole_operator"] = True
         if client_token:
             body["client_token"] = client_token
         # action approvals only, the agent runs with these values instead
@@ -427,6 +451,9 @@ class ApprovalsClient:
     async def deny(
         self, approval_id: str, *, reason: str = "", client_token: str | None = None
     ) -> dict[str, Any]:
+        """Deny with a reason of at least 5 characters. The requester is told the reason."""
+        if len((reason or "").strip()) < 5:
+            raise ValueError("Say why you are denying it, at least 5 characters. The requester is told.")
         return await self.signoff(
             approval_id, "deny", reason=reason, client_token=client_token
         )
@@ -664,8 +691,46 @@ class DecisionsClient:
     async def _call(self, method: str, path: str, **kw: Any) -> Any:
         return await _call(self._client, AbenixDecisionError, method, path, **kw)
 
-    async def list(self, q: str = "") -> list[dict[str, Any]]:
-        return await self._call("GET", "/api/decisions", params={"q": q} if q else None) or []
+    async def list(self, q: str = "", *, archived: bool = False) -> list[dict[str, Any]]:
+        params: dict[str, Any] = {}
+        if q:
+            params["q"] = q
+        if archived:
+            params["archived"] = 1
+        return await self._call("GET", "/api/decisions", params=params or None) or []
+
+    async def check_key(self, key: str) -> dict[str, Any]:
+        """{"available", "valid", "suggestion", "archived"}, the suggestion is the next free key."""
+        return await self._call("GET", "/api/decisions/check-key", params={"key": key})
+
+    async def search(self, q: str) -> dict[str, Any]:
+        """{"items": [...], "archived_matches": n}, so a search can say archived decisions match too."""
+        res = await self._client._http.get("/api/decisions", params={"q": q})
+        body = res.json() if res.content else {}
+        if res.status_code >= 400:
+            err = (body or {}).get("error") or {}
+            raise AbenixDecisionError(res.status_code, err.get("message") or f"HTTP {res.status_code}", err.get("error_code"), err.get("details"))
+        return {"items": body.get("data") or [], "archived_matches": ((body.get("meta") or {}).get("archived_matches") or 0)}
+
+    async def archive(self, key: str, *, reason: str | None = None) -> dict[str, Any]:
+        """Archive. At a tier that asks for sign-off it needs a reason and comes back as {"pending": {...}}."""
+        return await self._call("DELETE", f"/api/decisions/{key}", json={"reason": reason} if reason else None)
+
+    async def restore(self, key: str, *, reason: str | None = None) -> dict[str, Any]:
+        """Restore. At a tier that asks for sign-off it needs a reason and comes back as {"pending": {...}}."""
+        return await self._call("POST", f"/api/decisions/{key}/restore", json={"reason": reason} if reason else None)
+
+    async def discard_draft(self, key: str, version: int) -> dict[str, Any]:
+        """Delete a draft. Only its author or someone who can publish may, and never a proposed or published version."""
+        return await self._call("DELETE", f"/api/decisions/{key}/versions/{version}")
+
+    async def approver_candidates(self, key: str) -> list[dict[str, Any]]:
+        """Teammates who could be made approvers: active, real people who cannot approve yet."""
+        return await self._call("GET", f"/api/decisions/{key}/approver-candidates") or []
+
+    async def add_approver(self, key: str, user_id: str) -> dict[str, Any]:
+        """Put a person in the Decision reviewers set so they can approve decisions. Admins only."""
+        return await self._call("POST", f"/api/decisions/{key}/approvers", json={"user_id": user_id})
 
     async def get(self, key: str) -> dict[str, Any]:
         return await self._call("GET", f"/api/decisions/{key}")
@@ -706,8 +771,50 @@ class DecisionsClient:
     async def version(self, key: str, n: int) -> dict[str, Any]:
         return await self._call("GET", f"/api/decisions/{key}/versions/{n}")
 
-    async def export(self, key: str, version: int | None = None) -> dict[str, Any]:
-        return await self._call("GET", f"/api/decisions/{key}/export", params={"version": version} if version else None)
+    async def export(self, key: str, version: int | None = None, *, full: bool = False) -> dict[str, Any]:
+        """The rules of a version. full=True gives the whole decision as an abenix-decision-v1 file
+        with facts, outcomes, rules and tests, which import_file takes back."""
+        params: dict[str, Any] = {}
+        if version:
+            params["version"] = version
+        if full:
+            params["full"] = 1
+        return await self._call("GET", f"/api/decisions/{key}/export", params=params or None)
+
+    async def import_file(
+        self,
+        data: Any,
+        *,
+        preview: bool = False,
+        as_new_key: str | None = None,
+        as_new_name: str | None = None,
+    ) -> dict[str, Any]:
+        """A decision file into a new decision, or a new draft when the key exists, with its tests.
+
+        data is a dict, JSON text or bytes, or a path to a .json file. Both an export(full=True)
+        file and the plain {key, name, description, risk_tier, rules, tests} shape work. The tier
+        comes from the file and nothing is published. preview=True returns what would happen, including
+        target, identical_to_latest, suggested_key and name_taken. A file the same as the latest version
+        creates nothing and answers no_changes. draft is the new draft's version number.
+        """
+        if isinstance(data, (bytes, bytearray)):
+            data = json.loads(bytes(data).decode("utf-8"))
+        elif isinstance(data, os.PathLike) or (isinstance(data, str) and not data.lstrip().startswith("{")):
+            data = json.loads(Path(data).read_text(encoding="utf-8"))
+        elif isinstance(data, str):
+            data = json.loads(data)
+        params: dict[str, Any] = {}
+        if preview:
+            params["preview"] = 1
+        if as_new_key:
+            params["as_new_key"] = as_new_key
+        if as_new_name:
+            params["as_new_name"] = as_new_name
+        return await self._call("POST", "/api/decisions/import", json=data, params=params or None)
+
+    async def sign_off_info(self, key: str, version: int) -> dict[str, Any]:
+        """Who must sign this version, who has, who could, and whether you may sign it alone."""
+        return await self._call("GET", f"/api/decisions/{key}/versions/{version}/sign-off")
 
     async def propose_rules(self, key: str, rules: Any, *, note: str, mode: str = "merge") -> dict[str, Any]:
         """New draft from the version in force, the rules imported into it, then proposed for sign-off."""
@@ -734,9 +841,36 @@ class DecisionsClient:
         risk_tier: str | None = None,
         tags: list[str] | None = None,
         log_mode: str | None = None,
+        reason: str | None = None,
     ) -> dict[str, Any]:
-        body = {k: v for k, v in {"name": name, "description": description, "risk_tier": risk_tier, "tags": tags, "log_mode": log_mode}.items() if v is not None}
+        """Change a decision's settings.
+
+        Raising risk_tier applies at once, and a version in force whose sign-off falls short of the
+        new tier gets a review, returned as reattest, while it stays in force. Lowering needs a reason, and when the current tier asks
+        for sign-off it does not change the tier: the result carries pending_tier_change with the
+        approval_id to sign, and the tier moves once that approval is granted. Any tier change is
+        refused with TIER_LOCKED while a version waits for sign-off.
+        """
+        body = {
+            k: v
+            for k, v in {"name": name, "description": description, "risk_tier": risk_tier, "tags": tags,
+                         "log_mode": log_mode, "reason": reason}.items()
+            if v is not None
+        }
         return await self._call("PATCH", f"/api/decisions/{key}", json=body)
+
+    async def withdraw_tier_change(self, key: str) -> dict[str, Any]:
+        """Drop a lowering that waits for sign-off."""
+        return await self._call("DELETE", f"/api/decisions/{key}/tier-change")
+
+    async def reattest(self, key: str) -> dict[str, Any] | None:
+        """The review a version in force waits for after a tier raise, or None.
+
+        {"approval_id", "version", "from_tier", "to_tier", "status", "required_signoffs"}. Sign it with
+        approvals.signoff, sole_operator=True included when nobody else can. Once approved the version
+        records attested_under, shown by version() and sign_off_info().
+        """
+        return (await self.get(key)).get("reattest")
 
     async def new_draft(self, key: str, *, note: str = "", from_version: int | None = None) -> dict[str, Any]:
         """A draft copied from from_version, or from the version in force. Carries an etag for saves."""
@@ -784,8 +918,9 @@ class DecisionsClient:
         """What publishing would supersede or close, and why it would be refused, before anyone publishes."""
         return await self._call("GET", f"/api/decisions/{key}/versions/{version}/publish-plan")
 
-    async def retire(self, key: str, version: int) -> dict[str, Any]:
-        return await self._call("POST", f"/api/decisions/{key}/versions/{version}/retire")
+    async def retire(self, key: str, version: int, *, reason: str | None = None) -> dict[str, Any]:
+        """Retire the version in force. At a tier that asks for sign-off it needs a reason and comes back as {"pending": {...}}."""
+        return await self._call("POST", f"/api/decisions/{key}/versions/{version}/retire", json={"reason": reason} if reason else None)
 
     async def diff(self, key: str, a: int, b: int) -> dict[str, Any]:
         """Rules added, removed and changed between two versions, and how the valid period moved."""
@@ -1796,6 +1931,26 @@ class KillSwitchesClient:
         return await self._call("POST", f"/api/governance/kill-switches/{switch_id}/clear")
 
 
+class TeamClient:
+    """Members of the workspace and who of them can approve decisions."""
+
+    def __init__(self, client: "Abenix"):
+        self._client = client
+
+    async def _call(self, method: str, path: str, **kw: Any) -> Any:
+        return await _call(self._client, AbenixError, method, path, **kw)
+
+    async def members(self) -> list[dict[str, Any]]:
+        """Each member with role and can_approve_decisions."""
+        return ((await self._call("GET", "/api/team/members")) or {}).get("members") or []
+
+    async def set_approver(self, user_id: str, can_approve_decisions: bool) -> dict[str, Any]:
+        """Add someone to Decision reviewers or take them out. warning says when few people are left who can approve."""
+        return await self._call(
+            "PUT", f"/api/team/{user_id}/approver", json={"can_approve_decisions": can_approve_decisions}
+        )
+
+
 class ApiKeysClient:
     """API keys of the calling user, or of the whole tenant for an admin."""
 
@@ -1904,6 +2059,7 @@ class Abenix:
         self.feedback = FeedbackClient(self)
         self.kill_switches = KillSwitchesClient(self)
         self.api_keys = ApiKeysClient(self)
+        self.team = TeamClient(self)
         # no default Content-Type, httpx sets it per request and a fixed
         # JSON one broke multipart uploads through forge.http
         self._http = httpx.AsyncClient(

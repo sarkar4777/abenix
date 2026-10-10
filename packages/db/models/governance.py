@@ -40,6 +40,8 @@ class PermissionSet(UUIDMixin, TenantMixin, TimestampMixin, Base):
     created_by: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
+    # sets the platform seeds keep this key across renames, such as decision_reviewers
+    builtin_key: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
 
 class PermissionAssignment(UUIDMixin, TenantMixin, Base):

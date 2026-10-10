@@ -25,8 +25,15 @@ import {
   Code2,
   FileText,
   Server,
+  Scale,
+  ShieldCheck,
+  BellRing,
+  UserCog,
+  Gauge,
+  User,
   type LucideIcon,
 } from 'lucide-react';
+import { holds, useMyPermissions } from '@/lib/capabilities';
 
 interface RemoteResult {
   category: string;
@@ -45,6 +52,7 @@ function iconForCategory(c: string): LucideIcon {
     case 'Executions':   return Activity;
     case 'Runs':         return Activity;
     case 'Pages':        return FileText;
+    case 'Decisions':    return Scale;
     default:             return Server;
   }
 }
@@ -59,6 +67,10 @@ interface Command {
   keywords?: string[];
   shortcut?: string;
   requires?: 'marketplace' | 'monetization';
+  capability?: string;
+  // the label for someone who can look but not change
+  viewLabel?: string;
+  feature?: string;
 }
 
 const NAVIGATION_COMMANDS: Command[] = [
@@ -77,6 +89,31 @@ const NAVIGATION_COMMANDS: Command[] = [
     href: '/agents',
     category: 'Navigation',
     keywords: ['my agents', 'list', 'bots'],
+  },
+  {
+    id: 'nav-inbox',
+    label: 'Needs you',
+    icon: BellRing,
+    href: '/inbox',
+    category: 'Navigation',
+    keywords: ['inbox', 'waiting', 'todo', 'to do', 'my approvals'],
+  },
+  {
+    id: 'nav-decisions',
+    label: 'Decisions',
+    icon: Scale,
+    href: '/decisions',
+    category: 'Navigation',
+    keywords: ['rules', 'business rules', 'decision table', 'policy', 'policies', 'excel'],
+    capability: 'decisions.view',
+  },
+  {
+    id: 'nav-approvals',
+    label: 'Approvals',
+    icon: ShieldCheck,
+    href: '/approvals',
+    category: 'Navigation',
+    keywords: ['sign off', 'sign-off', 'approve', 'approver', 'approvers', 'who can approve', 'deny', 'review', 'requests'],
   },
   {
     id: 'nav-builder',
@@ -140,9 +177,37 @@ const NAVIGATION_COMMANDS: Command[] = [
     id: 'nav-team',
     label: 'Team',
     icon: Users,
-    href: '/team',
-    category: 'Navigation',
-    keywords: ['members', 'invite', 'organization'],
+    href: '/settings/team',
+    category: 'Settings',
+    viewLabel: 'Team (view only)',
+    feature: 'manage_team',
+    keywords: ['members', 'invite', 'organization', 'people', 'approve', 'approver', 'approvers', 'who can approve', 'can approve decisions', 'sign off', 'reviewers', 'roles'],
+  },
+  {
+    id: 'nav-permissions',
+    label: 'Permissions',
+    icon: UserCog,
+    href: '/admin/permissions',
+    category: 'Settings',
+    keywords: ['roles', 'access', 'capabilities', 'decision reviewers', 'who can approve'],
+    capability: 'permissions.manage',
+  },
+  {
+    id: 'nav-risk',
+    label: 'Risk & Controls',
+    icon: Gauge,
+    href: '/admin/risk',
+    category: 'Settings',
+    keywords: ['risk tier', 'sign-off', 'approvals needed', 'controls', 'governance'],
+    capability: 'risk.view',
+  },
+  {
+    id: 'nav-profile',
+    label: 'Profile',
+    icon: User,
+    href: '/settings/profile',
+    category: 'Settings',
+    keywords: ['password', 'name', 'account'],
   },
   {
     id: 'nav-billing',
@@ -186,6 +251,48 @@ const ACTION_COMMANDS: Command[] = [
 
 const ALL_COMMANDS: Command[] = [...NAVIGATION_COMMANDS, ...ACTION_COMMANDS];
 
+// pages and settings match by name, category or a plain word for what they do
+export function matchCommands(query: string, commands: Command[] = ALL_COMMANDS): Command[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return commands;
+  return commands.filter((cmd) =>
+    cmd.label.toLowerCase().includes(q) ||
+    cmd.category.toLowerCase().includes(q) ||
+    !!cmd.keywords?.some((kw) => kw.toLowerCase().includes(q)),
+  );
+}
+
+// what this person sees: pages they can't use drop out, Team becomes view only for members
+export function commandsFor(perms: { capabilities?: string[]; is_admin?: boolean; features?: Record<string, boolean> } | null | undefined, commands: Command[] = ALL_COMMANDS): Command[] {
+  return commands
+    .filter((c) => !c.capability || !perms || holds(perms.capabilities, c.capability))
+    .map((c) => (c.feature && perms && !perms.is_admin && perms.features?.[c.feature] !== true && c.viewLabel ? { ...c, label: c.viewLabel } : c));
+}
+
+// run logs and file dumps make poor results, a label that is mostly symbols is dropped
+export function isJunkLabel(label: string): boolean {
+  const t = (label || '').replace(/\s+/g, '');
+  if (!t) return true;
+  if (/(.)\1{5,}/.test(t)) return true;
+  const plain = (t.match(/[\p{L}\p{N}]/gu) || []).length;
+  return plain / t.length < 0.5;
+}
+
+interface DecisionHit { key: string; name: string; description?: string }
+
+// decisions by name, key or description, as palette results
+export function decisionResults(rows: DecisionHit[], q: string): RemoteResult[] {
+  const needle = q.trim().toLowerCase();
+  const words = needle.split(/\s+/).filter(Boolean);
+  return rows
+    .filter((d) => {
+      const hay = `${d.name} ${d.key} ${d.description || ''}`.toLowerCase();
+      return words.every((w) => hay.includes(w));
+    })
+    .slice(0, 6)
+    .map((d) => ({ category: 'Decisions', label: d.name, subtitle: d.key, href: `/decisions/${encodeURIComponent(d.key)}` }));
+}
+
 export const OPEN_PALETTE_EVENT = 'abenix:open-command-palette';
 
 export default function CommandPalette() {
@@ -198,10 +305,12 @@ export default function CommandPalette() {
 
   const [remoteResults, setRemoteResults] = useState<RemoteResult[]>([]);
   const { marketplace, monetization } = usePlatformFeatures();
+  const { perms } = useMyPermissions();
   const commands = useMemo(
-    () => ALL_COMMANDS.filter((c) => !c.requires || (c.requires === 'marketplace' ? marketplace : monetization)),
-    [marketplace, monetization],
+    () => commandsFor(perms, ALL_COMMANDS.filter((c) => !c.requires || (c.requires === 'marketplace' ? marketplace : monetization))),
+    [marketplace, monetization, perms],
   );
+  const canSeeDecisions = !perms || holds(perms.capabilities, 'decisions.view');
 
   // Hit /api/search whenever the query stabilises. Local commands still match
   // instantly; remote results stream in for agents/pipelines/KB/ML/etc.
@@ -209,33 +318,28 @@ export default function CommandPalette() {
     const q = query.trim();
     if (!q) { setRemoteResults([]); return; }
     let cancelled = false;
-    const handle = setTimeout(() => {
-      apiFetch<{ results: RemoteResult[] }>(`/api/search?q=${encodeURIComponent(q)}&limit=6`, { silent: true })
-        .then(({ data: payload }) => {
-          if (cancelled || !payload) return;
-          // keep server pages the local list lacks, like the admin screens
-          const local = new Set(ALL_COMMANDS.map((c) => c.href).filter(Boolean));
-          setRemoteResults((payload.results || []).filter(r => r.category !== 'Pages' || !local.has(r.href)));
-        })
-        .catch(() => { if (!cancelled) setRemoteResults([]); });
+    const handle = setTimeout(async () => {
+      const [search, decisions] = await Promise.all([
+        apiFetch<{ results: RemoteResult[] }>(`/api/search?q=${encodeURIComponent(q)}&limit=6`, { silent: true }).catch(() => ({ data: null })),
+        canSeeDecisions && q.length >= 2
+          ? apiFetch<DecisionHit[]>('/api/decisions', { silent: true }).catch(() => ({ data: null }))
+          : Promise.resolve({ data: null as DecisionHit[] | null }),
+      ]);
+      if (cancelled) return;
+      // keep server pages the local list lacks, like the admin screens
+      const local = new Set(ALL_COMMANDS.map((c) => c.href).filter(Boolean));
+      const server = (search.data?.results || []).filter((r) => (r.category !== 'Pages' || !local.has(r.href)) && !isJunkLabel(r.label));
+      const mine = decisionResults(decisions.data || [], q);
+      const seen = new Set(server.map((r) => r.href));
+      setRemoteResults([...mine.filter((r) => !seen.has(r.href)), ...server]);
     }, 180);
     return () => { cancelled = true; clearTimeout(handle); };
-  }, [query]);
+  }, [query, canSeeDecisions]);
 
   const filteredCommands = useMemo(() => {
     if (!query.trim()) return commands;
 
-    const lowerQuery = query.toLowerCase();
-    const localMatches = commands.filter((cmd) => {
-      if (cmd.label.toLowerCase().includes(lowerQuery)) return true;
-      if (cmd.category.toLowerCase().includes(lowerQuery)) return true;
-      if (
-        cmd.keywords?.some((kw) => kw.toLowerCase().includes(lowerQuery))
-      ) {
-        return true;
-      }
-      return false;
-    });
+    const localMatches = matchCommands(query, commands);
 
     const remoteAsCommands: Command[] = remoteResults.map((r, i) => ({
       id: `remote-${r.category}-${i}-${r.href}`,
@@ -434,8 +538,16 @@ export default function CommandPalette() {
               className="max-h-[320px] overflow-y-auto py-2"
             >
               {flatCommands.length === 0 && (
-                <div className="px-4 py-8 text-center text-sm text-slate-500" data-testid="command-palette-empty">
-                  Nothing found for &ldquo;{query}&rdquo;
+                <div className="px-4 py-6 text-center text-sm text-slate-400" data-testid="command-palette-empty">
+                  <p>Nothing found for &ldquo;{query}&rdquo;.</p>
+                  <div className="mt-3 flex flex-wrap justify-center gap-2">
+                    <button type="button" onClick={() => executeCommand({ id: 'docs-q', label: 'docs', icon: FileText, category: 'Help', href: `/docs?q=${encodeURIComponent(query.trim())}` })} className="rounded-md border border-slate-600 px-3 py-1.5 text-xs text-cyan-200 hover:bg-slate-700/40" data-testid="command-palette-search-docs">
+                      Search the docs for &ldquo;{query.trim()}&rdquo;
+                    </button>
+                    <button type="button" onClick={() => executeCommand({ id: 'help', label: 'help', icon: FileText, category: 'Help', href: '/help' })} className="rounded-md border border-slate-600 px-3 py-1.5 text-xs text-slate-200 hover:bg-slate-700/40" data-testid="command-palette-help">
+                      Open Help
+                    </button>
+                  </div>
                 </div>
               )}
 

@@ -581,14 +581,26 @@ class DecisionProposeTool(_DecisionTool):
                 actor_id=self._user_id or None,
                 actor_label=f"agent {self._agent_name or 'unknown'}",
             )
+            kept = (
+                f"Updated your open draft, version {out['version']}, and added this to its change note. "
+                if out.get("updated_own_draft")
+                else ""
+            )
             if out["tests_failed"]:
-                out["message"] = (
+                out["message"] = kept + (
                     f"Saved as draft version {out['version']}, not proposed, because "
-                    f"{out['tests_failed']} golden tests fail: {', '.join(out['failed_tests'])}."
+                    f"{out['tests_failed']} golden test{'s fail' if out['tests_failed'] != 1 else ' fails'}: "
+                    f"{', '.join(out['failed_tests'])}."
+                )
+            elif not out["approvals_needed"]:
+                out["message"] = kept + (
+                    f"Proposed as version {out['version']}. Its tier needs no sign-off, "
+                    "so it can be published now."
                 )
             else:
-                out["message"] = (
-                    f"Proposed as version {out['version']}. It needs {out['approvals_needed']} approval(s) "
+                out["message"] = kept + (
+                    f"Proposed as version {out['version']}. It needs {out['approvals_needed']} "
+                    f"approval{'s' if out['approvals_needed'] != 1 else ''} "
                     "on the Approvals page before anyone can publish it."
                 )
             return self._ok(out, decision=key, version=out["version"])

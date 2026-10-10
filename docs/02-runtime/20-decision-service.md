@@ -133,7 +133,7 @@ The executor builds every `decision_*` tool with the run's `tenant_id`, `executi
 | `decision_compare` | `service.evaluate` once per target (version, `as_of`, `known_at`), without traces |
 | `decision_explain` | `service.evaluate` with the trace, then the applied rules with their descriptions and cited sources |
 | `decision_test` | Runs the decision's `decision_tests` against the latest or a named version with `validation.run_tests`, the same check the API runs before propose |
-| `decision_propose` | `service.create_proposal`. Saves a draft, runs the golden tests, and proposes it for sign-off only when they pass |
+| `decision_propose` | `service.create_proposal`. Saves a draft, runs the golden tests, and proposes it for sign-off only when they pass. When the same agent, acting for the same person, already has an open draft on that decision, it updates that draft and adds the new note under the old one instead of starting another version |
 
 All are `low` risk except `decision_propose`, which is `medium`. It writes a proposal and never publishes. Signing off a proposal is an approval with `gate_kind: decision_publish`, see [05-approvals-hitl](05-approvals-hitl.md). Proposing and publishing emit `decision.proposed` and `decision.published`, see [19-outbound-events](19-outbound-events.md).
 

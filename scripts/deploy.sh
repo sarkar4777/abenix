@@ -1534,7 +1534,8 @@ start_persistent_forward() {
   # verifier and served a different app's 404s to every test.
   # a forward stopped a moment ago can hold its port for a few seconds on Windows
   local tries=0
-  while curl -s -o /dev/null --max-time 2 "http://localhost:${local_port}/" 2>/dev/null && [ "${tries}" -lt 6 ]; do
+  while curl -s -o /dev/null --max-time 2 "http://localhost:${local_port}/" 2>/dev/null && [ "${tries}" -lt 15 ]; do
+    [ "${tries}" -eq 3 ] && log "waiting for port ${local_port} to be released by the forward that just stopped"
     tries=$((tries + 1))
     sleep 1
   done

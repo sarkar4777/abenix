@@ -114,7 +114,7 @@ export default function KillSwitches({
       {canManage ? (
         <NewSwitch optionsFor={optionsFor} onDone={mutate} />
       ) : (
-        <p className="text-xs text-slate-500">Setting or resuming a kill switch needs the killswitch.manage capability.</p>
+        <p className="text-xs text-slate-500">Setting or resuming a kill switch needs Manage kill switches, which an admin can give you.</p>
       )}
 
       <section aria-labelledby="active-switches">

@@ -211,3 +211,23 @@ def draft_release_message(name: str, tier: Any) -> str:
         "tier's release checks, before pipelines, triggers, other agents or API keys call it. "
         "You can still test it from the builder and chat."
     )
+
+
+_COUNT_WORDS = {1: "one", 2: "two", 3: "three", 4: "four", 5: "five"}
+
+
+def publish_policy_text(tier: Any, publish_approvals: dict[str, Any] | None) -> str:
+    """One plain sentence on what a new version of something at this tier needs before it goes live."""
+    pa = publish_approvals or {}
+    name = f"{normalize(tier).capitalize()} risk"
+    try:
+        n = max(0, int(pa.get("min_approvers") or 0))
+    except (TypeError, ValueError):
+        n = 0
+    if n == 0:
+        return f"{name}: no sign-off needed, the author can publish."
+    count = _COUNT_WORDS.get(n, str(n))
+    who = "person" if n == 1 else "people"
+    if pa.get("exclude_author"):
+        return f"{name}: {count} {who} who did not author it must approve."
+    return f"{name}: {count} {who} must approve, the author may be one of them."

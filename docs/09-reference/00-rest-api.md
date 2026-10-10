@@ -277,12 +277,12 @@ Detail in [02-runtime/05-approvals-hitl](../02-runtime/05-approvals-hitl.md).
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
 | `POST` | `/api/approvals` | signed in | Create, usually from an agent through the SDK. `client_token` makes it idempotent |
-| `GET` | `/api/approvals` | signed in | List, filterable by status |
+| `GET` | `/api/approvals` | signed in | List, filterable by status. Only what you can sign, asked for or signed, with `can_sign` and `cannot_sign_reason`. `?all=1` for admins |
 | `GET` | `/api/approvals/webhooks` | signed in | Approval webhook config |
 | `PUT` | `/api/approvals/webhooks` | admin or owner role | Set the approval webhook URL and secret |
 | `GET` | `/api/approvals/{approval_id}` | signed in | Detail |
 | `GET` | `/api/approvals/{approval_id}/wait` | signed in | Long-poll until it leaves pending or times out |
-| `POST` | `/api/approvals/{approval_id}/signoff` | signed in, plus the tier's signing capability when set | Body `{decision, reason, client_token, edited_arguments}`. See below |
+| `POST` | `/api/approvals/{approval_id}/signoff` | signed in, plus the tier's signing capability when set | Body `{decision, reason, client_token, edited_arguments, sole_operator}`. See below |
 
 `decision` on signoff is one of:
 
@@ -304,12 +304,18 @@ Rules as versioned decision models. Detail in [08-howto/09-decisions](../08-howt
 
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
-| `GET` | `/api/decisions` | `decisions.view` | List decisions |
+| `GET` | `/api/decisions` | `decisions.view` | List decisions, `?archived=1` for archived ones. Rows carry `state`, `in_force_version`, `waiting` and `pending_action`. A search sets `meta.archived_matches` |
 | `POST` | `/api/decisions` | `decisions.author` | Create a decision |
-| `GET` | `/api/decisions/{key}` | `decisions.view` | Detail with versions |
-| `PATCH` | `/api/decisions/{key}` | `decisions.author` | Change name, description and other metadata |
-| `DELETE` | `/api/decisions/{key}` | `decisions.publish` | Archive |
-| `POST` | `/api/decisions/{key}/restore` | `decisions.publish` | Bring back an archived decision. 409 when it is not archived |
+| `GET` | `/api/decisions/check-key` | `decisions.view` | `?key=`, returns `{available, valid, archived, suggestion}` |
+| `POST` | `/api/decisions/import` | `decisions.author` | Import a whole decision file, ours or `{key, name, description, risk_tier, rules, tests}`. `?preview=1` writes nothing, `?as_new_key=` imports under another key |
+| `GET` | `/api/decisions/{key}` | `decisions.view` | Detail with versions, `pending_tier_change` and `reattest`, the review a version in force waits for after a tier raise |
+| `PATCH` | `/api/decisions/{key}` | `decisions.author` | Change name, description, tier and other metadata. A lowering needs `reason` and, when the tier asks for sign-off, answers 202 with `pending_tier_change`. 409 `TIER_LOCKED` while a version is proposed |
+| `DELETE` | `/api/decisions/{key}/tier-change` | `decisions.author` | Withdraw a lowering that waits for sign-off |
+| `DELETE` | `/api/decisions/{key}` | `decisions.publish` | Archive. Body `{reason}`. At a tier that needs sign-off, 202 with `pending` and a `decision_archive` approval |
+| `POST` | `/api/decisions/{key}/restore` | `decisions.publish` | Bring back an archived decision. 409 when it is not archived. Same sign-off rule, `decision_restore` |
+| `DELETE` | `/api/decisions/{key}/versions/{n}` | `decisions.author` | Discard a draft, its author or someone with `decisions.publish` |
+| `POST` | `/api/decisions/{key}/approvers` | `permissions.manage` | `{user_id}`, add a person to Decision reviewers |
+| `GET` | `/api/decisions/{key}/approver-candidates` | `permissions.manage` | `[{id, name, email}]`, active members who cannot approve decisions yet |
 | `GET` | `/api/decisions/{key}/versions/{n}` | `decisions.view` | One version |
 | `POST` | `/api/decisions/{key}/versions` | `decisions.author` | Start a new draft |
 | `PUT` | `/api/decisions/{key}/versions/{n}` | `decisions.author` | Save a draft. `If-Match` with the etag, 409 when someone saved first or the version is no longer editable |
@@ -319,9 +325,10 @@ Rules as versioned decision models. Detail in [08-howto/09-decisions](../08-howt
 | `POST` | `/api/decisions/{key}/versions/{n}/validate` | `decisions.view` | Run validation and tests on a version |
 | `POST` | `/api/decisions/{key}/versions/{n}/propose` | `decisions.author` | Send a draft for sign-off. 422 when validation fails |
 | `POST` | `/api/decisions/{key}/versions/{n}/withdraw` | `decisions.author` | Pull a proposed version back to draft |
-| `POST` | `/api/decisions/{key}/versions/{n}/publish` | `decisions.publish` | Put an approved version in force. Body `{expected_current}`. 409 `AWAITING_APPROVAL`, `REJECTED` or `NOT_APPROVED` otherwise |
+| `POST` | `/api/decisions/{key}/versions/{n}/publish` | `decisions.publish` | Put an approved version in force. Body `{expected_current}`. 409 `AWAITING_APPROVAL`, `REJECTED`, `NOT_APPROVED`, or `TIER_CHANGED` when the tier went up after it was approved |
+| `GET` | `/api/decisions/{key}/versions/{n}/sign-off` | `decisions.view` | Required sign-offs, the policy in words, sign-offs so far, eligible approvers, `sole_operator_available` |
 | `GET` | `/api/decisions/{key}/versions/{n}/publish-plan` | `decisions.view` | What publishing would do, before anyone does it |
-| `POST` | `/api/decisions/{key}/versions/{n}/retire` | `decisions.publish` | Take the version in force out of force |
+| `POST` | `/api/decisions/{key}/versions/{n}/retire` | `decisions.publish` | Take the version in force out of force. Body `{reason}`. At a tier that needs sign-off, 202 with `pending` and a `decision_retire` approval |
 | `POST` | `/api/decisions/{key}/evaluate` | `decisions.evaluate` | Evaluate one set of facts. Body `{facts, as_of, known_at, version, trace, persist, idempotency_key}` |
 | `POST` | `/api/decisions/{key}/evaluate-batch` | `decisions.evaluate` | Evaluate many items in one call |
 | `POST` | `/api/decisions/{key}/compare` | `decisions.evaluate` | Same facts against 2 to 10 targets side by side |
@@ -331,7 +338,7 @@ Rules as versioned decision models. Detail in [08-howto/09-decisions](../08-howt
 | `POST` | `/api/decisions/{key}/tests` | `decisions.author` | Add a test case |
 | `PUT` | `/api/decisions/{key}/tests/{test_id}` | `decisions.author` | Change a test case |
 | `DELETE` | `/api/decisions/{key}/tests/{test_id}` | `decisions.author` | Delete a test case |
-| `GET` | `/api/decisions/{key}/export` | `decisions.view` | Export rules, `?version=` or the latest |
+| `GET` | `/api/decisions/{key}/export` | `decisions.view` | Export rules, `?version=` or the latest. `?full=1` gives the whole decision as an `abenix-decision-v1` file |
 | `POST` | `/api/decisions/{key}/import` | `decisions.author` | Import rules into a draft. `If-Match` like a save |
 | `GET` | `/api/decisions/{key}/diff` | `decisions.view` | Diff two versions, `?a=&b=` |
 
@@ -418,6 +425,8 @@ Permission sets, risk tiers, kill switches, audit chain, replay and provenance. 
 | `GET` | `/api/governance/risk` | `risk.view` | Policy per tier (`low`, `medium`, `high`, `critical`) |
 | `PUT` | `/api/governance/risk/{tier}` | `risk.manage` | Set the policy for a tier. `publish_approvals.escalate_after_minutes` (0, or 1 to 43200) wins over `escalate_after_hours` |
 | `DELETE` | `/api/governance/risk/{tier}` | `risk.manage` | Reset a tier to its default |
+| `GET` | `/api/governance/settings` | `risk.view` | `{sole_operator_signoff}` |
+| `PUT` | `/api/governance/settings` | admin role | Turn sole-operator sign-off on or off |
 | `GET` | `/api/governance/kill-switches` | `risk.view` | Active switches, `?include_cleared=true` for all |
 | `POST` | `/api/governance/kill-switches` | `killswitch.manage` | Set a switch. `scope` is `all`, `agent`, `pipeline`, `tool`, `model`, `trigger`, `decision` or `source` |
 | `POST` | `/api/governance/kill-switches/{switch_id}/clear` | `killswitch.manage` | Clear a switch |

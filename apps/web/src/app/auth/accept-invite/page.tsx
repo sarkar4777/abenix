@@ -9,6 +9,8 @@ interface InviteInfo {
   email: string;
   tenant_name: string;
   role: string;
+  can_approve_decisions?: boolean;
+  message?: string;
   expired: boolean;
   used?: boolean;
 }
@@ -98,7 +100,13 @@ export default function AcceptInvitePage() {
                 <h1 className="text-lg font-semibold text-white" data-testid="accept-title">
                   Join {invite.tenant_name || 'the workspace'}
                 </h1>
-                <p className="text-xs text-slate-500">You were invited as {invite.role}</p>
+                <p className="text-xs text-slate-500">
+                  You were invited as {({ admin: 'an Admin', creator: 'a Creator', user: 'a Member', member: 'a Member' } as Record<string, string>)[String(invite.role)] || invite.role}
+                  {invite.can_approve_decisions || invite.role === 'admin' ? ', and you can approve decisions' : ''}.
+                </p>
+                {(invite.can_approve_decisions || invite.role === 'admin') && (
+                  <p className="mt-1 text-xs text-slate-400" data-testid="accept-approver">That means signing off rule changes other people propose. They show up on your Approvals page.</p>
+                )}
               </div>
             </div>
 
