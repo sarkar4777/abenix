@@ -1,0 +1,180 @@
+{{- /*
+Dev-only catchers for local clusters: Mailpit for email, a webhook catcher
+for Slack-format posts, and a mock OIDC provider for SSO. Off by default,
+values-local.yaml turns them on. Never enable this in production.
+*/}}
+{{- $dc := default dict .Values.devCatchers }}
+{{- if $dc.enabled }}
+{{- $mp := default dict $dc.mailpit }}
+{{- $wc := default dict $dc.webhookCatcher }}
+{{- $oidc := default dict $dc.mockOidc }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-mailpit
+  labels:
+    {{- include "abenix.labels" . | nindent 4 }}
+    app.kubernetes.io/component: dev-catcher
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: mailpit
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: mailpit
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      containers:
+        - name: mailpit
+          image: {{ default "axllent/mailpit:v1.21" $mp.image | quote }}
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: MP_MAX_MESSAGES
+              value: "2000"
+            - name: MP_SMTP_AUTH_ACCEPT_ANY
+              value: "true"
+            - name: MP_SMTP_AUTH_ALLOW_INSECURE
+              value: "true"
+          ports:
+            - { name: smtp, containerPort: 1025 }
+            - { name: http, containerPort: 8025 }
+          readinessProbe:
+            httpGet: { path: /livez, port: 8025 }
+            periodSeconds: 10
+          resources:
+            requests: { cpu: 10m, memory: 32Mi }
+            limits: { cpu: 200m, memory: 128Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-mailpit
+  labels:
+    {{- include "abenix.labels" . | nindent 4 }}
+spec:
+  selector:
+    app.kubernetes.io/name: mailpit
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports:
+    - { name: smtp, port: 1025, targetPort: 1025 }
+    - { name: http, port: 8025, targetPort: 8025 }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-webhook-catcher
+  labels:
+    {{- include "abenix.labels" . | nindent 4 }}
+data:
+  catcher.py: |
+{{ .Files.Get "files/webhook-catcher.py" | indent 4 }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-webhook-catcher
+  labels:
+    {{- include "abenix.labels" . | nindent 4 }}
+    app.kubernetes.io/component: dev-catcher
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: webhook-catcher
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: webhook-catcher
+        app.kubernetes.io/instance: {{ .Release.Name }}
+      annotations:
+        checksum/script: {{ .Files.Get "files/webhook-catcher.py" | sha256sum }}
+    spec:
+      containers:
+        - name: catcher
+          image: {{ default "python:3.12-alpine" $wc.image | quote }}
+          imagePullPolicy: IfNotPresent
+          command: ["python", "-u", "/opt/catcher/catcher.py"]
+          ports:
+            - { name: http, containerPort: 8080 }
+          readinessProbe:
+            httpGet: { path: /healthz, port: 8080 }
+            periodSeconds: 10
+          volumeMounts:
+            - { name: script, mountPath: /opt/catcher }
+          resources:
+            requests: { cpu: 10m, memory: 32Mi }
+            limits: { cpu: 100m, memory: 96Mi }
+      volumes:
+        - name: script
+          configMap:
+            name: {{ .Release.Name }}-webhook-catcher
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-webhook-catcher
+  labels:
+    {{- include "abenix.labels" . | nindent 4 }}
+spec:
+  selector:
+    app.kubernetes.io/name: webhook-catcher
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports:
+    - { name: http, port: 8080, targetPort: 8080 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-mock-oidc
+  labels:
+    {{- include "abenix.labels" . | nindent 4 }}
+    app.kubernetes.io/component: dev-catcher
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: mock-oidc
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: mock-oidc
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      containers:
+        - name: mock-oidc
+          image: {{ default "ghcr.io/navikt/mock-oauth2-server:2.1.10" $oidc.image | quote }}
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: SERVER_PORT
+              value: "8080"
+            # a login form where the tester types the user and claims
+            - name: JSON_CONFIG
+              value: '{"interactiveLogin": true}'
+          ports:
+            - { name: http, containerPort: 8080 }
+          readinessProbe:
+            httpGet: { path: /default/.well-known/openid-configuration, port: 8080 }
+            periodSeconds: 10
+          resources:
+            requests: { cpu: 20m, memory: 128Mi }
+            limits: { cpu: 500m, memory: 512Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-mock-oidc
+  labels:
+    {{- include "abenix.labels" . | nindent 4 }}
+spec:
+  selector:
+    app.kubernetes.io/name: mock-oidc
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports:
+    - { name: http, port: 8080, targetPort: 8080 }
+{{- end }}

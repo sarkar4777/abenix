@@ -26,6 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import log_action
 from app.core.deps import get_current_user, get_db
+from app.core.permissions import share_expiry_fields
 from app.core.responses import error, success
 from app.services.document_access import grant_document
 from app.services.kb_access import (
@@ -89,7 +90,7 @@ def _grant_dict(g: DocumentGrant) -> dict[str, Any]:
         "permission": g.permission,
         "granted_by": str(g.granted_by) if g.granted_by else None,
         "granted_at": g.granted_at.isoformat() if g.granted_at else None,
-        "expires_at": g.expires_at.isoformat() if g.expires_at else None,
+        **share_expiry_fields(getattr(g, "expires_at", None)),
     }
 
 

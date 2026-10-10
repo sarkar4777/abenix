@@ -430,7 +430,7 @@ export default function HealingPage() {
 
       <div className="mt-10 text-[11px] text-slate-600 text-center">
         Surgeon model is configured under{' '}
-        <Link href="/admin/settings" className="text-cyan-400 hover:underline">Admin → Settings</Link>{' '}
+        <Link href="/admin/llm-settings" className="text-cyan-400 hover:underline">Admin → Model Selection</Link>{' '}
         (key <code>pipeline_surgeon.model</code>).
       </div>
     </div>

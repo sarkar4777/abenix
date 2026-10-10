@@ -189,7 +189,7 @@ async def list_triggers(
     elif sort == "name":
         query = query.order_by(AgentTrigger.name.asc())
     else:  # newest (default)
-        query = query.order_by(AgentTrigger.created_at.desc())
+        query = query.order_by(AgentTrigger.created_at.desc(), AgentTrigger.id)
 
     # Apply pagination
     query = query.limit(limit).offset(offset)
@@ -726,7 +726,6 @@ async def write_trigger_outcome(
     """
     if not trigger_id:
         return False
-    import logging
 
     from sqlalchemy import update
 
@@ -745,29 +744,45 @@ async def write_trigger_outcome(
         updated = (getattr(r, "rowcount", 0) or 0) > 0
         if not updated or outcome != "failed":
             return updated
-        try:
-            row = (
-                await db.execute(
-                    select(AgentTrigger.created_by, AgentTrigger.tenant_id).where(
-                        AgentTrigger.id == tid
-                    )
-                )
-            ).first()
-            if row and row[0]:
-                await _notify_trigger_failure(
-                    db,
-                    tenant_id=row[1],
-                    user_id=row[0],
-                    trigger_id=str(tid),
-                    execution_id=str(execution_id),
-                    error=str(error or "execution failed"),
-                )
-                await db.commit()
-        except Exception as exc:
-            logging.getLogger("abenix.triggers").warning(
-                "trigger %s failure notice skipped: %s", tid, exc
-            )
+        await notify_trigger_failure_once(db, tid, execution_id, error)
     return updated
+
+
+async def notify_trigger_failure_once(
+    db: AsyncSession, trigger_id: Any, execution_id: Any, error: str | None
+) -> bool:
+    """Tell the trigger's owner it failed, once per run whichever process finished it."""
+    import logging
+
+    from app.services.run_announcer import claim
+
+    try:
+        row = (
+            await db.execute(
+                select(AgentTrigger.created_by, AgentTrigger.tenant_id).where(
+                    AgentTrigger.id == uuid.UUID(str(trigger_id))
+                )
+            )
+        ).first()
+        if not row or not row[0]:
+            return False
+        if not await claim(f"trigger-failed:{execution_id}"):
+            return False
+        await _notify_trigger_failure(
+            db,
+            tenant_id=row[1],
+            user_id=row[0],
+            trigger_id=str(trigger_id),
+            execution_id=str(execution_id),
+            error=str(error or "execution failed"),
+        )
+        await db.commit()
+        return True
+    except Exception as exc:
+        logging.getLogger("abenix.triggers").warning(
+            "trigger %s failure notice skipped: %s", trigger_id, exc
+        )
+        return False
 
 
 @router.post("/webhook/{token}")

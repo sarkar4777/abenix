@@ -458,6 +458,10 @@ def _resolve_templates(
     return {key: _resolve(value) for key, value in arguments.items()}
 
 
+def _continued_after_error(output: Any) -> bool:
+    return isinstance(output, dict) and bool(output.get("__error_continue"))
+
+
 def _skipped_by_failure(result: Any) -> bool:
     err = getattr(result, "error", None) or ""
     return err.startswith("Dependency '") and err.endswith("' failed")
@@ -612,6 +616,60 @@ DEFAULT_PIPELINE_TIMEOUT_SECONDS = int(
 )
 
 
+# names seed pipelines use for the run message, all filled the same way on every path
+_MESSAGE_ALIASES = (
+    "user_message",
+    "message",
+    "prompt",
+    "content",
+    "text",
+    "ticket_content",
+    "query",
+    "request",
+)
+
+
+def build_run_context(
+    message: str,
+    execution_id: str = "",
+    defaults: dict[str, Any] | None = None,
+    context: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """The context every execute path hands to PipelineExecutor.execute.
+
+    Declared input defaults sit under what the caller sent, and the execution
+    id rides along so healing can attach a failure diff to the run.
+    """
+    out: dict[str, Any] = {k: message for k in _MESSAGE_ALIASES} if message else {}
+    out.update(defaults or {})
+    out.update(context or {})
+    if execution_id:
+        out["__execution_id"] = str(execution_id)
+    return out
+
+
+def pipeline_timed_out(
+    limit_seconds: int, node_statuses: dict[str, str] | None = None
+) -> "PipelineResult":
+    """The failed result a caller records when a run overruns its time limit."""
+    msg = (
+        f"The pipeline ran out of time. It stopped after {int(limit_seconds)}s, "
+        "the limit set in pipeline.timeout_seconds."
+    )
+    unfinished = [
+        nid for nid, st in (node_statuses or {}).items() if st in ("pending", "running")
+    ]
+    errors = {"pipeline": msg, **{nid: msg for nid in unfinished}}
+    return PipelineResult(
+        status="failed",
+        failed_nodes=unfinished,
+        total_duration_ms=int(limit_seconds) * 1000,
+        final_output={"error": msg},
+        node_errors=errors,
+        failure_code="RUNTIME_TIMEOUT",
+    )
+
+
 class PipelineExecutor:
     """Execute a DAG of tool calls with conditions and data piping."""
 
@@ -668,7 +726,7 @@ class PipelineExecutor:
         nodes: list[PipelineNode],
         context: dict[str, Any] | None = None,
     ) -> PipelineResult:
-        await governance.ensure_fresh()
+        await governance.ensure_fresh(max_age=1.0)
         await autonomy.ensure_fresh()
         parent = governance.current()
         base = risk.highest(
@@ -742,6 +800,12 @@ class PipelineExecutor:
         node_outputs["input"] = input_alias
         # Also store flat for backward compatibility ({{user_message}}, etc.)
         node_outputs.update(context)
+        # a plain-text "input" in the context must not replace the alias, or {{input.x}} breaks
+        if not isinstance(context.get("input"), dict):
+            if isinstance(context.get("input"), str):
+                input_alias.pop("input", None)
+                input_alias.setdefault("message", context["input"])
+            node_outputs["input"] = input_alias
         results: dict[str, NodeResult] = {}
         execution_path: list[str] = []
         skipped_nodes: list[str] = []
@@ -776,15 +840,20 @@ class PipelineExecutor:
                 node_errors={n.id: str(e) for n in nodes},
             )
 
+        timed_out = False
         for layer in layers:
             elapsed = time.monotonic() - start
             if elapsed > self.timeout_seconds:
+                timed_out = True
                 for nid in layer:
                     results[nid] = NodeResult(
                         node_id=nid,
                         status="failed",
                         error="Pipeline timeout exceeded",
-                        error_message=f"Pipeline timeout exceeded after {int(elapsed)}s (limit: {self.timeout_seconds}s)",
+                        error_message=(
+                            f"The pipeline ran out of time after {int(elapsed)}s "
+                            f"(limit {self.timeout_seconds}s), so this step did not run."
+                        ),
                         error_type="timeout",
                         tool_name=node_map[nid].tool_name,
                     )
@@ -858,7 +927,8 @@ class PipelineExecutor:
                         execution_path.append(nid)
                         node_outputs[nid] = {
                             "__error_continue": True,
-                            "error": result.error,
+                            "error": result.error_message or result.error,
+                            "error_type": result.error_type,
                             "status": "failed",
                         }
                     elif node.on_error == "error_branch" and node.error_branch_node:
@@ -970,6 +1040,7 @@ class PipelineExecutor:
             final_output=final_output,
             node_errors=node_errors,
             labels={n.id: n.label for n in nodes if n.label},
+            failure_code="RUNTIME_TIMEOUT" if timed_out else "",
         )
 
     async def _execute_node(
@@ -1043,18 +1114,9 @@ class PipelineExecutor:
             if dep_result is None:
                 continue
             if dep_result.status == "failed":
-                for n in [n for n in prior_results]:
-                    pass  # node_map not available here, check via depends_on
-                # If the failed dependency has on_error="continue", propagate error info instead of skipping
-                # We check the original node config via the id match in prior_results
-                # For simplicity, we use a convention: if the failed dep's output contains
-                # {"__error_continue": True}, it means on_error=continue was set
-                if (
-                    dep_result.output
-                    and isinstance(dep_result.output, dict)
-                    and dep_result.output.get("__error_continue")
-                ):
-                    continue  # Allow this node to proceed with error info available
+                # on_error: continue leaves an error marker in node_outputs, dependents run with it
+                if _continued_after_error(node_outputs.get(dep_id)):
+                    continue
                 return NodeResult(
                     node_id=node.id,
                     status="skipped",
@@ -2103,6 +2165,23 @@ def pipeline_usage(result: PipelineResult) -> dict[str, Any]:
             total[k] += v
     total["cost"] = round(total["cost"], 6)
     return total
+
+
+def pipeline_provider_costs(result: PipelineResult) -> dict[str, float]:
+    """Run spend split by LLM provider, from each step's model."""
+    from engine.agent_executor import _provider_key
+
+    out: dict[str, float] = {}
+    for nr in (result.node_results or {}).values():
+        cost = node_usage(nr)["cost"]
+        if not cost:
+            continue
+        md = nr.metadata or {}
+        out_val = nr.output if isinstance(nr.output, dict) else {}
+        model = md.get("model") or out_val.get("model") or ""
+        key = _provider_key(str(model))
+        out[key] = round(out.get(key, 0.0) + cost, 6)
+    return out
 
 
 def serialize_pipeline_result(result: PipelineResult) -> dict[str, Any]:

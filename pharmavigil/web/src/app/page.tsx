@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   Activity, AlertTriangle, ArrowRight, CheckCircle2, ClipboardList, Clock,
-  FlaskConical, Loader2, ShieldAlert, TrendingUp,
+  FilePlus2, Loader2, ShieldAlert, TrendingUp,
 } from 'lucide-react';
 
 type Stats = {
@@ -106,7 +106,10 @@ export default function Home() {
           country: s.country,
         }),
       });
-      if (!r.ok) setErr(`Intake failed: HTTP ${r.status}`);
+      if (!r.ok) {
+        const b = await r.json().catch(() => null);
+        setErr(typeof b?.detail === 'string' ? b.detail : `The sample was not filed (HTTP ${r.status}).`);
+      }
       await load();
     } catch (e) {
       setErr(String(e));
@@ -126,14 +129,20 @@ export default function Home() {
   return (
     <main className="min-h-screen bg-slate-950 text-slate-200">
 
-      <div className="mx-auto max-w-7xl px-6 py-8 space-y-8">
-        <section className="pt-2">
+      <div className="mx-auto max-w-7xl px-4 sm:px-6 py-8 space-y-8">
+        <section className="pt-2 flex flex-wrap items-start gap-4">
+          <div className="flex-1 min-w-[16rem]">
           <h2 className="text-2xl font-bold text-white">Case queue</h2>
           <p className="text-sm text-slate-400 mt-1">
             Ordered by predicted reviewer escalation, not arrival time. Nine
             agents assess every report; a human signs off before anything is
             submitted.
           </p>
+          </div>
+          <a href="/cases/new" data-testid="new-case"
+            className="inline-flex items-center gap-2 rounded-lg bg-teal-500/15 text-teal-200 ring-1 ring-teal-500/40 hover:bg-teal-500/25 px-4 py-2 text-sm font-medium">
+            <FilePlus2 className="w-4 h-4" /> New report
+          </a>
         </section>
 
         {err && (
@@ -191,7 +200,7 @@ export default function Home() {
             </div>
             {cases.length === 0 ? (
               <p className="px-4 py-10 text-center text-sm text-slate-500">
-                No cases yet. File a sample report above to watch the pipeline run.
+                No cases yet. File a new report, or a sample above, to watch the assessment run.
               </p>
             ) : (
               <div className="divide-y divide-slate-800/70">

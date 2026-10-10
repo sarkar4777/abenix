@@ -233,25 +233,60 @@ async def change_password(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
+    from app.core import sessions
+
+    if not user.password_hash:
+        return error(
+            "This account signs in with single sign-on and has no password. "
+            "Use Forgot password on the sign-in page to set one.",
+            400,
+        )
     if not verify_password(body.current_password, user.password_hash):
         return error("Current password is incorrect", 400)
 
-    if len(body.new_password) < 8:
-        return error("Password must be at least 8 characters", 400)
+    problem = password_problem(body.new_password)
+    if problem:
+        return error(problem, 400)
+    if verify_password(body.new_password, user.password_hash):
+        return error("The new password is the same as the current one", 400)
 
     user.password_hash = hash_password(body.new_password)
+    # other devices must sign in again with the new password
+    signed_out = await sessions.revoke(
+        db,
+        user.id,
+        keep=getattr(user, "_session_id", None),
+        reason="password_changed",
+    )
 
     log = ActivityLog(
         tenant_id=user.tenant_id,
         user_id=user.id,
         action="password.changed",
-        ip_address=request.client.host if request.client else None,
+        details={"other_sessions_signed_out": signed_out},
+        ip_address=sessions.client_ip(request),
         user_agent=request.headers.get("user-agent"),
     )
     db.add(log)
     await db.commit()
 
-    return success({"message": "Password updated successfully"})
+    return success(
+        {
+            "message": "Password updated successfully",
+            "other_sessions_signed_out": signed_out,
+        }
+    )
+
+
+MIN_PASSWORD_LEN = 8
+
+
+def password_problem(pw: str) -> str | None:
+    if len(pw or "") < MIN_PASSWORD_LEN:
+        return f"Password must be at least {MIN_PASSWORD_LEN} characters"
+    if len(pw) > 128:
+        return "Password must be at most 128 characters"
+    return None
 
 
 NOTIFICATION_DEFAULTS = {
@@ -356,7 +391,8 @@ async def get_activity(
 ) -> JSONResponse:
     result = await db.execute(
         select(ActivityLog)
-        .where(ActivityLog.tenant_id == user.tenant_id)
+        # your own activity, the tenant-wide trail is the admin audit log
+        .where(ActivityLog.tenant_id == user.tenant_id, ActivityLog.user_id == user.id)
         .order_by(ActivityLog.created_at.desc())
         .limit(50)
     )
@@ -380,28 +416,81 @@ async def get_sessions(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
-    result = await db.execute(
-        select(ActivityLog)
-        .where(
-            ActivityLog.user_id == user.id,
-            ActivityLog.action.in_(["login", "password.changed"]),
-        )
-        .order_by(ActivityLog.created_at.desc())
-        .limit(10)
-    )
-    logs = result.scalars().all()
+    from app.core import sessions
 
-    sessions = [
+    current = str(getattr(user, "_session_id", "") or "")
+    rows = await sessions.list_live(db, user.id)
+    data = [
         {
-            "id": str(log.id),
-            "ip_address": log.ip_address,
-            "user_agent": log.user_agent,
-            "action": log.action,
-            "created_at": log.created_at.isoformat() if log.created_at else None,
+            "id": str(r.id),
+            "ip_address": r.ip_address,
+            "user_agent": r.user_agent,
+            "method": r.method,
+            "action": "login",
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+            "last_seen_at": r.last_seen_at.isoformat() if r.last_seen_at else None,
+            "current": str(r.id) == current,
         }
-        for log in logs
+        for r in rows
     ]
-    return success(sessions)
+    # the device you are on first
+    data.sort(key=lambda d: not d["current"])
+    return success(data)
+
+
+@router.delete("/sessions/{session_id}")
+async def revoke_session(
+    session_id: uuid.UUID,
+    request: Request,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    from app.core import principal, sessions
+
+    if str(session_id) == str(getattr(user, "_session_id", "") or ""):
+        return error("This is the session you are using. Sign out instead.", 400)
+    n = await sessions.revoke(db, user.id, sid=session_id, reason="revoked")
+    if not n:
+        return error("That session is already signed out", 404)
+    db.add(
+        ActivityLog(
+            tenant_id=user.tenant_id,
+            user_id=user.id,
+            action="session.revoked",
+            details={"session_id": str(session_id)},
+            ip_address=sessions.client_ip(request),
+            user_agent=(request.headers.get("user-agent") or "")[:500],
+        )
+    )
+    await db.commit()
+    principal.forget(user.id)
+    return success({"revoked": n})
+
+
+@router.post("/sessions/revoke-others")
+async def revoke_other_sessions(
+    request: Request,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    from app.core import principal, sessions
+
+    n = await sessions.revoke(
+        db, user.id, keep=getattr(user, "_session_id", None), reason="revoked"
+    )
+    db.add(
+        ActivityLog(
+            tenant_id=user.tenant_id,
+            user_id=user.id,
+            action="session.revoked",
+            details={"count": n, "scope": "others"},
+            ip_address=sessions.client_ip(request),
+            user_agent=(request.headers.get("user-agent") or "")[:500],
+        )
+    )
+    await db.commit()
+    principal.forget(user.id)
+    return success({"revoked": n})
 
 
 @router.get("/retention")
@@ -425,6 +514,18 @@ async def get_retention(
     )
 
 
+RETENTION_MINIMUMS = {
+    "execution_retention_days": 7,
+    "message_retention_days": 30,
+    "audit_log_retention_days": 365,
+}
+RETENTION_LABELS = {
+    "execution_retention_days": "Run history",
+    "message_retention_days": "Messages",
+    "audit_log_retention_days": "Audit logs",
+}
+
+
 @router.put("/retention")
 async def update_retention(
     body: dict,
@@ -432,6 +533,16 @@ async def update_retention(
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
     """Update tenant data retention settings."""
+    # shortening retention deletes history for everyone in the workspace
+    if user.role != UserRole.ADMIN:
+        return error("Only workspace admins can change how long data is kept", 403)
+    for key, low in RETENTION_MINIMUMS.items():
+        v = body.get(key)
+        if v is not None and (not isinstance(v, int) or isinstance(v, bool) or v < low):
+            return error(
+                f"{RETENTION_LABELS[key]} must be a whole number of days, {low} or more",
+                400,
+            )
     result = await db.execute(select(Tenant).where(Tenant.id == user.tenant_id))
     tenant = result.scalar_one_or_none()
     if not tenant:
@@ -473,6 +584,8 @@ async def update_dlp_settings(
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
     """Update tenant DLP settings. Modes: detect, mask, block."""
+    if user.role != UserRole.ADMIN:
+        return error("Only tenant admins can change the data protection setting", 403)
     result = await db.execute(select(Tenant).where(Tenant.id == user.tenant_id))
     tenant = result.scalar_one_or_none()
     if not tenant:
@@ -496,6 +609,12 @@ async def update_dlp_settings(
 
 # Tenant-scoped Redis overrides for the sandboxed_job tool. Falls back to
 # host env vars when not set. Keys live at sandbox:settings:<tenant_id>.
+
+
+IMAGE_REF = re.compile(
+    r"^(?:[a-z0-9.-]+(?::\d+)?/)?[a-z0-9]+(?:[._-][a-z0-9]+)*(?:/[a-z0-9]+(?:[._-][a-z0-9]+)*)*"
+    r"(?::[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?(?:@sha256:[a-f0-9]{64})?$"
+)
 
 
 def _sandbox_key(tenant_id: str) -> str:
@@ -543,9 +662,10 @@ async def get_sandbox_settings(user: User = Depends(get_current_user)) -> JSONRe
         return v.strip().lower() in ("1", "true", "yes")
 
     images_override = overrides.get("allowed_images")
+    # an empty override is a real choice, nothing may run, not "use the defaults"
     images_list = (
         sorted({i.strip() for i in (images_override or "").split(",") if i.strip()})
-        if images_override
+        if images_override is not None
         else None
     )
 
@@ -611,6 +731,12 @@ async def set_sandbox_settings(
             fields_to_del.append("allowed_images")
         elif isinstance(v, list):
             cleaned = sorted({str(i).strip() for i in v if str(i).strip()})
+            bad = [i for i in cleaned if not IMAGE_REF.match(i)]
+            if bad:
+                return error(
+                    f"{bad[0]} is not a container image. Use name:tag, like python:3.12-slim",
+                    400,
+                )
             fields_to_set["allowed_images"] = ",".join(cleaned)
         else:
             return error("allowed_images must be a list of strings or null", 400)
@@ -679,16 +805,20 @@ async def update_tenant_settings(
     if "slack_webhook_url" in body:
         from app.core import crypto
 
+        from app.core.notifications import slack_url_problem
+
         url = (body.get("slack_webhook_url") or "").strip() or None
-        # Best-effort URL validation — Slack URLs are always
-        # https://hooks.slack.com/services/.../.../...
         if url is not None and "…" in url:
             url = "__keep__"  # the masked value came back unchanged
         if url is not None and url != "__keep__":
-            if not url.lower().startswith("https://"):
-                return error("slack_webhook_url must use https://", 400)
             if len(url) > 500:
-                return error("slack_webhook_url too long (max 500 chars)", 400)
+                return error(
+                    "The webhook link is too long, 500 characters at most", 400
+                )
+            # private and cluster addresses stay blocked unless an operator names the host
+            problem = await slack_url_problem(url)
+            if problem:
+                return error(problem, 400)
         if url is None:
             tenant.slack_webhook_url = None
         elif url != "__keep__":

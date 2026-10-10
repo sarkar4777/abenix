@@ -16,8 +16,9 @@ def _get_keys() -> tuple[str, str]:
         return _private_key, _public_key
 
     if settings.jwt_private_key and settings.jwt_public_key:
-        _private_key = settings.jwt_private_key
-        _public_key = settings.jwt_public_key
+        # a key kept on one line in .env has its line breaks written as \n
+        _private_key = settings.jwt_private_key.replace("\\n", "\n").strip()
+        _public_key = settings.jwt_public_key.replace("\\n", "\n").strip()
         return _private_key, _public_key
 
     if not settings.debug:
@@ -45,7 +46,12 @@ def _get_keys() -> tuple[str, str]:
     return _private_key, _public_key
 
 
-def create_access_token(user_id: uuid.UUID, tenant_id: uuid.UUID, role: str) -> str:
+def create_access_token(
+    user_id: uuid.UUID,
+    tenant_id: uuid.UUID,
+    role: str,
+    sid: uuid.UUID | str | None = None,
+) -> str:
     private_key, _ = _get_keys()
     now = datetime.now(timezone.utc)
     payload = {
@@ -56,10 +62,12 @@ def create_access_token(user_id: uuid.UUID, tenant_id: uuid.UUID, role: str) -> 
         "exp": now + timedelta(minutes=settings.access_token_expire_minutes),
         "iat": now,
     }
+    if sid:
+        payload["sid"] = str(sid)
     return jwt.encode(payload, private_key, algorithm=settings.jwt_algorithm)
 
 
-def create_refresh_token(user_id: uuid.UUID) -> str:
+def create_refresh_token(user_id: uuid.UUID, sid: uuid.UUID | str | None = None) -> str:
     private_key, _ = _get_keys()
     now = datetime.now(timezone.utc)
     payload = {
@@ -67,6 +75,24 @@ def create_refresh_token(user_id: uuid.UUID) -> str:
         "type": "refresh",
         "exp": now + timedelta(days=settings.refresh_token_expire_days),
         "iat": now,
+    }
+    if sid:
+        payload["sid"] = str(sid)
+    return jwt.encode(payload, private_key, algorithm=settings.jwt_algorithm)
+
+
+def create_purpose_token(
+    user_id: uuid.UUID, purpose: str, minutes: int, **claims: str
+) -> str:
+    """Short single-purpose token, a reset link or a second sign-in step."""
+    private_key, _ = _get_keys()
+    now = datetime.now(timezone.utc)
+    payload = {
+        "sub": str(user_id),
+        "type": purpose,
+        "exp": now + timedelta(minutes=minutes),
+        "iat": now,
+        **claims,
     }
     return jwt.encode(payload, private_key, algorithm=settings.jwt_algorithm)
 
@@ -83,5 +109,11 @@ def hash_password(password: str) -> str:
     return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
 
 
-def verify_password(plain: str, hashed: str) -> bool:
-    return bcrypt.checkpw(plain.encode(), hashed.encode())
+def verify_password(plain: str, hashed: str | None) -> bool:
+    # SSO-only accounts have no password to match
+    if not hashed or not plain:
+        return False
+    try:
+        return bcrypt.checkpw(plain.encode(), hashed.encode())
+    except ValueError:
+        return False

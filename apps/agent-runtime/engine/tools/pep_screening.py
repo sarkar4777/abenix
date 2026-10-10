@@ -337,6 +337,17 @@ class PEPScreeningTool(BaseTool):
             group="OpenSanctions",
             signup_url="https://www.opensanctions.org/api/",
         ),
+        ConfigField(
+            "CONGRESS_GOV_API_KEY",
+            label="API key",
+            kind="secret",
+            required=False,
+            group="congress.gov",
+            description="Adds the US Congress member roster to US screenings.",
+            signup_url="https://api.congress.gov/sign-up/",
+            # read through the _GOV_ROSTERS table, not a literal
+            dynamic=True,
+        ),
     )
     description = (
         "Screen a person against Politically Exposed Persons (PEP) lists — "

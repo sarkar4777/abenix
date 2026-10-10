@@ -169,7 +169,15 @@ async def update_retention_policy(
         return error("Admin only", 403)
     if table not in ARCHIVABLE_TABLES:
         return error(f"table must be one of {ARCHIVABLE_TABLES}", 400)
-    days = int((body or {}).get("retention_days") or 30)
+    raw = (body or {}).get("retention_days", 30)
+    try:
+        days = int(raw)
+        if isinstance(raw, bool) or float(raw) != days:
+            raise ValueError
+    except (TypeError, ValueError):
+        return error("Retention must be a whole number of days.", 400)
+    if not 1 <= days <= 3650:
+        return error("Retention must be between 1 and 3650 days.", 400)
     enabled = bool((body or {}).get("enabled", True))
     description = ((body or {}).get("description") or "").strip() or None
     existing = (

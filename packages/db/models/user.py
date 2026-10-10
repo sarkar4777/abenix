@@ -2,7 +2,16 @@ import enum
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, DateTime, Enum, Integer, Numeric, String
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    DateTime,
+    Enum,
+    Integer,
+    Numeric,
+    String,
+    Text,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -44,6 +53,14 @@ class User(UUIDMixin, TenantMixin, TimestampMixin, Base):
     notification_settings: Mapped[dict | None] = mapped_column(
         JSONB, nullable=True, default=dict
     )
+    # Two-step sign-in. The secret is encrypted with the tenant key, recovery
+    # codes are stored as sha256 digests and each one works once.
+    totp_secret: Mapped[str | None] = mapped_column(Text, nullable=True)
+    totp_enabled_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    totp_last_step: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    totp_recovery_codes: Mapped[list | None] = mapped_column(JSONB, nullable=True)
 
     # Token & cost quotas (null = unlimited)
     token_monthly_allowance: Mapped[int | None] = mapped_column(

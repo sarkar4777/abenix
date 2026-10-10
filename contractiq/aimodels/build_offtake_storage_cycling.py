@@ -79,7 +79,8 @@ def train() -> None:
         },
         "output_schema": {"type": "object", "properties": {"optimal_cycle_gwh": {"type": "number"}}},
         "training_metrics": {"mae_gwh": mae, "rmse_gwh": rmse,
-                              "n_train": int(split), "n_test": int(len(df) - split)},
+                              "n_train": int(split), "n_test": int(len(df) - split),
+                              "feature_means": {c: float(df[c].values[:split].mean()) for c in feature_cols}},
         "tags": ["contractiq", "forecaster", "storage", "cycling"],
         "feature_columns": feature_cols,
         "training_set_description": (

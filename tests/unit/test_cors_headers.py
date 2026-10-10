@@ -24,3 +24,8 @@ def test_web_request_headers_are_allowed() -> None:
             sent.add(m.group(1).lower())
     missing = sent - _allowed()
     assert not missing, f"add to allow_headers in main.py: {sorted(missing)}"
+
+
+def test_delegation_subject_header_is_allowed() -> None:
+    # browser SDK callers send it when acting for an end user
+    assert "x-abenix-subject" in _allowed()

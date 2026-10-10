@@ -166,24 +166,45 @@ Tier policies with `require_output_schema` refuse to activate an agent that has 
 
 ---
 
-## Provenance
+<a id="provenance"></a>
+
+## Run provenance
+
+Every agent run records what produced it, so you can tell later which prompt, model and tools gave an answer.
+
+### What is recorded
 
 A database trigger, `executions_provenance`, runs `BEFORE INSERT` on `executions`, so no insert path can skip it. For a row with an `agent_id` and no `provenance` yet it:
 
 1. Hashes the agent's `system_prompt` and `model_config` together (SHA-256) into `config_hash`.
 2. Stores that pair in `execution_config_snapshots`, keyed by the hash, once.
-3. Sets `prompt_hash` (SHA-256 of the system prompt), `agent_revision` (the highest revision number) and the starting `risk_tier` from the agent's `model_config.risk_tier`, unless the insert gave one.
+3. Sets `prompt_hash` (SHA-256 of the system prompt), `agent_revision` (the highest `agent_revisions.revision_number` for the agent) and the starting `risk_tier` from `model_config.risk_tier`, unless the insert gave one.
 4. Writes `provenance` as `{config_hash, agent_version, model, temperature, tools, risk_tier}`.
 
-The run's final tier overwrites `risk_tier` at the end. `GET /api/governance/runs/{execution_id}/provenance` returns these fields, the snapshot, and `changed_since`, the keys that differ from the agent now. `POST /api/governance/runs/{execution_id}/replay` reruns an agent execution on its recorded input, `pinned` to the snapshot or on the `current` agent. Both need `runs.replay`. Evaluation suites use `config_hash` for the publish gate, see [18-evaluation-suites](18-evaluation-suites.md#publish-gate).
+The run's final tier and `risk_reasons` overwrite the starting tier at the end. A row without an `agent_id` gets no provenance.
+
+### Where it shows
+
+Open a run at `/executions/<id>`. The collapsible **What this run used** panel ([`ProvenancePanel.tsx`](../../apps/web/src/components/governance/ProvenancePanel.tsx)) shows the risk tier, model, agent revision, prompt hash, config hash, the reasons the tier was raised, the tools available, and "agent changed since" with the settings that differ from the agent now. Its **Replay exactly as it ran** and **Replay on the agent as it is now** buttons call the replay route below and show whether the answer and the tool calls came out the same, with a link to the new run. A pipeline run points to the Replay button on each step instead. The panel is hidden for users without `runs.replay`. Every role holds it by default. The Help topic is "What a run used, and replay".
+
+### API
+
+| Route | What it does |
+|---|---|
+| `GET /api/governance/runs/{execution_id}/provenance` | Returns `agent_revision`, `prompt_hash`, `risk_tier`, `risk_reasons`, `provenance`, the `snapshot` (`system_prompt`, `model_config`), `changed_since` and `agent_deleted` |
+| `POST /api/governance/runs/{execution_id}/replay` | Reruns an agent execution on its recorded input. Body `{mode, model?}`, mode `pinned` (the snapshot) or `current` (the agent as it is now) |
+
+Both need `runs.replay` and only see runs in the caller's tenant. A replay runs inside the API process with `invoke()`, checks the daily spend caps first, and writes a new row with `trigger_kind: replay` and `parent_execution_id` set to the original. A pinned replay copies the original's provenance and adds `replay_of` and `replay_mode`. The response compares the two runs with `same_output` and `same_tools`. A run from before provenance has no snapshot, so a pinned replay answers 409 `NO_SNAPSHOT`. A deleted agent answers 409. Pipeline runs replay from a step instead, through `POST /api/pipelines/{agent_id}/replay`.
+
+Evaluation suites use `config_hash` for the publish gate, see [18-evaluation-suites](18-evaluation-suites.md#publish-gate).
 
 ---
 
 ## LLM provider abstraction
 
-The runtime supports Anthropic, OpenAI, Azure OpenAI and Google out of the box, plus a Claude subscription provider. Every implementation lives in one file, [`apps/agent-runtime/engine/llm_router.py`](../../apps/agent-runtime/engine/llm_router.py).
+The runtime ships providers for Anthropic, OpenAI, Azure OpenAI and Google, plus a Claude subscription provider. Every implementation lives in one file, [`apps/agent-runtime/engine/llm_router.py`](../../apps/agent-runtime/engine/llm_router.py).
 
-Cost is split by model prefix for the per-provider columns: `claude*` is Anthropic, `gpt*`, `o1*` and `chatgpt*` are OpenAI, `gemini*` is Google, anything else is other.
+The executor also splits cost by model prefix on `ExecutionResult`: `claude*` is Anthropic, `gpt*`, `o1*` and `chatgpt*` are OpenAI, `gemini*` is Google, anything else is other. The matching per-provider columns on `executions` are not filled and stay 0.
 
 To add a new provider:
 1. Subclass `LLMProvider` in `llm_router.py`. There is no separate providers
@@ -253,7 +274,7 @@ A gate does not suspend the run. The `human_approval` or `approval_gate` tool ca
 
 ## Cost roll-up
 
-Each LLM response carries its cost. The executor adds them up, plus the final-answer turn when there is one, and splits them by provider. On the terminal write the consumer stores `cost` (rounded to 6 places, 0 written as 0 rather than left NULL), the token counts, `model_used`, `duration_ms` and `trace_id`, and debits the API key's and user's usage counters.
+Each LLM response carries its cost. The executor adds them up, plus the final-answer turn when there is one. On the terminal write the consumer stores `cost` (rounded to 6 places, 0 written as 0 rather than left NULL), the token counts, `model_used`, `duration_ms` and `trace_id`, and debits the API key's and user's usage counters.
 
 These are the numbers the Analytics page rolls up.
 
@@ -305,7 +326,7 @@ A pipeline row's `cost`, `input_tokens` and `output_tokens` are the sum over eve
 | Unhandled exception | The row is failed with a code from `classify_exception` and a dead letter is written | `failure_code` such as `LLM_RATE_LIMIT`, `INFRA_CRASH`, `UNKNOWN_ERROR` |
 | Pod dies mid-run | On a pool, JetStream redelivers and another pod reruns the agent from the start once the lease (`CONSUMER_LEASE_SECONDS`, 25) expires. Tool side effects can repeat. After `CONSUMER_MAX_ATTEMPTS` (3) pickups the run is failed. An inline run stays `running` until the API's sweeper fails `running` rows older than `STALE_EXECUTION_MAX_MINUTES` (default 10), skipping runs on a HITL gate or with a live lease | A second attempt in the logs, or `failure_code=STALE_SWEEP` |
 
-Every terminal outcome increments `abenix_executions_failed_total{failure_code=…}` or the completed counter. The full list of codes is in [09-state-machines](09-state-machines.md#failure-codes).
+Every terminal outcome increments `abenix_executions_completed_total{status}`, and a failure also increments `abenix_executions_failed_total{failure_code=…}`. The full list of codes is in [09-state-machines](09-state-machines.md#failure-codes).
 
 ---
 
@@ -330,6 +351,7 @@ Every terminal outcome increments `abenix_executions_failed_total{failure_code=�
 | **Per-call wrapper** | [`apps/agent-runtime/engine/tools/base.py`](../../apps/agent-runtime/engine/tools/base.py) — `BaseTool.__init_subclass__`, `_govern` |
 | **Sandbox limits** | [`apps/agent-runtime/engine/sandbox.py`](../../apps/agent-runtime/engine/sandbox.py) |
 | **Provenance trigger** | [`packages/db/alembic/versions/c1d2e3f4a5b6_governance_core.py`](../../packages/db/alembic/versions/c1d2e3f4a5b6_governance_core.py) |
-| **Provenance and replay endpoints** | [`apps/api/app/routers/governance.py`](../../apps/api/app/routers/governance.py) |
+| **Provenance and replay endpoints** | [`apps/api/app/routers/governance.py`](../../apps/api/app/routers/governance.py) — `run_provenance`, `replay_run` |
+| **Provenance panel** | [`apps/web/src/components/governance/ProvenancePanel.tsx`](../../apps/web/src/components/governance/ProvenancePanel.tsx) |
 | **Failure codes** | [`apps/api/app/core/failure_codes.py`](../../apps/api/app/core/failure_codes.py) |
 | **Stale sweeper** | [`apps/api/app/core/scheduler.py`](../../apps/api/app/core/scheduler.py) — `sweep_stale_executions` |

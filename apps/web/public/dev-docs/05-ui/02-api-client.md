@@ -115,7 +115,18 @@ Set by the API (only `error_code` is listed, read `details` in the route):
 | `AGENT_DELETED` | 410 when executing an archived agent |
 | `INVALID_ASSERTION` | evals |
 | `NO_SNAPSHOT` | run replay in `routers/governance.py` |
-| `STALE_DRAFT`, `NOT_EDITABLE`, `VALIDATION_FAILED`, `AWAITING_APPROVAL`, `NOT_APPROVED`, `REJECTED`, `PUBLISH_CONFLICT`, `VALID_PERIOD_CONFLICT`, `BAD_RULES`, `BAD_FLOW`, `ENGINE_ERROR` | decisions |
+| `STALE_DRAFT`, `NOT_EDITABLE`, `VALIDATION_FAILED`, `AWAITING_APPROVAL`, `NOT_APPROVED`, `REJECTED`, `PUBLISH_CONFLICT`, `VALID_PERIOD_CONFLICT`, `BAD_RULES`, `BAD_FLOW`, `ENGINE_ERROR`, `ARCHIVED` | decisions |
+| `MODERATION_BLOCKED`, `MODERATION_HELD` | executing an agent when the moderation policy blocks or holds the input |
+| `NEEDS_MODERATION_REVIEW`, `REASON_REQUIRED`, `INVALID_RETENTION` | moderation reviews and policy |
+| `MARKETPLACE_OFF`, `MONETIZATION_OFF` | marketplace calls while that platform switch is off |
+| `AUTHOR_CANNOT_APPROVE`, `AUTHOR_CANNOT_GRANT`, `BAD_EDITED_ARGUMENTS` | approvals |
+| `BUDGET_EXCEEDED`, `DRAFT_NOT_RELEASED` | triggers |
+| `KILL_SWITCH` | Source Watch |
+| `MODEL_NOT_READY`, `MODEL_LOAD_FAILED`, `PREDICTION_FAILED`, `VERSION_EXISTS`, `INVALID_VERSION`, `UNSUPPORTED_FRAMEWORK`, `INVALID_INPUT` | ML models |
+| `PORTFOLIO_*`, `INVALID_PORTFOLIO_SCHEMA` | portfolio schemas |
+| `REVISION_WRITE_FAILED` | saving an agent revision |
+
+This list covers the codes in `apps/api/app` at the time of writing. `grep -rn 'error_code=' apps/api/app` finds them all.
 
 A missing capability is a plain 403 with the message "This needs the X capability. An admin can grant it under Admin, Permissions." and no `error_code`.
 
@@ -155,6 +166,18 @@ Use `useApi` for reads and `apiFetch` for writes.
 | `run-errors.ts` | `explainRunError()`, which turns a raw run error into a title and hint |
 | `format-stats.ts` | count, rate, percent, ms and USD formatters that dim honest zeros |
 | `curl-parser.ts` | `parseCurl()` for the cURL import |
+| `auth-redirect.ts` | `signInUrl()`, `safeReturnPath()` and `readSignInParams()` for the sign-in redirect (below) |
+| `inbox.ts` | Needs you tabs, `INBOX_COUNTS_KEY`, the 60s poll and `badgeText()` for the sidebar count |
+| `autonomy.ts` | Earned Autonomy types, `LEVELS` and level labels |
+| `improvements.ts`, `improvement-proposals.ts` | types and calls for governed self-improvement, lessons, groups and proposals |
+| `moderation-review.ts` | span, mask and SLA helpers for the held content inbox |
+| `monitor-format.ts` | plain labels for failure codes, metrics, roles and setting keys |
+| `run-origin.ts` | what started a run, with labels, filters and links |
+| `readable-input.ts` | `readableInput()`, which turns a JSON input envelope into the text a person typed |
+| `patchDiff.ts` | turns a Pipeline Surgeon JSON Patch into readable lines |
+| `cluster.ts` | types and verdict helpers for the admin cluster view |
+| `doc-links.ts` | `resolveDocHref()`, where a link inside a developer doc goes when read in the app |
+| `nav-walk.ts` | small shared helpers for sidebar pages, such as moderation labels and `apiErrorText()` |
 | `schemas.ts` | zod schemas for agent, pipeline node, KB, login and register forms |
 | `tool-docs.ts`, `blueprints.ts` | static tool docs and blueprint data |
 | `use-event-source.ts` | an `EventSource` hook with backoff. Nothing imports it today |

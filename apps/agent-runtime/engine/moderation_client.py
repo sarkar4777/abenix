@@ -350,9 +350,6 @@ async def evaluate(
             decision.outcome = "flagged"
         elif action == ACTION_REDACT:
             decision.outcome = "redacted"
-            decision.redacted_content = _redact(
-                content, custom_patterns, redaction_mask
-            )
         elif action == ACTION_HOLD:
             decision.outcome = "held"
         elif action == ACTION_BLOCK:
@@ -373,12 +370,34 @@ async def evaluate(
                     thresholds=thresholds,
                     default_threshold=default_threshold,
                     model=model,
-                    localize=action == ACTION_HOLD,
+                    localize=action in (ACTION_HOLD, ACTION_REDACT),
                 )
+            )
+        if action == ACTION_REDACT:
+            # provider categories are masked like pattern matches, by span
+            decision.redacted_content = mask_spans(
+                content,
+                list(decision.spans) + pattern_spans(content, custom_patterns),
+                redaction_mask,
             )
 
     decision.latency_ms = int((time.monotonic() - start) * 1000)
     return decision
+
+
+def event_provider_response(decision: ModerationDecision) -> dict[str, Any]:
+    """What an event row keeps, plus where a redact masked the text."""
+    out = dict(decision.provider_response or {})
+    if decision.outcome == "redacted" and decision.spans:
+        out["_masked_spans"] = [
+            {
+                "start": int(s["start"]),
+                "end": int(s["end"]),
+                "category": str(s.get("category") or ""),
+            }
+            for s in decision.spans
+        ]
+    return out
 
 
 def content_hash(content: str) -> str:

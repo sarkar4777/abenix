@@ -7,7 +7,10 @@ image:
 
 service:
   type: ClusterIP
-  port: 80
+  # the image runs Next.js on 3000, the service matches so forwards and ingress agree
+  port: 3000
+
+containerPort: 3000
 
 health:
   path: /

@@ -91,6 +91,7 @@ async def resolve_user_collections(
         .where(
             UserCollectionGrant.user_id == user_id,
             UserCollectionGrant.permission.in_(allowed_perms),
+            UserCollectionGrant.live(),
         )
         .scalar_subquery()
     )
@@ -130,6 +131,7 @@ async def assert_collection_access(
             UserCollectionGrant.user_id == user_id,
             UserCollectionGrant.collection_id == collection_id,
             UserCollectionGrant.permission.in_(allowed_perms),
+            UserCollectionGrant.live(),
         )
     )
     return grant.first() is not None

@@ -126,8 +126,8 @@ export default function DataFabricPage() {
   useEffect(() => { load(); }, []);
 
   return (
-    <div className="min-h-screen text-slate-200 p-8 max-w-[1400px] mx-auto">
-      <header className="mb-6 flex items-baseline justify-between">
+    <div className="min-h-screen text-slate-200 p-4 sm:p-8 max-w-[1400px] mx-auto">
+      <header className="mb-6 flex flex-wrap items-baseline justify-between gap-3">
         <div>
           <div className="flex items-center gap-3 mb-2">
             <Database className="w-7 h-7 text-cyan-400" />
@@ -151,7 +151,7 @@ export default function DataFabricPage() {
         </div>
       )}
 
-      <div className="grid grid-cols-3 gap-4 mb-6">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
         <Tile icon={Wrench} label="Market-data tools" value={loading ? '...' : String(data?.summary.tools_total ?? data?.sources.length ?? 0)} caption={`${data?.summary.tools_live ?? 0} live · ${data?.summary.tools_simulated ?? 0} simulated · ${data?.summary.tools_unavailable ?? 0} unavailable`} />
         <Tile icon={Brain} label="ML models" value={loading ? '...' : String(data?.summary.ml_models_registered ?? 0)} caption="registered for this tenant" />
         <Tile icon={Boxes} label="Recent executions" value={loading ? '...' : String(data?.summary.recent_executions_total ?? 0)} caption="last 200 across all agents" />

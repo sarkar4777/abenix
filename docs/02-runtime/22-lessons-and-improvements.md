@@ -2,6 +2,18 @@
 
 > How agents learn from their own mistakes without changing themselves. Every signal becomes a lesson, similar lessons are grouped, and each group suggests test cases. Proposing, proving, approving and watching a fix is the second half of the loop, in [23-governed-self-improvement](23-governed-self-improvement.md). Tables are in [04-data-model/09-self-improvement](../04-data-model/09-self-improvement.md).
 
+## In short
+
+How people give feedback:
+
+- **Thumbs up or down** under an agent answer in chat, on a run's page (`/executions/{id}`) and on an autonomy action card. A thumbs down opens a "what should it have said" box. Text typed there is a correction.
+- **This was wrong because** on a run's page: a note, plus what the agent should have done if known.
+- **From an app** through the SDK: `forge.feedback.give(...)` and `forge.lessons.report(...)` in Python, the same calls in the JS SDK.
+
+Many lessons need no person at all: failed runs, failed pipeline steps, drift alerts, failing eval cases, and autonomy rejects, edits, harm flags and missed predictions are captured on their own.
+
+How lessons are used: they never change an agent directly. Similar lessons form a group, each group suggests test cases, and a group can be turned into a proposed fix that must be proven and approved ([23](23-governed-self-improvement.md)). Lessons show on `/improvements` (sidebar **Improvements**, needs `improvements.view`) and on each agent's Improvements tab at `/agents/{id}/improvements`.
+
 ---
 
 ## Where it lives

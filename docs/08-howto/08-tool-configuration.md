@@ -111,7 +111,7 @@ Before this mechanism a missing key produced four different behaviours across th
 - **Required and missing.** The tool result is an error reading `KEY is not configured. An admin can add it under Admin -> Tool Configuration. Get a key at <url>`. The model repeats it. The Flight Recorder shows it under the tool call.
 - **Optional and missing.** The tool runs on what it has and appends a tool note, for example `[tool notes] UK PSC register not queried: COMPANIES_HOUSE_API_KEY is not configured`. In a pipeline the note is also written into the node's output as `_warnings`, because the next node only sees the output.
 
-A key the provider rejects is treated as the first case, with the provider's status code, never as an empty result.
+A tool that gets a 401 or 403 from its provider should report it as an error with the status code, never as an empty result. `news_feed` is an example.
 
 ---
 

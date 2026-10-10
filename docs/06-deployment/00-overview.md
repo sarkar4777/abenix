@@ -49,21 +49,21 @@ bash scripts/deploy.sh local
 | Command | What it does |
 |---|---|
 | `local` | Minikube with the platform, standalone apps, seeds and port forwards |
-| `local-runtime` | Same, layering `values-local-runtime.yaml` for the full runtime pool set |
+| `local-runtime` | Core platform only, with `values-local-runtime.yaml` layered on: pools `default`, `chat` and `heavy-reasoning`, KEDA off. Skips KEDA, mosquitto, timescaledb, the edge gateway, the standalone apps and the observability stack |
 | `cloud` | Builds and pushes to `REGISTRY` (default `ghcr.io/abenix`), installs with `values-production.yaml` on the current context |
 | `build` | Images only |
 | `reload <svc>` | Rebuilds one image and restarts it. Core: `api`, `web`, `worker`, `agent-runtime`, `edge-runtime`. Apps: `<app>-api`, `<app>-web`, `claimsiq` |
 | `forwards` | Re-establishes every port forward and reports which answer |
-| `observability` | Installs Prometheus, Grafana and Tempo only |
+| `observability` | Installs Prometheus and Grafana only. Tempo is not part of the local stack |
 | `status` / `destroy` | Health check, tear down |
 
 What `local` does:
 
-1. Starts minikube if needed (`--driver=docker --cpus=4 --memory=8192 --disk-size=30g`) and enables the `ingress`, `metrics-server` and `storage-provisioner` addons. `FRESH=true` recreates it from scratch.
-2. Points Docker at minikube's daemon and builds images there, tagged `localhost:5000/abenix/<svc>`. There is no registry container. The local values pull with `pullPolicy: Never`. The pgvector Postgres image is built the same way.
+1. Starts minikube if needed, sized for the apps you picked (8 GB and 4 CPUs for the core platform, plus 0.75 GB per app, 6 CPUs from three apps), after checking Docker has the room. See [09-local-sizing](09-local-sizing.md). It enables the `ingress`, `metrics-server` and `storage-provisioner` addons. `FRESH=true` recreates it from scratch.
+2. Points Docker at minikube's daemon and builds `api`, `web`, `worker`, `agent-runtime`, `edge-runtime`, the code runner images and the selected apps there, tagged `localhost:5000/abenix/<svc>`. The web image is built on the host daemon and loaded into minikube (`MINIKUBE_HOST_BUILD`). There is no registry container. The local values pull with `pullPolicy: Never`. The pgvector Postgres image is built the same way.
 3. Installs KEDA into the `keda` namespace when the local values ask for it.
 4. Installs mosquitto and timescaledb as their own releases, then the `abenix` chart with `values-local.yaml`.
-5. Seeds, applies the standalone apps you picked, installs the observability stack and starts port forwards.
+5. Runs migrations and seeds, installs the edge gateway and LiveKit, applies the standalone apps you picked and mints their API keys, starts port forwards, then installs Prometheus and Grafana. `OBSERVABILITY=false` skips the last step.
 
 `WEB_PORT` and `API_PORT` move the forwarded ports. `APPS` picks the standalone
 apps without the prompt.
@@ -108,7 +108,7 @@ missing from ACR at that tag and its pods go to `ImagePullBackOff`. Recovery is
 
 ### What a deploy runs
 
-1. **SDK drift gate.** `scripts/sync-sdks.sh --check` must pass, or the script stops. `SKIP_SDK_SYNC_CHECK=1` bypasses it.
+1. **Pre-flight.** `scripts/sync-sdks.sh --check` and `scripts/verify-alembic-graph.sh` must pass, or the script stops. `SKIP_SDK_SYNC_CHECK=1` and `SKIP_ALEMBIC_GRAPH_CHECK=1` bypass them. Before Helm runs, an `AZURE_OPENAI_API_BASE` that ends in `/openai` or `/openai/deployments` is trimmed.
 2. **Images.** `api`, `web`, `worker`, `agent-runtime`, `code-runner-python`, `code-runner-node`, then each standalone app's images, built one after another with `docker buildx --platform=linux/amd64 --push`, tagged with the short SHA and `latest`. The cognify worker reuses the `worker` image. Edge runtime images are not rebuilt, they stay on the version pinned in their charts.
 3. **KEDA, mosquitto, timescaledb.**
 4. **Helm.** Roughly:
@@ -122,13 +122,13 @@ missing from ACR at that tag and its pods go to `ImagePullBackOff`. Recovery is
      <secrets from .env> --timeout 15m --wait=false
    ```
 
-5. **Edge runtime** release, then a wait of up to 600 seconds for pods.
+5. **Edge runtime** release `abenix-edge` on the tag pinned in its chart (or `EDGE_IMAGE_TAG`), then a wait of up to 600 seconds for pods.
 6. **JWT keys.** Generates an RSA pair into `abenix-secrets` if none is there.
 7. **Migrations.** The API pod's `db-migrate` init container already runs `python -m bootstrap`, `alembic upgrade heads` and `python -m bootstrap verify` from `/app/packages/db` on every rollout. The script also creates the database if missing and runs the same steps in a running API pod.
-8. **Seeds**, then checks that the subscription token works, that the runtime can read a model file the API stored, and which tool credentials are set.
+8. **Seeds**, once `scripts/lint-agent-seeds.py` passes, then checks that the subscription token works, that the runtime can read a model file the API stored, and which tool credentials are set.
 9. **LiveKit and the standalone apps**, each with `kubectl apply`.
 10. **Standalone API keys** reconciled by `scripts/seed-standalone-keys.sh`.
-11. **Observability and ingress.**
+11. **Observability and ingress.** Prometheus, Grafana and Tempo, plus the `abenix-cluster-reader` role. `SKIP_OBSERVABILITY=true` skips them.
 12. **Reconcile.** The script exits non-zero if any pod is still unhealthy after a settle window of `RECONCILE_WAIT_SECS` (default 300).
 
 ---
@@ -140,17 +140,18 @@ Both scripts run these from an API pod:
 ```
 packages/db/seeds/seed_agents.py
 packages/db/seeds/seed_users.py
-packages/db/seeds/seed_llm_pricing.py
 packages/db/seeds/seed_portfolio_schemas.py
-packages/db/seeds/seed_kb.py
-packages/db/seeds/seed_kb_agent_grants.py
-packages/db/seeds/seed_atlas.py
 packages/db/seeds/seed_ml_models.py
 packages/db/seeds/seed_code_assets.py
+packages/db/seeds/seed_kb.py
+packages/db/seeds/seed_atlas.py
+packages/db/seeds/seed_kb_agent_grants.py
+packages/db/seeds/seed_llm_pricing.py
 packages/db/seeds/seed_backfill_agent_shares.py
 ```
 
-Each is idempotent. `seed_portfolio_schemas.py` reads its template from
+They run in this order. `seed_kb.py` comes after `seed_agents.py` because it
+grants collections to agents by slug. Each is idempotent. `seed_portfolio_schemas.py` reads its template from
 `apps/api/app/core/portfolio_templates/energy_contracts.json` and exits non-zero
 when that file is missing. `seed_kb.py` chunks and embeds the sample documents itself,
 using the built-in local embedder when no OpenAI or Azure key is configured.
@@ -163,9 +164,14 @@ using the built-in local embedder when no OpenAI or Azure key is configured.
 bash scripts/uat.sh
 ```
 
-Runs the sanity (61 tests), deep (31) and industrial (about 18) browser specs in
-that order and stops at the first failure. It expects forwards on 3000 and 8000.
-No deploy script runs it for you. `deploy-azure.sh test` and `all` run the
+Brings up the in-cluster MCP fixtures `uat-mcp` and `custom-mcp`, checks both
+are on `MCP_ALLOWED_HOSTS` and seeds a low-privilege viewer user. Then it runs
+13 Playwright specs in order and stops at the first failure: sanity (61 tests),
+deep (31), industrial (about 18), HITL, SDK playground, apps, Wingman,
+multi-user RBAC, ClaimsIQ, Grafana panels, PharmaVigil, help surfaces and
+platform surfaces. It expects the web on 3000 and the API on 8000 (`BASE` and
+`API` move them). `--seed-only` prepares the cluster and stops before the
+specs. No deploy script runs it for you. `deploy-azure.sh test` and `all` run the
 Playwright suites instead.
 
 ---
@@ -187,16 +193,20 @@ Full table of ports in [08-howto/00-local-setup](../08-howto/00-local-setup.md).
 
 ### AKS
 
-The cluster web image is built with `NEXT_PUBLIC_API_URL` unset, so the browser
-calls `http://localhost:8000`. Use the port forward script:
+The cluster web image is built with `NEXT_PUBLIC_API_URL` unset unless `.env`
+sets it, so the browser calls `http://localhost:8000`. Use the port forward
+script:
 
 ```bash
 bash scripts/portforward-azure.sh            # start, also: stop, status, restart, urls, open, pods
 ```
 
-It forwards web 3000, API 8000, the standalone apps on 3001 to 3006 and 8001 to
-8006, Grafana 3010, Prometheus 9090 and Tempo 3200. Only use this script for
-forwards, so `stop` can clean them all up.
+It forwards web 3000 and API 8000, ContractIQ, Mideast Tourism, Industrial IoT
+and ResolveAI on 3001 to 3004 and 8001 to 8004, ClaimsIQ on 3005, Wingman on
+3006 and 8006, Grafana 3010, Prometheus 9090 and Tempo 3200. PharmaVigil is not
+forwarded, reach it through its ingress host. `start` also opens the browser,
+`--no-browser` skips that. Only use this script for forwards, so `stop` can
+clean them all up.
 
 The deploy also applies an `abenix-ingress` with hosts under the load balancer
 IP through `nip.io`, so nothing has to go in DNS or `/etc/hosts`:
@@ -277,8 +287,9 @@ Prior examples are in [`packages/db/alembic/versions/`](../../packages/db/alembi
 ## Edge runtimes
 
 Gateways that run agents on site register with the API every 60 seconds and
-receive signed bundles over MQTT or HTTP. They are installed separately, see
-[05-edge-runtime](05-edge-runtime.md).
+receive signed bundles over MQTT or HTTP. Both deploy scripts install one
+in-cluster gateway, `edge-cluster-default`. Gateways on site are installed
+separately, see [05-edge-runtime](05-edge-runtime.md).
 
 ---
 
@@ -287,5 +298,7 @@ receive signed bundles over MQTT or HTTP. They are installed separately, see
 - [01-images](01-images.md) — which Dockerfiles are built and why there are two sets
 - [02-helm](02-helm.md) — chart values + templates
 - [03-keda](03-keda.md) — autoscaling per runtime pool
+- [08-dev-catchers](08-dev-catchers.md) — Mailpit, a webhook catcher and mock OIDC on local clusters
+- [09-local-sizing](09-local-sizing.md) — how much memory a local cluster needs for the apps you pick
 - [04-observability](04-observability.md) — Prometheus + Grafana + Tempo setup
 - [08-howto/00-local-setup](../08-howto/00-local-setup.md) — local dev (the simplest path)

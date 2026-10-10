@@ -1,121 +1,130 @@
 # The other verticals — Mideast Tourism, ResolveAI, Industrial-IoT, ClaimsIQ
 
-> Brief overviews. Each follows the [thin-app pattern](00-pattern.md) and the structural notes for Wingman + E&C-Copilot apply.
+> Brief overviews. Each follows the [thin-app pattern](00-pattern.md), and the structural notes for Wingman and E&C-Copilot apply. PharmaVigil has its own page, [05-pharmavigil](05-pharmavigil.md).
+
+| App | Directory | Stack | Local ports | In-cluster services |
+|---|---|---|---|---|
+| Mideast Tourism | `mideasttourism/` | Next.js + FastAPI | 3002 web, 8002 api | `mideasttourism-web:3002`, `mideasttourism-api:8002` |
+| Industrial-IoT | `industrial-iot/` | Next.js + FastAPI | 3003 web, 8003 api | `industrial-iot-web:3003`, `industrial-iot-api:8003` |
+| ResolveAI | `resolveai/` | Next.js + FastAPI | 3004 web, 8004 api | `resolveai-web:3004`, `resolveai-api:8004` |
+| ClaimsIQ | `claimsiq/` | Spring Boot + Vaadin, one process | 3005 | `claimsiq:3005` |
+
+Each app has a `start.sh` for local dev and a `k8s/<app>.yaml` for the cluster. The web services are NodePort (30302, 30303, 30304, 30305) and the APIs are ClusterIP.
 
 ---
 
 ## Mideast Tourism
 
-**Domain**: tourism analytics + planning for Gulf Tourism Strategy 2030 (hotel occupancy, visa flows, event impact modelling, regional recommendations).
+**Domain**: tourism analytics and planning for a regional ministry of tourism, built around a Gulf "Tourism Strategy 2030" (visitor arrivals, hotel occupancy, revenue by sector, satisfaction, event impact).
 
-**Key features**:
-- Visitor-flow heatmaps (Dubai, Abu Dhabi, Nizwa, Lusail, Heritage Quarter)
-- Event-impact simulator
-- Per-region report generator
-- Hotel + airline capacity model
+**Pages** (`mideasttourism/web/src/app/`): `/dashboard`, `/upload` (CSV and text datasets), `/regional`, `/analytics`, `/simulations`, `/chat`, `/reports`.
+
+**Data**: [`mideasttourism/test-data/`](../../mideasttourism/test-data/) has 2024 arrivals, occupancy, revenue and satisfaction CSVs plus two strategy documents. Regions in the sample data: Dubai, Abu Dhabi, Sharjah, Northern Emirates, Doha, Lusail, Muscat, Nizwa, Salalah.
 
 **Agents** (`packages/db/seeds/agents/st_*.yaml`):
-- `st-analytics` — main analytics agent (multi-tool)
-- `st-data-extractor` — pull from open datasets
-- `st-report-generator` — PDF report assembly
+- `st-analytics` — main analytics agent (multi-tool), behind `/analytics` and `/regional`
+- `st-data-extractor` — parses uploaded datasets
+- `st-report-generator` — report assembly
 - `st-simulator` — what-if event modelling
-- `st-chat` — concierge-style chat for the home page
+- `st-chat` — chat over the data and the strategy documents
 
-**Theme**: green + white. App at `mideasttourism/`, ports 3002 (web) / 8002 (api).
+**KB**: `mideasttourism-knowledge` ([`packages/db/seeds/kb/mideasttourism-knowledge.yaml`](../../packages/db/seeds/kb/mideasttourism-knowledge.yaml)) holds the strategy documents `st-chat` searches.
+
+**Theme**: green + white. Key: `MIDEASTTOURISM_ABENIX_API_KEY`. Subject type: `mideasttourism`.
 
 ---
 
 ## ResolveAI
 
-**Domain**: customer-support automation. Triage tickets, route to right team, suggest replies, escalate to humans via approvals.
+**Domain**: customer-service resolution. Triage tickets, cite the policy used, plan the resolution, gate risky actions on a human, predict CSAT, and mine tomorrow's problems from today's cases.
 
-**Key features**:
-- Inbox of incoming tickets
-- Per-ticket classification (urgency, category, customer-tier)
-- Suggested reply drafts (using customer's history + knowledge base)
-- Auto-resolution for low-risk categories
-- Human handoff via approval gates
+**Pages** (`resolveai/web/src/app/`): `/` dashboard, `/cases` and `/cases/{id}`, `/live-console`, `/qa`, `/sla`, `/trends`, `/admin`, `/help`.
 
-**Agents** (`packages/db/seeds/agents/resolveai_*.yaml`):
-- `resolveai-classifier` — ticket triage
-- `resolveai-reply-drafter` — KB-grounded reply
-- `resolveai-policy-checker` — pre-send compliance gate
-- `resolveai-escalation-router` — choose human
+**Pipelines** (what the API calls):
+- `resolveai-inbound-resolution` — triage → policy research → customer context → resolution plan → `human_approval` gate when the plan needs it → `moderation_vet` on the reply. Run on `POST /api/resolveai/cases`.
+- `resolveai-post-qa` — QA review of a closed case
+- `resolveai-sla-sweep` — sweep open cases for SLA breaches
+- `resolveai-trend-mining` — cluster recent cases into trends
 
-**Compliance**: approval gates on refunds > policy threshold, on outbound to high-value accounts, on PII-containing replies.
+**Agents**: `resolveai-triage`, `-policy-research`, `-resolution-planner`, `-customer-context`, `-tone`, `-deflection`, `-action-executor`, `-qa-reviewer`, `-trend-miner`, `-live-copilot`.
 
-App at `resolveai/`, ports 3008 (web) / 8008 (api).
+Seeds: the source is [`resolveai/seeds/agents/`](../../resolveai/seeds/agents/). The platform loads the copies in `packages/db/seeds/agents/` (`01_triage_agent.yaml` … `10_live_copilot.yaml`, `96_` … `99_*_pipeline.yaml`). Keep the two in step.
+
+**Approvals**: the resolution plan carries per-action `requires_approval` and an approval tier. Refund limits are set in the pipeline (auto up to $25, tier 1 up to $250, manager up to $5000). The action executor refuses an approval-required action without an approval token. Pending approvals show at `/api/resolveai/admin/pending-approvals`.
+
+**KB**: `resolveai-policy` ([`packages/db/seeds/kb/resolveai-policy.yaml`](../../packages/db/seeds/kb/resolveai-policy.yaml)) plus the ontology in `resolveai/seeds/kb/ontology.yaml`.
+
+Key: `RESOLVEAI_ABENIX_API_KEY`. Subject type: `resolveai`.
 
 ---
 
 ## Industrial-IoT
 
-**Domain**: equipment health, alarm desk, predictive maintenance, OPC-UA integration.
+**Domain**: five industrial use cases on one page, each a platform pipeline with a live DAG view, plus edge deployment.
 
-**Key features**:
-- Live OPC-UA tag dashboards
-- Alarm queue with RCA suggestions
-- Predictive maintenance (RUL — remaining useful life)
-- Cold-chain corrector for refrigerated logistics
-- Sensor anomaly detection
-- Two-way control via approvals (remote PLC reset)
+**UI**: one page with tabs (`industrial-iot/web/src/app/tabs/`):
 
-**Agents** (`packages/db/seeds/agents/industrial-iot_*.yaml`):
-- `iiot-alarm-triager` — classifies + routes alarms
-- `iiot-rul-estimator` — RUL with confidence band
-- `iiot-rca-helper` — fetches sensor history + suggests root cause
-- `iiot-cold-chain-corrector` — drift detection on temperature logs
-- `iiot-control-gate` — wraps every write tool with approvals
+| Tab | Pipeline | What it does |
+|---|---|---|
+| Pump Vibration | `iot-pump-pipeline` | FFT features → DSP analysis → diagnosis → remaining useful life → maintenance plan |
+| Cold Chain | `iot-coldchain-pipeline` | Reconstruct a reefer temperature profile, adjudicate excursions, release / dispose / claim |
+| Design Studio | `iot-valueedge-pipeline` | Offshore-wind site brief → 3 design scenarios → CapEx, CO2, IRR, LCOE → value engineering → compliance RFIs |
+| Field Guide | `iot-fieldedge-pipeline` | Technician symptom → fleet history search → manual-grounded repair procedure |
+| Alarm Desk | `iot-bedrocc-pipeline` | SCADA alarm classify → cascade noise filter → safe-reset advice behind an approval gate |
+| Architecture | — | How the pieces fit |
 
-**ML models** (`industrial-iot/aimodels/`):
-- `rul-estimator` (GradientBoosting)
-- `cold-chain-corrector` (sklearn regressor)
-- `pump-dsp-correction` (signal-processing model)
-- `wind-turbine-failure-classifier` (random forest)
+**Agents**: 29 seeds in `packages/db/seeds/agents/iot_*.yaml`, 24 agents plus the 5 pipelines above. Slugs follow `iot-<usecase>-<role>`, for example `iot-pump-dsp-analyzer`, `iot-excursion-adjudicator`, `iot-bedrocc-safe-reset-advisor`.
 
-**Edge-aware**: the cold-chain + RUL agents can run on the edge runtime for low-latency on-device inference.
+**Code assets** (`industrial-iot/code-assets/`): `pump-dsp-correction` (Go), `cold-chain-corrector` (Go), `rul-estimator` (Python).
 
-App at `industrial-iot/`, ports 3009 (web) / 8009 (api).
+**ML model** (`industrial-iot/aimodels/`): `wind-turbine-failure-classifier`, registered by `seed_ml_models.py`. No agent seed calls it yet.
+
+**KB**: `industrial-iot-knowledge` ([`packages/db/seeds/kb/industrial-iot-knowledge.yaml`](../../packages/db/seeds/kb/industrial-iot-knowledge.yaml)).
+
+**Edge**: `POST /api/industrial-iot/edge/compile-and-deploy` compiles an agent bundle and deploys it to a registered edge gateway, and `POST /api/industrial-iot/edge/execute` runs a payload on it. The Pump tab uses this.
+
+**Platform passthrough**: the API forwards `/api/code-assets`, `/api/agents` and `/api/connectors` to the platform with its own key so the browser never holds an Abenix credential. `/api/approvals` is deliberately not forwarded.
+
+Key: `INDUSTRIALIOT_ABENIX_API_KEY`. Subject type: `industrial-iot`, subject id from `X-Forwarded-User`.
 
 ---
 
 ## ClaimsIQ
 
-**Domain**: insurance claims triage + fraud detection.
+**Domain**: insurance first notice of loss (FNOL) through to a claim decision, with an adjuster review queue.
 
-**Key features**:
-- Claims inbox (auto-ingested from upstream system)
-- Per-claim risk score + fraud flags
-- Document review (medical records, police reports)
-- Settlement-amount recommender
-- Adjuster handoff with full lineage
+**Stack**: Java 21, Spring Boot 3 and Vaadin 24 in one process. It calls the platform through the Java SDK in [`claimsiq/sdk/`](../../claimsiq/sdk/), a Gradle subproject. See [03-sdk/03-java](../03-sdk/03-java.md).
 
-**Agents** (`packages/db/seeds/agents/claimsiq_*.yaml`):
-- `claimsiq-intake` — pipeline that orchestrates the others
-- `claimsiq-fraud-detector` — multi-signal fraud score
-- `claimsiq-doc-extractor` — OCR + structured extraction from claim docs
-- `claimsiq-settlement-recommender` — settlement amount + confidence
-- `claimsiq-adjuster-handoff` — package + escalate
+**Views** (`claimsiq/app/src/main/java/com/abenix/claimsiq/ui/`): `/` dashboard, `/fnol`, `/claims`, `/claims/{id}`, `/review` (adjuster queue), `/review/{id}`, `/help`. The claim page shows the pipeline's live DAG.
 
-App at `claimsiq/`, ports 3010 (web) / 8010 (api).
+**Pipeline** `claimsiq-adjudicate`: FNOL intake → policy match → damage assessment (multimodal, reads photos) → fraud screen → valuation → decision.
+
+**Agents**: `claimsiq-fnol-intake`, `-policy-matcher`, `-damage-assessor`, `-fraud-screener`, `-valuator`, `-claim-decider`.
+
+Seeds: source in [`claimsiq/seeds/agents/`](../../claimsiq/seeds/agents/). The platform loads the copies `packages/db/seeds/agents/cq_*.yaml`.
+
+**KB**: `claimsiq-policies` ([`packages/db/seeds/kb/claimsiq-policies.yaml`](../../packages/db/seeds/kb/claimsiq-policies.yaml)).
+
+Key: `CLAIMSIQ_ABENIX_API_KEY`. Subject type: `claimsiq`, with the claim id as subject id. Health: `/actuator/health/liveness`.
 
 ---
 
 ## Picking apart any of them
 
-All follow the structure in [00-pattern](00-pattern.md). The fastest way to learn one:
+The fastest way to learn one:
 
-1. Open `<app>/api/main.py` — every endpoint maps to a page action.
-2. Read the agent yamls in `packages/db/seeds/agents/<app>_*.yaml`.
+1. Open the API entry point. `<app>/api/main.py` for the Python apps (larger ones split into `<app>/api/app/routers/`), `ClaimsService.java` for ClaimsIQ.
+2. Read the agent and pipeline yamls it calls.
 3. Open the page that interests you in `<app>/web/src/app/`.
-4. Trace one request from the page → vertical api → SDK → platform agent → tools.
+4. Trace one request from the page → app API → SDK → platform agent → tools.
 
-Each end-to-end trace takes ~15 minutes. Once you've done it for one app you can pick any other up in under an hour.
+Once you have done this for one app, the others follow the same shape.
 
 ---
 
 ## See also
 
 - [00-pattern](00-pattern.md) — the contract
-- [01-wingman](01-wingman.md) — most-evolved example
-- [02-contractiq](02-contractiq.md) — heaviest KB + atlas user
+- [01-wingman](01-wingman.md) — most evolved example
+- [02-contractiq](02-contractiq.md) — E&C-Copilot, the largest app
+- [05-pharmavigil](05-pharmavigil.md) — pipeline, code assets and one ML model

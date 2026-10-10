@@ -619,6 +619,10 @@ function EditScaleModal({
                 <NumInput label="Concurrency / pod" value={form.concurrency_per_replica} min={1} max={20}
                   onChange={v => setForm({ ...form, concurrency_per_replica: v })} data-testid="edit-conc" />
               </div>
+              <p className="text-[11px] text-amber-300/90" data-testid="replicas-not-enforced">
+                Min and max replicas and concurrency are saved as a sizing note only. They are not enforced
+                per agent. The worker pool scales between the bounds set for the whole pool in the Helm chart.
+              </p>
             </>
           )}
 
@@ -638,9 +642,8 @@ function EditScaleModal({
           <div className="rounded-lg border border-cyan-500/20 bg-cyan-500/5 p-3 text-[11px] text-slate-300">
             <p className="font-semibold text-cyan-300 mb-1">What will happen</p>
             <p>
-              Saving updates the row in <code className="text-cyan-300">agents</code>.
-              The runtime re-reads scaling on every execution, so new requests hit the new config immediately.
-              Helm / KEDA pick up replicas on their next reconcile cycle (≤ 30 s).
+              The pool, rate limit and daily budget apply to the next run. A run over the rate limit is
+              turned away with a &ldquo;try again&rdquo; message. Replica counts come from the pool, not this agent.
             </p>
           </div>
         </div>

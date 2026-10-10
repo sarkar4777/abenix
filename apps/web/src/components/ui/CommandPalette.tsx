@@ -43,6 +43,7 @@ function iconForCategory(c: string): LucideIcon {
     case 'ML Models':    return Brain;
     case 'Code Assets':  return Code2;
     case 'Executions':   return Activity;
+    case 'Runs':         return Activity;
     case 'Pages':        return FileText;
     default:             return Server;
   }
@@ -185,6 +186,8 @@ const ACTION_COMMANDS: Command[] = [
 
 const ALL_COMMANDS: Command[] = [...NAVIGATION_COMMANDS, ...ACTION_COMMANDS];
 
+export const OPEN_PALETTE_EVENT = 'abenix:open-command-palette';
+
 export default function CommandPalette() {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -210,8 +213,9 @@ export default function CommandPalette() {
       apiFetch<{ results: RemoteResult[] }>(`/api/search?q=${encodeURIComponent(q)}&limit=6`, { silent: true })
         .then(({ data: payload }) => {
           if (cancelled || !payload) return;
-          // The Pages category is already mirrored in NAVIGATION_COMMANDS, drop dupes.
-          setRemoteResults((payload.results || []).filter(r => r.category !== 'Pages'));
+          // keep server pages the local list lacks, like the admin screens
+          const local = new Set(ALL_COMMANDS.map((c) => c.href).filter(Boolean));
+          setRemoteResults((payload.results || []).filter(r => r.category !== 'Pages' || !local.has(r.href)));
         })
         .catch(() => { if (!cancelled) setRemoteResults([]); });
     }, 180);
@@ -321,7 +325,13 @@ export default function CommandPalette() {
     };
 
     document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
+    // the search button in the top bar opens it too
+    const openFromButton = () => handleOpen();
+    window.addEventListener(OPEN_PALETTE_EVENT, openFromButton);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener(OPEN_PALETTE_EVENT, openFromButton);
+    };
   }, [open, handleOpen, handleClose, router]);
 
   // Focus input when opened
@@ -380,7 +390,7 @@ export default function CommandPalette() {
   return (
     <AnimatePresence>
       {open && (
-        <div className="fixed inset-0 z-[60] flex justify-center">
+        <div className="fixed inset-0 z-[60] flex justify-center" role="dialog" aria-modal="true" aria-label="Search" data-testid="command-palette">
           {/* Backdrop */}
           <motion.div
             className="absolute inset-0 bg-black/60 backdrop-blur-sm"
@@ -408,7 +418,9 @@ export default function CommandPalette() {
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 onKeyDown={handleInputKeyDown}
-                placeholder="Search pages, agents, pipelines, KBs, models, executions..."
+                aria-label="Search pages, agents, runs and more"
+                data-testid="command-palette-input"
+                placeholder="Search pages, agents, pipelines, knowledge, models, runs..."
                 className="flex-1 bg-transparent text-sm text-white placeholder-slate-500 outline-none"
               />
               <kbd className="hidden rounded-md border border-slate-600 bg-slate-700/50 px-1.5 py-0.5 text-[10px] text-slate-400 sm:inline-block">
@@ -422,8 +434,8 @@ export default function CommandPalette() {
               className="max-h-[320px] overflow-y-auto py-2"
             >
               {flatCommands.length === 0 && (
-                <div className="px-4 py-8 text-center text-sm text-slate-500">
-                  No commands found for &ldquo;{query}&rdquo;
+                <div className="px-4 py-8 text-center text-sm text-slate-500" data-testid="command-palette-empty">
+                  Nothing found for &ldquo;{query}&rdquo;
                 </div>
               )}
 
@@ -445,6 +457,9 @@ export default function CommandPalette() {
                         <button
                           key={cmd.id}
                           data-selected={isSelected}
+                          data-testid="command-palette-item"
+                          data-category={cmd.category}
+                          data-href={cmd.href || ''}
                           onClick={() => executeCommand(cmd)}
                           onMouseEnter={() =>
                             setSelectedIndex(globalIndex)

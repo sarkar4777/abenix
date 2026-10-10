@@ -1,6 +1,6 @@
 # Pipelines — the DAG engine
 
-> When a single agent isn't enough, chain tools and agents together with conditions, switches, loops, error routing and parallel fan-out. The pipeline engine is a layered DAG executor.
+> When one agent is not enough, chain tools and agents with conditions, switches, loops, error routing and parallel fan-out. The engine runs the DAG layer by layer.
 
 ---
 
@@ -50,7 +50,7 @@ pipeline_config:
         case: "{{input.case_id}}"
 ```
 
-There are no edges. A node runs after the nodes in its `depends_on`, plus every node its templates name (`{{load_case.x}}` adds `load_case`). Every tool a node calls must be in `model_config.tools`, including `agent_step` for `type: agent` nodes. A missing one fails the node with "Unknown tool". The ad-hoc execute endpoint adds `agent_step` by itself.
+There are no edges. A node runs after the nodes in its `depends_on`, plus every node its templates name (`{{load_case.x}}` adds `load_case`). Every tool a node calls must be in `model_config.tools`, including `agent_step` for `type: agent` nodes. On agent execute and queued runs a missing tool fails the node with "Unknown tool". `POST /api/pipelines/{id}/execute` and `/execute-saved` reject the run with a 400 before it starts, and both add `agent_step` themselves when the pipeline has agent nodes.
 
 ### Node types
 
@@ -58,8 +58,8 @@ There are no edges. A node runs after the nodes in its `depends_on`, plus every 
 
 | `type` | Runs | Key fields |
 |---|---|---|
-| `tool` (default) | One tool call, no LLM unless the tool calls one | `tool_name` or `tool`, `arguments`, and `input` (a dict is merged into the arguments, anything else becomes `arguments.input`) |
-| `agent` | A seeded agent through the `agent_step` tool, with that agent's system prompt, model, tools, `max_iterations` and temperature | `agent_slug` or `agent_id`, `input` (the message), `context` (appended to the message as a `[Pipeline context]` block) |
+| `tool` (default) | One tool call, no LLM unless the tool calls one | `tool_name` or `tool`, `arguments`, and `input` (a dict is merged into the arguments, anything else becomes `arguments.input`). `input` is read only when `type: tool` is written out |
+| `agent` | A seeded agent through the `agent_step` tool, with that agent's system prompt, model, tools, `max_iterations` and temperature | `agent_slug`, `input` (the message), `context` (appended to the message as a `[Pipeline context]` block). A node with only `agent_id` is not resolved and fails with "system_prompt is required" |
 | `structured` | No call. Template-resolves `output` (or `fields`) and returns it as one dict, parsing values that look like JSON | `output` |
 
 Some tool names are built into the engine and never reach the registry:
@@ -85,11 +85,11 @@ Any node can also carry these:
 | `timeout_seconds` | Per-node timeout for the tool call |
 | `on_error` | `stop` (default), `continue` or `error_branch` |
 | `error_branch_node` | The node to run when this one fails and `on_error` is `error_branch` |
-| `label` | Display name. Templates may name a step by its unique label instead of its id |
+| `label` | Display name. `arguments`, `context` and `input_mappings` may name a step by its unique label instead of its id. Use ids in `input`, `output`, `condition` and `required_if` |
 
 Condition operators are `eq`, `neq`, `gt`, `lt`, `gte`, `lte`, `contains`, `not_contains`, `in` and `not_in`. A missing field is false for everything except `eq` and `neq`.
 
-The ad-hoc `POST /api/pipelines/{agent_id}/execute` takes the same nodes through a Pydantic schema that knows `type: tool | agent`, up to 50 nodes, `max_retries` 0 to 5, `retry_delay_ms` 100 to 30,000, `timeout_seconds` 1 to 300 and `for_each.max_concurrency` 1 to 50.
+The ad-hoc `POST /api/pipelines/{agent_id}/execute` takes a subset of these fields through a Pydantic schema. It drops `while_loop`, `label`, `required_if`, `input`, `context` and `output`, rejects `type: structured`, and needs `tool_name` on tool nodes. Limits: up to 50 nodes, `max_retries` 0 to 5, `retry_delay_ms` 100 to 30,000, node `timeout_seconds` 1 to 300 and `for_each.max_concurrency` 1 to 50.
 
 ### Switch and merge
 
@@ -123,7 +123,7 @@ Cases are tried in order and the first match activates its target. With no match
 
 | Root | Is |
 |---|---|
-| `input.*` | The run's input. `input.message` falls back to `user_message`, `prompt`, `body`, `ticket_content` or `content` |
+| `input.*` | The run's input, the same on every execute path. `input.message` falls back to `user_message`, `prompt`, `body`, `ticket_content` or `content`. Every agent-execute path builds its context with `build_run_context()` in `engine/pipeline.py`, and a plain-text `input` in the context never replaces this root |
 | `context.*` | The run's context, as sent |
 | `<node_id>.*` | That node's output. An agent node's `{"response": "<json>"}` wrapper is looked through, and JSON inside code fences or followed by prose is parsed |
 | any context key | Context keys are also available flat, `{{user_message}}` |
@@ -164,14 +164,22 @@ flowchart TB
 Important behaviours:
 
 - **Layers.** Nodes are sorted into layers by dependency. Every node in a layer starts at once. There is no cap on concurrency within a layer. `for_each` caps its items with `max_concurrency` (default 10).
-- **Pipeline timeout.** `PIPELINE_TIMEOUT_SECONDS` (default 300) or the admin setting `pipeline.timeout_seconds`. It is checked before each layer, not during one. A layer that starts late fails all its nodes with "Pipeline timeout exceeded".
-- **Failures.** With `on_error: stop` the node fails and its dependents are skipped with "Dependency '<id>' failed". Other branches keep going. With `continue` the node counts as done and dependents see `{__error_continue, error, status: failed}` as its output. With `error_branch` the named node runs after the layer, and can read `__error_from_<id>`.
+- **Pipeline timeout.** Checked before each layer. A layer that starts late fails all its nodes with "The pipeline ran out of time after Ns (limit Ns), so this step did not run." and the run gets `failure_code: RUNTIME_TIMEOUT`. The streamed paths also stop a step that hangs past the limit, a few seconds over it, and fail the run with "The pipeline ran out of time. It stopped after Ns, the limit set in pipeline.timeout_seconds." See [Pipeline timeout](#pipeline-timeout).
+- **Failures.** With `on_error: stop` the node fails and its dependents are skipped with "Dependency '<id>' failed". Other branches keep going. With `continue` the node goes on the execution path and not into `failed_nodes`, and `{__error_continue, error, error_type, status: failed}` is stored as its output. Nodes that `depends_on` it run, and read the failure as `{{<id>.error}}`. With `error_branch` the named node runs after the layer, and can read `__error_from_<id>`.
 - **Final output.** The output of the last node that completed, in run order.
 - **Cost budget.** The ad-hoc execute endpoint takes `cost_limit`. A node that would start after the budget is used fails with "Cost budget exceeded". The run's cost counts every step, failed and retried ones included, so the budget and analytics see what was really spent.
 - **Governance.** A pipeline is a governed run like an agent. Kill switch scope `pipeline` with the pipeline agent's id is checked at start and refuses the run with `failure_code: KILL_SWITCH`. Its starting tier is the higher of the agent's stored tier and the caller's. Nested agents and tools raise it, and the final tier and reasons are written to the execution. See [00-agent-execution](00-agent-execution.md#governance-at-run-start).
-- **Self-healing.** A failed node is captured for the Pipeline Surgeon, and each completed node's output is kept as the last good sample. See [10-pipeline-healing-drift](10-pipeline-healing-drift.md).
+- **Self-healing.** A node that fails with `on_error: stop` is captured for the Pipeline Surgeon on every path: queued runs, `/api/pipelines` runs and inline `/api/agents/{id}/execute` runs, streamed or not. Each path passes the execution id, so Diagnose and fix finds the diff whichever path ran the pipeline. Each completed node's output is kept as the last good sample. See [10-pipeline-healing-drift](10-pipeline-healing-drift.md).
 
 Node statuses are `completed`, `failed`, `skipped` and `timeout`, plus `partial` for a `for_each` node where some items failed. The pipeline status is `completed`, `partial` (something failed and something completed) or `failed` (something failed and nothing completed). The queue consumer writes the execution as `completed` only for `completed`. `partial` and `failed` both become a `failed` execution with `PIPELINE_NODE_FAILED`. See [09-state-machines](09-state-machines.md#pipeline-runs).
+
+### Pipeline timeout
+
+| Path | Timeout |
+|---|---|
+| Queue consumer | Admin setting `pipeline.timeout_seconds`, else `PIPELINE_TIMEOUT_SECONDS`, default 300 |
+| `/api/agents/{id}/execute`, streamed or not | Admin setting `pipeline.timeout_seconds`, default 300 |
+| `/api/pipelines/{id}/execute`, `/execute-saved`, `/execute-stream` | `timeout_seconds` in the body, 5 to 3600. Left out, the admin setting `pipeline.timeout_seconds` |
 
 ---
 
@@ -185,6 +193,8 @@ There is one row per run, in `executions`. A pipeline's per-node results go on t
 | `tool_calls` | One entry per node, for the trace views |
 | `execution_trace` | `pipeline_status`, `execution_path`, `failed_nodes`, `skipped_nodes`, `node_results` and `steps`, one row per node in run order |
 | `failure_code`, `risk_tier`, `risk_reasons` | As for an agent run |
+
+Runs through `/api/pipelines/{id}/execute` and `/execute-saved` store only `node_results`. `/execute-stream` stores none of the three.
 
 `pipeline_states` holds the cross-run key-value data that `state_get` and `state_set` use. There are no separate pipeline run tables.
 

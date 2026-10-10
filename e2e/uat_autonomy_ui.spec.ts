@@ -194,12 +194,29 @@ test('asks first: approve, edit and reject in place on the timeline', async ({ p
   await page.getByTestId('autonomy-run-sample-3').click();
   // each run waits for a person, so the cards appear while the runs are still going
   const pending = page.locator('[data-testid="action-card"][data-status="pending"]');
-  await expect(pending.first()).toBeVisible({ timeout: LLM_WAIT });
+
+  // a run that reads the plant already on target proposes nothing, so a person runs it once more
+  async function nextPending() {
+    const until = Date.now() + LLM_WAIT;
+    while (Date.now() < until) {
+      if (await pending.first().isVisible().catch(() => false)) return;
+      const idle = !(await page.getByTestId('autonomy-run-status').isVisible().catch(() => false));
+      if (idle && await page.getByTestId('autonomy-run-summary').isVisible().catch(() => false)) {
+        test.info().annotations.push({ type: 'top-up', description: (await page.getByTestId('autonomy-run-summary').innerText()).trim() });
+        await page.getByTestId('autonomy-run-sample').click();
+        await expect(page.getByTestId('autonomy-run-status')).toBeVisible({ timeout: 30_000 });
+      }
+      await page.waitForTimeout(2_000);
+    }
+    await expect(pending.first()).toBeVisible({ timeout: 5_000 });
+  }
+
+  await nextPending();
   await shot(page, '07-pending-in-timeline');
 
   const decided: string[] = [];
   for (const how of ['approve', 'edit', 'reject'] as const) {
-    await expect(pending.first()).toBeVisible({ timeout: LLM_WAIT });
+    await nextPending();
     const card = pending.first();
     const id = (await card.getAttribute('data-action-id')) || '';
     if (how === 'approve') {

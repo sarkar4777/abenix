@@ -1,0 +1,252 @@
+[
+  {
+    "title": "Approval waits drained the database pool",
+    "area": "approvals",
+    "problem": "Each /api/approvals/{id}/wait long-poll held a pooled database connection for up to 120 seconds while it slept, so a dozen waiting clients exhausted the pool and unrelated requests got 503 busy.",
+    "fix": "The wait closes its session between reads so the connection goes back to the pool. The Python and JS SDK waits also retry 429 and 503 answers until their timeout.",
+    "fixed_in": "v2.5.6",
+    "labels": [
+      "bug"
+    ]
+  },
+  {
+    "title": "Java SDK waits failed after 30 seconds",
+    "area": "sdk",
+    "problem": "approvals().waitFor and actions().waitFor ran each 120 s long-poll under the client's 30 s request timeout, so any wait longer than 30 s failed on a healthy server, and a busy 503 threw.",
+    "fix": "Each round gets a timeout sized to its poll, the deadline follows the clock, and busy answers and dropped connections are retried.",
+    "fixed_in": "v2.5.6",
+    "labels": [
+      "bug"
+    ]
+  },
+  {
+    "title": "code_asset calls hit 429 under normal app load",
+    "area": "tools",
+    "problem": "code_asset was limited to 2 concurrent runs per tenant and 6 overall, so an app stepping a warm runner while running briefs and checks got 429 Too Many Requests.",
+    "fix": "The default is 8 per tenant and 24 overall. Installs still on the old default are lifted on upgrade, admin-set values are kept.",
+    "fixed_in": "v2.5.6",
+    "labels": [
+      "bug"
+    ]
+  },
+  {
+    "title": "A cancelled tool call kept its concurrency slot",
+    "area": "tools",
+    "problem": "A direct tool call cancelled by a disconnect, timeout or pod restart never released its slot, so the tool answered 429 with one or two calls in flight until the counter expired.",
+    "fix": "Slots are leases with an expiry, and a cancelled call releases its lease.",
+    "fixed_in": "v2.5.6",
+    "labels": [
+      "bug"
+    ]
+  },
+  {
+    "title": "Pipeline execute without nodes answered a bare 422",
+    "area": "pipelines",
+    "problem": "POST /api/pipelines/{id}/execute required nodes in the body, so a caller running a saved pipeline got Field required with no hint.",
+    "fix": "Without nodes the agent's saved pipeline runs, and an agent with nothing saved gets a 400 that says so.",
+    "fixed_in": "v2.5.6",
+    "labels": [
+      "bug"
+    ]
+  },
+  {
+    "title": "Code asset inputs over 128 KB failed on the Job path",
+    "area": "code-assets",
+    "problem": "The archive and input went to the Job as environment variables or command arguments, so a 430 KB training set failed with exit 255.",
+    "fix": "They reach the Job as files through a Secret volume mounted at /in, up to 950 KB.",
+    "fixed_in": "v2.5.6",
+    "labels": [
+      "bug"
+    ]
+  },
+  {
+    "title": "A code asset lost its warm runner after one failed manifest read",
+    "area": "code-assets",
+    "problem": "A failed read of the runner manifest was cached as having no manifest, so the asset lost its warm runner, warm-wait and prewarm until the pod restarted.",
+    "fix": "A failed read is tried again on the next call.",
+    "fixed_in": "v2.5.6",
+    "labels": [
+      "bug"
+    ]
+  },
+  {
+    "title": "A new code asset version started cold",
+    "area": "code-assets",
+    "problem": "The first call to a new version of a warm asset ran as a cold Job, 151 s in one case, because its runner only started on that call.",
+    "fix": "Uploading a version starts its runner, and a call waits briefly for a warm runner to come up.",
+    "fixed_in": "v2.5.6",
+    "labels": [
+      "bug"
+    ]
+  },
+  {
+    "title": "Code asset schema validation cost 22 ms a call",
+    "area": "code-assets",
+    "problem": "Every call re-checked the input and output schema against the metaschema, about 22 ms each time, twice per call.",
+    "fix": "Validators are compiled once per schema. A twin step through the API went from 66 ms to 17 ms.",
+    "fixed_in": "v2.5.6",
+    "labels": [
+      "bug"
+    ]
+  },
+  {
+    "title": "Large code asset test records broke jsonb",
+    "area": "code-assets",
+    "problem": "The last-test record cut large JSON at 20,000 characters and stored the broken string as jsonb, which Postgres rejected on every large call.",
+    "fix": "A record that is too big is stored as its size.",
+    "fixed_in": "v2.5.6",
+    "labels": [
+      "bug"
+    ]
+  },
+  {
+    "title": "Kill switch could miss the next run",
+    "area": "governance",
+    "problem": "A run started from a kill switch snapshot refreshed in the background, so a switch could miss the next run by up to ten seconds, and the message named the agent by id.",
+    "fix": "Runs read a switch list no older than a second, a stale snapshot is reloaded before use, and the message names the agent.",
+    "fixed_in": "v2.5.6",
+    "labels": [
+      "bug"
+    ]
+  },
+  {
+    "title": "Fresh installs had no database triggers",
+    "area": "install",
+    "problem": "The bootstrap built tables from the ORM and stamped alembic, so the four migration triggers were missing. The audit log could be edited and runs carried no provenance.",
+    "fix": "bootstrap verify heals missing triggers and migration-only tables from the migrations' own SQL.",
+    "fixed_in": "v2.5.6",
+    "labels": [
+      "bug"
+    ]
+  },
+  {
+    "title": "model_availability_events missing on fresh installs",
+    "area": "install",
+    "problem": "That table only existed in a migration, so the hourly model check failed with a 500 on every fresh install.",
+    "fix": "The model is registered with the ORM and the bootstrap creates any missing table.",
+    "fixed_in": "v2.5.6",
+    "labels": [
+      "bug"
+    ]
+  },
+  {
+    "title": "Agent-to-agent calls failed on a fresh install",
+    "area": "install",
+    "problem": "deploy.sh added the JWT keys after the pods started and never restarted them, so sub-agent calls failed with Could not sign a token.",
+    "fix": "deploy.sh restarts every service that reads abenix-secrets after it generates keys.",
+    "fixed_in": "v2.5.6",
+    "labels": [
+      "bug"
+    ]
+  },
+  {
+    "title": "Paged lists returned duplicate rows",
+    "area": "api",
+    "problem": "Rows inserted in one transaction share a timestamp and the order had no tie-breaker, so paging could return the same agent twice and skip another, 23 of 211 on a fresh install.",
+    "fix": "Every offset-paged query orders by id as a tie-breaker.",
+    "fixed_in": "v2.5.6",
+    "labels": [
+      "bug"
+    ]
+  },
+  {
+    "title": "Local Postgres crashed into recovery under load",
+    "area": "install",
+    "problem": "values-local.yaml capped Postgres at 512Mi, so a busy backend was killed and the database went into crash recovery, seen as random 500s.",
+    "fix": "Postgres gets 512Mi requested and 2Gi limit.",
+    "fixed_in": "v2.5.6",
+    "labels": [
+      "bug"
+    ]
+  },
+  {
+    "title": "Model availability stayed stale after connecting a provider",
+    "area": "models",
+    "problem": "Connecting a model, subscription or provider key left models unavailable until the hourly check, so requests were routed to a fallback.",
+    "fix": "Availability is re-checked a few seconds after the change, and resolve reads it fresh.",
+    "fixed_in": "v2.5.6",
+    "labels": [
+      "bug"
+    ]
+  },
+  {
+    "title": "Streamed runs ended with no answer at the step limit",
+    "area": "runtime",
+    "problem": "A streamed run that used its last step on a tool call ended with no answer.",
+    "fix": "It gets one final turn without tools to answer from what it gathered.",
+    "fixed_in": "v2.5.6",
+    "labels": [
+      "bug"
+    ]
+  },
+  {
+    "title": "Agent chat page kept no memory",
+    "area": "chat",
+    "problem": "Chatting from an agent's own chat page saved nothing, so follow-ups started from scratch and never showed in history.",
+    "fix": "The page saves the conversation and sends its id with each turn.",
+    "fixed_in": "v2.5.6",
+    "labels": [
+      "bug"
+    ]
+  },
+  {
+    "title": "Builder snapped Sonnet back to the default model",
+    "area": "builder",
+    "problem": "Picking Claude Sonnet 4.5 on a new agent snapped back to the platform default.",
+    "fix": "The default is applied once when the builder opens.",
+    "fixed_in": "v2.5.6",
+    "labels": [
+      "bug"
+    ]
+  },
+  {
+    "title": "Pipeline agent steps passed prose instead of JSON",
+    "area": "pipelines",
+    "problem": "An agent step with an output schema passed on prose with a fenced JSON block, while the same agent run directly returned clean JSON.",
+    "fix": "The step passes on the JSON its schema describes.",
+    "fixed_in": "v2.5.6",
+    "labels": [
+      "bug"
+    ]
+  },
+  {
+    "title": "Scheduled trigger failures on a runtime pool were silent",
+    "area": "triggers",
+    "problem": "A scheduled trigger that failed on a runtime pool never told its owner.",
+    "fix": "The run announcer sends the Scheduled trigger failed notice once per run.",
+    "fixed_in": "v2.5.6",
+    "labels": [
+      "bug"
+    ]
+  },
+  {
+    "title": "ML model predict skipped the access check",
+    "area": "ml-models",
+    "problem": "Predict checked only the tenant, so a user could call a model they could not see.",
+    "fix": "Predict and explain answer 404 to a caller without access, like the detail page.",
+    "fixed_in": "v2.5.6",
+    "labels": [
+      "bug"
+    ]
+  },
+  {
+    "title": "ml_model_register could read another workspace's file",
+    "area": "ml-models",
+    "problem": "Path mode read any file in the shared export area by name.",
+    "fix": "It reads only from the calling workspace's own folder and refuses without a tenant.",
+    "fixed_in": "v2.5.6",
+    "labels": [
+      "bug"
+    ]
+  },
+  {
+    "title": "scripts/uat.sh dropped all but the last --spec",
+    "area": "testing",
+    "problem": "Giving --spec more than once ran only the last spec.",
+    "fix": "Repeated flags add up.",
+    "fixed_in": "v2.5.6",
+    "labels": [
+      "bug"
+    ]
+  }
+]

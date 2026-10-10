@@ -69,6 +69,31 @@ DEFAULT_POLICIES: dict[str, dict[str, Any]] = {
 
 TOOL_CALL_ACTIONS = ("allow", "approval", "block")
 
+# escalation can be set in minutes, 0 is off
+ESCALATE_MINUTES_MIN = 1
+ESCALATE_MINUTES_MAX = 720 * 60
+
+
+def escalate_minutes(publish_approvals: dict[str, Any] | None) -> int:
+    """Minutes an approval may wait before admins are told, minutes win over hours."""
+    pa = publish_approvals or {}
+    m = pa.get("escalate_after_minutes")
+    if isinstance(m, int) and not isinstance(m, bool) and m > 0:
+        return m
+    try:
+        return max(0, int(pa.get("escalate_after_hours") or 0)) * 60
+    except (TypeError, ValueError):
+        return 0
+
+
+def wait_words(minutes: int) -> str:
+    if minutes % 60 == 0:
+        h = minutes // 60
+        return f"{h}h"
+    if minutes < 60:
+        return f"{minutes} min"
+    return f"{minutes // 60}h {minutes % 60} min"
+
 
 def normalize(tier: Any, default: str = "low") -> str:
     t = str(tier or "").strip().lower()
@@ -127,6 +152,19 @@ def validate_policy(policy: dict[str, Any]) -> list[str]:
                 problems.append(
                     "publish_approvals.escalate_after_hours must be a whole number from 0 to 720"
                 )
+            if "escalate_after_minutes" in pa:
+                m = pa.get("escalate_after_minutes")
+                if (
+                    not isinstance(m, int)
+                    or isinstance(m, bool)
+                    or (
+                        m != 0 and not ESCALATE_MINUTES_MIN <= m <= ESCALATE_MINUTES_MAX
+                    )
+                ):
+                    problems.append(
+                        "publish_approvals.escalate_after_minutes must be 0, or a whole number "
+                        f"from {ESCALATE_MINUTES_MIN} to {ESCALATE_MINUTES_MAX} (30 days)"
+                    )
     act = policy.get("tool_call_action")
     if act is not None and act not in TOOL_CALL_ACTIONS:
         problems.append(

@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import io
 import json
+import os
+import zipfile
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, AsyncIterator
 
 import httpx
@@ -30,7 +34,9 @@ class ActingSubject:
 
 @dataclass
 class StreamEvent:
-    type: str  # token, tool_call, tool_result, node_start, node_complete, done, error
+    # token, tool_call, tool_result, node_start, node_complete, done, error,
+    # or any other event the server sends (moderation, node_trace ...) by name
+    type: str
     text: str | None = None
     name: str | None = None
     arguments: dict[str, Any] | None = None
@@ -47,6 +53,8 @@ class StreamEvent:
     agent_id: str | None = None        # Which agent/node failed
     traceback: str | None = None       # Stack trace (debug mode)
     output_preview: str | None = None  # Truncated output for node_complete events
+    execution_id: str | None = None    # set on done, read the run back with it
+    data: dict[str, Any] | None = None  # the raw event payload
 
 
 @dataclass
@@ -386,10 +394,14 @@ class ApprovalsClient:
         *,
         reason: str = "",
         client_token: str | None = None,
+        edited_arguments: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         body: dict[str, Any] = {"decision": decision, "reason": reason}
         if client_token:
             body["client_token"] = client_token
+        # action approvals only, the agent runs with these values instead
+        if edited_arguments is not None:
+            body["edited_arguments"] = edited_arguments
         res = await self._client._http.post(
             f"/api/approvals/{approval_id}/signoff", json=body
         )
@@ -397,10 +409,19 @@ class ApprovalsClient:
         return (res.json() or {}).get("data") or {}
 
     async def approve(
-        self, approval_id: str, *, reason: str = "", client_token: str | None = None
+        self,
+        approval_id: str,
+        *,
+        reason: str = "",
+        client_token: str | None = None,
+        edited_arguments: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         return await self.signoff(
-            approval_id, "approve", reason=reason, client_token=client_token
+            approval_id,
+            "approve",
+            reason=reason,
+            client_token=client_token,
+            edited_arguments=edited_arguments,
         )
 
     async def deny(
@@ -415,27 +436,18 @@ class ApprovalsClient:
     ) -> dict[str, Any]:
         """Block until the approval leaves pending status or the timeout fires.
 
-        Uses the server's /wait long-poll under the hood so a single client
-        call covers up to 120s of real waiting per round-trip.
+        Uses the server's /wait long-poll, up to 120s per round trip. A busy
+        server (429, 503) or a dropped connection is retried until the timeout.
         """
-        import asyncio as _asyncio
-        deadline = max(1, int(timeout_seconds))
-        elapsed = 0
-        last: dict[str, Any] = {}
-        while elapsed < deadline:
-            chunk = min(120, deadline - elapsed)
-            res = await self._client._http.get(
-                f"/api/approvals/{approval_id}/wait",
-                params={"timeout_seconds": chunk},
-            )
-            res.raise_for_status()
-            last = (res.json() or {}).get("data") or {}
-            if last.get("status") and last["status"] != "pending":
-                return last
-            elapsed += chunk
-            if poll_seconds and elapsed < deadline:
-                await _asyncio.sleep(poll_seconds)
-        return last
+        return await _long_poll(
+            self._client,
+            f"/api/approvals/{approval_id}/wait",
+            "timeout_seconds",
+            timeout_seconds,
+            lambda d: bool(d.get("status")) and d["status"] != "pending",
+            poll_seconds,
+            http_errors=True,
+        )
 
     async def subscribe(self) -> AsyncIterator[dict[str, Any]]:
         """Stream approval lifecycle events for the tenant via the notification WS.
@@ -556,6 +568,91 @@ async def _call(client: "Abenix", exc: type[AbenixError], method: str, path: str
             res.status_code, err.get("message") or f"HTTP {res.status_code}", err.get("error_code"), err.get("details")
         )
     return body.get("data")
+
+
+_BUSY = (429, 502, 503, 504)
+
+
+async def _long_poll(
+    client: "Abenix",
+    path: str,
+    param: str,
+    timeout_seconds: int,
+    done: Any,
+    poll_seconds: float = 0.0,
+    http_errors: bool = False,
+) -> dict[str, Any]:
+    """Repeat a server long-poll until done(data) or the timeout. Busy answers and dropped connections are retried."""
+    import asyncio as _asyncio
+    import time as _time
+
+    deadline = _time.monotonic() + max(1, int(timeout_seconds))
+    last: dict[str, Any] = {}
+    while True:
+        left = deadline - _time.monotonic()
+        if left <= 0:
+            return last
+        chunk = max(1, min(120, int(left)))
+        pause = poll_seconds
+        try:
+            if http_errors:
+                # the older sub-clients raise httpx.HTTPStatusError, keep that
+                res = await client._http.get(path, params={param: chunk}, timeout=chunk + 30)
+                if res.status_code in _BUSY:
+                    raise AbenixError(res.status_code, "busy")
+                res.raise_for_status()
+                last = (res.json() or {}).get("data") or {}
+            else:
+                last = await _call(
+                    client, AbenixError, "GET", path, params={param: chunk}, timeout=chunk + 30
+                ) or {}
+            if done(last):
+                return last
+        except AbenixError as e:
+            if e.status not in _BUSY:
+                raise
+            pause = 2.0
+        except httpx.TransportError:
+            pause = 2.0
+        if pause:
+            await _asyncio.sleep(min(pause, max(0.0, deadline - _time.monotonic())))
+
+
+def _file_part(file: str | os.PathLike[str] | bytes, filename: str | None) -> tuple[str, bytes]:
+    if isinstance(file, (bytes, bytearray)):
+        if not filename:
+            raise ValueError("raw bytes need a filename, for example model.joblib")
+        return filename, bytes(file)
+    path = Path(file)
+    return filename or path.name, path.read_bytes()
+
+
+# left out when a folder is zipped for upload
+_SKIP_DIRS = {".git", "__pycache__", ".venv", "venv", "node_modules", ".mypy_cache", ".pytest_cache", ".ruff_cache"}
+
+
+def _archive_part(source: str | os.PathLike[str] | bytes, filename: str | None) -> tuple[str, bytes]:
+    """A zip or tar.gz as (filename, bytes). A folder is zipped in memory."""
+    if isinstance(source, (bytes, bytearray)):
+        return filename or "code.zip", bytes(source)
+    path = Path(source)
+    if not path.is_dir():
+        return filename or path.name, path.read_bytes()
+    buf = io.BytesIO()
+    count = 0
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for f in sorted(path.rglob("*")):
+            rel = f.relative_to(path)
+            if not f.is_file() or f.name == ".DS_Store" or _SKIP_DIRS & set(rel.parts[:-1]):
+                continue
+            zf.write(f, rel.as_posix())
+            count += 1
+    if not count:
+        raise ValueError(f"{path} has no files to upload")
+    return filename or f"{path.name or 'code'}.zip", buf.getvalue()
+
+
+_TEST_FIELDS = ("name", "facts", "expected", "expected_outcome", "as_of", "match")
 
 
 class DecisionsClient:
@@ -697,8 +794,42 @@ class DecisionsClient:
     async def tests(self, key: str) -> list[dict[str, Any]]:
         return await self._call("GET", f"/api/decisions/{key}/tests") or []
 
-    async def add_test(self, key: str, name: str, facts: dict[str, Any], *, expected: Any = None, expected_outcome: str = "decided", as_of: str | None = None) -> dict[str, Any]:
-        return await self._call("POST", f"/api/decisions/{key}/tests", json={"name": name, "facts": facts, "expected": expected, "expected_outcome": expected_outcome, "as_of": as_of})
+    async def add_test(
+        self,
+        key: str,
+        name: str,
+        facts: dict[str, Any],
+        *,
+        expected: Any = None,
+        expected_outcome: str = "decided",
+        as_of: str | None = None,
+        match: str = "exact",
+    ) -> dict[str, Any]:
+        """match is exact, or subset where the expected keys must match and extra result keys are ignored."""
+        return await self._call(
+            "POST",
+            f"/api/decisions/{key}/tests",
+            json={"name": name, "facts": facts, "expected": expected, "expected_outcome": expected_outcome,
+                  "as_of": as_of, "match": match},
+        )
+
+    async def update_test(self, key: str, test_id: str, **fields: Any) -> dict[str, Any]:
+        """Change some of name, facts, expected, expected_outcome, as_of and match. The rest stay as they are."""
+        unknown = set(fields) - set(_TEST_FIELDS)
+        if unknown:
+            raise ValueError(f"unknown test fields: {', '.join(sorted(unknown))}")
+        current = next((t for t in await self.tests(key) if t.get("id") == test_id), None)
+        if current is None:
+            raise AbenixDecisionError(404, "Test not found", "NOT_FOUND")
+        body = {k: current.get(k) for k in _TEST_FIELDS}
+        body.update(fields)
+        body["facts"] = body.get("facts") or {}
+        body["expected_outcome"] = body.get("expected_outcome") or "decided"
+        body["match"] = body.get("match") or "exact"
+        return await self._call("PUT", f"/api/decisions/{key}/tests/{test_id}", json=body)
+
+    async def delete_test(self, key: str, test_id: str) -> dict[str, Any]:
+        return await self._call("DELETE", f"/api/decisions/{key}/tests/{test_id}")
 
     async def evaluations(self, key: str, limit: int = 50) -> list[dict[str, Any]]:
         return await self._call("GET", f"/api/decisions/{key}/evaluations", params={"limit": limit}) or []
@@ -871,16 +1002,266 @@ class EventsClient:
         return hmac.compare_digest(want, signature.strip())
 
 
+# file extension for raw bytes when only the framework is given
+_FRAMEWORK_EXT = {"sklearn": ".joblib", "xgboost": ".joblib", "onnx": ".onnx", "pytorch": ".pt"}
+
+
+def _feature_schema(names: list[str], base: dict[str, Any] | None = None) -> dict[str, Any]:
+    names = [str(n) for n in names]
+    if base is not None:
+        return {**base, "features": names}
+    n = len(names)
+    return {
+        "type": "object",
+        "required": ["input_data"],
+        "features": names,
+        "properties": {
+            "input_data": {
+                "type": "array",
+                "description": f"Array of samples, each an array of {n} numeric features in this order: {', '.join(names)}.",
+                "items": {"type": "array", "items": {"type": "number"}, "minItems": n, "maxItems": n},
+                "x-feature-order": names,
+            },
+        },
+    }
+
+
 class MLModelsClient:
-    """Read-side access to the platform's ML model registry."""
+    """The platform's ML model registry: register, read, predict and delete."""
 
     def __init__(self, client: "Abenix"):
         self._client = client
+        self._ids: dict[str, str] = {}
+
+    async def _call(self, method: str, path: str, **kw: Any) -> Any:
+        return await _call(self._client, AbenixError, method, path, **kw)
 
     async def list(self) -> list[dict[str, Any]]:
         res = await self._client._get("/api/ml-models")
         items = (res.get("data") if isinstance(res, dict) else res) or []
         return items if isinstance(items, list) else []
+
+    async def _refresh_ids(self) -> None:
+        # the active version wins, otherwise the newest
+        best: dict[str, dict[str, Any]] = {}
+        for m in await self.list():
+            name = m.get("name") or ""
+            cur = best.get(name)
+            if cur is None or (m.get("is_active") and not cur.get("is_active")):
+                best[name] = m
+        self._ids = {n: str(m.get("id") or "") for n, m in best.items()}
+
+    async def _id(self, name_or_id: str) -> str:
+        if self._client._UUID_RE.match(name_or_id):
+            return name_or_id
+        if name_or_id not in self._ids:
+            await self._refresh_ids()
+        mid = self._ids.get(name_or_id)
+        if not mid:
+            raise AbenixError(404, f"No ML model called {name_or_id}.", "NOT_FOUND")
+        return mid
+
+    async def get(self, name_or_id: str) -> dict[str, Any]:
+        """One model version with its deployments. A name gives its active version."""
+        return await self._call("GET", f"/api/ml-models/{await self._id(name_or_id)}")
+
+    async def upload(
+        self,
+        name: str,
+        file: str | os.PathLike[str] | bytes,
+        *,
+        filename: str | None = None,
+        framework: str | None = None,
+        version: str | None = None,
+        description: str = "",
+        input_schema: dict[str, Any] | None = None,
+        feature_names: list[str] | None = None,
+        output_schema: dict[str, Any] | None = None,
+        tags: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Register a model file as a new version of name. Raw bytes need a filename or a framework.
+
+        A file that does not load raises AbenixError 422 MODEL_LOAD_FAILED, details["model"] holds the stored row.
+        """
+        if isinstance(file, (bytes, bytearray)) and not filename and framework in _FRAMEWORK_EXT:
+            filename = f"{name}{_FRAMEWORK_EXT[framework]}"
+        fname, content = _file_part(file, filename)
+        if feature_names:
+            input_schema = _feature_schema(feature_names, input_schema)
+        meta: dict[str, Any] = {"name": name, "description": description}
+        for k, v in (("framework", framework), ("version", version), ("input_schema", input_schema),
+                     ("output_schema", output_schema), ("tags", tags)):
+            if v is not None:
+                meta[k] = v
+        model = await self._call(
+            "POST",
+            "/api/ml-models",
+            files={"file": (fname, content, "application/octet-stream")},
+            data={"metadata": json.dumps(meta)},
+        )
+        self._ids.pop(name, None)
+        if model and model.get("is_active"):
+            self._ids[name] = str(model["id"])
+        return model
+
+    async def delete(self, name_or_id: str, *, all_versions: bool = False) -> dict[str, Any]:
+        """Delete one version, or with a name and all_versions=True every version of it."""
+        if all_versions and not self._client._UUID_RE.match(name_or_id):
+            ids = [str(m["id"]) for m in await self.list() if m.get("name") == name_or_id]
+            if not ids:
+                raise AbenixError(404, f"No ML model called {name_or_id}.", "NOT_FOUND")
+        else:
+            ids = [await self._id(name_or_id)]
+        for mid in ids:
+            await self._call("DELETE", f"/api/ml-models/{mid}")
+        self._ids = {n: i for n, i in self._ids.items() if i not in ids}
+        return {"deleted": ids}
+
+    async def predict(
+        self, name_or_id: str, input_data: Any, *, timeout: float | None = None
+    ) -> dict[str, Any]:
+        """Run the model on input_data, for example {"features": [...]} or a list of rows."""
+        mid = await self._id(name_or_id)
+        return await self._call(
+            "POST",
+            f"/api/ml-models/{mid}/predict",
+            json={"input_data": input_data},
+            timeout=timeout or self._client.timeout,
+        ) or {}
+
+    async def explain(
+        self,
+        name_or_id: str,
+        input_data: Any,
+        baseline: dict[str, Any] | list[float] | None = None,
+        *,
+        timeout: float | None = None,
+    ) -> dict[str, Any]:
+        """Per-feature contributions for one row, with the waterfall from baseline to prediction.
+
+        baseline is optional, the model's training means are used when it has them, zeros otherwise.
+        """
+        mid = await self._id(name_or_id)
+        body: dict[str, Any] = {"input_data": input_data}
+        if baseline is not None:
+            body["baseline"] = baseline
+        return await self._call(
+            "POST",
+            f"/api/ml-models/{mid}/explain",
+            json=body,
+            timeout=timeout or self._client.timeout,
+        ) or {}
+
+
+class LLMModelsClient:
+    """The model catalogue: which models exist, the default and how runs are billed."""
+
+    def __init__(self, client: "Abenix"):
+        self._client = client
+
+    async def list(self) -> dict[str, Any]:
+        """{"models": [...], "subscription": {...}, "default_model": "..."}."""
+        res = await _call(self._client, AbenixError, "GET", "/api/llm-models")
+        return res if isinstance(res, dict) else {"models": res or []}
+
+    async def billing(self) -> str:
+        """"subscription" when a Claude subscription serves the runs, otherwise "metered"."""
+        sub = (await self.list()).get("subscription") or {}
+        return "subscription" if sub.get("active") or sub.get("enabled") else "metered"
+
+
+class CodeAssetsClient:
+    """Upload code as an asset, ship new versions of it and run it without an agent in between."""
+
+    def __init__(self, client: "Abenix"):
+        self._client = client
+
+    async def _call(self, method: str, path: str, **kw: Any) -> Any:
+        return await _call(self._client, AbenixError, method, path, **kw)
+
+    async def update(self, name_or_id: str, **fields: Any) -> dict[str, Any]:
+        """Change an asset's details, such as description, input_schema or output_schema."""
+        aid = await self._id(name_or_id)
+        return await self._call("PUT", f"/api/code-assets/{aid}", json=fields)
+
+    async def list(self) -> list[dict[str, Any]]:
+        res = await self._client._get("/api/code-assets")
+        items = (res.get("data") if isinstance(res, dict) else res) or []
+        return items if isinstance(items, list) else []
+
+    async def _id(self, name_or_id: str) -> str:
+        if self._client._UUID_RE.match(name_or_id):
+            return name_or_id
+        for a in await self.list():
+            if a.get("name") == name_or_id:
+                return str(a["id"])
+        raise AbenixError(404, f"No code asset called {name_or_id}.", "NOT_FOUND")
+
+    async def get(self, name_or_id: str) -> dict[str, Any]:
+        return await self._call("GET", f"/api/code-assets/{await self._id(name_or_id)}")
+
+    def _upload_kw(
+        self, meta: dict[str, Any], source: Any, filename: str | None, git_url: str | None, git_ref: str | None
+    ) -> dict[str, Any]:
+        if source is None and not git_url:
+            raise ValueError("give a zip, a tar.gz, a folder or a git_url")
+        if git_url:
+            meta["git_url"] = git_url
+            if git_ref:
+                meta["git_ref"] = git_ref
+        # multipart even without a file, like the web form
+        files: dict[str, Any] = {"metadata": (None, json.dumps(meta))}
+        if source is not None:
+            fname, content = _archive_part(source, filename)
+            files["file"] = (fname, content, "application/octet-stream")
+        return {"files": files}
+
+    async def create(
+        self,
+        name: str,
+        source: str | os.PathLike[str] | bytes | None = None,
+        *,
+        description: str = "",
+        git_url: str | None = None,
+        git_ref: str | None = None,
+        filename: str | None = None,
+    ) -> dict[str, Any]:
+        """New asset from a zip, a tar.gz, a folder (zipped for you) or a git_url.
+
+        Analysis runs before this returns. Check status, ready or failed, and error on the row.
+        """
+        kw = self._upload_kw({"name": name, "description": description}, source, filename, git_url, git_ref)
+        return await self._call("POST", "/api/code-assets", **kw)
+
+    async def new_version(
+        self,
+        name_or_id: str,
+        source: str | os.PathLike[str] | bytes | None = None,
+        *,
+        git_url: str | None = None,
+        git_ref: str | None = None,
+        filename: str | None = None,
+    ) -> dict[str, Any]:
+        """Replace the code behind an asset. Agents keep the same asset id.
+
+        A version that does not analyse cleanly raises AbenixError 422 and the live version stays.
+        """
+        asset_id = await self._id(name_or_id)
+        kw = self._upload_kw({}, source, filename, git_url, git_ref)
+        return await self._call("POST", f"/api/code-assets/{asset_id}/versions", **kw)
+
+    async def run(
+        self,
+        code_asset_id: str,
+        input: Any = None,
+        *,
+        timeout_seconds: int | None = None,
+        timeout: float | None = None,
+    ) -> dict[str, Any]:
+        args: dict[str, Any] = {"code_asset_id": code_asset_id, "input": input}
+        if timeout_seconds:
+            args["timeout_seconds"] = timeout_seconds
+        return await self._client.tools.execute("code_asset", args, timeout=timeout)
 
 
 class KnowledgeClient:
@@ -968,6 +1349,43 @@ class KnowledgeClient:
         )
         res.raise_for_status()
         return res.json().get("data", {})
+
+    async def upload(
+        self,
+        kb_id: str,
+        file: str | bytes,
+        *,
+        filename: str | None = None,
+        content_type: str | None = None,
+    ) -> dict[str, Any]:
+        """Add a document to a collection. file is a path or the raw bytes.
+
+        Returns the document row. It is indexed in the background, poll
+        `documents` until its status is ready before searching.
+        """
+        import mimetypes
+        import os
+
+        if isinstance(file, (bytes, bytearray)):
+            if not filename:
+                raise ValueError("Pass a filename with raw bytes, its extension picks the parser.")
+            raw = bytes(file)
+        else:
+            with open(file, "rb") as fh:
+                raw = fh.read()
+            filename = filename or os.path.basename(file)
+        ctype = content_type or mimetypes.guess_type(filename)[0] or "application/octet-stream"
+        return await _call(
+            self._client,
+            AbenixError,
+            "POST",
+            f"/api/knowledge-bases/{kb_id}/upload",
+            files={"file": (filename, raw, ctype)},
+        )
+
+    async def documents(self, kb_id: str) -> list[dict[str, Any]]:
+        """Documents in a collection with their status: processing, ready, degraded or failed."""
+        return await _call(self._client, AbenixError, "GET", f"/api/knowledge-bases/{kb_id}/documents") or []
 
     async def graph_stats(self, kb_id: str) -> dict[str, Any]:
         """Get knowledge graph statistics for a knowledge base."""
@@ -1140,6 +1558,312 @@ class ChatClient:
         return res.json().get("data", {})
 
 
+class ActionsClient:
+    """Earned autonomy for actions an app takes itself: propose, wait for a person, report what ran and what happened."""
+
+    def __init__(self, client: "Abenix"):
+        self._client = client
+
+    async def _call(self, method: str, path: str, **kw: Any) -> Any:
+        return await _call(self._client, AbenixError, method, path, **kw)
+
+    async def propose(
+        self,
+        action_key: str,
+        arguments: dict[str, Any] | None = None,
+        *,
+        agent_id: str | None = None,
+        target: str | None = None,
+        intent: str | None = None,
+        prediction: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Ask before acting. decision is run, wait, watching or blocked, only run means go ahead."""
+        body: dict[str, Any] = {"action_key": action_key, "arguments": arguments or {}}
+        if agent_id:
+            body["agent_id"] = agent_id
+        if target is not None:
+            body["target"] = target
+        if intent:
+            body["intent"] = intent
+        if prediction is not None:
+            body["prediction"] = prediction
+        return await self._call("POST", "/api/autonomy/actions/propose", json=body)
+
+    async def wait(self, action_id: str, *, timeout_seconds: int = 60) -> dict[str, Any]:
+        """Block until a person decides or the timeout fires. Use the returned arguments, a reviewer may have edited them."""
+        return await _long_poll(
+            self._client,
+            f"/api/autonomy/actions/{action_id}/wait",
+            "timeout_s",
+            timeout_seconds,
+            lambda d: d.get("decision") != "wait",
+        )
+
+    async def executed(
+        self, action_id: str, ok: bool = True, *, result_preview: str | None = None
+    ) -> dict[str, Any]:
+        """Say the action ran, or failed. Starts the outcome clock when the action type has a probe."""
+        body: dict[str, Any] = {"ok": bool(ok)}
+        if result_preview is not None:
+            body["result_preview"] = result_preview
+        return await self._call("POST", f"/api/autonomy/actions/{action_id}/executed", json=body)
+
+    async def report_outcome(
+        self, action_id: str, value: float | int | str, *, note: str | None = None
+    ) -> dict[str, Any]:
+        """What actually happened. Scored against the prediction band."""
+        body: dict[str, Any] = {"value": value, "source": "api"}
+        if note:
+            body["note"] = note
+        return await self._call("POST", f"/api/autonomy/actions/{action_id}/outcome", json=body)
+
+    async def flag_harm(self, action_id: str, note: str) -> dict[str, Any]:
+        """Flag that the action did harm. Drops the agent to Asks first at once."""
+        if not (note or "").strip():
+            raise ValueError("Say what went wrong.")
+        return await self._call("POST", f"/api/autonomy/actions/{action_id}/harm", json={"note": note})
+
+    async def get(self, action_id: str) -> dict[str, Any]:
+        """One action with its card, outcome and score."""
+        return await self._call("GET", f"/api/autonomy/actions/{action_id}")
+
+
+class AutonomyClient:
+    """Read the autonomy ladder: levels, track records and the actions behind them."""
+
+    def __init__(self, client: "Abenix"):
+        self._client = client
+
+    async def _call(self, method: str, path: str, **kw: Any) -> Any:
+        return await _call(self._client, AbenixError, method, path, **kw)
+
+    async def overview(self) -> dict[str, Any]:
+        """Counts, every grant, what is ready to promote, recent demotions and unmanaged actions."""
+        return await self._call("GET", "/api/autonomy/overview") or {}
+
+    async def enrol(
+        self,
+        agent_id: str,
+        tool_name: str,
+        action_type: dict[str, Any],
+        *,
+        scope: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Put one of an agent's actions on the autonomy ladder, starting at Watching."""
+        body: dict[str, Any] = {
+            "agent_id": agent_id,
+            "tool_name": tool_name,
+            "action_type": action_type,
+        }
+        if scope is not None:
+            body["scope"] = scope
+        return await self._call("POST", "/api/autonomy/enrol", json=body)
+
+    async def grant(self, grant_id: str) -> dict[str, Any]:
+        """One grant with its next-step checklist, level history and chart points."""
+        return await self._call("GET", f"/api/autonomy/grants/{grant_id}")
+
+    async def grant_actions(
+        self,
+        grant_id: str,
+        *,
+        status: str | None = None,
+        limit: int = 50,
+        before: str | None = None,
+    ) -> dict[str, Any]:
+        """A page of the grant's actions, newest first. Pass next_before as before for the next page."""
+        params: dict[str, Any] = {"limit": limit}
+        if status:
+            params["status"] = status
+        if before:
+            params["before"] = before
+        return await self._call("GET", f"/api/autonomy/grants/{grant_id}/actions", params=params) or {}
+
+
+class ImprovementsClient:
+    """Fixes proposed from an agent's lessons, their proof, approval and watch."""
+
+    def __init__(self, client: "Abenix"):
+        self._client = client
+
+    async def _call(self, method: str, path: str, **kw: Any) -> Any:
+        return await _call(self._client, AbenixError, method, path, **kw)
+
+    async def list(
+        self, *, agent_id: str | None = None, state: str | None = None, limit: int = 50
+    ) -> list[dict[str, Any]]:
+        """Proposals you may see, newest first. state is one of drafting, proving, failed_proof,
+        awaiting_approval, approved, rejected, released, kept, rolled_back, superseded."""
+        params: dict[str, Any] = {"limit": limit}
+        if agent_id:
+            params["agent_id"] = agent_id
+        if state:
+            params["state"] = state
+        out = await self._call("GET", "/api/improvements/proposals", params=params) or {}
+        return out.get("items") or []
+
+    async def get(self, proposal_id: str) -> dict[str, Any]:
+        """One proposal with its diff, proof, progress and watch result."""
+        return await self._call("GET", f"/api/improvements/proposals/{proposal_id}")
+
+
+class LessonsClient:
+    """Tell an agent what it got wrong. Lessons feed proposals, they never change an agent on their own."""
+
+    def __init__(self, client: "Abenix"):
+        self._client = client
+
+    async def report(
+        self,
+        agent_id: str,
+        note: str,
+        *,
+        expected: str | None = None,
+        execution_id: str | None = None,
+        input: str | None = None,
+        output: str | None = None,
+    ) -> dict[str, Any]:
+        """Say why a run was wrong, and what it should have done when you know.
+        Without an execution_id, pass the input and output the app saw."""
+        if not (note or "").strip():
+            raise ValueError("Say what was wrong.")
+        body: dict[str, Any] = {"agent_id": agent_id, "note": note, "source": "sdk"}
+        for k, v in (("expected", expected), ("input", input), ("output", output)):
+            if v is not None:
+                body[k] = v
+        if execution_id:
+            body["execution_id"] = execution_id
+        return await _call(self._client, AbenixError, "POST", "/api/improvements/lessons", json=body)
+
+
+class FeedbackClient:
+    """Thumbs up or down on an answer, with an optional correction."""
+
+    def __init__(self, client: "Abenix"):
+        self._client = client
+
+    async def give(
+        self,
+        rating: int,
+        *,
+        execution_id: str | None = None,
+        conversation_id: str | None = None,
+        message_id: str | None = None,
+        agent_id: str | None = None,
+        correction: str | None = None,
+    ) -> dict[str, Any]:
+        """rating is 1 or -1. A thumbs down with a correction becomes a lesson with that as the right answer."""
+        if rating not in (1, -1):
+            raise ValueError("rating is 1 for thumbs up or -1 for thumbs down.")
+        body: dict[str, Any] = {"rating": rating}
+        for k, v in (
+            ("execution_id", execution_id),
+            ("conversation_id", conversation_id),
+            ("message_id", message_id),
+            ("agent_id", agent_id),
+            ("correction", correction),
+        ):
+            if v is not None:
+                body[k] = v
+        return await _call(self._client, AbenixError, "POST", "/api/improvements/feedback", json=body)
+
+
+class KillSwitchesClient:
+    """Stop agents, pipelines, tools, models and more across the tenant at once."""
+
+    def __init__(self, client: "Abenix"):
+        self._client = client
+
+    async def _call(self, method: str, path: str, **kw: Any) -> Any:
+        return await _call(self._client, AbenixError, method, path, **kw)
+
+    async def list(self, *, include_cleared: bool = False) -> list[dict[str, Any]]:
+        params = {"include_cleared": "true"} if include_cleared else None
+        data = await self._call("GET", "/api/governance/kill-switches", params=params) or {}
+        return data.get("switches") or []
+
+    async def set(self, scope: str, target: str, reason: str) -> dict[str, Any]:
+        """scope is all, agent, pipeline, tool, model, trigger, decision, source or improvements.
+
+        target is a name or id within the scope, * for all of them. Setting a switch that is
+        already on returns the existing one.
+        """
+        return await self._call(
+            "POST", "/api/governance/kill-switches", json={"scope": scope, "target": target or "*", "reason": reason}
+        )
+
+    async def clear(self, switch_id: str) -> dict[str, Any]:
+        return await self._call("POST", f"/api/governance/kill-switches/{switch_id}/clear")
+
+
+class ApiKeysClient:
+    """API keys of the calling user, or of the whole tenant for an admin."""
+
+    def __init__(self, client: "Abenix"):
+        self._client = client
+
+    async def _call(self, method: str, path: str, **kw: Any) -> Any:
+        return await _call(self._client, AbenixError, method, path, **kw)
+
+    async def list(self) -> list[dict[str, Any]]:
+        return await self._call("GET", "/api/api-keys") or []
+
+    async def create(
+        self,
+        name: str,
+        scopes: dict[str, Any] | list[str] | None = None,
+        *,
+        expires_at: str | None = None,
+        max_monthly_tokens: int | None = None,
+        max_monthly_cost: float | None = None,
+    ) -> dict[str, Any]:
+        """The new key. raw_key is only in this response, store it now.
+
+        scopes is {"can_delegate": True}, {"allowed_actions": [...]} or a list of actions.
+        """
+        if isinstance(scopes, list):
+            scopes = {"allowed_actions": scopes}
+        if scopes is not None and not ({"can_delegate", "allowed_actions"} & set(scopes)):
+            raise ValueError("scopes takes can_delegate or allowed_actions")
+        body: dict[str, Any] = {"name": name, "scopes": scopes}
+        for k, v in (("expires_at", expires_at), ("max_monthly_tokens", max_monthly_tokens),
+                     ("max_monthly_cost", max_monthly_cost)):
+            if v is not None:
+                body[k] = v
+        return await self._call("POST", "/api/api-keys", json=body)
+
+    async def revoke(self, key_id: str) -> dict[str, Any]:
+        return await self._call("DELETE", f"/api/api-keys/{key_id}")
+
+
+async def bootstrap_key(
+    base_url: str,
+    email: str,
+    password: str,
+    name: str,
+    *,
+    scopes: dict[str, Any] | list[str] | None = None,
+    timeout: float = 30.0,
+) -> str:
+    """Sign in once as a person and mint an API key for an app. Returns the raw key, shown only this once."""
+    async with httpx.AsyncClient(base_url=base_url.rstrip("/"), timeout=timeout) as http:
+        r = await http.post("/api/auth/login", json={"email": email, "password": password})
+        body = r.json() if r.content else {}
+        if r.status_code >= 400:
+            raise AbenixError(((body.get("error") or {}).get("message")) or f"sign-in failed ({r.status_code})")
+        token = (body.get("data") or {}).get("access_token")
+        if not token:
+            raise AbenixError("sign-in did not return an access token, two-factor accounts need a key made in Settings")
+        payload: dict[str, Any] = {"name": name}
+        if scopes is not None:
+            payload["scopes"] = scopes
+        r = await http.post("/api/api-keys", json=payload, headers={"Authorization": f"Bearer {token}"})
+        body = r.json() if r.content else {}
+        if r.status_code >= 400:
+            raise AbenixError(((body.get("error") or {}).get("message")) or f"key creation failed ({r.status_code})")
+        return (body.get("data") or {})["raw_key"]
+
+
 class Abenix:
     """Abenix Python SDK client."""
 
@@ -1168,12 +1892,23 @@ class Abenix:
         self.tools = ToolsClient(self)
         self.presets = PresetsClient(self)
         self.ml_models = MLModelsClient(self)
+        self.code_assets = CodeAssetsClient(self)
+        self.llm_models = LLMModelsClient(self)
         self.decisions = DecisionsClient(self)
         self.sources = SourcesClient(self)
         self.events = EventsClient(self)
+        self.actions = ActionsClient(self)
+        self.autonomy = AutonomyClient(self)
+        self.improvements = ImprovementsClient(self)
+        self.lessons = LessonsClient(self)
+        self.feedback = FeedbackClient(self)
+        self.kill_switches = KillSwitchesClient(self)
+        self.api_keys = ApiKeysClient(self)
+        # no default Content-Type, httpx sets it per request and a fixed
+        # JSON one broke multipart uploads through forge.http
         self._http = httpx.AsyncClient(
             base_url=self.base_url,
-            headers={"X-API-Key": self.api_key, "Content-Type": "application/json"},
+            headers={"X-API-Key": self.api_key},
             timeout=self.timeout,
         )
         # Public, authenticated http client. Standalone apps that need to hit
@@ -1371,7 +2106,12 @@ class Abenix:
                 if line.startswith("event: "):
                     current_event = line[7:].strip()
                 elif line.startswith("data: ") and current_event:
-                    data = json.loads(line[6:])
+                    try:
+                        data = json.loads(line[6:])
+                    except json.JSONDecodeError:
+                        data = {"text": line[6:]}
+                    if not isinstance(data, dict):
+                        data = {"value": data}
                     yield self._map_event(current_event, data)
                     current_event = ""
 
@@ -1475,6 +2215,12 @@ class Abenix:
 
     @staticmethod
     def _map_event(event: str, data: dict[str, Any]) -> StreamEvent:
+        ev = Abenix._map_known(event, data)
+        ev.data = data
+        return ev
+
+    @staticmethod
+    def _map_known(event: str, data: dict[str, Any]) -> StreamEvent:
         if event == "token":
             return StreamEvent(type="token", text=data.get("text"))
         if event == "tool_call":
@@ -1493,7 +2239,14 @@ class Abenix:
                 output_preview=data.get("output_preview"),
             )
         if event == "done":
-            return StreamEvent(type="done", input_tokens=data.get("input_tokens"), output_tokens=data.get("output_tokens"), cost=data.get("cost"), duration_ms=data.get("duration_ms"))
+            return StreamEvent(
+                type="done",
+                input_tokens=data.get("input_tokens"),
+                output_tokens=data.get("output_tokens"),
+                cost=data.get("cost"),
+                duration_ms=data.get("duration_ms"),
+                execution_id=data.get("execution_id"),
+            )
         if event == "error":
             return StreamEvent(
                 type="error",
@@ -1502,4 +2255,6 @@ class Abenix:
                 traceback=data.get("traceback"),
                 agent_id=data.get("agent_id"),
             )
-        return StreamEvent(type="error", message=f"Unknown event: {event}")
+        # moderation, reply_checking, node_trace and newer events pass through
+        # by name, reporting them as errors made a clean run look failed
+        return StreamEvent(type=event, message=data.get("message"))

@@ -2,6 +2,8 @@
 
 > A meeting is an agent execution surface. The bot joins a LiveKit room as your representative, answers only on the topics you allow, hands the rest back to you and declines everything else. Rehearse it first with typed turns, then run it live.
 
+Pages: **Meetings** in the sidebar (`/meetings`, needs the `use_meetings` feature), a meeting at `/meetings/{id}`, its rehearsal at `/meetings/{id}/rehearse` and the browser join page at `/meetings/{id}/join`. The API is [`apps/api/app/routers/meetings.py`](../../apps/api/app/routers/meetings.py). LiveKit is the only working room provider. The Teams and Zoom adapters are stubs.
+
 ---
 
 ## What needs which keys
@@ -32,7 +34,7 @@ The scope check runs in code. `meeting_listen` tags every question aimed at the 
 
 ## 2. Rehearse
 
-Press **Rehearse** on the meeting. The rehearsal page runs the meeting's own agent with the same tools, prompt and scope as live. Only the room is swapped for a rehearsal adapter.
+Press **Rehearse** on the meeting. It needs at least one topic under **Answers on**, and it is refused while the bot is in the live meeting. The rehearsal page runs the meeting's own agent with the same tools, prompt and scope as live. Only the room is swapped for a rehearsal adapter.
 
 - Type what a participant says, or dictate it with the mic. Dictation uses the browser's own speech recognition, so it costs nothing.
 - Each turn shows the scope decision, the persona notes cited, any question handed back to you and how long the reply took.
@@ -46,7 +48,7 @@ How it works. `POST /api/meetings/{id}/rehearsal` writes the meeting's scope und
 
 ## 3. Run it live
 
-1. Press **Join the room** to join from this browser. Your mic stays off until you turn it on. **Join from another LiveKit app instead** gives a server URL and token for any other client.
+1. Press **Join the room** to join from this browser. Your mic stays off until you turn it on. **Join from another LiveKit app instead** gives a server URL and token for any other client. Both come from `GET /api/meetings/livekit-token`, which mints a one hour token for you. Set `LIVEKIT_PUBLIC_URL` when the browser reaches LiveKit at a different address than the API pod does.
 2. On the meeting page press **Start bot**. It shows up in the participant list on both pages within a few seconds and posts a consent notice in the room chat.
 3. Ask it something by voice or in the room chat. The meeting page polls every 2 seconds and shows the transcript with the bot's replies and their latency, plus what the bot did step by step.
 4. Questions it hands back show under **The bot is waiting on you**.

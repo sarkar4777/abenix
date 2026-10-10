@@ -98,7 +98,11 @@ async def list_code_asset_invocations(
         q = q.where(CodeAssetInvocation.is_error.is_(False))
     elif status == "error":
         q = q.where(CodeAssetInvocation.is_error.is_(True))
-    q = q.order_by(CodeAssetInvocation.created_at.desc()).limit(limit).offset(offset)
+    q = (
+        q.order_by(CodeAssetInvocation.created_at.desc(), CodeAssetInvocation.id)
+        .limit(limit)
+        .offset(offset)
+    )
     rows = (await db.execute(q)).scalars().all()
     total_q = select(func.count(CodeAssetInvocation.id)).where(
         CodeAssetInvocation.code_asset_id == asset_id
@@ -246,7 +250,11 @@ async def list_all_ml_invocations(
         q = q.where(MLModelInvocation.is_error.is_(False))
     elif status == "error":
         q = q.where(MLModelInvocation.is_error.is_(True))
-    q = q.order_by(MLModelInvocation.created_at.desc()).limit(limit).offset(offset)
+    q = (
+        q.order_by(MLModelInvocation.created_at.desc(), MLModelInvocation.id)
+        .limit(limit)
+        .offset(offset)
+    )
     rows = (await db.execute(q)).scalars().all()
     items = [
         {
@@ -289,7 +297,11 @@ async def list_ml_model_invocations(
         q = q.where(MLModelInvocation.is_error.is_(False))
     elif status == "error":
         q = q.where(MLModelInvocation.is_error.is_(True))
-    q = q.order_by(MLModelInvocation.created_at.desc()).limit(limit).offset(offset)
+    q = (
+        q.order_by(MLModelInvocation.created_at.desc(), MLModelInvocation.id)
+        .limit(limit)
+        .offset(offset)
+    )
     rows = (await db.execute(q)).scalars().all()
     total = (
         await db.execute(
@@ -429,7 +441,7 @@ async def list_kb_query_invocations(
             KBQueryInvocation.kb_collection_id == collection_id,
             KBQueryInvocation.tenant_id == user.tenant_id,
         )
-        .order_by(KBQueryInvocation.created_at.desc())
+        .order_by(KBQueryInvocation.created_at.desc(), KBQueryInvocation.id)
         .limit(limit)
         .offset(offset)
     )

@@ -22,6 +22,8 @@ Problems show at the field as you type: unknown fact, wrong value type, a range 
 
 **Try it** runs your unsaved changes as you edit. It shows the outcome, which rule applied and the values it looked at. **Keep as test** turns the case into a golden test.
 
+A golden test matches its expected result exactly by default. Set **Match** to **Subset** on the Tests tab when only some keys matter. The test then passes when every expected key is in the result with the same value, and extra keys are ignored.
+
 Drafts save themselves. Two people can edit the same draft. Each sees the other on the page, and if one saves first the other's changes are combined rule by rule, with a choice offered only where both changed the same rule.
 
 ## Outcomes

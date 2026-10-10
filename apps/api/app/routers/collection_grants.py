@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sys
 import uuid
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -15,7 +16,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, get_db
-from app.core.permissions import is_admin
+from app.core.permissions import is_admin, parse_share_expiry, share_expiry_fields
 from app.core.responses import error, success
 from app.services.collection_access import assert_collection_access
 
@@ -44,6 +45,7 @@ class GrantAgentRequest(BaseModel):
 class GrantUserRequest(BaseModel):
     user_id: uuid.UUID
     permission: CollectionPermission = Field(default=CollectionPermission.READ)
+    expires_at: datetime | None = None
 
 
 async def _require_admin_on(
@@ -91,7 +93,7 @@ def _serialize_user_grant(g: UserCollectionGrant) -> dict[str, Any]:
         ),
         "granted_by": str(g.granted_by) if g.granted_by else None,
         "granted_at": g.granted_at.isoformat() if g.granted_at else None,
-        "expires_at": g.expires_at.isoformat() if g.expires_at else None,
+        **share_expiry_fields(getattr(g, "expires_at", None)),
     }
 
 
@@ -228,6 +230,9 @@ async def grant_user(
 
     # Recipient must exist and be in the same tenant. We don't expose
     # invite-by-email here — that's a separate flow on ResourceShare.
+    expires_at, exp_err = parse_share_expiry(body.expires_at)
+    if exp_err:
+        return error(exp_err, 400)
     recipient = await db.get(User, body.user_id)
     if recipient is None or recipient.tenant_id != user.tenant_id:
         return error("User not found in this tenant", 404)
@@ -245,11 +250,13 @@ async def grant_user(
             collection_id=collection_id,
             permission=body.permission,
             granted_by=user.id,
+            expires_at=expires_at,
         )
         db.add(grant)
     else:
         grant.permission = body.permission
         grant.granted_by = user.id
+        grant.expires_at = expires_at
 
     try:
         await db.commit()

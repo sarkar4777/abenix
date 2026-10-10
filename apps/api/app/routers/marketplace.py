@@ -127,15 +127,16 @@ async def browse_marketplace(
         base = base.where(Agent.category == category)
 
     if sort == "newest":
-        base = base.order_by(Agent.created_at.desc())
+        base = base.order_by(Agent.created_at.desc(), Agent.id)
     elif sort == "top_rated":
-        base = base.order_by(func.coalesce(func.avg(Review.rating), 0).desc())
+        base = base.order_by(func.coalesce(func.avg(Review.rating), 0).desc(), Agent.id)
     elif sort == "price_low" and paid:
-        base = base.order_by(func.coalesce(Agent.marketplace_price, 0).asc())
+        base = base.order_by(func.coalesce(Agent.marketplace_price, 0).asc(), Agent.id)
     else:
         base = base.order_by(
             func.count(Subscription.id.distinct()).desc(),
             func.coalesce(func.avg(Review.rating), 0).desc(),
+            Agent.id,
         )
 
     count_subq = base.subquery()

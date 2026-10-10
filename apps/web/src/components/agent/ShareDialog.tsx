@@ -2,7 +2,8 @@
 
 import { useEscapeToClose } from '@/hooks/useEscapeToClose';
 import { useState, useEffect } from 'react';
-import { Loader2, Share2, Trash2, X, Users, Mail, Shield } from 'lucide-react';
+import { Loader2, Share2, Trash2, X, Users, Mail } from 'lucide-react';
+import { ShareExpiryBadge, ShareExpiryInput, expiryToIso, isExpired } from '@/components/share/ShareExpiry';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -11,6 +12,8 @@ interface Share {
   shared_with_email: string;
   permission: string;
   created_at: string;
+  expires_at?: string | null;
+  expired?: boolean;
 }
 
 interface Props {
@@ -23,6 +26,7 @@ interface Props {
 export default function ShareDialog({ open, onClose, agentId, agentName }: Props) {
   const [email, setEmail] = useState('');
   const [permission, setPermission] = useState<'view' | 'execute' | 'edit'>('execute');
+  const [expiry, setExpiry] = useState('');
   const [shares, setShares] = useState<Share[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -56,12 +60,13 @@ export default function ShareDialog({ open, onClose, agentId, agentName }: Props
       const resp = await fetch(`${API_URL}/api/agents/${agentId}/share`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ email, permission }),
+        body: JSON.stringify({ email, permission, expires_at: expiryToIso(expiry) }),
       });
       const body = await resp.json();
       if (resp.ok) {
         setSuccess(`Shared with ${email}`);
         setEmail('');
+        setExpiry('');
         setShares(prev => [...prev.filter(s => s.id !== body.data.id), body.data]);
       } else {
         setError(body.error?.message || 'Failed to share');
@@ -126,6 +131,8 @@ export default function ShareDialog({ open, onClose, agentId, agentName }: Props
             </button>
           </div>
 
+          <ShareExpiryInput value={expiry} onChange={setExpiry} />
+
           {error && <p role="alert" data-testid="share-error" className="text-xs text-red-400">{error}</p>}
           {success && <p data-testid="share-success" className="text-xs text-emerald-400">{success}</p>}
           {shares.length === 0 && !error && (
@@ -136,13 +143,14 @@ export default function ShareDialog({ open, onClose, agentId, agentName }: Props
             <div className="space-y-2">
               <p className="text-[10px] text-slate-500 uppercase tracking-wider">Shared with</p>
               {shares.map(s => (
-                <div key={s.id} data-testid="share-row" className="flex items-center justify-between p-2 bg-slate-900/30 rounded-lg">
-                  <div className="flex items-center gap-2">
+                <div key={s.id} data-testid="share-row" data-email={s.shared_with_email} className={`flex items-center justify-between gap-2 p-2 bg-slate-900/30 rounded-lg ${isExpired(s) ? 'opacity-70' : ''}`}>
+                  <div className="flex flex-wrap items-center gap-2 min-w-0">
                     <Users className="w-3 h-3 text-slate-500" />
                     <span className="text-xs text-slate-300">{s.shared_with_email}</span>
                     <span className={`text-[9px] px-1.5 py-0.5 rounded ${permColors[s.permission as keyof typeof permColors] || 'text-slate-400'} bg-slate-800`}>
                       {s.permission}
                     </span>
+                    <ShareExpiryBadge row={s} />
                   </div>
                   <button onClick={() => revoke(s.id)} aria-label={`Revoke access for ${s.shared_with_email}`} className="text-red-400 hover:text-red-300">
                     <Trash2 className="w-3 h-3" />

@@ -687,7 +687,9 @@ async def get_per_user_analytics(
                 "token_allowance": r.token_monthly_allowance,
                 "tokens_used": r.tokens_used_this_month or 0,
                 "cost_limit": (
-                    float(r.cost_monthly_limit) if r.cost_monthly_limit else None
+                    float(r.cost_monthly_limit)
+                    if r.cost_monthly_limit is not None
+                    else None
                 ),
                 "cost_used": float(r.cost_used_this_month or 0),
                 "usage_pct": (
@@ -710,10 +712,14 @@ async def get_per_user_analytics(
             {
                 "id": str(user.id),
                 "email": user.email,
+                "full_name": user.full_name,
+                "role": user.role.value,
                 "token_allowance": user.token_monthly_allowance,
                 "tokens_used": user.tokens_used_this_month or 0,
                 "cost_limit": (
-                    float(user.cost_monthly_limit) if user.cost_monthly_limit else None
+                    float(user.cost_monthly_limit)
+                    if user.cost_monthly_limit is not None
+                    else None
                 ),
                 "cost_used": float(user.cost_used_this_month or 0),
                 "usage_pct": (

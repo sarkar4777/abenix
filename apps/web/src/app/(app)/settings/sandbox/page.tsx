@@ -5,6 +5,7 @@ import { Box, AlertCircle, Check, Loader2, Plus, X, ShieldOff, Wifi, WifiOff, Po
 import { usePageTitle } from '@/hooks/usePageTitle';
 import { apiFetch } from '@/lib/api-client';
 import PageHeader from '@/components/layout/PageHeader';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface SandboxConfig {
   effective: { enabled: boolean; allow_network: boolean; allowed_images: string[] };
@@ -14,6 +15,8 @@ interface SandboxConfig {
 
 export default function SandboxSettingsPage() {
   usePageTitle('Sandbox Settings');
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'admin';
   const [cfg, setCfg] = useState<SandboxConfig | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -102,6 +105,12 @@ export default function SandboxSettingsPage() {
         storageKey="settings-sandbox"
       />
 
+      {!isAdmin && user && (
+        <p role="status" data-testid="sandbox-readonly" className="rounded-lg border border-slate-700/60 bg-slate-800/40 px-3 py-2 text-xs text-slate-300">
+          You can see the sandbox settings. Only a workspace admin can change them.
+        </p>
+      )}
+
       {err && (
         <div className="rounded-lg bg-red-500/10 border border-red-500/30 text-red-300 text-sm px-4 py-2.5 flex items-center gap-2">
           <AlertCircle className="w-4 h-4" /> {err}
@@ -125,7 +134,8 @@ export default function SandboxSettingsPage() {
           <div className="flex flex-col items-end gap-2">
             <button
               onClick={flipEnabled}
-              disabled={saving}
+              disabled={saving || !isAdmin}
+              data-testid="sandbox-enabled"
               role="switch"
               aria-checked={!!cfg?.effective.enabled}
               aria-labelledby="sandbox-enabled-label"
@@ -168,7 +178,8 @@ export default function SandboxSettingsPage() {
           <div className="flex flex-col items-end gap-2">
             <button
               onClick={flipNetwork}
-              disabled={saving}
+              disabled={saving || !isAdmin}
+              data-testid="sandbox-network"
               role="switch"
               aria-checked={!!cfg?.effective.allow_network}
               aria-labelledby="sandbox-network-label"
@@ -204,7 +215,7 @@ export default function SandboxSettingsPage() {
           {(cfg?.effective.allowed_images || []).map((img) => (
             <span key={img} className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-slate-800 border border-slate-700 text-xs text-slate-200 font-mono">
               {img}
-              <button onClick={() => removeImage(img)} disabled={saving} className="text-slate-500 hover:text-red-400">
+              <button onClick={() => removeImage(img)} disabled={saving || !isAdmin} aria-label={`Remove ${img}`} data-testid="sandbox-remove-image" className="text-slate-500 hover:text-red-400 disabled:opacity-40">
                 <X className="w-3 h-3" />
               </button>
             </span>
@@ -218,6 +229,8 @@ export default function SandboxSettingsPage() {
             ref={imageInput}
             type="text"
             aria-label="Container image to allow"
+            data-testid="sandbox-image-input"
+            disabled={!isAdmin}
             value={newImage}
             onChange={(e) => setNewImage(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && addImage()}
@@ -226,7 +239,8 @@ export default function SandboxSettingsPage() {
           />
           <button
             onClick={addImage}
-            disabled={saving || !newImage.trim()}
+            disabled={saving || !newImage.trim() || !isAdmin}
+            data-testid="sandbox-add-image"
             className="px-3 py-2 rounded-lg bg-cyan-500/20 border border-cyan-500/40 text-cyan-300 text-xs font-medium hover:bg-cyan-500/30 disabled:opacity-50 inline-flex items-center gap-1"
           >
             <Plus className="w-3 h-3" /> Add

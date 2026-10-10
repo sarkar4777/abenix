@@ -6,29 +6,31 @@ Source: [`packages/db/models/agent.py`](../../packages/db/models/agent.py)
 
 ## `agents`
 
-One row per agent or pipeline. Tenant-scoped through `TenantMixin`, so every query the API
-issues is filtered by `tenant_id` and nothing crosses a tenant boundary by
-accident.
+One row per agent or pipeline. Tenant-scoped through `TenantMixin`. The API filters
+every query by `tenant_id`.
 
 | Column | Type | Notes |
 |---|---|---|
 | `id` | uuid | Primary key. |
 | `tenant_id` | uuid | Owning tenant. |
-| `creator_id` | uuid | User who created it. NULL for platform-seeded agents. |
-| `name` | text | Display name. |
-| `slug` | text | URL-safe identifier. The SDK and pipeline `agent_slug` references resolve against this. |
+| `creator_id` | uuid | User who created it. Foreign key to `users`, NOT NULL, indexed. |
+| `name` | varchar(255) | Display name. |
+| `slug` | varchar(255) | URL-safe identifier, indexed. The SDK and pipeline `agent_slug` references resolve against this. |
 | `description` | text | Shown on the agent card and info page. |
-| `system_prompt` | text | The prompt. Can be long, so it is `Text` rather than a bounded string. |
+| `system_prompt` | text | The prompt. |
 | `model_config` | jsonb | Model, sampling, iteration cap, tool list, pipeline nodes, risk tier. Mapped in Python as `model_config_` because `model_config` collides with a Pydantic attribute. |
-| `agent_type` | enum | `custom`, `oob`, `vertical`. `oob` are the seeded out-of-the-box agents. |
-| `category` | text | Grouping for the marketplace. |
-| `status` | enum | `draft`, `pending_review`, `active`, `rejected`, `archived`. |
+| `agent_type` | enum `agent_type` | `custom` (default), `oob`, `vertical`. `oob` are the seeded out-of-the-box agents. |
+| `category` | varchar(100) | Grouping for the marketplace. Nullable. |
+| `status` | enum `agent_status` | `draft` (default), `pending_review`, `active`, `rejected`, `archived`. |
 | `rejection_reason` | text | Set when marketplace review rejects it. |
-| `is_published` / `marketplace_price` | bool / numeric | Marketplace listing. |
-| `version` / `version_tag` | text | Version label and canary tag, see below. |
+| `is_published` / `marketplace_price` | bool / numeric(10,2) | Marketplace listing. |
+| `version` / `version_tag` | varchar(50) | Version label (default `0.1.0`) and canary tag, see below. |
 | `parent_agent_id` | uuid | Set on a canary variant, pointing at the agent it was branched from. |
-| `traffic_weight` | float | Share of traffic for a canary variant. |
-| `icon_url` | text | Card icon. |
+| `traffic_weight` | numeric(5,2) | Share of traffic for a canary variant. Server default 100. |
+| `icon_url` | varchar(500) | Card icon. |
+| `created_at` / `updated_at` | timestamptz | From `TimestampMixin`. |
+
+Indexes: `ix_agents_tenant_created` on `(tenant_id, created_at)`, `ix_agents_status` on `(tenant_id, status)`.
 
 ### `model_config`
 
@@ -51,14 +53,14 @@ model_config:
     - moderation_vet
 ```
 
-`tools` is the enabled set for this agent. A tool that exists in the registry
-but is missing from this list is rejected at validation with "exists but is not
-enabled on this agent" rather than silently ignored.
+`tools` is the enabled set for this agent. Pipeline validation flags a tool node
+whose tool is missing from this list ("exists but is not enabled on this agent"),
+and execution refuses it.
 
 `model` is what the agent requests, not necessarily what runs. When subscription
 mode is exclusive the router pins every call to the configured subscription
-model, and the executions row records both, see
-[02-executions](02-executions.md).
+model. The executions row records both, see
+[02-executions](02-executions.md#tokens-cost-and-which-model-actually-ran).
 
 `risk_tier` is read by the `executions_provenance` trigger, by the activation check
 (an output schema and an allowed model may be required) and by the eval gate. See
@@ -72,27 +74,29 @@ as valid template targets.
 
 ## Revisions
 
-Every change to an agent writes an `agent_revisions` row, all through
-`app.services.agent_revisions.record_revision`. The row joins the change's own
-transaction, so when it cannot be written the change is refused with 500
+Every change to an agent writes an `agent_revisions` row through
+[`record_revision`](../../apps/api/app/services/agent_revisions.py). The row joins the
+change's own transaction, so when it cannot be written the change is refused with 500
 `REVISION_WRITE_FAILED` and nothing is saved. The paths are a builder save
-(`PUT`), publish, revert, import, duplicate, and a healing patch applied or
-rolled back.
+(`PUT`), publish, revert, import, duplicate, a healing patch applied or rolled
+back, and an improvement proposal released.
+
+The table has no `tenant_id` and only a `created_at` timestamp.
 
 | Column | Notes |
 |---|---|
-| `agent_id` | The agent. |
+| `agent_id` | The agent. Foreign key to `agents`, indexed. |
 | `revision_number` | Monotonic per agent. The provenance trigger stamps the latest one on each run as `executions.agent_revision`. |
 | `changed_by` | User. |
-| `change_type` | `config_update`, `publish`, `revert`, `import`, `duplicate`, `healing_patch` or `healing_rollback`. |
+| `change_type` | varchar(50). `config_update`, `publish`, `revert`, `import`, `duplicate`, `healing_patch`, `healing_rollback`, `improvement`, or `prompt_update` when the self-improvement sample is reset. |
 | `previous_state` / `new_state` | jsonb snapshots of name, description, prompt, `model_config`, category, status. |
 | `diff_summary` | Short human summary of what changed. |
-| `source` | Where the change came from: `edit`, `healing`, `improvement`, `revert` or `import`. Default `edit`. |
-| `proposal_id` | The improvement proposal a release came from, null otherwise. The version history links it to its proof. |
+| `source` | varchar(20). Where the change came from, `edit`, `healing`, `improvement`, `revert` or `import`. Default `edit`. Added by `selfimp0001`. |
+| `proposal_id` | The improvement proposal a release came from, null otherwise. No foreign key. Added by `selfimp0001`. |
 
-The version history on the agent's info page shows each revision's source as
-a badge, a "See the proof" link when `proposal_id` is set, and Restore with a
-confirmation. A revert never waits on the eval gate, it is the way back.
+The version history dialog shows each revision's source as a badge, a "See the
+proof" link when `proposal_id` is set, and Restore with a confirmation. A revert
+never waits on the eval gate.
 
 ## Canary variants
 
@@ -110,14 +114,15 @@ them on every run and a join would be on the hot path.
 
 | Column | Effect |
 |---|---|
-| `per_execution_cost_limit` / `daily_cost_limit` / `daily_budget_usd` | Spend caps, 0 or less means none. `daily_cost_limit` caps the agent's spend across all callers per UTC day, `daily_budget_usd` caps one tenant's spend on it per UTC day. A run over either is refused with 429 `BUDGET_EXCEEDED`. `per_execution_cost_limit` caps one run: an agent stops with `BUDGET_EXCEEDED` when it wants another step after reaching it, a pipeline fails its next node. The builder and `/admin/scaling` both edit `daily_budget_usd`. See [Spend caps](../02-runtime/00-agent-execution.md#spend-caps). Pausing an agent from `/admin/scaling` sets `status = archived`. |
-| `runtime_pool` | Which agent-runtime pool executes it, default `default`. `inline` keeps the run on the API pod. |
-| `min_replicas` / `max_replicas` / `concurrency_per_replica` | Per-pool KEDA bounds. |
-| `rate_limit_qps` | Per-agent throttle. |
-| `dedicated_mode` | Gives the agent its own pod instead of sharing a pool. |
+| `per_execution_cost_limit` / `daily_cost_limit` / `daily_budget_usd` | numeric(10,4) / numeric(10,2) / numeric(10,2), all nullable. Spend caps, NULL or 0 or less means none. `daily_cost_limit` caps the agent's spend across all callers per UTC day, `daily_budget_usd` caps one tenant's spend on it per UTC day. A run over either is refused with 429 `BUDGET_EXCEEDED`. `per_execution_cost_limit` caps one run. An agent stops with `BUDGET_EXCEEDED` when it wants another step after reaching it, a pipeline fails its next node. The builder and `/admin/scaling` both edit `daily_budget_usd`. See [Spend caps](../02-runtime/00-agent-execution.md#spend-caps). Pausing an agent from `/admin/scaling` sets `status = archived`. |
+| `runtime_pool` | varchar(40), default `default`. Which agent-runtime pool executes it. `inline` keeps the run on the API pod. |
+| `min_replicas` / `max_replicas` / `concurrency_per_replica` | Defaults 1, 10 and 3. Stored as a sizing note and not applied: pools are shared, so the chart's `scaling.pools` sets their bounds and concurrency. The admin and builder screens say so. |
+| `rate_limit_qps` | Per-agent throttle, applied on `POST /api/agents/{id}/execute` as a Redis token bucket with a one-second burst. Over it the call gets 429 `RATE_LIMITED` and a `Retry-After` header. NULL means unlimited. |
+| `dedicated_mode` | bool, default false. Gives the agent its own pod instead of sharing a pool. Added by `w3x4y5z6a7b8`. |
 
-The scaling columns and `daily_budget_usd` are added by idempotent `ALTER TABLE`
-statements in the API startup hook rather than by a migration. See
+`runtime_pool`, the replica and concurrency columns, `rate_limit_qps` and
+`daily_budget_usd` are also added by idempotent `ALTER TABLE` statements in the
+API startup hook, so an older database gains them without a migration. See
 [02-runtime/08-queue-scaling](../02-runtime/08-queue-scaling.md) for how the
 pool values become a `ScaledObject`.
 
@@ -152,8 +157,8 @@ Full node grammar and the templating rules are in
 
 ### `pipeline_states`
 
-A key/value store scoped to one pipeline (`agent_id`, `key`, jsonb `value`), so a
-pipeline can carry data from one run to the next.
+A key/value store scoped to one pipeline (`agent_id`, `key`, jsonb `value`), unique on
+`(agent_id, key)`, so a pipeline can carry data from one run to the next.
 
 ---
 
@@ -175,6 +180,6 @@ pipeline can carry data from one run to the next.
 
 ## See also
 
-- [00-overview](00-overview.md) — the data model as a whole
-- [02-runtime/00-agent-execution](../02-runtime/00-agent-execution.md) — what happens on a run
-- [08-howto/02-add-an-agent](../08-howto/02-add-an-agent.md) — adding one
+- [00-overview](00-overview.md): the data model as a whole
+- [02-runtime/00-agent-execution](../02-runtime/00-agent-execution.md): what happens on a run
+- [08-howto/02-add-an-agent](../08-howto/02-add-an-agent.md): adding one

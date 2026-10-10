@@ -6,17 +6,30 @@ import {
   Bot, Plug, Workflow, FileText, Zap, ShieldCheck, AlertTriangle,
   CircleDot,
 } from 'lucide-react';
+import { useState } from 'react';
 import { usePageTitle } from '@/hooks/usePageTitle';
 import { useApi } from '@/hooks/useApi';
+import { apiFetch } from '@/lib/api-client';
+import { toastError, toastSuccess } from '@/stores/toastStore';
 import PageHeader from '@/components/layout/PageHeader';
+import TwoFactorPanel from '@/components/settings/TwoFactorPanel';
 
 interface Session {
   id: string;
   ip_address: string | null;
   user_agent: string | null;
-  action: string;
+  method: string;
   created_at: string;
+  last_seen_at: string | null;
+  current: boolean;
 }
+
+const METHOD_LABEL: Record<string, string> = {
+  password: 'password',
+  'password+2fa': 'password and code',
+  sso: 'single sign-on',
+  invite: 'invite link',
+};
 
 interface ActivityItem {
   id: string;
@@ -63,7 +76,15 @@ const ACTION_META: Record<string, { label: string; icon: any; tone: string }> = 
   'login':              { label: 'Signed in',                icon: LogIn,        tone: 'text-emerald-300' },
   'user.login':         { label: 'Signed in',                icon: LogIn,        tone: 'text-emerald-300' },
   'logout':             { label: 'Signed out',               icon: LogIn,        tone: 'text-slate-400' },
+  'session.revoked':    { label: 'Signed out another device', icon: LogIn,       tone: 'text-rose-300' },
   'password.changed':   { label: 'Password changed',         icon: Key,          tone: 'text-amber-300' },
+  'password.reset':     { label: 'Password reset by email',  icon: Key,          tone: 'text-amber-300' },
+  'password.reset_requested': { label: 'Password reset link sent', icon: Key,    tone: 'text-slate-400' },
+  '2fa.enabled':        { label: 'Two-step sign-in turned on', icon: ShieldCheck, tone: 'text-emerald-300' },
+  '2fa.disabled':       { label: 'Two-step sign-in turned off', icon: AlertTriangle, tone: 'text-rose-300' },
+  'user.2fa_failed':    { label: 'Wrong sign-in code',       icon: AlertTriangle, tone: 'text-rose-300' },
+  'user.login_sso':     { label: 'Signed in with SSO',       icon: LogIn,        tone: 'text-emerald-300' },
+  'sso.configured':     { label: 'Single sign-on saved',     icon: ShieldCheck,  tone: 'text-cyan-300' },
   'profile.updated':    { label: 'Profile updated',          icon: UserCog,      tone: 'text-cyan-300' },
   'api_key.created':    { label: 'API key created',          icon: Key,          tone: 'text-amber-300' },
   'api_key.revoked':    { label: 'API key revoked',          icon: Key,          tone: 'text-rose-300' },
@@ -129,8 +150,23 @@ function dedupeConsecutive(items: ActivityItem[]): Array<ActivityItem & { count?
 
 export default function SecurityPage() {
   usePageTitle('Security');
-  const { data: sessions, isLoading: loadingSessions } =
+  const { data: sessions, isLoading: loadingSessions, mutate: reloadSessions } =
     useApi<Session[]>('/api/settings/sessions');
+  const [revoking, setRevoking] = useState<string | null>(null);
+
+  const revoke = async (id: string) => {
+    setRevoking(id);
+    try {
+      await apiFetch(id === 'others' ? '/api/settings/sessions/revoke-others' : `/api/settings/sessions/${id}`, {
+        method: id === 'others' ? 'POST' : 'DELETE',
+      });
+      toastSuccess(id === 'others' ? 'Every other device is signed out' : 'That device is signed out');
+      reloadSessions();
+    } catch (e) {
+      toastError(e instanceof Error ? e.message : 'Could not sign that device out');
+    }
+    setRevoking(null);
+  };
   const { data: activity, isLoading: loadingActivity } =
     useApi<ActivityItem[]>('/api/settings/activity');
 
@@ -173,50 +209,80 @@ export default function SecurityPage() {
       <PageHeader
         title="Security"
         icon={Lock}
-        purpose="Recent sign-ins to your account and a log of changes made in this workspace. For everyone."
+        purpose="Where you are signed in, two-step sign-in, and a log of changes made in this workspace. For everyone."
         primaryAction={{ label: 'Change password', icon: Key, href: '/settings/profile' }}
         steps={[
-          'Check the recent sign-ins. The top one is you, right now.',
-          'If a sign-in looks wrong, change your password and revoke your API keys.',
+          'Check where you are signed in. The device marked This device is the one you are using.',
+          'Sign out any device you do not recognise, then change your password.',
+          'Turn on two-step sign-in so a stolen password is not enough.',
           'The activity list shows the last 25 changes, with repeats folded together.',
         ]}
         docSlug="01-architecture/07-governance"
         storageKey="settings-security"
       />
 
-      {/* Recent Sessions */}
-      {sessionsList.length > 0 && (
-        <div className="bg-slate-800/30 border border-slate-700/50 rounded-xl p-6">
-          <div className="flex items-center gap-2 mb-4">
-            <Lock className="w-4 h-4 text-cyan-400" />
-            <h2 className="text-sm font-semibold text-white">Recent sign-ins</h2>
-            <span className="ml-auto text-[11px] text-slate-500">{sessionsList.length} entries</span>
-          </div>
-          <div className="space-y-3">
-            {sessionsList.map((session, i) => {
+      {/* Signed-in devices */}
+      <section className="bg-slate-800/30 border border-slate-700/50 rounded-xl p-4 sm:p-6" data-testid="sessions-panel" aria-labelledby="sessions-title">
+        <div className="flex flex-wrap items-center gap-2 mb-4">
+          <Lock className="w-4 h-4 text-cyan-400" aria-hidden="true" />
+          <h2 id="sessions-title" className="text-sm font-semibold text-white">Where you are signed in</h2>
+          <span className="text-[11px] text-slate-500">{sessionsList.length} {sessionsList.length === 1 ? 'device' : 'devices'}</span>
+          {sessionsList.length > 1 && (
+            <button
+              type="button"
+              onClick={() => revoke('others')}
+              disabled={revoking !== null}
+              data-testid="sessions-revoke-others"
+              className="ml-auto text-xs px-2.5 py-1 rounded-lg border border-slate-600 text-slate-200 hover:border-rose-500/60 disabled:opacity-50"
+            >
+              Sign out all other devices
+            </button>
+          )}
+        </div>
+        {sessionsList.length === 0 ? (
+          <p className="text-xs text-slate-500">No sign-ins are recorded for this browser yet. Sign out and in again to see it here.</p>
+        ) : (
+          <ul className="space-y-3">
+            {sessionsList.map((session) => {
               const ua = parseUA(session.user_agent);
               const Icon = ua.icon;
+              const seen = session.last_seen_at || session.created_at;
               return (
-                <div key={session.id} className="flex items-center gap-3">
+                <li key={session.id} className="flex items-center gap-3" data-testid="session-row">
                   <div className="w-9 h-9 rounded-lg bg-slate-700/30 flex items-center justify-center shrink-0">
-                    <Icon className="w-4 h-4 text-slate-400" />
+                    <Icon className="w-4 h-4 text-slate-400" aria-hidden="true" />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-xs text-white">{ua.browser} on {ua.os}</p>
-                    <p className="text-[11px] text-slate-500">
+                    <p className="text-xs text-white truncate">{ua.browser} on {ua.os}</p>
+                    <p className="text-[11px] text-slate-500 sm:truncate">
                       {formatIP(session.ip_address) || 'Unknown IP'}
-                      {session.created_at ? ` · ${timeAgo(session.created_at)}` : ''}
+                      {` · signed in with ${METHOD_LABEL[session.method] || session.method}`}
+                      {session.created_at ? ` ${timeAgo(session.created_at)}` : ''}
+                      {seen ? ` · last active ${timeAgo(seen)}` : ''}
                     </p>
                   </div>
-                  {i === 0 && (
-                    <span className="text-[10px] text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 px-1.5 py-0.5 rounded">Current</span>
+                  {session.current ? (
+                    <span className="text-[10px] text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 px-1.5 py-0.5 rounded shrink-0">This device</span>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => revoke(session.id)}
+                      disabled={revoking !== null}
+                      data-testid="session-revoke"
+                      aria-label={`Sign out ${ua.browser} on ${ua.os}`}
+                      className="text-[11px] px-2 py-1 rounded border border-slate-600 text-slate-300 hover:border-rose-500/60 hover:text-rose-200 disabled:opacity-50 shrink-0"
+                    >
+                      {revoking === session.id ? 'Signing out...' : 'Sign out'}
+                    </button>
                   )}
-                </div>
+                </li>
               );
             })}
-          </div>
-        </div>
-      )}
+          </ul>
+        )}
+      </section>
+
+      <TwoFactorPanel />
 
       {/* Activity Log */}
       <div className="bg-slate-800/30 border border-slate-700/50 rounded-xl p-6">

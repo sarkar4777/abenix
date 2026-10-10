@@ -1,0 +1,9 @@
+{
+  "name": "abenix-sdk-js-e2e",
+  "private": true,
+  "type": "module",
+  "description": "JS SDK end to end suite, installs the packed SDK and runs it against a live API",
+  "scripts": {
+    "test": "node --test --test-concurrency=1 --test-timeout=600000 sdk.e2e.test.mjs"
+  }
+}

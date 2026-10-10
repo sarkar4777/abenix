@@ -26,13 +26,15 @@ If the API says `can_edit: false`, the page shows a read-only banner with a link
 - agent name
 - the mode toggle
 - the validation chip (Validating, N errors, N warnings, or Valid). Clicking errors or warnings jumps to the first bad node
-- Run pipeline (Pipeline mode, saved agents only)
+- Run Pipeline (Pipeline mode, saved agents only). When the pipeline declares input parameters, [`RunInputsDialog`](../../apps/web/src/components/builder/pipeline/RunInputsDialog.tsx) asks for them first
 - Test, which opens `/agents/{id}/chat`
-- the AI checks chip, the model AI Validate and Build with AI use (read only, set under Admin)
+- the AI checks chip, the model AI Validate and Build with AI use. It is read only here and comes from the `builder_model` setting an admin sets
 - AI Validate and Build with AI
-- Save Draft and Publish. Publish needs a saved draft
+- Save Draft and Publish. Publish needs a saved draft and opens [`PublishDialog`](../../apps/web/src/components/builder/PublishDialog.tsx), where you pick who sees the agent
 
 Once the agent has an id, every change autosaves 500ms after it is made.
+
+`/builder` has no `PageHeader`. The top bar stands in for it and carries the same test ids (`page-header`, `page-purpose`, and `page-primary-action` around Save Draft and Publish), so the lostness gate checks it like any other page, see [08-howto/03-add-a-page](../08-howto/03-add-a-page.md#passing-the-lostness-gate).
 
 ---
 
@@ -146,8 +148,10 @@ Agent mode has no DAG, so the chip only matters in Pipeline mode.
 | `/builder?tool=code_asset&asset_id={uuid}` | New agent with `code_asset` pre-added and `parameter_defaults.code_asset_id` set to that id |
 | `/builder?atlas={graphId}` | New agent with `atlas_search_grounded` and `atlas_describe`, bound to that graph |
 | `/builder?kb={collectionId}` | New agent with `knowledge_search`, bound to that collection |
+| `/builder?tool={slug}` | New agent with any other tool pre-added, for example `portfolio_<domain>` from Portfolio Schemas. `name` and `prompt` prefill the agent name and system prompt |
+| `/builder?tool=persona_rag&persona_scope={scope}` | New persona agent with `persona_rag` pinned to that scope, default `self` |
 
-`atlas` and `kb` can be combined. These power the "Use in Agent" buttons on ML Models, Code Runner, Atlas and Knowledge Bases.
+`atlas` and `kb` can be combined. These power the "Use in an agent" buttons on ML Models, Code Runner, Atlas, Knowledge Bases, Portfolio Schemas, Persona KB, Decisions, Source Watch, Connectors and the Tools Catalogue.
 
 ---
 

@@ -695,6 +695,7 @@ async def create_proposal(
                 "facts": t.facts,
                 "expected_outcome": t.expected_outcome,
                 "expected": t.expected,
+                "match": t.match_mode or "exact",
                 "as_of": t.as_of,
             }
             for t in tests

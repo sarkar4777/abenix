@@ -45,14 +45,15 @@ Every tool subclasses `BaseTool` in [`engine/tools/base.py`](../../apps/agent-ru
 3. **`input_schema`**, a JSON Schema for the arguments. It goes to the model as is. The runtime does not validate arguments against it, so `execute` checks what it needs.
 4. **`async def execute(self, arguments) -> ToolResult`**, which does the work.
 
-Two optional class attributes:
+Three more class attributes:
 
 | Attribute | Default | Meaning |
 |---|---|---|
 | `config_fields` | `()` | The keys and settings the tool reads. See [Configuration and credentials](#configuration-and-credentials) |
-| `risk_tier` | `"low"` | `low`, `medium`, `high` or `critical`. See [Risk tiers and kill switches](#risk-tiers-and-kill-switches) |
+| `risk_tier` | `"low"` | `low`, `medium`, `high` or `critical`. The lint requires every tool to declare it. See [Risk tiers and kill switches](#risk-tiers-and-kill-switches) |
+| `effect` | `None` | An `Effect` describing what the tool changes. The lint requires it for medium tier and above. Use `READ_ONLY` for a tool that only reads |
 
-`to_dict()` returns `name`, `description`, `input_schema`, `config_fields` and `risk_tier`. That is what the catalogue API reads.
+`to_dict()` returns `name`, `description`, `input_schema`, `config_fields` and `risk_tier`. `ToolRegistry.list_all()` passes it through `autonomy.describe` to build the tool list the executor gives the model. The catalogue API reads the class attributes directly.
 
 ---
 
@@ -69,7 +70,7 @@ class ToolResult:
 Those are the only three fields.
 
 - **`content`** is what the model reads next. The executor cuts it to 12,000 characters (`MAX_TOOL_RESULT_CHARS`) before it goes into the context, and keeps at most 8,000 characters on the execution row (`TOOL_RESULT_PERSIST_CHARS`).
-- **`metadata`** is structured data for the trace. It is stored on the run's node trace and a compact projection goes on the tool call entry as `output_summary`. The model never sees it, except for three keys the executor appends to the content as `[tool notes]`: `warnings`, `sources_skipped` and `needs_configuration`.
+- **`metadata`** is structured data for the trace. It is stored on the run's node trace and a compact projection goes on the tool call entry as `output_summary`. The model never sees it, except for `warnings`, `sources_skipped`, `needs_configuration` and a `skipped` reason, which the executor appends to the content as `[tool notes]`, followed by an `[instruction]` line asking the model to pass them on.
 - **`is_error=True`** sends the content back as an error tool result. Most agents recover and try another way.
 
 ---
@@ -99,12 +100,13 @@ Nothing registers itself at import time and `engine/tools/__init__.py` is empty.
 |---|---|
 | The agent has knowledge bases (`kb_ids`) | `knowledge_search`, `vector_search` and `knowledge_store`, scoped to those KBs |
 | Any `atlas_*` tool requested | Each requested Atlas tool, limited to `model_config.atlas_graphs` when set, otherwise every graph in the tenant |
-| An acting subject and a `portfolio_<domain>` name | A `SchemaPortfolioTool` for that domain and subject |
+| A `portfolio_<domain>` name, with an acting subject or a user id | A `SchemaPortfolioTool` for that domain, scoped to the subject, or to the user running the agent |
 | An acting subject and `graph_explorer` | `graph_explorer` on the subject's KB namespace |
+| An acting subject and `knowledge_search`, when no KB registered it | `knowledge_search` on the subject's KB namespace |
 
 MCP tools are added by [`engine/tool_resolver.py`](../../apps/agent-runtime/engine/tool_resolver.py), which wraps each MCP server tool in `MCPToolWrapper` (risk tier `medium`). See [03-mcp](03-mcp.md).
 
-The API catalogue (`GET /api/tools`) reads schemas and config fields straight off these classes. Tools built only inside `build_tool_registry` are reached through `LAZY_TOOL_MODULES` in [`apps/api/app/routers/tools.py`](../../apps/api/app/routers/tools.py): `knowledge_search`, `knowledge_store`, `graph_explorer`, four Atlas tools and `SchemaPortfolioTool`.
+The API catalogue (`GET /api/tools`) reads schemas and config fields straight off these classes. `LAZY_TOOL_MODULES` in [`apps/api/app/routers/tools.py`](../../apps/api/app/routers/tools.py) also lists `knowledge_search`, `knowledge_store`, `graph_explorer`, four Atlas tools and `SchemaPortfolioTool`. Only `knowledge_store` still depends on it, the rest are in `_CONTEXT_TOOL_FACTORIES`. The catalogue replaces `schema_portfolio_tool` with one `portfolio_<domain>` entry per active portfolio schema.
 
 ### Adding a tool
 
@@ -112,7 +114,7 @@ The API catalogue (`GET /api/tools`) reads schemas and config fields straight of
 2. Import it in `_ensure_tool_classes()` and add it to `_TOOL_CLASSES`, or to `_CONTEXT_TOOL_FACTORIES` if it needs run context. A context tool also needs a constructor entry in `build_tool_registry`.
 3. Add a catalogue entry (category, blurb) to `TOOL_CATALOG` in `apps/api/app/routers/tools.py`. Without one the tool still shows, bucketed by `_guess_category` from its slug prefix.
 4. Declare `config_fields` for every value it reads.
-5. Run `python scripts/check-tool-config.py`. It fails a tool class the registry and the lazy list cannot reach, unless the class carries `# tool-registry: exempt`.
+5. Run `python scripts/check-tool-config.py`. It fails a tool class the registry and the lazy list cannot reach, unless its module carries a `# tool-registry: exempt <reason>` comment.
 
 The full walkthrough is [08-howto/01-add-a-tool](../08-howto/01-add-a-tool.md).
 
@@ -150,9 +152,10 @@ Tool instances live for one run, not one call. Two calls to the same tool in a r
 Every subclass's `execute` is wrapped once by `BaseTool.__init_subclass__`. The wrapper:
 
 1. refreshes the credential snapshot (`credentials.ensure_fresh()`),
-2. on the outermost call only, refreshes governance and runs the kill switch and tier checks below,
-3. sets the tenant context from the tool's own `tenant_id` when nothing else set it,
-4. turns a `ToolNeedsConfiguration` raised by `cfg(..., required=True)` into the standard "not configured" result.
+2. on the outermost call only, refreshes governance and autonomy, then runs the kill switches, the earned-autonomy gate (which can rewrite or refuse the call) and the tier check,
+3. strips the autonomy-only `_intent` and `_prediction` arguments,
+4. sets the tenant context from the tool's own `tenant_id` when nothing else set it,
+5. turns a `ToolNeedsConfiguration` raised by `cfg(..., required=True)` into the standard "not configured" result.
 
 The executor sets no per-call timeout. Each tool sets its own on its outbound calls.
 
@@ -227,7 +230,7 @@ What the declarations feed:
 - the `config` object per tool on `GET /api/tools`, behind the badges on `/tools` and in the builder palette,
 - `/settings/integrations`, through `GET /api/integrations/tools`.
 
-The lint [`scripts/check-tool-config.py`](../../scripts/check-tool-config.py) runs in CI, in `deploy.sh` and under pytest. It fails on an `os.environ` or `os.getenv` read under `engine/tools` outside its `INFRA_ENV` list of deployment plumbing (`DATABASE_URL`, `REDIS_URL`, `NATS_URL` and similar), on a `cfg()` key no tool declares, on a declared key nothing reads unless it is `dynamic`, and on a tool class the registry cannot reach.
+The lint [`scripts/check-tool-config.py`](../../scripts/check-tool-config.py) runs in CI and under pytest, and `scripts/deploy.sh` warns on it. It fails on an `os.environ` or `os.getenv` read under `engine/tools` outside its `INFRA_ENV` list of deployment plumbing (`DATABASE_URL`, `REDIS_URL`, `NATS_URL` and similar), on a `cfg()` key no tool declares, on a declared key nothing reads unless it is `dynamic`, on a tool class the registry cannot reach, on a tool without its own `risk_tier`, and on a medium-or-higher tool without an `effect`.
 
 An optional `config_test(values, key)` classmethod returns `(ok, message)` and gives the admin a Test button for the key. Degraded modes go in `metadata["warnings"]`, skipped sources in `metadata["sources_skipped"]`.
 
@@ -272,7 +275,7 @@ Two agent-level fields sit beside `tool_config`:
 
 | Field | Effect |
 |---|---|
-| `require_tools` | Tool slugs the run must call. A run that finishes without calling every one is failed with `REQUIRED_TOOLS_VIOLATION`, on the inline and the queued path alike. `require_knowledge_search: true` adds `knowledge_search` |
+| `require_tools` | Tool slugs the run must call. A run that finishes without calling every one is failed with `REQUIRED_TOOLS_VIOLATION`, or `GROUNDING_REQUIRED_VIOLATION` when only `knowledge_search` is missing. `require_knowledge_search: true` adds `knowledge_search`. See [Required tools](00-agent-execution.md#required-tools) |
 | `input_variables[].default` | Applied into the pipeline context under what the caller sends, so a seeded pipeline runs with no input and a typed value from the chat page replaces the default |
 
 ```yaml
@@ -316,6 +319,7 @@ See [00-agent-execution](00-agent-execution.md#tool-dispatch).
 | `open_meteo` | Weather and marine forecasts from Open-Meteo | | |
 | `patents_trademarks` | Search granted US patents in PatentsView | | |
 | `phmsa_lookup` | Find a US pipeline operator in PHMSA | | |
+| `sample_plant` | Simulated plant for trying autonomy: read the pressure or set the pressure setpoint | | |
 | `tavily_search` | Web search with an answer, over Tavily, Brave, SerpAPI or Serper | | `TAVILY_API_KEY`, `BRAVE_SEARCH_API_KEY`, `SERPAPI_API_KEY`, `SERPER_API_KEY` |
 | `unit_converter` | Unit conversion across energy, power, length, volume and more | | |
 | `weather` | Current weather and forecast for a location | | |
@@ -657,7 +661,7 @@ Three tools run code. They isolate it differently.
 | Tool | Where the code runs | Limits |
 |---|---|---|
 | `code_executor` | In the runtime process, in a thread. Imports are checked against an allow-list (`ALLOWED_MODULES`) and `subprocess`, `os.system` and similar are blocked | 30 s (`MAX_EXECUTION_TIME`), output up to 100,000 characters |
-| `sandboxed_job` | A one-off container. A Kubernetes Job when the pod has a service account, `docker run` otherwise. The image must be in `SANDBOXED_JOB_ALLOWED_IMAGES` and the tool must be enabled (`SANDBOXED_JOB_ENABLED`, or the tenant's sandbox settings) | `timeout_seconds` 5 to 1800 (default 60), `memory_mb` 64 to 8192 (default 512), `cpu_limit` 0.1 to 4 (default 1). No network unless the host allows it and the call asks for it |
+| `sandboxed_job` | A one-off container. A Kubernetes Job when the pod has a service account, `docker run` otherwise. The image must be in `SANDBOXED_JOB_ALLOWED_IMAGES` and the tool must be enabled (`SANDBOXED_JOB_ENABLED`, or the tenant's sandbox settings) | Schema ranges `timeout_seconds` 5 to 1800 (default 60), `memory_mb` 64 to 8192 (default 512), `cpu_limit` 0.1 to 4 (default 1). The tool does not clamp values outside them. No network unless the host allows it and the call asks for it |
 | `code_asset` | A warm code runner over NATS when runners are configured, otherwise a one-off `sandboxed_job`. `CODE_RUNNER_MODE` picks `auto`, `warm` or `job` | Those of the path taken |
 
 Details are in [11-sandboxed-code-execution](11-sandboxed-code-execution.md) and [16-warm-code-runners](16-warm-code-runners.md).

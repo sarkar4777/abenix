@@ -17,11 +17,16 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "packages" / "db"))
 
-from models.agent import Agent, AgentType
+from models.agent import Agent, AgentStatus, AgentType
 from models.agent_favorite import AgentFavorite
 from models.user import User
 
 router = APIRouter(prefix="/api/agents", tags=["agent-favorites"])
+
+
+def favorite_is_live(agent: Agent) -> bool:
+    # a deleted agent is archived and its info page 404s
+    return agent.status != AgentStatus.ARCHIVED or agent.agent_type == AgentType.OOB
 
 
 @router.post("/{agent_id}/favorite")
@@ -32,18 +37,18 @@ async def add_favorite(
     db: AsyncSession = Depends(get_db),
 ) -> Any:
     body = body or {}
-    from sqlalchemy import or_
+    from app.services.agent_share import resolve_agent_access, visible_agent_clause
 
-    agent_check = await db.execute(
-        select(Agent).where(
-            Agent.id == agent_id,
-            or_(
-                Agent.tenant_id == user.tenant_id,
-                Agent.agent_type == AgentType.OOB,
-            ),
+    agent = (
+        await db.execute(
+            select(Agent).where(Agent.id == agent_id, visible_agent_clause(user))
         )
-    )
-    if not agent_check.scalar_one_or_none():
+    ).scalar_one_or_none()
+    if (
+        agent is None
+        or not favorite_is_live(agent)
+        or not await resolve_agent_access(db, user, agent)
+    ):
         return error("Agent not found", 404)
     existing = await db.execute(
         select(AgentFavorite).where(
@@ -93,21 +98,20 @@ async def list_favorites(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> Any:
-    from sqlalchemy import or_
+    from app.services.agent_share import resolve_agent_access, visible_agent_clause
 
     result = await db.execute(
         select(AgentFavorite, Agent)
         .join(Agent, AgentFavorite.agent_id == Agent.id)
-        .where(
-            AgentFavorite.user_id == user.id,
-            or_(
-                Agent.tenant_id == user.tenant_id,
-                Agent.agent_type == AgentType.OOB,
-            ),
-        )
+        .where(AgentFavorite.user_id == user.id, visible_agent_clause(user))
         .order_by(AgentFavorite.created_at.desc())
     )
-    rows = result.all()
+    # only stars that still open, deleted or unshared agents drop out
+    rows = [
+        (fav, agent)
+        for fav, agent in result.all()
+        if favorite_is_live(agent) and await resolve_agent_access(db, user, agent)
+    ]
     return success(
         [
             {

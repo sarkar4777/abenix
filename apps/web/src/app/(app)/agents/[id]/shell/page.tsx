@@ -200,23 +200,23 @@ export default function WorkflowShellPage() {
           <div className="text-slate-500 text-xs">
             <p className="mb-2">Try one of these:</p>
             <ul className="space-y-1">
-              <li className="hover:text-cyan-300 cursor-pointer" onClick={() => submit('show workflow')}>
+              <li><button type="button" className="hover:text-cyan-300 text-left" data-testid="shell-try" onClick={() => submit('show workflow')}>
                 <code>show workflow</code> — inspect the DSL
-              </li>
-              <li className="hover:text-cyan-300 cursor-pointer" onClick={() => submit('show runs')}>
+              </button></li>
+              <li><button type="button" className="hover:text-cyan-300 text-left" data-testid="shell-try" onClick={() => submit('show runs')}>
                 <code>show runs</code> — list recent executions
-              </li>
-              <li className="hover:text-cyan-300 cursor-pointer" onClick={() => submit('show patches')}>
+              </button></li>
+              <li><button type="button" className="hover:text-cyan-300 text-left" data-testid="shell-try" onClick={() => submit('show patches')}>
                 <code>show patches</code> — list draft patches
-              </li>
-              <li className="hover:text-cyan-300 cursor-pointer" onClick={() => submit('help')}>
+              </button></li>
+              <li><button type="button" className="hover:text-cyan-300 text-left" data-testid="shell-try" onClick={() => submit('help')}>
                 <code>help</code> — full cheat sheet
-              </li>
+              </button></li>
             </ul>
           </div>
         )}
         {history.map(h => (
-          <div key={h.id} className="space-y-1">
+          <div key={h.id} className="space-y-1" data-testid="shell-entry" data-loading={h.loading ? '1' : '0'}>
             <div className="flex items-baseline gap-2 text-cyan-400">
               <span className="text-slate-500">$</span>
               <span>{h.command}</span>
@@ -244,6 +244,8 @@ export default function WorkflowShellPage() {
             onBlur={() => setTimeout(() => setAutocompleteOpen(false), 150)}
             onFocus={() => setAutocompleteOpen(true)}
             placeholder="Type a verb (try `help` or `show workflow`)…"
+            aria-label="Shell command"
+            data-testid="shell-input"
             className="flex-1 bg-slate-900/80 border border-slate-700 focus:border-cyan-500 text-white text-sm font-mono px-3 py-2.5 rounded-lg outline-none"
             disabled={busy}
             autoFocus
@@ -251,6 +253,7 @@ export default function WorkflowShellPage() {
           <button
             onClick={() => submit(text)}
             disabled={busy || !text.trim()}
+            data-testid="shell-run"
             className="inline-flex items-center gap-1.5 px-3 py-2 bg-cyan-500 hover:bg-cyan-400 text-slate-950 text-xs font-medium rounded-lg disabled:opacity-50"
           >
             {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}

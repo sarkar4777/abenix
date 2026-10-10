@@ -43,8 +43,8 @@ curl -s -X POST "$API/api/sources" \
 | `cadence_minutes` | 1440 | 5 minutes to 31 days |
 | `headers` | `{}` | Up to 20 plain headers. `Authorization`, `Cookie`, `Proxy-Authorization` and `X-API-Key` are refused here |
 | `credentials_key` | none | One of `SOURCE_AUTH_1` to `SOURCE_AUTH_5`, set by an admin under **Admin -> Tool Configuration -> Source Watch**. A bare token is sent as `Authorization: Bearer`, a value like `X-Api-Key: abc` as that header. Only sent to the source's own host |
-| `ingest_to_kb` | none | A knowledge base id. The baseline and every changed snapshot are added to it as a document |
-| `jurisdiction`, `tags`, `risk_tier` | | Carried on the source and on its events, so a subscription can filter on them |
+| `ingest_to_kb` | none | A knowledge base id you can edit. The baseline and every changed snapshot are added to it as a document |
+| `jurisdiction`, `tags`, `risk_tier` | `risk_tier` is `low` | Carried on the source and on its events. A subscription can filter on `jurisdiction` and `risk_tier`, not on `tags`, see below |
 
 Useful calls before saving: `POST /api/sources/validate-url` with `{"url": ...}` says whether the URL may be fetched and suggests a kind, `POST /api/sources/preview` fetches once without saving.
 
@@ -56,7 +56,7 @@ Check it once by hand:
 curl -s -X POST "$API/api/sources/$SOURCE/check-now" -H "Authorization: Bearer $TOKEN"
 ```
 
-`outcome.status` is `baseline`, `unchanged`, `not_modified`, `changed` or `error`. A kill switch on the source answers 409 with code `KILL_SWITCH`. Pause with `POST /api/sources/{id}/pause` and a `reason`, resume with `/resume`.
+`outcome.status` is `baseline`, `unchanged`, `not_modified`, `changed` or `error`. A kill switch on the source answers 409 with code `KILL_SWITCH`. Pause with `POST /api/sources/{id}/pause` and an optional `reason`, resume with `/resume`.
 
 ---
 
@@ -73,7 +73,7 @@ curl -s -X POST "$API/api/webhooks" \
     "name": "Tariff changes to pricing service",
     "events": ["source.changed"],
     "url": "https://pricing.example.com/hooks/abenix",
-    "filter": {"tags": ["freight"]}
+    "filter": {"source_id": "<source uuid>"}
   }'
 ```
 
@@ -96,8 +96,13 @@ secret = sub["signing_secret"]
 | `kill_switch.set`, `kill_switch.cleared` | Something was stopped or resumed |
 | `source.changed` | A watched source changed |
 | `eval.completed` | An evaluation suite run finished |
+| `action.proposed`, `action.executed`, `action.outcome_recorded` | A governed agent action was declared, ran, or had its outcome scored |
+| `moderation.held`, `moderation.decided` | A moderation policy held content for review, or a person decided on it |
+| `autonomy.recommended`, `autonomy.promoted`, `autonomy.demoted` | An agent's autonomy level is due to move, or moved |
+| `lesson.captured`, `cluster.opened` | A lesson was captured, or lessons about one mistake were first grouped |
+| `improvement.proposed`, `improvement.proved`, `improvement.released`, `improvement.rolled_back`, `improvement.kept` | A fix for an agent moved through proof, release and its watch period |
 
-`filter` maps payload field paths to the value they must have, or a list of allowed values, for example `{"risk_tier": ["high", "critical"]}` or `{"decision_key": "freight.remote.surcharge"}`. Every key must match.
+`filter` maps payload field paths to the value they must have, or a list of allowed values, for example `{"risk_tier": ["high", "critical"]}` or `{"decision_key": "freight.remote.surcharge"}`. Every key must match. The match is exact, so a field whose value is itself a list, such as `tags`, cannot be filtered on.
 
 The webhook URL is checked when you save it. `localhost`, private and loopback IPs, and cluster-internal names such as `*.svc.cluster.local` are refused, unless the exact host name is listed in `EVENTS_ALLOWED_INTERNAL_HOSTS` (comma separated) on the API. On delivery the host is resolved again and a private answer is refused, unless the host is in that list or the API runs with `EVENTS_ALLOW_PRIVATE_TARGETS=1`.
 
@@ -183,7 +188,7 @@ export function verify(secret: string, rawBody: Buffer, header: string | undefin
 }
 ```
 
-Answer with any 2xx within 15 seconds. Anything else is retried with backoff starting at 10 seconds and doubling up to an hour, for 8 attempts, after which the delivery is `dead`. A subscription that fails 25 times in a row is paused with the last error as `disabled_reason`. `PUT /api/webhooks/{id}` with `{"is_active": true}` turns it back on.
+Answer with any 2xx within 15 seconds. Anything else is retried after 10 seconds, then 20, 40 and so on, doubling each time. After 8 attempts, about 20 minutes, the delivery is `dead`. A subscription that fails 25 times in a row is paused with the last error as `disabled_reason`. `PUT /api/webhooks/{id}` with `{"is_active": true}` turns it back on.
 
 ---
 

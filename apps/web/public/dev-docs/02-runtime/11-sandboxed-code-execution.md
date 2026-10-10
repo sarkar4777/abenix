@@ -1,19 +1,21 @@
 # Sandboxed code execution + Code Assets
 
-A user uploads a zip of Python (or Node, Go, Rust, Ruby, Java), Abenix analyzes it, and an agent can call it as a tool. The execution runs in a tenant-scoped Docker sandbox with no network by default and a strict resource budget. The same plumbing powers the AI Builder's "write me code" flow.
+A user uploads a zip or points at a git repo, Abenix analyzes it, and an agent or pipeline calls it through the `code_asset` tool. A call runs as a Kubernetes Job in a cluster (local `docker run` in development), or on a warm code runner when those are enabled. See [16-warm-code-runners](16-warm-code-runners.md).
 
-## What ships in the box
+## Where it lives
 
-| Surface | Where it lives |
+| Surface | Where |
 |---|---|
-| Upload UI | `/code-runner` |
+| Upload UI | `/code-runner` (sidebar **Code Runner**) |
 | REST API | [`apps/api/app/routers/code_assets.py`](../../apps/api/app/routers/code_assets.py) |
-| Analyzer | `apps/api/app/services/code_analyzer.py` — extracts entry points, input/output schemas, language version |
-| Runtime sandbox | `sandboxed_job` tool in `apps/agent-runtime/engine/tools/sandboxed_job.py` |
-| Storage | `code_assets` table, with the binary at `/data/code-assets/<id>.tar.gz` |
-| Audit | `code_asset_invocations` — one row per call |
+| Analyzer | [`apps/agent-runtime/engine/code_analyzer.py`](../../apps/agent-runtime/engine/code_analyzer.py), picks language, image, build and run commands, and reads schemas from author files |
+| The tool agents call | `code_asset`, [`engine/tools/code_asset.py`](../../apps/agent-runtime/engine/tools/code_asset.py) |
+| One-off containers | `sandboxed_job`, [`engine/tools/sandboxed_job.py`](../../apps/agent-runtime/engine/tools/sandboxed_job.py) |
+| Warm runners | [`engine/code_runners.py`](../../apps/agent-runtime/engine/code_runners.py) |
+| Storage | `code_assets` table. The archive is a zip under `CODE_ASSET_STORE` (default `/data/code-assets`). Uploaded tar.gz files and git clones are repacked as zip |
+| Audit | `code_asset_invocations`, one row per call |
 
-Five languages ship: **Python**, **Node.js**, **Go**, **Rust**, **Ruby**, **Java**. Adding a sixth is one Dockerfile.
+Seven languages are detected: Python, Node.js, Go, Rust, Ruby, Java and Perl. Each maps to a stock public image that must be on the image allow-list.
 
 ## The lifecycle
 
@@ -22,64 +24,62 @@ sequenceDiagram
   participant U as User
   participant API as API
   participant AN as Analyzer
-  participant SB as Sandbox<br/>(Docker)
-  participant A as Agent
+  participant RT as code_asset tool
+  participant SB as Sandbox<br/>(k8s Job or docker)
 
-  U->>API: POST /api/code-assets (zip / git URL / source)
-  API->>API: store tar.gz at /data/code-assets/<id>
+  U->>API: POST /api/code-assets (zip or git_url)
+  API->>API: store zip under CODE_ASSET_STORE
   API->>AN: analyze
-  AN-->>API: language, version, entry points, input/output schema
+  AN-->>API: language, image, build and run commands, schemas if declared
   U->>API: POST /api/code-assets/{id}/test (sample input)
-  API->>SB: docker run --network=none --memory=512m --cpus=1 <image>
-  SB-->>API: { stdout, stderr, exit_code, duration_ms }
-  API-->>U: { result, captured stdout, etc. }
-  A->>SB: call as a tool node in a pipeline
-  SB-->>A: { result }
-  SB->>API: write code_asset_invocations row
+  API->>RT: run with memory_mb=1024, network allowed
+  RT->>SB: build command, then run command
+  SB-->>RT: stdout
+  RT-->>API: result, schema_ok, schema_error
+  API-->>U: execution (422 CODE_FAILED if the code fails)
+  RT->>RT: write code_asset_invocations row
 ```
 
-## The sandbox jail
+## The sandbox
 
-`sandboxed_job` runs every invocation under these defaults:
+| Constraint | `code_asset` call | Notes |
+|---|---|---|
+| Network | Off unless the call passes `allow_network: true` and the host or tenant allows it | `SANDBOXED_JOB_ALLOW_NETWORK`, or the tenant's `/settings/sandbox`. Helm sets it to `true` by default (`sandboxedJob.allowNetwork`). `/test` always asks for network |
+| Memory | `memory_mb`, default 1024, schema range 128 to 4096 | Per call, not per asset |
+| CPU | 2 | Fixed by `code_asset` |
+| Timeout | `timeout_seconds`, default 120, schema range 10 to 900 | `/test` defaults to 120 |
+| Filesystem | Read-only root, writable `/tmp` (64 MB tmpfs in docker, 64 Mi emptyDir in k8s) | Code runs in `/tmp/app` |
+| User | 65534, non-root, on the k8s backend | The docker backend runs as the image's default user and drops all capabilities |
+| Images | `SANDBOXED_JOB_ALLOWED_IMAGES` (Helm `sandboxedJob.allowedImages`) | A tenant's `/settings/sandbox` list is added to it, never subtracted |
 
-| Constraint | Default | Tenant-configurable | Where set |
-|---|---|---|---|
-| Network | `--network=none` | yes — `allow_network: true` per asset, off by default | `/settings/sandbox` |
-| Memory | 512 MB | yes | per-asset override |
-| CPU | 1 vCPU | yes | per-asset override |
-| Wall-clock timeout | 30s | yes — capped at tenant max | per-asset override |
-| Filesystem | tmpfs at `/work`, no other writable mounts | no | hard-coded |
-| User | non-root | no | hard-coded |
-| Allowed images | tenant-configurable allow-list | yes | `/settings/sandbox` |
+Called directly, `sandboxed_job` defaults to 60 seconds, 512 MB and 1 CPU. To tighten the image list, set `sandboxedJob.allowedImages` in Helm. `/settings/sandbox` can only add images.
 
-The allow-list at `/settings/sandbox` is the right knob to tighten an enterprise deployment — restrict to your own internal registry images, drop the public-image option entirely.
+## Input and output
 
-## Input/output contract
+Schemas come from the asset itself: `abenix.yaml`, `examples/input.json` and `examples/output.json`, or JSON blocks in the README. If none are found the schemas stay empty and input is not validated. An upload with an example input runs once to fill `output_schema`. `analysis_notes` holds `{level, message, suggestion}` entries.
 
-The analyzer infers a JSON Schema for each entry point's input + output. If the schema can't be inferred (dynamic typing, complex closures), the tool falls back to `string` in / `string` out and the asset is marked `analysis_notes: ["fallback schema"]`.
-
-Agents call the asset through the standard tool node — no special wrapper:
+In a pipeline, call the tool like any other:
 
 ```yaml
 nodes:
   - id: extract
-    type: code_asset
-    code_asset_id: <uuid>
-    inputs:
-      raw_text: "{previous_node.output}"
+    tool_name: code_asset
+    arguments:
+      code_asset_id: <uuid>
+      input: { raw_text: "{{previous_node.output}}" }
 ```
 
-The runtime maps node inputs into the asset's expected schema, runs the sandboxed job, captures stdout/stderr, and surfaces `result` to the next node.
+The tool validates `input` against the asset's `input_schema`, runs it, and returns `{result, schema_ok, schema_error}`.
 
 ## Multi-file projects
 
-For projects with internal imports (Go modules, Java packages, Python with `setup.py`), the runtime uploads the tar.gz via stdin to a builder layer that does `pip install -e .` / `go mod tidy` / `mvn package` before running. The build step's output is captured in `analysis_notes` so a maintainer can see what happened.
+The runtime runs the asset's build command in the sandbox before the run command, for example `pip install -r requirements.txt` (or poetry, or uv), `go build -o /tmp/bin`, or `javac` (`mvn package` when the project has no `src/main/java`). Build output goes to stderr. The built tree is cached under `CODE_ASSET_BUILD_CACHE` (default `/data/code-asset-cache`).
 
-The three reference multi-file projects in `tests/code-assets/` exercise this path: Go HTTP fetcher, Java JSON transformer, Perl text munger.
+Sample assets live in `industrial-iot/code-assets/`, `contractiq/code-assets/`, `wingman/code-assets/` and `pharmavigil/code-assets/`.
 
 ## Versions
 
-Upload new version on an asset replaces the code behind it. Agents and pipelines keep the same asset id and pick up the new code on their next call. The new archive is analysed first and only goes live if analysis succeeds. If it fails, the current version stays live and the reason comes back.
+Uploading a new version replaces the code behind an asset. Agents and pipelines keep the same asset id and pick up the new code on their next call. The new archive is analysed first and only goes live if analysis succeeds. If it fails, the current version stays live and the reason comes back.
 
 Each upload bumps `version` and keeps the replaced archive in `version_history`, so any earlier version can be restored from the asset page. Restoring makes it live as a new version number. History keeps `CODE_ASSET_MAX_VERSIONS` entries (20 by default) and deletes archives that fall off the end. Uploads to one asset are serialised with a row lock and every upload and restore is audited.
 
@@ -87,49 +87,36 @@ Endpoints: `POST /api/code-assets/{id}/versions` with a file or a git URL, and `
 
 ## How the sandbox gets the code
 
-Small assets travel inline on stdin. An asset larger than `CODE_ASSET_MAX_INLINE_BYTES` is fetched by the sandbox pod from `GET /api/code-assets/{id}/fetch`, authorised by a ten minute token the runtime signs for that one asset. The token is not a user token, so an agent shared with someone works for them without sharing the asset itself.
+Assets up to `CODE_ASSET_MAX_INLINE_BYTES` (default 400,000) are passed into the container as a base64 environment variable, with the input beside it. A larger asset is fetched by the sandbox from `GET /api/code-assets/{id}/fetch`, authorised by a ten-minute token the runtime signs for that one asset. The token is not a user token, so an agent shared with someone works for them without sharing the asset itself. When no token can be signed, the sandbox falls back to `/download` with `CODE_ASSET_DOWNLOAD_TOKEN`.
 
 ## Deleting an asset
 
 Delete first lists the agents and pipelines that call the asset (`GET /api/code-assets/{id}/dependents`). The API refuses with `409 IN_USE` unless the caller confirms with `force=true`.
 
-## Bring-your-own-repo from git
+## From a git repo
 
-`POST /api/code-assets` accepts `{ source_url: "https://github.com/..." }` instead of an uploaded zip. The API clones, packages as tar.gz, and runs the same analyzer. Authentication via tenant-configured deploy key (`GITHUB_DEPLOY_KEY` env var) for private repos.
+Send `metadata={"name": "...", "git_url": "https://...", "git_ref": "main"}` instead of a file. `name` is required. The API shallow-clones the repo (https and git only, hosts limited by `CODE_ASSET_GIT_ALLOWED_HOSTS` when set), zips it and runs the same analyzer. Private repos are not supported, the clone has no credentials.
 
-## The AI Builder loop
+## The AI Builder
 
-The "describe it, the platform builds it" surface in `/builder` uses code assets for the heavy lifting. Workflow:
+The Agent Builder lists the tenant's ready code assets to the model (`_get_code_assets_context` in [`ai_builder.py`](../../apps/api/app/routers/ai_builder.py)), so a generated agent can call one through `code_asset`. It does not write or run code assets itself.
 
-1. User describes the task in natural language.
-2. AI Builder agent drafts a code asset (Python by default — pick another language in the prompt).
-3. The asset goes through the analyzer.
-4. The Builder runs the asset in the sandbox against a synthesized sample input.
-5. If the run fails or output is wrong, the Builder iterates (Surgeon-style — JSON-Patch on the source, re-run).
-6. On success, the Builder wires the new asset into the pipeline as a `code_asset` node.
+## Adding a language
 
-The Builder never auto-applies — every iteration is a PipelinePatchProposal a human reviews.
-
-## Adding a sixth language
-
-Three steps:
-
-1. Add a Dockerfile for the language base image: `docker/sandbox/<lang>.Dockerfile`. Must end as non-root, must expose `/work` as the only writable mount.
-2. Add a detector branch in `code_analyzer.py` that recognizes the language (by file extensions, manifest files, shebangs).
-3. Add the entry-point schema inferer for that language. Python uses AST, Node uses `tsc --showConfig`, Go uses `go vet -json`. Adopt whatever the language gives you.
-
-A walkthrough for Crystal landed in commit `bcb8076` (deleted later because nobody used it, but the diff shows the exact contract).
+1. Add `_analyze_<lang>` in `apps/agent-runtime/engine/code_analyzer.py`, setting the image, build and run commands.
+2. Add it to `_LANGUAGE_RULES`, keyed on the manifest file that identifies the language.
+3. Add the image to `sandboxedJob.allowedImages`.
 
 ## Where to look
 
 - REST API: [`apps/api/app/routers/code_assets.py`](../../apps/api/app/routers/code_assets.py)
-- Sandbox tool: [`apps/agent-runtime/engine/tools/sandboxed_job.py`](../../apps/agent-runtime/engine/tools/sandboxed_job.py)
-- Analyzer: `apps/api/app/services/code_analyzer.py`
-- AI Builder loop: [`apps/api/app/routers/ai_builder.py`](../../apps/api/app/routers/ai_builder.py)
+- Analyzer: [`apps/agent-runtime/engine/code_analyzer.py`](../../apps/agent-runtime/engine/code_analyzer.py)
+- Tools: [`code_asset.py`](../../apps/agent-runtime/engine/tools/code_asset.py), [`sandboxed_job.py`](../../apps/agent-runtime/engine/tools/sandboxed_job.py)
+- Warm runners: [`apps/agent-runtime/engine/code_runners.py`](../../apps/agent-runtime/engine/code_runners.py)
 - Models: `packages/db/models/code_asset.py`, `code_asset_invocation.py`
 
 ## Related
 
-- [`02-runtime/02-tools.md`](02-tools.md) — how a `code_asset` node fits the tool framework
-- [`/settings/sandbox`](../05-ui/03-page-catalogue.md) — the admin UI for the sandbox allow-list
-- [`02-runtime/16-warm-code-runners.md`](16-warm-code-runners.md) — warm per-tenant runners that answer calls over NATS instead of starting a Job each time
+- [02-tools](02-tools.md#code-and-ml) for how `code_asset` fits the tool framework
+- [Page catalogue](../05-ui/03-page-catalogue.md) for `/settings/sandbox`
+- [16-warm-code-runners](16-warm-code-runners.md) for warm per-tenant runners that answer calls over NATS instead of starting a Job each time

@@ -6,13 +6,13 @@
 
 ## Why three SDKs
 
-The platform's clients are heterogeneous:
+The platform's callers are written in different languages:
 - **Standalone vertical apps** (Wingman, E&C-Copilot) — Python backends.
 - **Customer integrations** — usually TypeScript or Java.
 - **CI / scripts** — Python or shell.
 - **JVM apps** (ClaimsIQ) — Java.
 
-Maintaining three SDKs is annoying but worth it, because developers don't have to write HTTP/SSE boilerplate, slug lookup or the actAs header by hand.
+Each SDK saves callers from writing HTTP and SSE handling, slug lookup and the actAs header by hand.
 
 The Python SDK is the reference implementation. TypeScript and Java share its execute and approvals shape but not every client. The decisions, sources and events clients exist in Python and TypeScript only.
 
@@ -47,7 +47,7 @@ The big one. `message` is the text prompt. Input variables go in `context={...}`
 TypeScript takes `wait` in its options object. Java uses `ExecuteOptions.defaults().waitMode(WaitMode.SUBMITTED)` and the other `WaitMode` values.
 
 ### `stream(slug_or_id, message)`
-Starts a run and yields its SSE events (`token`, `tool_call`, `tool_result`, `node_start`, `node_complete`, `done`, `error`). Python and TypeScript.
+Starts a run and yields its SSE events (`token`, `tool_call`, `tool_result`, `node_start`, `node_complete`, `done`, `error`). Other events the server sends, such as `moderation`, `reply_checking` and `node_trace`, come through under their own name and are not errors. `done` carries the run's `execution_id`, so you can read the run back with `executions.get`. Every event also has its raw payload in `data`. Python and TypeScript. Java follows a run through `watch`.
 
 ### `watch(execution_id)`
 Subscribes to the DAG snapshot stream of an existing execution. Useful when the run was kicked off by a different process (webhook, scheduler, etc.). Python and Java.
@@ -55,13 +55,13 @@ Subscribes to the DAG snapshot stream of an existing execution. Useful when the 
 ### `approvals.signoff(approval_id, decision, reason=..., client_token=...)`
 Records an approval signoff. `approve`, `deny` and (Python, TypeScript) `return_for_changes` wrap it. Used by HITL workflow apps.
 
-There are smaller surfaces for agents, knowledge bases, chat threads, tools, presets, ML models and executions, but the above are most of the usage.
+Smaller surfaces cover agents, knowledge bases, chat threads, tools, presets, ML models, executions, actions and autonomy, and feedback and lessons. The four above are most of the usage.
 
 ---
 
 ## The actAs pattern
 
-The single most important SDK feature. Lets a service-account client speak **on behalf of** an end user inside the platform's RBAC + audit.
+Lets a service-account client act **on behalf of** an end user, so each run is recorded against that user.
 
 ```python
 from abenix_sdk import Abenix, ActingSubject
@@ -84,14 +84,14 @@ result = await client.execute(
 )
 ```
 
-The SDK sends `X-Abenix-Subject` with a JSON object: `{"subject_type": "wingman", "subject_id": "trader-42", "email": ..., "display_name": ...}`. The platform's audit log, sharing checks and notifications use that subject. The API key needs the `can_delegate` scope.
+The SDK sends `X-Abenix-Subject` with a JSON object: `{"subject_type": "wingman", "subject_id": "trader-42", "email": ..., "display_name": ...}`. The API key needs the `can_delegate` scope, checked in `get_current_user` ([`apps/api/app/core/deps.py`](../../apps/api/app/core/deps.py)), or the call is refused. The platform stamps the subject on the execution row (`executions.subject_id`, `subject_type`) and passes it to the agent run, where tools use it, for example to pick the per-subject KB collection. The audit log (`activity_logs`) has no subject columns and still records the service account.
 
 Pass the subject per call, or set a default (`act_as=` on the constructor, or `set_act_as`). Not every call sends it. In Python it goes out on `execute`, `stream`, `chat`, `tools` and `presets`. In TypeScript only on `execute` and `stream`. In Java a default subject goes out on every call.
 
 ### Why this matters
-Without actAs, the wingman service would show up in audit as "wingman service did X" — opaque to compliance. With actAs, every action carries the end-user identity even though the wire-level auth is the service's API key.
+Without actAs, every run looks like it came from the wingman service account. With actAs, executions carry the end-user identity, so runs can be listed and scoped per user even though the wire-level auth is the service's API key.
 
-See [01-architecture/01-tenants-rbac](../01-architecture/01-tenants-rbac.md#the-actas-delegated-subject-pattern) for the platform side.
+See [01-architecture/01-tenants-rbac](../01-architecture/01-tenants-rbac.md#actas--the-delegation-chain) for the platform side.
 
 ---
 
@@ -179,7 +179,7 @@ await client.approvals.signoff(
 
 None of the SDK clients touch OpenTelemetry themselves. Trace context reaches the platform when the HTTP library underneath is instrumented, which then sends the W3C `traceparent` header:
 
-- Python: `abenix_sdk.tracing.init_tracing(service_name, fastapi_app=None)` sets up OTel and instruments `httpx`. It needs `OTEL_EXPORTER_OTLP_ENDPOINT` and the OTel packages, see [01-python](01-python.md#opentelemetry-integration).
+- Python: `abenix_sdk.tracing.init_tracing(service_name, fastapi_app=None)` sets up OTel and instruments `httpx`. It needs `OTEL_EXPORTER_OTLP_ENDPOINT` (or `OTEL_TEMPO_ENDPOINT`) and the OTel packages, see [01-python](01-python.md#opentelemetry-integration).
 - TypeScript: instrument `fetch` yourself.
 - Java: run with the OpenTelemetry Java agent, which instruments `java.net.http.HttpClient`.
 
@@ -193,27 +193,52 @@ Each sub-client on `Abenix` wraps one area of the REST API. Python has the most 
 
 | Client | Server area | Python | TypeScript | Java |
 |---|---|---|---|---|
-| `me()`, `permissions()` | `/api/me`, `/api/me/permissions` | both | `permissions` | none |
-| `agents` | `/api/agents` | list, get, `find_by_slug`, `by_slug`, `create`, `update` | list, get | list, get, `findBySlug` |
+| `me()`, `permissions()` | `/api/me`, `/api/me/permissions` | both | both | both |
+| `agents` | `/api/agents` | list, get, `find_by_slug`, `by_slug`, `create`, `update` | list, get, `bySlug`, `create`, `update` | list, get, `findBySlug`, `bySlug`, `create` |
 | `decisions` | `/api/decisions`, `/api/decision-reference-sets` | 27 methods | 18 methods | none |
 | `sources` | `/api/sources` | 16 methods | 12 methods | none |
 | `events` | `/api/webhooks` | 9 methods incl. `redeliver`, `verify_signature` | 7 methods, no `test` or `redeliver` | none |
 | `approvals` | `/api/approvals` | 10 methods | 10 methods | 8 methods, no `return_for_changes` or `subscribe` |
-| `executions` | `/api/executions` | live, get, replay, tree, pending approvals, raw watch | same minus raw watch | same minus raw watch |
-| `knowledge` | `/api/knowledge-engines`, `/api/knowledge-projects` | cognify, search, graph, jobs, project bootstrap | cognify, search, graph, jobs | cognify, search, graph, jobs |
+| `executions` | `/api/executions` | live, list, get, replay, tree, pending approvals, raw watch | same minus raw watch | live, list, get, replay, tree, pending approvals |
+| `knowledge` | `/api/knowledge-engines`, `/api/knowledge-bases`, `/api/knowledge-projects` | project bootstrap, subject collection, upload, documents, cognify, search, graph, jobs | project bootstrap, upload, documents, cognify, search, graph, jobs | project bootstrap, upload, documents, cognify, search, graph, jobs |
 | `chat` | `/api/conversations` | 7 methods | none | 7 methods |
 | `tools`, `presets` | `/api/tools`, `/api/tool-presets` | yes | none | yes |
 | `ml_models` | `/api/ml-models` | list only | none | list only |
-| `feedback`, `lessons`, `improvements` | `/api/improvements` | give, report, list, get | same | same |
+| `actions` | `/api/autonomy/actions` | propose, wait, executed, report outcome, flag harm, get | same | same, `wait` is `waitFor` |
+| `autonomy` | `/api/autonomy` | overview, grant, grant actions | same | same |
+| `feedback`, `lessons`, `improvements` | `/api/improvements` | give, report, list, get | same | same, plus `feedback().giveOnMessage` |
 
 Detail pages: decisions in [08-howto/09-decisions](../08-howto/09-decisions.md), sources in [02-runtime/17-source-watch](../02-runtime/17-source-watch.md), events in [02-runtime/19-outbound-events](../02-runtime/19-outbound-events.md), approvals in [02-runtime/05-approvals-hitl](../02-runtime/05-approvals-hitl.md).
 
 No SDK wraps evaluation suites, governance (permission sets, risk tiers, kill switches, audit, run replay) or tool configuration. Call those routes from the [REST reference](../09-reference/00-rest-api.md) directly, in Python through `client.http`.
 
-The newer calls (`me`, `permissions`, `agents.by_slug/create/update`, `decisions`, `sources`, `events`) raise a typed error on any 4xx or 5xx. Decision calls raise `AbenixDecisionError`, the rest raise `AbenixError`. Both carry `status` (HTTP status), `code` (the server's `error_code`, such as `STALE_DRAFT`), `details` and the message. In Python the message is `str(e)`. In TypeScript it is `e.message`. `AbenixDecisionError` subclasses `AbenixError` in Python only.
+The newer calls (`me`, `permissions`, `agents.by_slug/create/update`, `decisions`, `sources`, `events`, `actions`, `autonomy`, `improvements`, `lessons`, `feedback`) raise a typed error on any 4xx or 5xx. Decision calls raise `AbenixDecisionError`, the rest raise `AbenixError`. Both carry `status` (HTTP status), `code` (the server's `error_code`, such as `STALE_DRAFT`), `details` and the message. In Python the message is `str(e)`. In TypeScript it is `e.message`. `AbenixDecisionError` subclasses `AbenixError` in Python only.
 
 ---
 
+
+## Versions
+
+The SDK version follows the platform. Major and minor match the Abenix release the SDK was built and tested against, the patch number is the SDK's own. Abenix 2.5.x ships `abenix-sdk` 2.5.5 (Python), `@abenix/sdk` and `@abenix/react` 2.5.5 (TypeScript and React) and `com.abenix:sdk` 2.5.5 (Java). An SDK works against any platform with the same major and minor. A call added in a later minor needs that platform.
+
+When the platform moves to a new minor, every SDK manifest moves with it in the same release: `packages/sdk/python/pyproject.toml`, `packages/sdk/js/package.json`, `packages/sdk/react/package.json` and `claimsiq/sdk/build.gradle.kts`.
+
+---
+
+## Testing the SDKs against a live platform
+
+`bash scripts/sdk-e2e.sh` runs every SDK the way an app uses it. It signs in to the web UI and generates an API key on Settings, API keys, then runs the same journey in each language: run, stream and read a run back, approvals, autonomy propose, wait and outcome, lessons and feedback, and knowledge upload and search.
+
+| Suite | What runs |
+|---|---|
+| `python` | `e2e/sdk/python_sdk_e2e.py` with pytest |
+| `js` | builds `@abenix/sdk`, packs it, installs the tarball into `e2e/sdk/js` and runs `node --test` |
+| `react` | `AgentChat` and `useAgentStream` rendered in jsdom with the real `fetch`, through vitest |
+| `java` | the SDK's JUnit suite and `e2e/sdk/java/LiveSmoke.java` in a `gradle:8.7-jdk21` container, no local JDK needed |
+
+Pass suite names to run a subset, for example `bash scripts/sdk-e2e.sh python js`. `ABENIX_URL` and `BASE` point it at another API and web UI. The autonomy checks use the sample plant from the Autonomy page.
+
+---
 
 ## Language-specific docs
 
@@ -230,11 +255,11 @@ The wire format is identical across languages. The method sets are not, each pag
 | Scenario | Use |
 |---|---|
 | "Just run it and tell me the answer." | default (`"completed"`), bounded by the client timeout and at most 1800 s server-side. |
-| "Run it. show the user updates in the UI." | `stream(...)`, render each event. |
+| "Run it and show the user updates in the UI." | `stream(...)`, render each event. |
 | "Long-running batch — fire and check on a job board." | `wait="submitted"`, then `executions.get(id)` or `watch(id)` later. |
 | "Compliance flow that might pause." | `wait="until_gate"`. |
 
-> **Trap** — never block on a run inside a webhook handler. Webhook providers (Slack, Stripe, GitHub) timeout at 3-10s. the platform takes 2-30s on average. Submit with `wait="submitted"`, return 200, then process async.
+> **Trap** — never block on a run inside a webhook handler. Webhook providers (Slack, Stripe, GitHub) time out after 3-10 s, and a run often takes longer. Submit with `wait="submitted"`, return 200, then follow the run from a background task.
 
 ---
 
@@ -255,7 +280,8 @@ The wire format is identical across languages. The method sets are not, each pag
 | **Canonical Python SDK source** | [`packages/sdk/python/abenix_sdk/`](../../packages/sdk/python/abenix_sdk/) — copied into `packages/agent-sdk/` and every standalone app's `api/sdk/` |
 | **SDK sync verifier** | [`scripts/sync-sdks.sh`](../../scripts/sync-sdks.sh) — `--check` fails when a copy drifts from canonical, run by `dev-local.sh` and `deploy-azure.sh` |
 | **TypeScript SDK** | [`packages/sdk/js/`](../../packages/sdk/js/) — `@abenix/sdk` |
-| **React component** | [`packages/sdk/react/`](../../packages/sdk/react/) — `@abenix/react`, `AgentChat` |
+| **React component** | [`packages/sdk/react/`](../../packages/sdk/react/) — `@abenix/react`, `AgentChat` and `useAgentStream` |
+| **Live SDK suites** | [`scripts/sdk-e2e.sh`](../../scripts/sdk-e2e.sh) and [`e2e/sdk/`](../../e2e/sdk/) |
 | **Java SDK** | [`claimsiq/sdk/`](../../claimsiq/sdk/) — `com.abenix.sdk` |
 | **REST surface the SDKs wrap** | [`09-reference/00-rest-api`](../09-reference/00-rest-api.md) |
 | **Error envelope** | [`apps/api/app/core/responses.py`](../../apps/api/app/core/responses.py) — `success()` / `error()` |

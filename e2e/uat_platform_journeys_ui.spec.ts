@@ -318,9 +318,9 @@ test('a document goes into a knowledge base and the agent answers from it and ad
   await page.getByPlaceholder('e.g. Product Documentation').fill(KB);
   await page.getByPlaceholder('What kind of documents will this contain?').fill('Supplier onboarding, escalation and payment terms');
   await page.getByRole('button', { name: /^Create$/ }).click();
-  const kbCard = page.locator(`[data-testid="kb-card"][data-name="${KB}"]`);
-  await expect(kbCard).toBeVisible({ timeout: 30_000 });
-  await kbCard.click();
+  // creating opens the new base straight away
+  await page.waitForURL(/\/knowledge\?id=[0-9a-f-]{36}/, { timeout: 30_000 });
+  await expect(page.getByText(KB, { exact: true }).first()).toBeVisible({ timeout: 30_000 });
   await page.getByTestId('kb-dropzone-input').setInputFiles(doc);
   const row = page.locator(`[data-testid="kb-doc-row"][data-name="${path.basename(doc)}"]`);
   await expect(row).toHaveAttribute('data-status', /ready|failed/, { timeout: 240_000 });
@@ -477,7 +477,8 @@ test('a moderation policy with a custom pattern blocks a chat message, then the 
   await go(page, `/agents/${ids.echoAgent}/chat`);
   const blocked = await chat(page, 'Move the balance to ACCT-123456 today.');
   const notice = page.getByTestId('moderation-notice');
-  const said = `${blocked.error} ${(await notice.count()) ? await notice.innerText() : ''}`;
+  // the block can arrive as the reply itself, the error banner or the notice strip
+  const said = `${blocked.text} ${blocked.error} ${(await notice.count()) ? await notice.innerText() : ''}`;
   expect(said, 'the chat says the message was blocked').toMatch(/block|moderation|policy/i);
   expect(blocked.text).not.toMatch(/TRIGGER OK: Move the balance to ACCT-123456/);
 

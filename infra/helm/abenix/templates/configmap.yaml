@@ -80,6 +80,10 @@ data:
   DATABASE_PORT: "5432"
   DATABASE_NAME: {{ .Values.databaseName | default "abenix" | quote }}
   FRONTEND_URL: {{ .Values.frontendUrl | default "http://localhost:3000" | quote }}
+  {{- if .Values.publicApiUrl }}
+  # where an SSO provider sends the browser back to
+  PUBLIC_API_BASE_URL: {{ .Values.publicApiUrl | quote }}
+  {{- end }}
   # Browser origins allowed to call the API. The web UI's host port is not
   # always 3000 — deploy.sh takes WEB_PORT — so every origin the browser may
   # use has to be listed here or the UI gets CORS-blocked.
@@ -140,7 +144,31 @@ data:
   # with "server_url rejected: cluster-internal DNS blocked".
   MCP_ALLOWED_HOSTS: {{ .Values.mcpAllowedHosts | default (printf "uat-mcp.%s.svc.cluster.local" .Release.Namespace) | quote }}
   # in-cluster webhook receivers that may resolve to private addresses, exact names
-  EVENTS_ALLOWED_INTERNAL_HOSTS: {{ .Values.eventsAllowedInternalHosts | default "" | quote }}
+  {{- $dc := default dict .Values.devCatchers }}
+  {{- $allowed := .Values.eventsAllowedInternalHosts | default "" }}
+  {{- if $dc.enabled }}
+  {{- $catcher := printf "%s-webhook-catcher.%s.svc.cluster.local,%s-webhook-catcher" .Release.Name .Release.Namespace .Release.Name }}
+  {{- $allowed = ternary $catcher (printf "%s,%s" $allowed $catcher) (eq $allowed "") }}
+  {{- end }}
+  EVENTS_ALLOWED_INTERNAL_HOSTS: {{ $allowed | quote }}
+  # Outgoing email for notifications, password resets and invites
+  {{- $smtp := default dict .Values.smtp }}
+  {{- if $dc.enabled }}
+  SMTP_HOST: "{{ .Release.Name }}-mailpit"
+  SMTP_PORT: "1025"
+  SMTP_STARTTLS: "false"
+  {{- else }}
+  SMTP_HOST: {{ default "" $smtp.host | quote }}
+  SMTP_PORT: {{ default 587 $smtp.port | quote }}
+  SMTP_STARTTLS: {{ default "auto" $smtp.startTls | quote }}
+  {{- end }}
+  SMTP_FROM: {{ default "no-reply@abenix.dev" $smtp.from | quote }}
+  {{- if $dc.enabled }}
+  # Dev only: the browser reaches the mock OIDC provider on a forwarded
+  # localhost port, the API reaches the same server by its service name
+  DEV_CATCHERS: "true"
+  OIDC_INTERNAL_URL_MAP: {{ printf "%s=http://%s-mock-oidc.%s.svc.cluster.local:8080" (default "http://localhost:8090" (default dict $dc.mockOidc).publicUrl) .Release.Name .Release.Namespace | quote }}
+  {{- end }}
   # Warm code runners, see templates/code-runners.yaml
   {{- $cr := default dict .Values.codeRunners }}
   {{- if $cr.enabled }}

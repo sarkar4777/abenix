@@ -464,6 +464,30 @@ mcpAllowedHosts: ""
 # private addresses, comma separated. Everything else private stays blocked.
 eventsAllowedInternalHosts: ""
 
+# Outgoing email for notifications, password resets and team invites.
+# Empty host turns email off. The login goes in secrets.smtpUser/smtpPassword.
+# startTls: auto uses STARTTLS when the server offers it, true requires it.
+smtp:
+  host: ""
+  port: 587
+  from: "no-reply@abenix.dev"
+  startTls: "auto"
+
+# Dev-only catchers: Mailpit (SMTP + web UI), a webhook catcher for
+# Slack-format posts and a mock OIDC provider for SSO. When on, the API
+# mails through Mailpit, the catcher host joins the webhook allow-list and
+# the mock issuer is mapped to its service name. Never enable in production.
+devCatchers:
+  enabled: false
+  mailpit:
+    image: axllent/mailpit:v1.21
+  webhookCatcher:
+    image: python:3.12-alpine
+  mockOidc:
+    image: ghcr.io/navikt/mock-oauth2-server:2.1.10
+    # where the browser reaches the mock, deploy.sh forwards it here
+    publicUrl: http://localhost:8090
+
 environment: production
 logLevel: info
 
@@ -473,6 +497,9 @@ secrets:
   redisPassword: ""
   postgresPassword: ""
   jwtSecret: ""
+  # SMTP login for smtp.host, both optional
+  smtpUser: ""
+  smtpPassword: ""
   stripeSecretKey: ""
   anthropicApiKey: ""
   # Claude Pro/Max subscription token (`claude setup-token`). Optional.
@@ -496,6 +523,17 @@ secrets:
   # fetch it from GET /api/edge/signing-key.
   edgeSigningKeyPem: ""
   edgeSigningPubkeyPem: ""
+  # SSO sign-in. A provider shows on the sign-in page once its id and secret are
+  # both set. The callback base is publicApiUrl, the landing page is frontendUrl.
+  sso:
+    googleClientId: ""
+    googleClientSecret: ""
+    githubClientId: ""
+    githubClientSecret: ""
+    microsoftClientId: ""
+    microsoftClientSecret: ""
+    # Entra tenant id or domain, empty means common (any Microsoft account)
+    microsoftTenant: ""
 
 # Defaults for the two product switches. Admins change them at runtime on
 # Admin > Marketplace, the stored value wins over these.

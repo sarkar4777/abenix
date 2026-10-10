@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import {
   AlertTriangle, ArrowLeft, CheckCircle2, Copy, FileText, GitBranch,
-  Loader2, Tags, TrendingUp, XCircle,
+  Loader2, RotateCcw, Tags, TrendingUp, XCircle,
 } from 'lucide-react';
 
 type Coded = {
@@ -25,7 +25,7 @@ function Section({ title, icon: Icon, children, note }: {
   title: string; icon: any; children: React.ReactNode; note?: string;
 }) {
   return (
-    <section className="rounded-xl bg-slate-900/60 ring-1 ring-slate-800">
+    <section className="min-w-0 rounded-xl bg-slate-900/60 ring-1 ring-slate-800">
       <div className="px-4 py-3 border-b border-slate-800 flex items-center gap-2">
         <Icon className="w-4 h-4 text-slate-500" />
         <h3 className="text-sm font-semibold text-white">{title}</h3>
@@ -40,9 +40,11 @@ function Field({ k, v }: { k: string; v: any }) {
   const empty = v === null || v === undefined || v === '';
   return (
     <div className="flex items-start gap-3 py-1 text-xs">
-      <span className="text-slate-500 font-mono w-44 shrink-0">{k}</span>
-      <span className={empty ? 'text-slate-600 italic' : 'text-slate-200 break-words'}>
-        {empty ? 'not reported' : typeof v === 'object' ? JSON.stringify(v) : String(v)}
+      <span className="text-slate-500 font-mono w-28 sm:w-44 shrink-0">{k}</span>
+      <span className={`min-w-0 ${empty ? 'text-slate-600 italic' : 'text-slate-200 [overflow-wrap:anywhere]'}`}>
+        {empty ? 'not reported'
+          : Array.isArray(v) && v.every((x) => typeof x === 'string') ? v.map((x) => x.replace(/_/g, ' ')).join(', ')
+          : typeof v === 'object' ? JSON.stringify(v) : String(v)}
       </span>
     </div>
   );
@@ -53,12 +55,27 @@ export default function CaseDetail() {
   const id = params?.id;
   const [c, setC] = useState<Case | null>(null);
   const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState<string | null>(null);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [missing, setMissing] = useState(false);
+  const [reviewer, setReviewer] = useState('');
+  const [notes, setNotes] = useState('');
+
+  useEffect(() => {
+    try {
+      setReviewer(localStorage.getItem('pv.reviewer') || '');
+    } catch {
+      /* private mode */
+    }
+  }, []);
 
   const load = useCallback(async () => {
     if (!id) return;
     try {
       const r = await fetch(`/api/pv/cases/${id}`, { cache: 'no-store' });
+      if (r.status === 404) {
+        setMissing(true);
+        return;
+      }
       if (!r.ok) return;
       const body = await r.json();
       setC((body?.data ?? body) as Case);
@@ -73,21 +90,70 @@ export default function CaseDetail() {
     return () => clearInterval(t);
   }, [load]);
 
+  const detailOf = async (r: Response) => {
+    const b = await r.json().catch(() => null);
+    const d = b?.detail;
+    if (typeof d === 'string') return d;
+    if (Array.isArray(d)) return d.map((x: any) => x.msg).join(', ');
+    return `HTTP ${r.status}`;
+  };
+
   const decide = async (decision: string) => {
+    if (reviewer.trim().length < 2) {
+      setMsg({ ok: false, text: 'Enter your name as the reviewer before you decide.' });
+      return;
+    }
+    if (decision !== 'approve' && !notes.trim()) {
+      setMsg({ ok: false, text: `Say why you ${decision} this case in the notes.` });
+      return;
+    }
     setBusy(true);
     setMsg(null);
     try {
+      try {
+        localStorage.setItem('pv.reviewer', reviewer.trim());
+      } catch {
+        /* private mode */
+      }
       const r = await fetch(`/api/pv/cases/${id}/review`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ decision, reviewer: 'medical.reviewer', notes: '' }),
+        body: JSON.stringify({ decision, reviewer: reviewer.trim(), notes: notes.trim() }),
       });
-      setMsg(r.ok ? `Recorded: ${decision}` : `Failed: HTTP ${r.status}`);
+      setMsg(r.ok
+        ? { ok: true, text: decision === 'approve' ? 'Approved and submitted.' : decision === 'reject' ? 'Rejected.' : 'Merged into the earlier case.' }
+        : { ok: false, text: await detailOf(r) });
+      await load();
+    } catch {
+      setMsg({ ok: false, text: 'PharmaVigil could not be reached, nothing was recorded.' });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const reassess = async () => {
+    setBusy(true);
+    setMsg(null);
+    try {
+      const r = await fetch(`/api/pv/cases/${id}/reassess`, { method: 'POST' });
+      setMsg(r.ok ? { ok: true, text: 'Assessment started again.' } : { ok: false, text: await detailOf(r) });
       await load();
     } finally {
       setBusy(false);
     }
   };
+
+  if (missing) {
+    return (
+      <main className="min-h-screen bg-slate-950 text-slate-300 grid place-items-center px-4">
+        <div className="text-center space-y-2">
+          <p className="text-white font-semibold">This case does not exist</p>
+          <p className="text-sm text-slate-500">It may have been filed on another environment.</p>
+          <a href="/" className="text-sm text-teal-300 hover:underline">Back to the case queue</a>
+        </div>
+      </main>
+    );
+  }
 
   if (!c) {
     return (
@@ -105,14 +171,14 @@ export default function CaseDetail() {
   return (
     <main className="min-h-screen bg-slate-950 text-slate-200">
       <header className="border-b border-slate-800/80 bg-slate-900/40">
-        <div className="mx-auto max-w-5xl px-6 py-4 flex items-center gap-3">
+        <div className="mx-auto max-w-5xl px-4 sm:px-6 py-4 flex items-center gap-3">
           <a href="/" className="text-slate-500 hover:text-teal-300"><ArrowLeft className="w-4 h-4" /></a>
-          <div className="flex-1">
-            <h1 className="text-base font-bold text-white">
+          <div className="flex-1 min-w-0">
+            <h1 className="text-base font-bold text-white break-words">
               {c.suspect_drug || 'unknown drug'}
               {c.primary_pt ? <span className="text-slate-400 font-normal"> · {c.primary_pt}</span> : null}
             </h1>
-            <p className="text-[11px] text-slate-500 font-mono">{c.id}</p>
+            <p className="text-[11px] text-slate-500 font-mono truncate">{c.id}</p>
           </div>
           {c.priority && (
             <span className="text-xs px-2 py-1 rounded ring-1 ring-slate-700 text-slate-300">
@@ -122,7 +188,7 @@ export default function CaseDetail() {
         </div>
       </header>
 
-      <div className="mx-auto max-w-5xl px-6 py-6 space-y-5">
+      <div className="mx-auto max-w-5xl px-4 sm:px-6 py-6 space-y-5">
         {assessing && (
           <div className="rounded-lg bg-cyan-500/10 ring-1 ring-cyan-500/30 px-4 py-3 text-sm text-cyan-200 flex items-center gap-2">
             <Loader2 className="w-4 h-4 animate-spin" />
@@ -130,8 +196,14 @@ export default function CaseDetail() {
           </div>
         )}
         {c.error_message && (
-          <div className="rounded-lg bg-rose-500/10 ring-1 ring-rose-500/30 px-4 py-3 text-sm text-rose-300">
-            {c.error_message}
+          <div className="rounded-lg bg-rose-500/10 ring-1 ring-rose-500/30 px-4 py-3 text-sm text-rose-300 flex flex-wrap items-center gap-3">
+            <span className="flex-1 min-w-0 break-words">The assessment failed: {c.error_message}</span>
+            {c.status === 'failed' && (
+              <button data-testid="reassess" disabled={busy} onClick={() => void reassess()}
+                className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-rose-500/10 ring-1 ring-rose-500/40 hover:bg-rose-500/20 disabled:opacity-40">
+                <RotateCcw className="w-3.5 h-3.5" /> Run it again
+              </button>
+            )}
           </div>
         )}
         {gaps.length > 0 && (
@@ -145,7 +217,10 @@ export default function CaseDetail() {
           </div>
         )}
         {msg && (
-          <div className="rounded-lg bg-slate-800/60 ring-1 ring-slate-700 px-4 py-2 text-xs text-slate-300">{msg}</div>
+          <div role="status" data-testid="review-message"
+            className={`rounded-lg px-4 py-2 text-xs ring-1 ${msg.ok ? 'bg-emerald-500/10 ring-emerald-500/30 text-emerald-200' : 'bg-rose-500/10 ring-rose-500/30 text-rose-200'}`}>
+            {msg.text}
+          </div>
         )}
 
         <Section title="Reported" icon={FileText}>
@@ -277,6 +352,30 @@ export default function CaseDetail() {
         </Section>
 
         <Section title="Medical review" icon={CheckCircle2} note="nothing is submitted without this">
+          {c.review_decision ? (
+            <p className="text-sm text-slate-300" data-testid="review-outcome">
+              {c.reviewed_by} chose <strong className="text-white">{c.review_decision}</strong>
+              {c.reviewed_at ? <> on {String(c.reviewed_at).slice(0, 10)}</> : null}
+              {c.review_notes ? <span className="block text-xs text-slate-400 mt-1">{c.review_notes}</span> : null}
+            </p>
+          ) : c.status !== 'assessed' ? (
+            <p className="text-xs text-slate-500">
+              {c.status === 'failed' ? 'Run the assessment again before it can be reviewed.' : 'You can review once the assessment finishes.'}
+            </p>
+          ) : (
+          <div className="space-y-3">
+          <div className="grid sm:grid-cols-2 gap-3">
+            <div>
+              <label htmlFor="reviewer" className="text-xs text-slate-400">Reviewer</label>
+              <input id="reviewer" data-testid="review-reviewer" value={reviewer} onChange={(e) => setReviewer(e.target.value)}
+                placeholder="Your name" className="mt-1 w-full rounded-lg bg-slate-900 ring-1 ring-slate-700 focus:ring-teal-500/60 px-3 py-2 text-sm outline-none" />
+            </div>
+            <div>
+              <label htmlFor="notes" className="text-xs text-slate-400">Notes (needed to reject or merge)</label>
+              <input id="notes" data-testid="review-notes" value={notes} onChange={(e) => setNotes(e.target.value)}
+                className="mt-1 w-full rounded-lg bg-slate-900 ring-1 ring-slate-700 focus:ring-teal-500/60 px-3 py-2 text-sm outline-none" />
+            </div>
+          </div>
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-xs text-slate-400 mr-2">
               ready_to_submit: <strong className={c.ready_to_submit ? 'text-emerald-300' : 'text-amber-300'}>
@@ -285,14 +384,15 @@ export default function CaseDetail() {
             </span>
             <button
               data-testid="review-approve"
-              disabled={busy || c.status === 'assessing'}
+              disabled={busy}
               onClick={() => void decide('approve')}
               className="text-xs px-3 py-1.5 rounded-lg bg-emerald-500/10 text-emerald-300 ring-1 ring-emerald-500/40 hover:bg-emerald-500/20 disabled:opacity-40"
             >
               Approve and submit
             </button>
             <button
-              disabled={busy || c.status === 'assessing'}
+              data-testid="review-reject"
+              disabled={busy}
               onClick={() => void decide('reject')}
               className="text-xs px-3 py-1.5 rounded-lg bg-slate-700/30 text-slate-300 ring-1 ring-slate-600 hover:bg-slate-700/50 disabled:opacity-40"
             >
@@ -300,6 +400,7 @@ export default function CaseDetail() {
             </button>
             {c.is_duplicate && (
               <button
+                data-testid="review-merge"
                 disabled={busy}
                 onClick={() => void decide('merge')}
                 className="text-xs px-3 py-1.5 rounded-lg bg-violet-500/10 text-violet-300 ring-1 ring-violet-500/40 hover:bg-violet-500/20 disabled:opacity-40"
@@ -307,12 +408,9 @@ export default function CaseDetail() {
                 Merge duplicate
               </button>
             )}
-            {c.review_decision && (
-              <span className="text-xs text-slate-400 ml-2">
-                {c.reviewed_by} chose <strong className="text-white">{c.review_decision}</strong>
-              </span>
-            )}
           </div>
+          </div>
+          )}
         </Section>
 
         {Array.isArray(c.events) && c.events.length > 0 && (

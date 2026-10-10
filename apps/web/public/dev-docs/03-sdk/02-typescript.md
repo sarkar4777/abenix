@@ -9,7 +9,7 @@ cd packages/sdk/js && npm install && npm run build
 npm install /path/to/agentforge/packages/sdk/js
 ```
 
-The package is `@abenix/sdk`. It has no runtime dependencies. It needs a global `fetch` and `AbortSignal.timeout`, so Node 18+ or a modern browser.
+The package is `@abenix/sdk`, an ES module (`"type": "module"`, `import { Abenix } from "@abenix/sdk"`). It has no runtime dependencies. It needs a global `fetch`, `FormData`, `Blob` and `AbortSignal.timeout`, so Node 18+ or a modern browser. `npm pack` in `packages/sdk/js` gives a tarball an app can install the same way.
 
 ---
 
@@ -42,7 +42,7 @@ interface AbenixConfig {
 
 Every request sends `X-API-Key` and is aborted after `timeout`. `execute` also derives the server-side wait from it (`timeout / 1000 - 5` seconds, clamped to 5..1800). There is nothing to close.
 
-Sub-clients: `executions`, `agents`, `knowledge`, `approvals`, `decisions`, `sources`, `events`. Top-level methods: `permissions`, `execute`, `stream`, `approve`, `reject`, `setActAs`.
+Sub-clients: `executions`, `agents`, `knowledge`, `approvals`, `decisions`, `sources`, `events`, `actions`, `autonomy`, `improvements`, `lessons`, `feedback`. Top-level methods: `permissions`, `execute`, `stream`, `approve`, `reject`, `setActAs`.
 
 ---
 
@@ -76,9 +76,10 @@ interface ExecuteOptions {
   context?: Record<string, unknown>;   // input variables for agents and pipelines
   actAs?: ActingSubject;
   wait?: "completed" | "submitted" | "until_gate" | boolean;
-  stream?: boolean;
-  maxTokens?: number;
-  temperature?: number;
+  conversationId?: string;             // continue a chat thread
+  waitTimeoutSeconds?: number;         // 5 to 1800, defaults to the client timeout less 5 s
+  maxTokens?: number;                  // deprecated, ignored
+  temperature?: number;                // deprecated, ignored
 }
 ```
 
@@ -91,7 +92,9 @@ interface ExecuteOptions {
 | `"until_gate"` | Blocks, but returns early with `status: "paused"` and `pausedAt` when a HITL gate opens. |
 | `false` | Asks the server not to wait. |
 
-Unlike Python, the TS client does not poll. If the server hands back an async response, `output` is empty and you poll `client.executions.get(executionId)` yourself. `maxTokens` and `temperature` are sent in the body but the execute endpoint ignores them. Use `stream()` rather than `stream: true` here.
+If the server hands back an async response with only an `execution_id`, the client reads the run until it ends, the same as Python, so `output` is filled in. `maxTokens` and `temperature` are not sent, the execute endpoint has no such fields. Set them on the agent's `model_config`. Use `stream()` rather than `stream: true` here.
+
+An agent can be named by slug or id. A slug is looked up exactly through `/api/agents/by-slug/{slug}`, and only a real UUID skips the lookup.
 
 Results carry `triggerKind`, `triggerId`, `triggerName` and `startedBy`. `client.executions.list({ triggerKind: ['schedule', 'webhook'] })` and `list({ triggerId })` filter past runs by what started them.
 
@@ -108,9 +111,21 @@ for await (const event of client.stream("deep-research", "Analyze market trends 
 }
 ```
 
-`stream(agentSlugOrId, message, options?)` is an async generator of `StreamEvent`. `type` is one of `token`, `tool_call`, `tool_result`, `node_start`, `node_complete`, `done`, `error`. An HTTP error does not throw. It yields one `error` event and ends. There is no reconnect and no TS `watch` for runs started elsewhere.
+`stream(agentSlugOrId, message, options?)` is an async generator of `StreamEvent`. `type` is one of `token`, `tool_call`, `tool_result`, `node_start`, `node_complete`, `done`, `error`, or the name of any other event the server sends, such as `moderation` or `node_trace`. Only `error` means the run failed. `done` carries `executionId`, and every event has its raw payload in `data`. An HTTP error does not throw. It yields one `error` event and ends. Breaking out of the loop closes the connection. There is no reconnect and no TS `watch` for runs started elsewhere.
 
-For React there is no streaming hook. `@abenix/react` (`packages/sdk/react`) ships one component, `AgentChat`, an embeddable chat box. Its props are `apiKey`, `agentSlug`, `baseUrl`, `theme`, `height`, `placeholder`, `onMessage`, `onError`, `onCostUpdate` and `className`.
+### React
+
+`@abenix/react` (`packages/sdk/react`) is built on `@abenix/sdk` and ships two things.
+
+`useAgentStream({ client | apiKey + baseUrl, agentSlug, actAs?, onCostUpdate?, onError? })` resolves the agent by slug and returns `{ messages, agentState, agentName, isStreaming, error, send, stop, reset }`. `agentState` is `loading`, `ready` or `missing`, the last when the slug is unknown or the key cannot see the agent. Each message has `role`, `content`, `toolCalls`, `isStreaming`, and on replies `executionId` and `error`.
+
+```tsx
+const chat = useAgentStream({ client, agentSlug: "deep-research" });
+if (chat.agentState === "missing") return <p>{chat.error}</p>;
+await chat.send("Summarise the EV market");
+```
+
+`AgentChat` (named and default export) is a ready chat box on top of the hook. Props: `apiKey` or `client`, `agentSlug`, `baseUrl`, `actAs`, `theme`, `height`, `placeholder`, `onMessage`, `onError`, `onCostUpdate` and `className`. It shows a connecting state, a clear message when the agent cannot be found, tool calls as they run, and a Stop button while a reply streams. `onMessage` fires once per finished message with its `executionId`.
 
 ---
 
@@ -165,13 +180,13 @@ const client = new Abenix({ apiKey: "af_xxx", baseUrl: "http://localhost:8000" }
 
 The TS client is behind Python here. Not in TS yet:
 
-- `me()`, `watch()` and `executions.watchRawSse`
-- `agents.bySlug`, `agents.create`, `agents.update`, `agents.findBySlug`
-- `decisions.create`, `versions`, `version`, `retire`, `tests`, `addTest`, `evaluations`, `referenceSet`, `putReferenceSet`
+- `watch()` and `executions.watchRawSse`
+- `agents.findBySlug` (use `bySlug`)
+- `decisions.create`, `versions`, `version`, `retire`, `evaluations`, `referenceSet`, `putReferenceSet`
 - `sources.snapshots`, `validateUrl`, `preview`, `settings`
 - `events.test`, `events.redeliver`
-- `knowledge.bootstrapProject`, `knowledge.ensureSubjectCollection`
-- the `chat`, `tools`, `presets` and `mlModels` sub-clients
+- `knowledge.ensureSubjectCollection`
+- the `chat`, `tools` and `presets` sub-clients, and `codeAssets.run`
 
 Neither SDK wraps the server's decision `check` and `try` endpoints.
 
@@ -186,7 +201,7 @@ class AbenixError extends Error {
 class AbenixDecisionError extends Error { /* same fields */ }
 ```
 
-`AbenixDecisionError` does not extend `AbenixError`, so check for both if you need to. Decision calls throw `AbenixDecisionError`. `permissions()`, `sources`, `events`, `actions` and `autonomy` throw `AbenixError`. The older `execute`, `approvals` and `knowledge` methods still throw a plain `Error`.
+`AbenixDecisionError` does not extend `AbenixError`, so check for both if you need to. Decision calls throw `AbenixDecisionError`. `permissions()`, `sources`, `events`, `actions`, `autonomy`, `improvements`, `lessons`, `feedback`, `mlModels`, `codeAssets`, `killSwitches` and `apiKeys` throw `AbenixError`. The older `execute`, `approvals` and `knowledge` methods still throw a plain `Error`.
 
 ```ts
 try {
@@ -271,6 +286,12 @@ await client.decisions.update(key, { riskTier: "medium", tags: ["credit"] });
 | `proposeRules` | `(key, rules, note, mode = "merge")`, new draft, import and propose in one call |
 | `export` | `(key, version?)` |
 | `referenceSets` | `()` |
+| `tests` | `(key)` |
+| `addTest` | `(key, name, facts, opts?: { expected, expectedOutcome, asOf, match })`, `match` is `"exact"` (default) or `"subset"` |
+| `updateTest` | `(key, testId, fields: { name, facts, expected, expectedOutcome, asOf, match })`, fields left out stay as they are |
+| `deleteTest` | `(key, testId)` |
+
+A golden test with `match: "subset"` passes when every key in `expected` is in the result with the same value. Extra result keys are ignored and nested objects are matched the same way.
 
 ### Sources
 
@@ -391,6 +412,72 @@ All need `autonomy.view`.
 
 These throw `AbenixError` like the other platform clients.
 
+### ML models
+
+A name stands for the model's active version, a UUID for one exact version.
+
+```ts
+const model = await client.mlModels.upload("churn", "./churn.joblib", {
+  featureNames: ["age", "income", "tenure"],
+  description: "Churn risk, retrained weekly",
+});
+console.log(model.version, model.status);
+console.log(await client.mlModels.predict("churn", { age: 35, income: 50000, tenure: 24 }));
+const why = await client.mlModels.explain("churn", { age: 35, income: 50000, tenure: 24 });
+console.log(why.method, why.contributions[0]);
+await client.mlModels.delete("churn", { allVersions: true });
+```
+
+| Method | Calls |
+|---|---|
+| `list()` | `GET /api/ml-models` |
+| `get(nameOrId)` | `GET /api/ml-models/{id}` |
+| `upload(name, file, opts?: { filename, framework, version, description, inputSchema, featureNames, outputSchema, tags })` | `POST /api/ml-models` as multipart. `file` is a path (Node), a `Blob`, a `Uint8Array` or an `ArrayBuffer`. Bytes need `filename` or `framework`. A version is picked for you when left out |
+| `predict(nameOrId, inputData)` | `POST /api/ml-models/{id}/predict` |
+| `explain(nameOrId, inputData, baseline?)` | `POST /api/ml-models/{id}/explain`. Resolves an `MLExplanation` with `contributions`, `waterfall`, `method` and `baseline_source`. See [Explanations](../02-runtime/12-ml-models.md#explanations) |
+| `delete(nameOrId, opts?: { allVersions })` | Resolves `{ deleted: string[] }` |
+
+A file that does not load throws `AbenixError` 422 with `code === "MODEL_LOAD_FAILED"` and the stored error version in `details.model`. A taken version throws 409 `VERSION_EXISTS`. An unknown name throws 404 `NOT_FOUND`.
+
+### Code assets
+
+```ts
+let asset = await client.codeAssets.create("scorer", "./scorer", { description: "Scores rows" });
+if (asset.status !== "ready") throw new Error(asset.error ?? "analysis failed");
+asset = await client.codeAssets.newVersion(asset.id, "./scorer");
+```
+
+| Method | Calls |
+|---|---|
+| `list()` | `GET /api/code-assets` |
+| `get(nameOrId)` | `GET /api/code-assets/{id}` |
+| `create(name, source?, opts?: { description, gitUrl, gitRef, filename })` | `POST /api/code-assets` as multipart. `source` is a zip or tar.gz path, a folder (Node, zipped for you without `.git`, virtualenvs, `node_modules` and caches) or the bytes of an archive. Or pass `gitUrl` and no source |
+| `newVersion(nameOrId, source?, opts?: { gitUrl, gitRef, filename })` | `POST /api/code-assets/{id}/versions`. Throws `AbenixError` 422 when the new code does not analyse cleanly, the live version stays |
+
+`create` resolves once analysis is done, also when it failed, so check `status` and `error`. Paths and folders need Node. In a browser pass a `Blob`.
+
+### Kill switches
+
+```ts
+const sw = await client.killSwitches.set("agent", "groundwork-trainer", "Bad outputs after the 2.1 data load");
+console.log(await client.killSwitches.list());
+await client.killSwitches.clear(sw.id);
+```
+
+| Method | Calls |
+|---|---|
+| `list(opts?: { includeCleared })` | `GET /api/governance/kill-switches`, resolves the switches. Needs `risk.view` |
+| `set(scope, target, reason)` | `POST /api/governance/kill-switches`. `scope` is `all`, `agent`, `pipeline`, `tool`, `model`, `trigger`, `decision`, `source` or `improvements`, `target` a name or id in it or `*`. `reason` needs at least 3 characters. Needs `killswitch.manage` |
+| `clear(switchId)` | `POST /api/governance/kill-switches/{id}/clear` |
+
+### API keys
+
+| Method | Calls |
+|---|---|
+| `list()` | `GET /api/api-keys`, your active keys, every key in the tenant for an admin |
+| `create(name, scopes?, opts?: { expiresAt, maxMonthlyTokens, maxMonthlyCost })` | `POST /api/api-keys`. `scopes` is `{ can_delegate: true }`, `{ allowed_actions: [...] }` or a list of actions, any other shape rejects before the call. `raw_key` is only in this response |
+| `revoke(keyId)` | `DELETE /api/api-keys/{id}` |
+
 ---
 
 ## Other sub-clients
@@ -409,7 +496,7 @@ Every call resolves to an `Approval` (camelCase: `id`, `agentId`, `agentExecutio
 | `signoff(approvalId, decision, opts?: { reason, clientToken, editedArguments })` | `decision` is `"approve"`, `"deny"` or `"return"`. `editedArguments` only on an `action:*` approval with `approve` |
 | `approve(approvalId, opts?)` / `deny(approvalId, opts?)` | `signoff` with that decision |
 | `returnForChanges(approvalId, reason, opts?: { clientToken })` | see above |
-| `waitFor(approvalId, opts?: { timeoutSeconds, pollSeconds })` | Long-polls `/wait` in chunks of up to 120 s, default 60 s total |
+| `waitFor(approvalId, opts?: { timeoutSeconds, pollSeconds })` | Long-polls `/wait` in chunks of up to 120 s, default 60 s total. A busy answer (429, 502, 503, 504) or a dropped connection is retried until the timeout |
 | `subscribe()` | Async generator over `GET /api/notifications/stream?types=approval_pending,approval_resolved`, yields `{ event, data }` |
 | `configureWebhook({ url, secret })` | `PUT /api/approvals/webhooks`, resolves `{ url, hasSecret }`. A missing field is sent as `null` |
 
@@ -417,17 +504,24 @@ Every call resolves to an `Approval` (camelCase: `id`, `agentId`, `agentExecutio
 
 `live()`, `get(executionId)`, `replay(executionId)`, `tree(executionId)` and `pendingApprovals()` wrap `GET /api/executions/live`, `/api/executions/{id}`, `/api/executions/{id}/replay`, `/api/executions/tree/{id}` and `/api/executions/approvals`. `replay` returns the stored trace, it does not run anything.
 
+`list(opts?: { agentId, status, triggerKind, triggerId, search, limit, offset })` wraps `GET /api/executions`. `limit` defaults to 20 and `triggerKind` takes a string or an array.
+
 ### `agents`
 
-`list()` (first page, 20 agents) and `get(agentId)`.
+`list()` (first page, 20 agents), `get(agentId)`, `bySlug(slug)` (null when there is none), `create(body)` and `update(agentId, body)`. `create` and `update` take the same fields as `POST /api/agents`, including `model_config`, and throw `AbenixError`.
+
+`client.me()` resolves `{ user: { id, email, full_name, role, tenant_id } }`.
 
 ### `knowledge`
 
 | Method | Notes |
 |---|---|
+| `bootstrapProject(slug, name, opts?: { description, collections })` | `POST /api/knowledge-projects/bootstrap`, idempotent. Resolves `{ project, collections, skipped_agents }` |
+| `upload(kbId, file, filename, contentType?)` | `file` is a `Blob`, `Uint8Array` or string, sent as multipart. Resolves the document with `status: "processing"`. Throws `AbenixError` 400 for an empty or unsupported file |
+| `documents(kbId)` | Documents with their `status`. Poll until yours is `ready` before you search |
 | `cognify(kbId, opts?: { docIds, model, chunkSize, chunkOverlap })` | Resolves `{ jobId, status, documents, message }` |
 | `graphStats(kbId)` | Resolves `{ entities, relationships, entityTypes }` |
-| `search(kbId, query, opts?: { mode, topK, graphDepth })` | Defaults `hybrid`, 5, 2. Resolves `{ results, graphEntities }` |
+| `search(kbId, query, opts?: { mode, topK, graphDepth })` | Defaults `hybrid`, 5, 2. Resolves `{ results, entitiesFound, modeUsed, vectorCount, graphCount, latencyMs }`, each result has `content`, `score`, `source` and `metadata`. Throws `AbenixError` |
 | `graph(kbId, limit = 100)` | Subgraph for display |
 | `cognifyJobs(kbId)` | Job history |
 

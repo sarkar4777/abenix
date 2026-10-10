@@ -1507,3 +1507,9 @@ async def test_enrol_refuses_to_drop_settings_on_an_existing_action(store):
 def test_limit_facts_read_json_text_arguments():
     facts = svc.limit_facts({"payload": '{"mw": 60}', "note": "{oops"}, "controls.b")
     assert facts == {"payload": {"mw": 60}, "note": "{oops", "target": "controls.b"}
+
+
+def test_sample_prompt_does_not_skip_a_setpoint_that_is_only_close():
+    # a run saw 4.17 against 4.14, called it close enough and proposed nothing
+    assert "equals it exactly" in svc.SAMPLE_PROMPT
+    assert "0.01 bar" in svc.SAMPLE_PROMPT

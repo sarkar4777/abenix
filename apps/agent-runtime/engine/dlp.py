@@ -131,3 +131,133 @@ def enforce_dlp(text: str, policy: DLPPolicy | None = None) -> tuple[str, DLPRes
 
     # detect mode: pass through but flag
     return text, result
+
+
+DLP_MODES = ("detect", "mask", "block")
+
+_LABELS = {
+    "email": "an email address",
+    "phone_us": "a phone number",
+    "ssn": "a social security number",
+    "credit_card": "a card number",
+    "ip_address": "an IP address",
+    "aws_access_key": "an AWS key",
+    "aws_secret_key": "an AWS secret",
+    "generic_api_key": "an API key",
+    "bearer_token": "a bearer token",
+}
+
+
+def policy_from_settings(raw: Any) -> DLPPolicy | None:
+    """The tenant's settings.dlp as a policy, None when scanning is off."""
+    if not isinstance(raw, dict) or raw.get("enabled") is False:
+        return None
+    mode = str(raw.get("mode") or "detect").lower()
+    if mode not in DLP_MODES:
+        mode = "detect"
+    custom = raw.get("custom_patterns")
+    return DLPPolicy(
+        mode=mode, custom_patterns=custom if isinstance(custom, dict) else {}
+    )
+
+
+def describe_findings(result: DLPResult) -> str:
+    kinds = list(dict.fromkeys(f["type"] for f in result.findings))
+    words = [
+        _LABELS.get(k, "a custom pattern" if k.startswith("custom:") else k)
+        for k in kinds
+    ]
+    return ", ".join(words[:4]) or "personal data"
+
+
+def input_blocked_message(result: DLPResult) -> str:
+    return (
+        f"This message was not sent because it contains {describe_findings(result)}. "
+        "Your workspace's data protection setting blocks personal data. "
+        "Remove it and try again."
+    )
+
+
+def output_blocked_message(result: DLPResult) -> str:
+    return (
+        f"The reply was withheld because it contained {describe_findings(result)}. "
+        "Your workspace's data protection setting blocks personal data in answers."
+    )
+
+
+def apply(
+    text: str, policy: DLPPolicy | None, *, source: str
+) -> tuple[str, str, DLPResult]:
+    """Apply the tenant mode. Returns (text, block message or "", scan)."""
+    if policy is None or not text:
+        return text, "", DLPResult(original_text=text, masked_text=text)
+    result = scan_text(text, policy)
+    if not result.has_pii or policy.mode == "detect":
+        return text, "", result
+    if policy.mode == "mask":
+        return result.masked_text, "", result
+    msg = (
+        input_blocked_message(result)
+        if source == "pre_llm"
+        else output_blocked_message(result)
+    )
+    return text, msg, result
+
+
+async def load_tenant_policy(db: Any, tenant_id: Any) -> DLPPolicy | None:
+    """Read tenants.settings.dlp fresh, so a change applies to the next run."""
+    import json
+
+    from sqlalchemy import text
+
+    raw = (
+        await db.execute(
+            text("SELECT settings->'dlp' FROM tenants WHERE id = CAST(:t AS uuid)"),
+            {"t": str(tenant_id)},
+        )
+    ).scalar()
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except ValueError:
+            raw = None
+    return policy_from_settings(raw)
+
+
+def apply_to_value(
+    value: Any, policy: DLPPolicy | None, *, source: str = "post_llm"
+) -> tuple[Any, str]:
+    """Every string inside a dict or list gets the mode. Returns (value, block message)."""
+    if policy is None or policy.mode not in ("mask", "block"):
+        return value, ""
+    if isinstance(value, str):
+        out, blocked, _ = apply(value, policy, source=source)
+        return out, blocked
+    if isinstance(value, dict):
+        res: dict[Any, Any] = {}
+        for k, v in value.items():
+            res[k], blocked = apply_to_value(v, policy, source=source)
+            if blocked:
+                return value, blocked
+        return res, ""
+    if isinstance(value, (list, tuple)):
+        items = []
+        for v in value:
+            nv, blocked = apply_to_value(v, policy, source=source)
+            if blocked:
+                return value, blocked
+            items.append(nv)
+        return items, ""
+    return value, ""
+
+
+async def apply_to_pipeline_result(db: Any, tenant_id: Any, result: Any) -> None:
+    """Mask or withhold a pipeline's final output per the tenant DLP mode."""
+    if result is None or getattr(result, "final_output", None) is None or not tenant_id:
+        return
+    try:
+        policy = await load_tenant_policy(db, tenant_id)
+    except Exception:  # noqa: BLE001
+        return
+    out, blocked = apply_to_value(result.final_output, policy)
+    result.final_output = blocked or out

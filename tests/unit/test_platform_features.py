@@ -33,14 +33,18 @@ class _Res:
     def scalar_one_or_none(self):
         return self._scalar
 
+    def first(self):
+        return self._rows[0] if self._rows else None
+
 
 class SwitchDB:
     """Answers the switch query from `stored`, records writes."""
 
-    def __init__(self, stored: dict[str, str] | None = None):
+    def __init__(self, stored: dict[str, str] | None = None, platform_tenant=TENANT):
         self.stored = dict(stored or {})
         self.writes: list[dict] = []
         self.commits = 0
+        self.platform_tenant = platform_tenant
 
     async def execute(self, stmt, params=None):
         sql = str(stmt)
@@ -50,6 +54,9 @@ class SwitchDB:
             return _Res()
         if "FROM platform_settings" in sql:
             return _Res(rows=list(self.stored.items()))
+        if "FROM users" in sql:
+            rows = [(self.platform_tenant,)] if self.platform_tenant else []
+            return _Res(rows=rows)
         return _Res()
 
     async def commit(self):
@@ -77,6 +84,7 @@ def _body(resp: JSONResponse) -> dict:
 def _clean_env(monkeypatch):
     monkeypatch.delenv("MARKETPLACE_ENABLED", raising=False)
     monkeypatch.delenv("MONETIZATION_ENABLED", raising=False)
+    monkeypatch.delenv("ABENIX_PLATFORM_OPERATORS", raising=False)
 
 
 # ── reading ──────────────────────────────────────────────────────────
@@ -172,6 +180,61 @@ def test_only_an_admin_can_flip_a_switch():
     r = c.put("/api/admin/platform-features", json={"monetization": True})
     assert r.status_code == 403
     assert db.writes == []
+
+
+def test_an_admin_of_another_tenant_cannot_flip_a_switch():
+    from app.routers import platform_features as router
+
+    db = SwitchDB(platform_tenant=uuid.uuid4())
+    c = _client(_user(), db, router)
+    r = c.put("/api/admin/platform-features", json={"marketplace": False})
+    assert r.status_code == 403
+    assert r.json()["error"]["error_code"] == "PLATFORM_OPERATOR_REQUIRED"
+    assert db.writes == []
+    got = c.get("/api/admin/platform-features").json()["data"]
+    assert got["can_change"] is False and "platform tenant" in got["operator_rule"]
+
+
+def test_operator_list_overrides_the_platform_tenant(monkeypatch):
+    from app.routers import platform_features as router
+
+    monkeypatch.setenv(
+        "ABENIX_PLATFORM_OPERATORS", "ops@example.com, Someone@Example.com"
+    )
+    db = SwitchDB(platform_tenant=uuid.uuid4())
+    c = _client(_user(), db, router)
+    assert c.get("/api/admin/platform-features").json()["data"]["can_change"] is True
+    with patch("app.routers.platform_features.log_action", AsyncMock()):
+        r = c.put("/api/admin/platform-features", json={"monetization": True})
+    assert r.status_code == 200
+
+    # listed but not an admin is still refused
+    c = _client(_user(UserRole.USER), SwitchDB(), router)
+    r = c.put("/api/admin/platform-features", json={"monetization": True})
+    assert r.status_code == 403
+
+    # an admin of the platform tenant who is not listed is refused
+    monkeypatch.setenv("ABENIX_PLATFORM_OPERATORS", "ops@example.com")
+    c = _client(_user(), SwitchDB(), router)
+    assert (
+        c.put("/api/admin/platform-features", json={"marketplace": True}).status_code
+        == 403
+    )
+
+
+def test_secret_storage_status_is_for_admins(monkeypatch):
+    from app.routers import platform_features as router
+
+    monkeypatch.delenv("ABENIX_DATA_KEY_KEK_BASE64", raising=False)
+    c = _client(_user(UserRole.USER), SwitchDB(), router)
+    assert c.get("/api/admin/secret-storage").status_code == 403
+    data = (
+        _client(_user(), SwitchDB(), router)
+        .get("/api/admin/secret-storage")
+        .json()["data"]
+    )
+    assert data["encrypted_at_rest"] is False
+    assert "ABENIX_DATA_KEY_KEK_BASE64" in data["message"]
 
 
 def test_admin_flips_and_bad_values_are_refused():

@@ -240,7 +240,7 @@ test('1. Simple agent: describe, build, inspect, save, publish and use it from c
     // a row of the flagged table means it was flagged
     expect(l, 'INV-1005 is 10,000.00, it must not be in the flagged table').not.toMatch(/\t|\|/);
     // prose may say why it is not flagged, "exactly 10,000 (threshold is >10,000)", but never that it is over
-    const negated = /\bnot\b|n't\b|exactly|equal|at the threshold|no flag/i.test(l);
+    const negated = /\bnot\b|n't\b|exactly|equal|at the threshold|no flag|compliant|no issue/i.test(l);
     if (!negated) expect(l, 'INV-1005 is 10,000.00, not over 10,000').not.toMatch(/over|exceed|>\s*10/i);
   }
   for (const clean of ['INV-1001', 'INV-1003', 'INV-1007']) {

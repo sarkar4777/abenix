@@ -1,7 +1,7 @@
 import { test, expect, Page } from '@playwright/test';
 
-const BASE = process.env.BASE || 'http://localhost:3001';
-const API  = process.env.API  || 'http://localhost:8001';
+const BASE = process.env.CIQ_BASE || 'http://localhost:3001';
+const API  = process.env.CIQ_API  || 'http://localhost:8001';
 const EMAIL = process.env.CIQ_EMAIL || 'test@contractiq.com';
 const PASSWORD = process.env.CIQ_PASSWORD || 'TestPass123!';
 
@@ -85,7 +85,7 @@ test.describe('contractiq truthfulness wave', () => {
 
   test('Workbench renders attribution panel', async ({ page }) => {
     await gotoOk(page, '/workbench');
-    await expect(page.locator('text=/Feature attributions/i').first()).toBeVisible({ timeout: 15_000 });
+    await expect(page.locator('text=/Feature contributions/i').first()).toBeVisible({ timeout: 15_000 });
   });
 
   test('Recommendations renders heading', async ({ page }) => {

@@ -1,138 +1,136 @@
-# Connectors + triggers
+# Connectors and triggers
 
-Two adjacent extensibility surfaces:
+Two separate features that are often confused:
 
-- **Connectors** — typed clients for external systems (Slack, Linear, Salesforce, SAP PM, ServiceNow, Maximo, Workday, Sensitech, Carrier Lynx, DTN Weather, BNEF). One tool node per connector plus a `/test` button that proves credentials work before an agent ever calls it.
-- **Triggers** — event sources that *start* agent executions. Cron, webhook, Slack mention, GitHub PR comment, email, MQTT topic, file drop. Each trigger has a typed payload schema the agent receives as input.
+- **Connectors** let an agent call an outside system (a maintenance system, an HR system, a weather feed). An admin saves the system's address and secret once, and agents call it through the `connector_call` tool.
+- **Triggers** start an agent run without anyone in chat: on a schedule, or when another system calls a webhook URL.
 
-If "what tools can an agent call?" is the connector question, "what wakes the agent up?" is the trigger question.
+Connectors answer "what can the agent reach?". Triggers answer "what wakes the agent up?".
 
-## Connector framework
+## Connectors
 
 ```mermaid
 flowchart LR
-  A[Agent node] --> CT[connector_tool]
-  CT --> AUTH[Auth resolver<br/>OAuth / API key / secret-ref]
-  CT --> P[Preset config<br/>endpoint, fields]
-  AUTH --> CALL[HTTP / SDK call]
-  P --> CALL
-  CALL --> NORM[Response normalizer]
-  NORM --> A
+  A[Agent] --> CT[connector_call tool]
+  CT --> C[Connector row<br/>base_url, auth_type, config]
+  CT --> P[Preset YAML<br/>operations, templates]
+  CT --> S[Secret from<br/>tenant_tool_credentials]
+  C --> G[URL guard]
+  P --> G
+  S --> G
+  G --> CALL[HTTP call]
+  CALL --> A
 ```
 
-A connector definition has four parts:
+A connector is a row in `connectors` with:
 
-1. **Auth contract** — what credentials it needs, what type (`oauth2`, `api_key`, `basic`, `mtls`). The secret comes from the connector's own write-only secret, see [Secrets](#secrets).
-2. **Preset config** — endpoints, default fields, common operations. Stored in `connector_presets` so multiple connections to the same system share defaults.
-3. **The HTTP / SDK call** — the actual code that talks to the external system. Plain Python.
-4. **Response normalizer** — maps the external system's JSON quirks into a clean shape the agent sees. (Salesforce's `attributes` envelope, Slack's `ok: false` wrapping, etc.)
+- `kind`: `cmms`, `hris`, `telematics`, `standards`, `weather`, `cost_data` or `custom`
+- `preset_key`: which preset supplies its operations
+- `base_url`: the system's address
+- `auth_type`: `none`, `api_key`, `bearer`, `basic` or `oauth2`
+- `config`: extra settings, such as `username` for basic auth or `auth_header_name` for an API key (default `X-API-Key`)
+- a write-only secret, see [Secrets](#secrets)
 
-## What ships in the box
+Admins manage them at `/admin/connectors` (sidebar: **Connectors**). The API matches the page. Create, update, delete and test need the `manage_settings` feature (admin by default) and answer 403 otherwise. Listing and reading stay open to every tenant member because the builder's connector picker uses them, and they never return a secret.
 
-| Connector | Auth | Notes |
-|---|---|---|
-| Slack | bot token | message send, channel list, user lookup |
-| Linear | OAuth2 / API key | issue CRUD, project list |
-| Salesforce | OAuth2 | SOQL, REST objects |
-| SAP PM | basic / OAuth2 | work-order CRUD via SAP Gateway |
-| ServiceNow | basic / OAuth2 | incident / change / problem CRUD |
-| Maximo | OAuth2 | work-order via Maximo REST |
-| Workday | OAuth2 | HCM employee + org structure |
-| Sensitech | API key | cold-chain logger reads |
-| Carrier Lynx | API key | refrigerated-trailer telemetry |
-| DTN Weather | API key | route weather |
-| BNEF | API key | energy + emissions data |
+### Presets
 
-The catalogue grows. Adding the next one is roughly an afternoon.
+A preset is a YAML file in [`packages/db/seeds/connector_presets/`](../../packages/db/seeds/connector_presets/). It names the system, gives a base URL template and auth hints, and lists operations. Each operation has a method, a path, its arguments and the query or body templates the arguments fill in. `GET /api/connectors/presets` lists them for the create form.
 
-## Adding a new connector
+| Preset key | System |
+|---|---|
+| `cmms_maximo` | IBM Maximo |
+| `cmms_sap_pm` | SAP Plant Maintenance |
+| `cmms_servicenow` | ServiceNow |
+| `hris_workday` | Workday |
+| `telematics_carrier_lynx` | Carrier Lynx |
+| `telematics_sensitech` | Sensitech |
+| `weather_dtn` | DTN Weather |
+| `cost_data_bnef` | BNEF |
 
-Three files:
+### Calling a connector from an agent
 
-1. **Preset definition** in `apps/api/app/services/connectors/presets/<name>.py`:
-   ```python
-   PRESET = {
-       "name": "Stripe",
-       "kind": "stripe",
-       "auth_type": "api_key",
-       "default_endpoints": {
-           "charges": "https://api.stripe.com/v1/charges",
-           "customers": "https://api.stripe.com/v1/customers",
-       },
-   }
-   ```
-2. **Client + normalizer** in `apps/agent-runtime/engine/tools/stripe.py`. Subclass `BaseConnectorTool` and implement `call(operation, args)`.
-3. **Register** in `tools/__init__.py` so the registry picks it up.
+The agent calls `connector_call` with `connector_id`, `operation` (an operation name from the preset) and `parameters`. The tool loads the connector for the run's tenant, fills the preset's templates, adds the auth header, sends the request through the URL guard and returns the parsed response. A connector with no preset, or one that is turned off, is refused. An operation whose name starts with `get`, `list`, `read`, `search`, `fetch`, `query`, `find` or `lookup` counts as read-only. Anything else counts as an external write for risk and autonomy checks.
 
-The new connector shows up in `/settings/integrations`, in the Builder tool palette, and as a callable tool — all automatically.
+Code: [`apps/agent-runtime/engine/tools/connector_call.py`](../../apps/agent-runtime/engine/tools/connector_call.py).
 
-## The `/test` button
+### Adding a connector for a new system
 
-Every connector exposes `POST /api/connectors/{id}/test`. It sends a GET to the base URL with the connector's auth and reports back in plain words. Only a 2xx or 3xx answer counts as ok. A 401 or 403 reads "The service refused the credentials". Use it in your CI smoke tests when bringing up a new tenant.
+Add a YAML file to `packages/db/seeds/connector_presets/` following an existing one such as `weather_dtn.yaml`. The preset loader is [`apps/api/app/core/connector_presets.py`](../../apps/api/app/core/connector_presets.py). No Python is needed. The new preset then shows in the create form at `/admin/connectors`.
+
+### The Test button
+
+`POST /api/connectors/{id}/test` sends a GET to the base URL with the connector's auth and reports back in plain words. Only a 2xx or 3xx answer counts as reachable. A 401 or 403 reads "The service refused the credentials". The result is saved as `last_test_at` and `last_test_ok`.
 
 ## Secrets
 
-A connector's secret is write-only. Admin -> Connectors has a password field. Once saved it shows "Saved, hidden" with Replace and Remove. The API takes `secret` on create and update and `clear_secret: true` on update, and only ever answers `has_secret`.
+A connector's secret is write-only. The form at `/admin/connectors` has a password field. Once saved it shows "Saved, hidden" with Replace and Remove. The API takes `secret` on create and update and `clear_secret: true` on update, and only ever answers `has_secret`.
 
-The value goes into the tool credentials store, `tenant_tool_credentials`, under `CONNECTOR_<connector id hex>_SECRET` for the connector's tenant. It is encrypted with the cluster KEK when `ABENIX_DATA_KEY_KEK_BASE64` is set, the same as any tenant tool credential. The test endpoint and the `connector_call` tool both read it with `credentials.get(key, tenant_id=<the connector's tenant>)`, so another tenant never resolves it. Deleting a connector deletes its secret. The key is built at run time, so it is not declared in `config_fields` and does not show on Admin -> Tool Configuration.
+The value goes into the tool credentials store, `tenant_tool_credentials`, under the key `CONNECTOR_<connector id hex>_SECRET` for the connector's tenant. It is encrypted with AES-GCM under the cluster key when `ABENIX_DATA_KEY_KEK_BASE64` is set, the same as any tenant tool credential. Without that key it is stored as plain text, so set it on any shared deployment. See [Encryption setup](../08-howto/06-encryption-setup.md).
 
-The `secret_ref` column is legacy. It pointed at an Abenix API key and the key's prefix was sent as the credential, which leaked part of our own key and never sent a real secret. It is no longer read as a credential. A connector that still has one and no stored secret reports `needs_secret: true` with "Re-enter this connector's secret, it used to point at an Abenix API key". Until then the test does not run and `connector_call` refuses the call. Saving or removing a secret clears the old pointer.
+The Test button and `connector_call` both read the secret for the connector's own tenant, so another tenant never resolves it. Deleting a connector deletes its secret. The key is built at run time, so it is not declared in `config_fields` and does not show on Admin, Tool Configuration.
 
-## Address guard
+The `secret_ref` column is legacy. It pointed at an Abenix API key and the key's prefix was sent as the credential. It is no longer read. A connector that still has one and no stored secret reports `needs_secret: true` with "Re-enter this connector's secret, it used to point at an Abenix API key". Until then the test does not run and `connector_call` refuses the call. Saving or removing a secret clears the old pointer.
 
-Connectors only call public addresses. `engine/url_guard.py` refuses `localhost`, cloud metadata names, cluster DNS (`*.svc`, `*.cluster.local`, `*.internal`, `*.local`) and any address that is private, loopback, link-local, multicast, reserved or unspecified, including one written as a number. It runs at three points.
+## URL guard
+
+Connectors only call public addresses. [`engine/url_guard.py`](../../apps/agent-runtime/engine/url_guard.py) refuses:
+
+- a URL that is not `http` or `https`
+- `localhost`, `metadata`, `metadata.google.internal`, `host.docker.internal`, `kubernetes.default` and similar internal names
+- cluster names ending in `.svc`, `.cluster.local`, `.internal` or `.local`
+- any address that is private, loopback, link-local, multicast, reserved or unspecified, including one written as a single number and IPv4 addresses mapped into IPv6
+- a host name that resolves to any of those
+
+It runs at three points:
 
 - **On save.** Create and update refuse a base URL that names such a host or resolves to one. A host that does not resolve yet, such as a preset template, is kept.
-- **On the test.** The base URL is resolved and checked again. Redirects are not followed automatically. At most 3 are followed by hand and each hop is checked before it is called. Auth headers are dropped when a hop moves to another host. A refusal comes back as `blocked: true` with the reason.
-- **In `connector_call`.** The same check and the same redirect rule apply before the runtime sends anything.
+- **On the test.** The URL is resolved and checked again. Redirects are not followed automatically. At most 3 are followed by hand and each hop is checked before it is called. The `Authorization` header is dropped when a hop moves to another origin. A refusal comes back as `blocked: true` with the reason.
+- **In `connector_call`.** The same check and redirect rule apply before the runtime sends anything.
 
-`CONNECTORS_ALLOW_PRIVATE_TARGETS=1` on abenix-api and agent-runtime lifts the check for dev clusters that point a connector at an in-cluster service. It is off by default.
+`CONNECTORS_ALLOW_PRIVATE_TARGETS=1` on abenix-api and agent-runtime lifts the check, for dev clusters that point a connector at an in-cluster service. It is off by default.
+
+Other outbound features have their own private-address checks with their own switches: Source Watch (`SOURCE_WATCH_ALLOW_PRIVATE_TARGETS`, see [17](17-source-watch.md)) and event subscriptions (`EVENTS_ALLOW_PRIVATE_TARGETS`, see [19](19-outbound-events.md)).
 
 ## Triggers
 
-Triggers are the inverse — they wake agents up on external events. Five kinds ship:
+A trigger belongs to one agent or pipeline and is one of two types:
 
-| Trigger kind | What fires it | Payload to the agent |
+| `trigger_type` | What fires it | What the run gets |
 |---|---|---|
-| `cron` | a schedule (cron expression) | the configured static input |
-| `webhook` | a `POST` to `/api/triggers/{id}/fire` | the request body |
-| `slack` | Slack Events API @-mention or DM | `{text, user, channel, ts}` |
-| `github` | GitHub webhook (PR comment, issue, push) | the event payload, normalized |
-| `email` | inbound email via configured SMTP / SES | `{from, to, subject, body, attachments[]}` |
-| `mqtt` | a configured MQTT topic gets a message | `{topic, payload}` |
-| `file_drop` | a file lands in a watched object-store prefix | `{key, size, content_type}` |
+| `schedule` | a cron expression (default `0 * * * *`, hourly) | the trigger's `default_message` and `default_context` |
+| `webhook` | a `POST` to `/api/triggers/webhook/{token}` | `message` and `context` from the JSON body, merged over the defaults |
 
-Each trigger is bound to an agent. When it fires, the runtime creates an `Execution` with the trigger's payload as input and runs it through the standard pool routing.
+Manage them at `/triggers` (sidebar: **Triggers**). You can only add a trigger to an agent you can run. Each fire creates a normal execution and dispatches it the same way as any other run.
 
-The run records what started it in `trigger_id`, `trigger_kind` and `trigger_name`. A scheduled fire is `schedule`, a webhook call is `webhook` and Run now is `manual`, all with the trigger's id and name. The Triggers page lists each trigger's last five runs and links to the full list at `/executions?trigger={id}`. See [Started by](../04-data-model/02-executions.md#started-by).
+- **Schedule.** A scheduler job checks every 30 seconds for due triggers. It locks each due row, so several API replicas never fire the same trigger twice.
+- **Webhook.** The token in the URL is the only credential, so treat the URL as a secret. The call answers 202 with the `execution_id`. A wrong or inactive token answers 404.
+- **Run now.** `POST /api/triggers/{id}/run` fires a trigger by hand.
+
+A trigger stops itself when its agent is archived or inactive, its owner is gone or deactivated, or the owner lost run access to the agent. A kill switch on the trigger or its agent makes a webhook call answer 423 so the sender retries later. See [Governance](../08-howto/11-governance.md).
+
+The run records what started it in `trigger_id`, `trigger_kind` and `trigger_name`. A scheduled fire is `schedule`, a webhook call is `webhook` and Run now is `manual`, all with the trigger's id and name. The Triggers page lists each trigger's recent runs and links to the full list at `/executions?trigger={id}`. See [Started by](../04-data-model/02-executions.md#started-by).
 
 If the agent is over its `daily_cost_limit` or `daily_budget_usd` for the UTC day, the execution is written as `failed` with `failure_code: BUDGET_EXCEEDED` and a plain message, the trigger owner is notified, and a webhook or Run now call answers 429 with that code. See [Spend caps](00-agent-execution.md#spend-caps).
 
-## Adding a new trigger kind
+Other things that start runs without a person: [Source Watch](17-source-watch.md) (`trigger_kind = source_watch`) and [event subscriptions](19-outbound-events.md) that target an agent (`trigger_kind = event`).
 
-Two files:
+## Inbound and outbound webhooks
 
-1. **Source adapter** in `apps/api/app/services/triggers/<kind>.py`. Implements `subscribe(trigger_config, callback)` — the runtime calls `callback(payload)` when an event arrives.
-2. **Schema + UI** in `apps/web/src/components/triggers/<kind>Form.tsx` — the form that captures the trigger's config (cron expression, Slack channel ID, MQTT topic, etc.).
-
-The dispatcher in `apps/worker/worker/tasks/trigger_dispatch.py` already handles the generic "create execution, route to pool, audit" path.
-
-## Webhooks (outbound vs inbound) — disambiguation
-
-This page is about **inbound** webhooks as triggers — they start executions.
-
-Outbound webhooks — Abenix calling YOUR system when an execution finishes — are a separate surface documented in [19-outbound-events](19-outbound-events.md). Same word, opposite direction. The product avoids conflating them in the UI, so inbound live in `/triggers`, outbound are in `/settings/webhooks`.
+This page covers **inbound** webhooks, which start runs. **Outbound** webhooks, where Abenix calls your system when something happens, are covered in [Outbound events](19-outbound-events.md). Inbound ones live on `/triggers`, outbound ones on `/webhooks`.
 
 ## Where to look
 
-- Connector tool base class: `apps/agent-runtime/engine/tools/_connector_base.py`
-- Connector REST: [`apps/api/app/routers/connectors.py`](../../apps/api/app/routers/connectors.py)
-- Trigger REST: [`apps/api/app/routers/triggers.py`](../../apps/api/app/routers/triggers.py)
-- Trigger dispatcher: `apps/worker/worker/tasks/trigger_dispatch.py`
-- Models: `packages/db/models/connector.py`, `agent_trigger.py`
-- Reference connector that's easy to copy: [`apps/agent-runtime/engine/tools/slack.py`](../../apps/agent-runtime/engine/tools/)
+- Connector API: [`apps/api/app/routers/connectors.py`](../../apps/api/app/routers/connectors.py)
+- Connector tool: [`apps/agent-runtime/engine/tools/connector_call.py`](../../apps/agent-runtime/engine/tools/connector_call.py)
+- URL guard: [`apps/agent-runtime/engine/url_guard.py`](../../apps/agent-runtime/engine/url_guard.py)
+- Secret storage: [`apps/api/app/core/tool_secrets.py`](../../apps/api/app/core/tool_secrets.py)
+- Trigger API: [`apps/api/app/routers/triggers.py`](../../apps/api/app/routers/triggers.py)
+- Schedule tick: [`apps/api/app/core/scheduler.py`](../../apps/api/app/core/scheduler.py)
+- Models: [`packages/db/models/connector.py`](../../packages/db/models/connector.py), [`packages/db/models/agent_trigger.py`](../../packages/db/models/agent_trigger.py)
+- Tests: `apps/agent-runtime/tests/test_connector_call_security.py`
 
 ## Related
 
-- [`02-runtime/02-tools.md`](02-tools.md) — the tool framework connectors plug into
-- [`02-runtime/05-approvals-hitl.md`](05-approvals-hitl.md) — pair a connector-based action (post to Slack) with an approval gate
+- [Tools](02-tools.md): the tool framework `connector_call` is part of
+- [Approvals](05-approvals-hitl.md): pair a connector write with an approval gate

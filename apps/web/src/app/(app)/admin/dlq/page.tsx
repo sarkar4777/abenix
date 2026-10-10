@@ -7,6 +7,7 @@ import {
 import { apiFetch } from '@/lib/api-client';
 import PageHeader from '@/components/layout/PageHeader';
 import { AccessGate } from '@/components/layout/NoAccess';
+import { adviceCode, failureTitle } from '@/components/alerts/failureAdvice';
 
 interface DlqRow {
   id: string;
@@ -38,8 +39,9 @@ function relTime(iso: string | null): string {
 
 function DlqCard({ row, onReplay, busy }: { row: DlqRow; onReplay: (id: string) => void; busy: boolean }) {
   const [open, setOpen] = useState(false);
+  const code = adviceCode({ failure_code: row.failure_code, sample_message: row.error_message });
   return (
-    <div className="bg-slate-800/40 border border-slate-700/50 rounded-xl p-4 mb-3">
+    <div className="bg-slate-800/40 border border-slate-700/50 rounded-xl p-4 mb-3" data-testid="dlq-card" data-agent={row.agent_name || ''} data-execution={row.execution_id}>
       <div className="flex flex-wrap items-start gap-3">
         <div className="flex-1 min-w-[240px]">
           <div className="flex flex-wrap items-center gap-2 mb-1.5">
@@ -47,8 +49,8 @@ function DlqCard({ row, onReplay, busy }: { row: DlqRow; onReplay: (id: string) 
             <h3 className="text-sm font-semibold text-white">
               {row.agent_name || row.agent_id?.slice(0, 8) || 'Unknown agent'}
             </h3>
-            <span className="text-[10px] px-2 py-0.5 rounded-full border bg-rose-500/15 text-rose-300 border-rose-500/40 uppercase tracking-wider">
-              {row.failure_code}
+            <span className="text-[11px] px-2 py-0.5 rounded-full border bg-rose-500/15 text-rose-300 border-rose-500/40" data-testid="dlq-reason">
+              {failureTitle(code)}
             </span>
             <span className="text-[10px] px-2 py-0.5 rounded-full border bg-slate-500/15 text-slate-300 border-slate-500/40 font-mono">
               pool: {row.runtime_pool || 'default'}
@@ -65,21 +67,23 @@ function DlqCard({ row, onReplay, busy }: { row: DlqRow; onReplay: (id: string) 
             <a href={`/executions/${row.execution_id}`} className="font-mono text-slate-400 hover:text-white inline-flex items-center gap-1">
               exec {row.execution_id.slice(0, 8)} <ExternalLink className="w-2.5 h-2.5" />
             </a>
+            <span>Reference <code className="font-mono text-slate-400" data-testid="dlq-code">{row.failure_code}</code></span>
             <span>Replays: {row.replay_count}</span>
             {row.last_replay_at && <span>Last replay {relTime(row.last_replay_at)}</span>}
             {row.replay_execution_id && (
-              <a href={`/executions/${row.replay_execution_id}`} className="font-mono text-cyan-400 hover:text-cyan-200 inline-flex items-center gap-1">
+              <a href={`/executions/${row.replay_execution_id}`} data-testid="dlq-replay-link" className="font-mono text-cyan-400 hover:text-cyan-200 inline-flex items-center gap-1">
                 replay {row.replay_execution_id.slice(0, 8)} <ExternalLink className="w-2.5 h-2.5" />
               </a>
             )}
           </div>
           {row.error_message && (
-            <p className="mt-2 text-[12px] text-rose-200/80 line-clamp-2">{row.error_message}</p>
+            <pre className="mt-2 font-sans text-[12px] text-rose-200/80 whitespace-pre-wrap break-words line-clamp-2">{row.error_message}</pre>
           )}
         </div>
         <button
           onClick={() => onReplay(row.id)}
           disabled={busy}
+          data-testid="dlq-replay"
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-cyan-500/15 border border-cyan-500/40 text-cyan-300 text-xs font-medium hover:bg-cyan-500/25 disabled:opacity-50"
         >
           {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}
@@ -107,6 +111,7 @@ function AdminDlqPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [notice, setNotice] = useState<{ ok: boolean; text: string; href?: string } | null>(null);
 
   const load = useCallback(async () => {
     const res = await apiFetch<DlqRow[]>('/api/admin/dlq', { silent: true });
@@ -120,8 +125,13 @@ function AdminDlqPage() {
 
   const handleReplay = async (id: string) => {
     setBusyId(id);
-    await apiFetch(`/api/admin/dlq/${id}/replay`, { method: 'POST' });
+    setNotice(null);
+    const r = await apiFetch<{ new_execution_id?: string; dispatched?: boolean }>(`/api/admin/dlq/${id}/replay`, { method: 'POST', throwOnError: false });
     setBusyId(null);
+    const runId = r.data?.new_execution_id;
+    setNotice(r.error
+      ? { ok: false, text: `Replay did not start. ${r.error}` }
+      : { ok: true, text: 'Replay started with the original input. It shows on the card once it has a run.', href: runId ? `/executions/${runId}` : undefined });
     await load();
   };
 
@@ -149,6 +159,12 @@ function AdminDlqPage() {
         </div>
       )}
 
+      {notice && (
+        <p role="status" data-testid="dlq-notice" className={`mb-4 text-xs rounded-lg border px-3 py-2 ${notice.ok ? 'text-emerald-300 border-emerald-500/30 bg-emerald-500/5' : 'text-rose-300 border-rose-500/30 bg-rose-500/5'}`}>
+          {notice.text}{notice.href && <> <a href={notice.href} className="underline" data-testid="dlq-notice-link">Open the replay</a></>}
+        </p>
+      )}
+
       {loading && rows.length === 0 ? (
         <div className="flex items-center gap-2 text-sm text-slate-500 py-12 justify-center">
           <Loader2 className="w-4 h-4 animate-spin" /> Loading dead-letter executions
@@ -156,7 +172,7 @@ function AdminDlqPage() {
       ) : rows.length === 0 ? (
         <div className="rounded-xl border border-dashed border-slate-700/50 bg-slate-800/20 p-10 text-center">
           <Inbox className="w-8 h-8 text-emerald-400/40 mx-auto mb-2" />
-          <p className="text-sm text-slate-400">DLQ is empty. Healthy.</p>
+          <p className="text-sm text-slate-400">Nothing here. Every run either finished or is still retrying.</p>
         </div>
       ) : (
         rows.map(r => <DlqCard key={r.id} row={r} onReplay={handleReplay} busy={busyId === r.id} />)

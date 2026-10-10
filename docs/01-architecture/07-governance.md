@@ -41,6 +41,7 @@ Each execution row records `risk_tier` and `risk_reasons`, the list of what rais
 - Whether an agent at this tier must pass its gating evaluation suites before it goes live, `require_eval_pass`
 - After how many hours an approval nobody has acted on is escalated to admins, `escalate_after_hours`. 0 means never
 - Which models are allowed. Empty means any. `claude-opus-*` allows a family
+- Earned-autonomy thresholds for the tier, the `autonomy` block. See [Earned autonomy](../02-runtime/21-earned-autonomy.md)
 
 Platform defaults:
 
@@ -56,6 +57,8 @@ With `require_eval_pass` on, publishing an agent is refused with 409 and `EVAL_G
 Those checks run when an agent is published, so a high or critical tier agent that is still a draft has not passed them. People can test such a draft from the builder and chat, signed in as themselves. Every other caller is refused with 409 `DRAFT_NOT_RELEASED` and a message to publish it first: API keys and the SDK, calls from another run (`invoke_agent` and pipeline agent steps), and triggers, which record the run as failed with that code. Low and medium tier drafts run for their owner and anyone they are shared with, as before.
 
 Approvals raised by tiered runs carry the same sign-off rules and escalation. See [approvals](../02-runtime/05-approvals-hitl.md#tier-floor).
+
+The **Tool tiers** tab lists the tier each tool declares. It is read-only.
 
 The admin screen stores only the settings that differ from the platform default (`PUT /api/governance/risk/{tier}`, `DELETE` to go back to defaults), so later default changes still reach the tenant. Changes apply to new runs within five seconds.
 
@@ -107,22 +110,28 @@ Roles give everyone a baseline. Capabilities add specific abilities without maki
 | `autonomy.grant` | Approve an agent moving up a level, never for an agent you built |
 | `actions.review` | Answer watching reviews, record outcomes and flag harm |
 | `moderation.review` | Release, redact or reject content a moderation policy held for review. Admins only by default |
+| `improvements.view` | See lessons, proposed fixes, their proof and releases in their watch period |
+| `improvements.propose` | Ask for a fix to a group of lessons, rerun a proof and roll a release back |
+| `improvements.approve` | Approve a proven fix so it is released, never for an agent you built |
+| `feedback.give` | Thumbs up or down and a correction on any agent answer |
 
 Role defaults (`ROLE_DEFAULTS`):
 
 | Role | Gets |
 |---|---|
-| `user` | `decisions.view`, `decisions.evaluate`, `risk.view`, `evals.run`, `runs.replay`, `autonomy.view`, `actions.review` |
-| `creator` | everything a user gets, plus `decisions.author`, `evals.manage`, `sources.manage`, `events.manage`, `autonomy.manage` |
+| `user` | `decisions.view`, `decisions.evaluate`, `risk.view`, `evals.run`, `runs.replay`, `autonomy.view`, `actions.review`, `feedback.give` |
+| `creator` | everything a user gets, plus `decisions.author`, `evals.manage`, `sources.manage`, `events.manage`, `autonomy.manage`, `improvements.view`, `improvements.propose` |
 | `admin` | `*`, every capability |
 
 A grant covers more than its exact key. `approvals.sign` covers every `approvals.sign:<group>`, and a group wildcard such as `decisions.*` covers every `decisions.` capability. **Admin -> Permissions** creates named sets, such as "Decision reviewers", and assigns them to people (`permission_sets`, `permission_assignments`). A user's capabilities are cached for ten seconds, so grants apply within that. `GET /api/me/permissions` returns the caller's role and capabilities, and the sidebar shows only what the caller can use.
 
 ## Separation of duties
 
-An approval created under a tier policy carries the policy with it: the capability signers need and whether the requester may sign. The sign-off endpoint enforces both. Only admins hold `approvals.sign` by default, so non-admin signers on a tiered gate need it from a permission set. Signing a decision version also needs `decisions.review`. Approvals without a policy keep the older rule, where an admin or creator signs and a self-approval is recorded as such, so single-admin tenants are not locked out.
+An approval created under a tier policy carries the policy with it, meaning the capability signers need and whether the requester may sign. The sign-off endpoint enforces both. Only admins hold `approvals.sign` by default, so non-admin signers on a tiered gate need it from a permission set. Signing a decision version also needs `decisions.review`. Approvals without a policy keep the older rule, where an admin or creator signs and a self-approval is recorded as such, so single-admin tenants are not locked out.
 
 Autonomy promotions (`gate_kind = autonomy.promote`) need `autonomy.grant` and refuse the agent's author, both when requesting and when signing. The author may self-approve only the sample, or when nobody else in the tenant holds `autonomy.grant`, and the change is recorded as self-approved. Demotions never need an approval. See [Earned autonomy](../02-runtime/21-earned-autonomy.md).
+
+Agent improvements follow the same rule. Releasing a proven fix (`gate_kind = improvement.release`) needs `improvements.approve` and refuses the agent's author with `AUTHOR_CANNOT_APPROVE`, with the same two exceptions. See [Governed self-improvement](../02-runtime/23-governed-self-improvement.md#approve).
 
 ## Tamper-evident audit log
 
@@ -134,6 +143,8 @@ Every `activity_logs` row is linked to the one before it, per tenant, by a SHA-2
 - Archiving and retention remove only a linked prefix and leave an `audit.pruned` row naming the last hash removed. Verification starts after it.
 
 **Admin -> Risk & Controls -> Audit integrity** walks the whole chain and reports the first entry that was changed or removed. `GET /api/governance/audit/verify` does the same, and a scheduled job verifies every tenant's chain nightly at 03:15. `GET /api/governance/audit/export` streams the linked log as JSON lines with each row's hashes, for evidence and archiving.
+
+**Admin -> Audit log** reads the same trail, newest first, and filters it by person, action, words in the details and time range. It is backed by `GET /api/governance/audit/events` with `actor_id`, `action`, `q`, `since`, `until` and `before` for paging, and needs `audit.view`. The page also runs the integrity check and the export. The Security settings page shows only your own activity.
 
 ## Run provenance
 

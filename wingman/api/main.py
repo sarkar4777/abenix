@@ -47,6 +47,7 @@ from abenix_sdk import Abenix, ActingSubject  # type: ignore  # noqa: E402
 import cache as result_cache  # type: ignore  # noqa: E402
 import trajectories as trajectory_store  # type: ignore  # noqa: E402
 import narration as narration_store  # type: ignore  # noqa: E402
+from agent_json import parse_agent_json  # type: ignore  # noqa: E402
 
 logger = logging.getLogger("wingman.api")
 logging.basicConfig(level=logging.INFO)
@@ -675,20 +676,7 @@ async def market_brief_cached() -> dict[str, Any]:
 
 
 def _parse_agent_json(raw: str) -> dict[str, Any]:
-    """Tolerant JSON parse — try the whole body, then a brace-balance subset."""
-    if not raw:
-        return {}
-    try:
-        return json.loads(raw)
-    except (TypeError, ValueError):
-        s = raw.strip()
-        first, last = s.find("{"), s.rfind("}")
-        if first != -1 and last > first:
-            try:
-                return json.loads(s[first : last + 1])
-            except Exception:
-                return {}
-        return {}
+    return parse_agent_json(raw)
 
 
 # corridor_id keyed by execution_id, so the result endpoint can echo it
@@ -1365,13 +1353,18 @@ async def mispricing_scan(
         raise HTTPException(status_code=404, detail=f"Corridor not found: {corridor_id}")
     payload = {"corridor": corridor}
     async with _abenix_client() as forge:
-        submitted = await forge.execute(
-            "wingman-mispricing-extractor",
-            json.dumps(payload),
-            wait="submitted",
-        )
-    if submitted.execution_id:
-        _MISPRICING_INDEX[submitted.execution_id] = corridor_id
+        try:
+            submitted = await forge.execute(
+                "wingman-mispricing-extractor",
+                json.dumps(payload),
+                wait="submitted",
+            )
+        except Exception as e:
+            logger.exception("mispricing submit failed")
+            raise HTTPException(status_code=502, detail=f"Abenix did not accept the scan: {e}")
+    if not submitted.execution_id:
+        raise HTTPException(status_code=502, detail="Abenix accepted the scan but returned no execution id.")
+    _MISPRICING_INDEX[submitted.execution_id] = corridor_id
     return {
         "data": {
             "corridor_id": corridor_id,
@@ -1401,8 +1394,15 @@ async def mispricing_result(execution_id: str) -> dict[str, Any]:
         and _scan_has_required_numbers(parsed)
         and _mispricing_passes_sanity(parsed)
     ) if parsed else False
-    if terminal and corridor_id and not is_load_bearing:
+    problem = None
+    if terminal and not is_load_bearing:
         logger.info("mispricing-result %s for %s: agent unavailable — no cache write", execution_id, corridor_id)
+        if status not in {"completed", "succeeded"}:
+            problem = row.get("error_message") or f"The scan ended with status {status}."
+        elif not parsed:
+            problem = "The agent finished but its answer had no readable scan JSON."
+        else:
+            problem = "The agent's numbers failed the sanity checks (missing spread, fair-value band or sigma)."
     if status == "completed" and parsed and corridor_id and is_load_bearing:
         candidate = {
             **parsed,
@@ -1419,8 +1419,8 @@ async def mispricing_result(execution_id: str) -> dict[str, Any]:
             "corridor_id": corridor_id,
             "execution_id": execution_id,
             "status": status,
-            "scan": parsed if parsed else None,
-            "error_message": row.get("error_message"),
+            "scan": parsed if is_load_bearing else None,
+            "error_message": row.get("error_message") or problem,
             "failure_code": row.get("failure_code"),
             "cost_usd": row.get("cost"),
             "duration_ms": row.get("duration_ms"),
@@ -1807,6 +1807,24 @@ async def graph_query(body: dict[str, Any]) -> dict[str, Any]:
 # of truth for who can sign off.
 
 
+# the gates Wingman opens, the tenant's other approvals belong to other apps
+WINGMAN_GATE_KINDS = ("broker.acknowledge", "strategy.activate", "trade.execute")
+
+
+def _upstream_error(e: Exception, what: str) -> HTTPException:
+    """Pass a platform refusal through with its status, only a dead link is a 502."""
+    resp = getattr(e, "response", None)
+    code = getattr(resp, "status_code", None)
+    if isinstance(code, int) and 400 <= code < 500:
+        try:
+            err = (resp.json() or {}).get("error") or {}
+            msg = err.get("message") if isinstance(err, dict) else str(err)
+        except Exception:  # noqa: BLE001
+            msg = None
+        return HTTPException(status_code=code, detail=msg or f"{what} was refused")
+    return HTTPException(status_code=502, detail=f"Backend unreachable: {e}")
+
+
 @app.get("/api/wingman/approvals")
 async def list_approvals(status: str = "pending") -> dict[str, Any]:
     try:
@@ -1816,7 +1834,8 @@ async def list_approvals(status: str = "pending") -> dict[str, Any]:
         raise
     except Exception as e:
         logger.exception("approvals list failed")
-        raise HTTPException(status_code=502, detail=f"Backend unreachable: {e}")
+        raise _upstream_error(e, "listing approvals")
+    items = [a for a in items if (a.get("gate_kind") or "") in WINGMAN_GATE_KINDS]
     return {"data": items}
 
 
@@ -1829,7 +1848,7 @@ async def get_approval(approval_id: str) -> dict[str, Any]:
         raise
     except Exception as e:
         logger.exception("approval get failed for %s", approval_id)
-        raise HTTPException(status_code=502, detail=f"Backend unreachable: {e}")
+        raise _upstream_error(e, "reading the approval")
     return {"data": row}
 
 
@@ -1847,7 +1866,7 @@ async def approve_approval(
         raise
     except Exception as e:
         logger.exception("approval approve failed for %s", approval_id)
-        raise HTTPException(status_code=502, detail=f"Backend unreachable: {e}")
+        raise _upstream_error(e, "the approval")
     return {"data": row}
 
 
@@ -1865,7 +1884,7 @@ async def deny_approval(
         raise
     except Exception as e:
         logger.exception("approval deny failed for %s", approval_id)
-        raise HTTPException(status_code=502, detail=f"Backend unreachable: {e}")
+        raise _upstream_error(e, "the denial")
     return {"data": row}
 
 

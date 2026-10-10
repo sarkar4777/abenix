@@ -78,7 +78,7 @@
 | `GET` | `/api/settings/retention` | signed in | Tenant data retention settings |
 | `PUT` | `/api/settings/retention` | signed in | Update tenant data retention settings |
 | `GET` | `/api/settings/dlp` | signed in | Tenant DLP settings |
-| `PUT` | `/api/settings/dlp` | signed in | Update DLP settings. Modes are `detect`, `mask` and `block` |
+| `PUT` | `/api/settings/dlp` | admin | Update DLP settings. Modes are `detect`, `mask` and `block`, applied to every agent and pipeline run |
 | `GET` | `/api/settings/sandbox` | signed in | Effective sandbox settings, env defaults with tenant overrides on top |
 | `PUT` | `/api/settings/sandbox` | admin role | Set tenant sandbox overrides. Send `null` or omit a key to clear it |
 | `GET` | `/api/settings/tenant` | signed in | Tenant settings. The Slack webhook is shown masked to admins only |
@@ -309,6 +309,7 @@ Rules as versioned decision models. Detail in [08-howto/09-decisions](../08-howt
 | `GET` | `/api/decisions/{key}` | `decisions.view` | Detail with versions |
 | `PATCH` | `/api/decisions/{key}` | `decisions.author` | Change name, description and other metadata |
 | `DELETE` | `/api/decisions/{key}` | `decisions.publish` | Archive |
+| `POST` | `/api/decisions/{key}/restore` | `decisions.publish` | Bring back an archived decision. 409 when it is not archived |
 | `GET` | `/api/decisions/{key}/versions/{n}` | `decisions.view` | One version |
 | `POST` | `/api/decisions/{key}/versions` | `decisions.author` | Start a new draft |
 | `PUT` | `/api/decisions/{key}/versions/{n}` | `decisions.author` | Save a draft. `If-Match` with the etag, 409 when someone saved first or the version is no longer editable |
@@ -325,6 +326,7 @@ Rules as versioned decision models. Detail in [08-howto/09-decisions](../08-howt
 | `POST` | `/api/decisions/{key}/evaluate-batch` | `decisions.evaluate` | Evaluate many items in one call |
 | `POST` | `/api/decisions/{key}/compare` | `decisions.evaluate` | Same facts against 2 to 10 targets side by side |
 | `GET` | `/api/decisions/{key}/evaluations` | `decisions.view` | Stored evaluations |
+| `GET` | `/api/decisions/{key}/evaluations/{evaluation_id}` | `decisions.view` | One stored evaluation |
 | `GET` | `/api/decisions/{key}/tests` | `decisions.view` | Test cases |
 | `POST` | `/api/decisions/{key}/tests` | `decisions.author` | Add a test case |
 | `PUT` | `/api/decisions/{key}/tests/{test_id}` | `decisions.author` | Change a test case |
@@ -414,7 +416,7 @@ Permission sets, risk tiers, kill switches, audit chain, replay and provenance. 
 | `POST` | `/api/governance/permission-sets/{set_id}/members` | `permissions.manage` | Add a member |
 | `DELETE` | `/api/governance/permission-sets/{set_id}/members/{user_id}` | `permissions.manage` | Remove a member |
 | `GET` | `/api/governance/risk` | `risk.view` | Policy per tier (`low`, `medium`, `high`, `critical`) |
-| `PUT` | `/api/governance/risk/{tier}` | `risk.manage` | Set the policy for a tier |
+| `PUT` | `/api/governance/risk/{tier}` | `risk.manage` | Set the policy for a tier. `publish_approvals.escalate_after_minutes` (0, or 1 to 43200) wins over `escalate_after_hours` |
 | `DELETE` | `/api/governance/risk/{tier}` | `risk.manage` | Reset a tier to its default |
 | `GET` | `/api/governance/kill-switches` | `risk.view` | Active switches, `?include_cleared=true` for all |
 | `POST` | `/api/governance/kill-switches` | `killswitch.manage` | Set a switch. `scope` is `all`, `agent`, `pipeline`, `tool`, `model`, `trigger`, `decision` or `source` |
@@ -467,16 +469,18 @@ Feedback, lessons, groups of lessons and suggested test cases. Detail in [02-run
 | Method | Path | Needs | Notes |
 |---|---|---|---|
 | `POST` | `/api/improvements/feedback` | `feedback.give` | Body `{execution_id?, conversation_id?, message_id?, agent_id?, rating: 1 or -1, correction?}`. Returns `{id, lesson_id, agent_id, can_view_lessons}`. A second rating of the same answer updates it |
+| `GET` | `/api/improvements/retention` | signed in | `{retention_days, default_days, min_days, max_days, updated_at, updated_by_name, can_edit}` for lessons, feedback and closed groups |
+| `PUT` | `/api/improvements/retention` | admin role | Body `{retention_days}`, a whole number from 7 to 3650. `422 INVALID_RETENTION` otherwise |
 | `GET` | `/api/improvements/overview` | signed in | `{counts: {open_lessons, open_clusters, proposals_waiting, releases_watching, rolled_back_30d}, agents, total_agents}`, worst first. `?q=&limit=` |
 | `GET` | `/api/improvements/agents/{agent_id}` | owner, share or admin | `{agent, can_manage, clusters, suggested_cases, proposals, releases, counts, gate}` |
-| `GET` | `/api/improvements/clusters/{id}` | owner, share or admin | The group with `lessons`, newest first. `?before=&limit=`, returns `next_before` |
-| `POST` | `/api/improvements/clusters/{id}/dismiss` | owner or `improvements.propose` | Body `{reason}`. 409 `IN_PROGRESS` while a fix is being worked on |
+| `GET` | `/api/improvements/clusters/{cluster_id}` | owner, share or admin | The group with `lessons`, newest first. `?before=&limit=`, returns `next_before` |
+| `POST` | `/api/improvements/clusters/{cluster_id}/dismiss` | owner or `improvements.propose` | Body `{reason}`. 409 `IN_PROGRESS` while a fix is being worked on |
 | `GET` | `/api/improvements/lessons` | signed in | `?agent_id=&source=&before=&limit=`, returns `{items, next_before}` |
 | `POST` | `/api/improvements/lessons` | `feedback.give` | "This was wrong because". Body `{agent_id?, execution_id?, note, expected?, input?, output?, source?}`. `source` is `note` or `sdk` |
-| `POST` | `/api/improvements/cases/{id}/accept` | owner or `improvements.propose` | The case runs with every proof. The suite does not become a gate |
+| `POST` | `/api/improvements/cases/{case_id}/accept` | owner or `improvements.propose` | The case runs with every proof. The suite does not become a gate |
 | `PUT` | `/api/improvements/agents/{agent_id}/gate` | owner or `improvements.propose` | Body `{gating}`. Require the Improvement tests to pass before changes to the live agent go through. Off by default, 409 `NO_TESTS` when there are none. Returns `{suite_id, gating, accepted, failing, last_run_at}` |
-| `POST` | `/api/improvements/cases/{id}/drop` | owner or `improvements.propose` | |
-| `PATCH` | `/api/improvements/cases/{id}` | owner or `improvements.propose` | Body `{name?, input_message?, reference_output?, assertions?}`. Suggested cases only |
+| `POST` | `/api/improvements/cases/{case_id}/drop` | owner or `improvements.propose` | |
+| `PATCH` | `/api/improvements/cases/{case_id}` | owner or `improvements.propose` | Body `{name?, input_message?, reference_output?, assertions?}`. Suggested cases only |
 | `POST` | `/api/improvements/cases/bulk` | owner or `improvements.propose` | Body `{ids, action: accept or drop}`, up to 100. Returns `{done, skipped}` |
 
 ## Improvements, proposal side
@@ -485,13 +489,13 @@ Propose, prove, approve, release and watch. Detail in [02-runtime/23-governed-se
 
 | Method | Path | Needs | What |
 |---|---|---|---|
-| `POST` | `/api/improvements/clusters/{id}/propose` | `improvements.propose` | 202. A ProposalRow in `drafting`, worked on in the background. Idempotent while one is in flight. 409 `KILL_SWITCH` or `CLUSTER_CLOSED` |
+| `POST` | `/api/improvements/clusters/{cluster_id}/propose` | `improvements.propose` | 202. A ProposalRow in `drafting`, worked on in the background. Idempotent while one is in flight. 409 `KILL_SWITCH` or `CLUSTER_CLOSED` |
 | `GET` | `/api/improvements/proposals` | owner, share or `improvements.view` | `?agent_id=&state=&limit=`. Returns `{items: [ProposalRow]}`, newest first |
-| `GET` | `/api/improvements/proposals/{id}` | owner, share or `improvements.view` | ProposalRow with `progress` (steps with counts), `proof` and `watch_result` |
-| `POST` | `/api/improvements/proposals/{id}/rerun` | `improvements.propose` | 202. Body `{diff?}`. Edit and prove again. A pending approval is withdrawn. 400 `CHANGE_NOT_ALLOWED` with the reason for a diff outside the allow list |
-| `POST` | `/api/improvements/proposals/{id}/request-approval` | `improvements.propose` | Opens the `improvement.release` approval. Automatic when the proof passes, idempotent. 409 `NOT_PROVEN` below the bar |
-| `POST` | `/api/improvements/proposals/{id}/rollback` | owner or `improvements.propose` | Body `{reason}`. At once, no approval. 409 `AGENT_CHANGED` when the agent was edited after the release |
-| `POST` | `/api/improvements/proposals/{id}/watch-check` | owner, share or `improvements.view` | Compare old and new now. May keep or roll back |
+| `GET` | `/api/improvements/proposals/{proposal_id}` | owner, share or `improvements.view` | ProposalRow with `progress` (steps with counts), `proof` and `watch_result` |
+| `POST` | `/api/improvements/proposals/{proposal_id}/rerun` | `improvements.propose` | 202. Body `{diff?}`. Edit and prove again. A pending approval is withdrawn. 400 `CHANGE_NOT_ALLOWED` with the reason for a diff outside the allow list |
+| `POST` | `/api/improvements/proposals/{proposal_id}/request-approval` | `improvements.propose` | Opens the `improvement.release` approval. Automatic when the proof passes, idempotent. 409 `NOT_PROVEN` below the bar |
+| `POST` | `/api/improvements/proposals/{proposal_id}/rollback` | owner or `improvements.propose` | Body `{reason}`. At once, no approval. 409 `AGENT_CHANGED` when the agent was edited after the release |
+| `POST` | `/api/improvements/proposals/{proposal_id}/watch-check` | owner, share or `improvements.view` | Compare old and new now. May keep or roll back |
 | `GET` | `/api/improvements/budget` | signed in | `{tokens_today, tokens_limit, proofs_today, proofs_limit, queue_depth, stopped}` |
 | `POST` | `/api/improvements/sample` | `improvements.propose` | The sample agent with a planted mistake, its lessons and cases. Idempotent, and resets the mistake after a finished loop. Returns `{agent_id, cluster_id, created, reset}` |
 
@@ -541,7 +545,7 @@ See [02-runtime/15-v2-knowledge-enterprise](../02-runtime/15-v2-knowledge-enterp
 | `GET` | `/api/knowledge/{kb_id}/documents/{doc_id}/grants` | signed in | Document-level grants `(subject_type, subject_id, permission)`. `subject_type` is `user` or `agent` |
 | `POST` | `/api/knowledge/{kb_id}/documents/{doc_id}/grants` | collection editor | Add a document grant. The first grant restricts the document to its grantees, admins, the collection creator and WRITE or ADMIN holders |
 | `DELETE` | `/api/knowledge/{kb_id}/documents/{doc_id}/grants/{grant_id}` | collection editor | Remove a document grant |
-| `POST` | `/api/knowledge/{kb_id}/documents/{doc_id}/replace` | signed in | Upload a new version. The old row gets `is_current=false, superseded_by=<new_id>` |
+| `POST` | `/api/knowledge/{kb_id}/documents/{doc_id}/replace` | edit rights on the collection | Make an already uploaded file the next version. The old row gets `is_current=false, superseded_by=<new_id>` and the new one is queued for processing. Search and Cognify use current versions only |
 | `GET` | `/api/knowledge/{kb_id}/reembed` | can read the collection | Current `embedding_model`, `supported_models` and the latest job's progress |
 | `POST` | `/api/knowledge/{kb_id}/reembed` | admin role | Body `{embedding_model, dry_run}`. With `dry_run` returns chunk count, cost estimate and ETA. Otherwise queues the job and answers 202 with `job_id`. 400 for an unknown model, 409 while a job is queued or running |
 | `GET` | `/api/knowledge/cognify-config` | signed in | Tenant `auto_accept_threshold`, `conflict_action`, `max_parallel_docs`, `daily_budget_usd` |
@@ -754,12 +758,12 @@ Call history for code assets, ML models and knowledge collections.
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
 | `GET` | `/api/connectors/presets` | signed in | Connector presets for the create form |
-| `POST` | `/api/connectors` | signed in | Create a connector. Takes an optional write-only `secret`. A private or cluster-internal `base_url` is refused |
+| `POST` | `/api/connectors` | admin | Create a connector. Takes an optional write-only `secret`. A private or cluster-internal `base_url` is refused |
 | `GET` | `/api/connectors` | signed in | List connectors. Each says `has_secret` and `needs_secret`, never the secret |
 | `GET` | `/api/connectors/{connector_id}` | signed in | One connector |
-| `PUT` | `/api/connectors/{connector_id}` | signed in | Update. `secret` replaces the stored secret, `clear_secret: true` removes it |
-| `DELETE` | `/api/connectors/{connector_id}` | signed in | Delete, with its stored secret |
-| `POST` | `/api/connectors/{connector_id}/test` | signed in | GET the base URL with the connector's auth. `ok` only on 2xx or 3xx, `blocked` when the address guard refused it, `message` in plain words |
+| `PUT` | `/api/connectors/{connector_id}` | admin | Update. `secret` replaces the stored secret, `clear_secret: true` removes it |
+| `DELETE` | `/api/connectors/{connector_id}` | admin | Delete, with its stored secret |
+| `POST` | `/api/connectors/{connector_id}/test` | admin | GET the base URL with the connector's auth. `ok` only on 2xx or 3xx, `blocked` when the address guard refused it, `message` in plain words |
 
 ---
 
@@ -905,7 +909,9 @@ Two switches gate this group, see [Marketplace and monetization](../08-howto/14-
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
 | `GET` | `/api/platform/features` | open | `{marketplace, monetization, source, defaults}`. `source` is `admin` or `default` |
-| `PUT` | `/api/admin/platform-features` | admin | Body `{marketplace?, monetization?}` with booleans. Stored in `platform_settings` |
+| `GET` | `/api/admin/platform-features` | signed in | The switches plus `can_change` and `operator_rule` for the caller |
+| `PUT` | `/api/admin/platform-features` | platform operator | Body `{marketplace?, monetization?}` with booleans. Stored in `platform_settings`. Other callers get 403 `PLATFORM_OPERATOR_REQUIRED` |
+| `GET` | `/api/admin/secret-storage` | admin | `{encrypted_at_rest, message, doc_slug, environment}`, whether tool and connector secrets are encrypted |
 | `GET` | `/api/billing/plans` | signed in, *monetization* | Plans |
 | `POST` | `/api/billing/checkout` | signed in, *monetization* | Start a Stripe checkout |
 | `POST` | `/api/billing/portal` | signed in, *monetization* | Open the Stripe billing portal |
@@ -1071,10 +1077,12 @@ Tool configuration detail in [08-howto/08-tool-configuration](../08-howto/08-too
 | `GET` | `/api/admin/cluster/pods/{name}/logs` | admin role | Last `lines` (1 to 2000, default 200) log lines of `container`. `previous=true` reads the run before the last restart. Colour codes are stripped. Capped at 512 KB and written to the audit log |
 | `GET` | `/api/admin/dlq` | admin role | Dead-letter queue |
 | `POST` | `/api/admin/dlq/{dlq_id}/replay` | admin role | Run a dead-lettered execution again from its original input |
+| `GET` | `/api/admin/jobs` | admin role | `{jobs, groups, scheduler_running, recording, replica, replicas, now}`. Each job has `id, title, what, why, group, destructive, confirm, schedule, next_run_at, last_run_at, last_outcome, last_duration_ms, last_summary, last_error, last_error_detail, last_trigger, last_by, run_count, fail_count, skip_count, manual_count, running, history` |
+| `POST` | `/api/admin/jobs/{job_id}/run` | admin role | Run a job now under its lock. Body `{confirm: true}` is required for jobs that change data (`400 CONFIRM_REQUIRED` otherwise). Returns `{status: ok\|failed\|skipped\|running, run?, message?}`. Waits up to 45 s, longer runs carry on in the background. Written to the audit log as `job.run_now` |
 | `GET` | `/api/admin/archives` | admin role | Archive runs |
 | `POST` | `/api/admin/archives/trigger` | admin role | Start an archive run |
 | `GET` | `/api/admin/archives/retention-policies` | admin role | Retention policy per table |
-| `PUT` | `/api/admin/archives/retention-policies/{table}` | admin role | Set a table's retention policy |
+| `PUT` | `/api/admin/archives/retention-policies/{table}` | admin role | Set a table's retention policy. `retention_days` is a whole number from 1 to 3650 |
 | `GET` | `/api/admin/archives/{run_id}/download` | admin role | Download an archive file |
 | `POST` | `/api/admin/archives/{run_id}/restore` | admin role | Restore an archive run |
 

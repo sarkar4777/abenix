@@ -93,10 +93,17 @@ public final class ApprovalsClient {
     }
 
     public Approval signoff(String approvalId, String decision, String reason, String clientToken) {
+        return signoff(approvalId, decision, reason, clientToken, null);
+    }
+
+    /** editedArguments is for action approvals only, the action then runs with those values. */
+    public Approval signoff(String approvalId, String decision, String reason, String clientToken,
+                            Map<String, Object> editedArguments) {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("decision", decision);
         body.put("reason", reason == null ? "" : reason);
         if (clientToken != null) body.put("client_token", clientToken);
+        if (editedArguments != null) body.put("edited_arguments", editedArguments);
         URI uri = URI.create(baseUrl + "/api/approvals/" + approvalId + "/signoff");
         return treeToValue(
             sendForData(HttpRequest.newBuilder(uri)
@@ -110,28 +117,25 @@ public final class ApprovalsClient {
         return signoff(approvalId, "approve", reason, null);
     }
 
+    public Approval approve(String approvalId, String reason, Map<String, Object> editedArguments) {
+        return signoff(approvalId, "approve", reason, null, editedArguments);
+    }
+
     public Approval deny(String approvalId, String reason) {
         return signoff(approvalId, "deny", reason, null);
     }
 
     /**
      * Block until the approval leaves pending status or the timeout fires.
-     * Uses the server's /wait long-poll under the hood.
+     * Uses the server's /wait long-poll, up to 120 s per round. A busy server
+     * or a dropped connection is retried until the timeout.
      */
     public Approval waitFor(String approvalId, int timeoutSeconds) {
-        int deadline = Math.max(1, timeoutSeconds);
-        int elapsed = 0;
-        Approval last = null;
-        while (elapsed < deadline) {
-            int chunk = Math.min(120, deadline - elapsed);
+        return HttpKit.longPoll(timeoutSeconds, chunk -> {
             URI uri = URI.create(baseUrl + "/api/approvals/" + approvalId + "/wait?timeout_seconds=" + chunk);
-            last = treeToValue(sendForData(HttpRequest.newBuilder(uri).GET()), Approval.class);
-            if (last != null && last.status() != null && !"pending".equals(last.status())) {
-                return last;
-            }
-            elapsed += chunk;
-        }
-        return last;
+            return treeToValue(
+                sendForData(HttpRequest.newBuilder(uri).GET(), Duration.ofSeconds(chunk + 30L)), Approval.class);
+        }, a -> a.status() != null && !"pending".equals(a.status()));
     }
 
     /** Set or clear the tenant-level approval webhook URL. Admin/owner only. */
@@ -175,12 +179,16 @@ public final class ApprovalsClient {
     }
 
     private JsonNode sendForData(HttpRequest.Builder rb) {
-        rb.header("X-API-Key", apiKey).timeout(timeout);
+        return sendForData(rb, timeout);
+    }
+
+    private JsonNode sendForData(HttpRequest.Builder rb, Duration requestTimeout) {
+        rb.header("X-API-Key", apiKey).timeout(requestTimeout);
         if (defaultActingSubject != null) defaultActingSubject.toHeader().forEach(rb::header);
         try {
             HttpResponse<String> resp = http.send(rb.build(), HttpResponse.BodyHandlers.ofString());
             if (resp.statusCode() >= 400) {
-                throw new AbenixException("approvals HTTP " + resp.statusCode() + " — " + resp.body());
+                throw HttpKit.error("approvals", resp.statusCode(), resp.body());
             }
             JsonNode root = JSON.readTree(resp.body());
             return root.has("data") ? root.get("data") : root;

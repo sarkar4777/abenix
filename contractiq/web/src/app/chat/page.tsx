@@ -269,7 +269,7 @@ export default function ContractIQChatPage() {
     const res = await apiFetch<any>(`${API_URL}/api/contractiq/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ query: msg, thread_id: activeThreadId }),
+      body: JSON.stringify({ query: msg, thread_id: activeThreadId, new_thread: !activeThreadId }),
     });
     if (res.ok && res.data?.data) {
       const data = res.data.data;
@@ -297,7 +297,7 @@ export default function ContractIQChatPage() {
   return (
     <div className="min-h-screen bg-[#0B0F19] flex">
       {/* Thread sidebar */}
-      <aside className="w-64 border-r border-slate-800/50 flex flex-col shrink-0">
+      <aside className="hidden md:flex w-64 border-r border-slate-800/50 flex-col shrink-0" data-testid="chat-threads">
         <div className="p-3 border-b border-slate-800/50">
           <button
             onClick={newChat}
@@ -321,7 +321,11 @@ export default function ContractIQChatPage() {
           {threads.map(t => (
             <div
               key={t.id}
+              role="button"
+              tabIndex={0}
+              data-testid="chat-thread"
               onClick={() => setActiveThreadId(t.id)}
+              onKeyDown={e => { if (e.key === 'Enter') setActiveThreadId(t.id); }}
               className={`group rounded-lg p-2 cursor-pointer transition-colors ${
                 activeThreadId === t.id
                   ? 'bg-emerald-500/10 border border-emerald-500/30'
@@ -332,8 +336,9 @@ export default function ContractIQChatPage() {
                 <p className="text-[12px] text-slate-200 truncate flex-1" title={t.title}>{t.title}</p>
                 <button
                   onClick={e => { e.stopPropagation(); void deleteThread(t.id); }}
-                  className="opacity-0 group-hover:opacity-100 p-0.5 text-slate-500 hover:text-rose-400 transition-opacity"
+                  className="opacity-100 md:opacity-0 md:group-hover:opacity-100 focus:opacity-100 p-0.5 text-slate-500 hover:text-rose-400 transition-opacity"
                   title="Delete"
+                  aria-label={`Delete ${t.title}`}
                 >
                   <Trash2 className="w-3 h-3" />
                 </button>
@@ -351,11 +356,23 @@ export default function ContractIQChatPage() {
 
       {/* Main */}
       <div className="flex-1 flex flex-col min-w-0">
-        <div className="border-b border-slate-800/50 px-6 py-4 flex items-center justify-between">
-          <div>
+        <div className="border-b border-slate-800/50 px-4 sm:px-6 py-4 flex items-center justify-between">
+          <div className="min-w-0">
             <h1 className="text-lg font-bold text-white flex items-center gap-2">
               <Bot className="w-5 h-5 text-emerald-400" /> Cross-Contract Intelligence
             </h1>
+            {/* phones get the thread list as a picker, the sidebar does not fit */}
+            <div className="md:hidden flex items-center gap-2 mt-2">
+              <select
+                aria-label="Conversation"
+                value={activeThreadId || ''}
+                onChange={e => { if (e.target.value) setActiveThreadId(e.target.value); else newChat(); }}
+                className="flex-1 min-w-0 bg-slate-800/50 border border-slate-700 rounded-lg px-2 py-1.5 text-xs text-slate-200"
+              >
+                <option value="">New conversation</option>
+                {threads.map(t => <option key={t.id} value={t.id}>{t.title}</option>)}
+              </select>
+            </div>
             <PageExplainer routeKey="chat" />
             <p className="text-xs text-slate-400 mt-0.5">
               AI-powered analysis across your entire contract portfolio
@@ -365,7 +382,7 @@ export default function ContractIQChatPage() {
         </div>
 
         {/* Messages */}
-        <div ref={scrollRef} className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
+        <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 sm:px-6 py-4 space-y-4">
           {messages.length === 0 && (
             <div className="flex flex-col items-center justify-center h-full">
               <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-emerald-500/20 to-cyan-500/20 flex items-center justify-center mb-4">
@@ -388,8 +405,9 @@ export default function ContractIQChatPage() {
           )}
           {messages.map((msg, i) => (
             <motion.div key={i} initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }}
+              data-testid={`chat-msg-${msg.role}`}
               className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-              <div className={`max-w-[75%] ${msg.role === 'user' ? '' : 'w-full max-w-[75%]'}`}>
+              <div className={`max-w-[90%] sm:max-w-[75%] ${msg.role === 'user' ? '' : 'w-full'}`}>
                 {msg.role === 'assistant' && (
                   <div className="flex items-center gap-2 mb-1.5">
                     <div className="w-5 h-5 rounded-full bg-emerald-500/20 flex items-center justify-center">

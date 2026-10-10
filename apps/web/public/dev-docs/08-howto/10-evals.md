@@ -81,7 +81,7 @@ A suite holds up to 500 cases, a case up to 25 assertions. A bad assertion is re
 | `max_cost` | `max` (USD) | The run cost at most that |
 | `max_duration_ms` | `max` | The run finished within that |
 | `cited_sources_present` | optional `pattern`, `min_count`, `accept_source_tools` | The output carries citations or links, or the run used a source tool such as `knowledge_search` |
-| `judge` | `rubric`, optional `min_score` (0 to 1), `model` | A model scores the output against the rubric. Not deterministic, use it alongside exact checks |
+| `judge` | `rubric`, optional `min_score` (0 to 1, default 0.7), `model` | A model scores the output against the rubric. Not deterministic, use it alongside exact checks |
 
 `GET /api/evals/assertion-types` returns the same list with field kinds, which is what the assertion builder renders.
 
@@ -105,7 +105,7 @@ curl -s -X POST "$API/api/evals/suites/$SUITE/cases/from-execution" \
   -d '{"execution_id": "<execution uuid>"}'
 ```
 
-The case gets the run's input, its output as `reference_output`, the tag `from-run`, and suggested assertions that all hold for that run. Up to three top-level fields and a schema when the output is a JSON object, otherwise a `contains` on a word from the first line. Then the tools it called, a citation check if it cited, and cost and duration ceilings at about three times what it took. Review them before relying on them. `same_agent` in the response says whether the run came from the suite's agent.
+The case gets the run's input, its output as `reference_output`, the tag `from-run`, and suggested assertions that all hold for that run. Up to three top-level fields and a schema when the output is a JSON object, otherwise a `contains` on a word from the first line of 12 or more characters. Then the tools it called, a citation check if it cited, and cost and duration ceilings at about three times what it took. Review them before relying on them. `same_agent` in the response says whether the run came from the suite's agent.
 
 ---
 
@@ -148,12 +148,9 @@ The answer lists `regressions` (passed before, fails now), `improvements`, `stil
 
 The gate applies when the tenant's policy for the agent's risk tier has `require_eval_pass: true`. By default that is the high and critical tiers. Set the tier on the agent (`model_config.risk_tier`, or the tier picker in the builder) and the policy on **Admin -> Risk & Controls**, see [11-governance](11-governance.md).
 
-When it applies, publishing the agent or setting it active looks at every suite of that agent with `gating: true`. For each it takes the latest completed run with no model override, and that run must
+When it applies, publishing the agent, setting it active, or saving a change to the prompt, model or tools of an agent that is already live looks at every suite of that agent with `gating: true`. For each it takes the latest completed run with no model override that ran against the agent's current configuration, and that run must meet the suite's `pass_threshold`. The `config_hash` is a SHA-256 of the system prompt and `model_config`, so any edit to either needs a fresh run. A suite with no such run counts as `not_run`.
 
-- have run against the agent's current configuration. The `config_hash` is a SHA-256 of the system prompt and `model_config`, so any edit to either needs a fresh run, and
-- meet the suite's `pass_threshold`.
-
-Otherwise the publish is refused with 409, code `EVAL_GATE`, and a message naming each suite, its score against the threshold and the failing cases. An agent with no gating suites is not blocked.
+If any gating suite is `failed` or `not_run`, the publish is refused with 409, code `EVAL_GATE`, and a message naming each suite, its score against the threshold and the failing cases. An agent with no gating suites is not blocked.
 
 Check where you stand before publishing:
 

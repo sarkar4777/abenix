@@ -1,5 +1,143 @@
 # Changelog
 
+## v2.5.6 — 2026-10-10
+
+### Added
+
+- Python SDK: autonomy.enrol, code_assets.update, llm_models.list and llm_models.billing, and bootstrap_key to sign in once and mint an app's first API key
+- Python SDK: ml_models.predict(name_or_id, input_data) and code_assets.run(code_asset_id, input)
+- docs/09-reference/06-signing-keys.md: what the JWT key pair signs, which pods need it, how to generate, install, rotate and check it. The agent-to-agent doc gains a section on calls across pods and pools
+- Audit log reads the real trail with filters for person, action, text and time, plus integrity check and export
+- Roles page uses the server's role table, with an inline role change that lists what the person gains and loses
+- Market data connectors can be added and removed, archives can be restored, document grants and project members have screens, collection grants use person and agent pickers, the models catalogue can be edited
+- Comments and favourites on agent pages, starred agents on the Agents page, a Search button for the command palette
+- Shares, collection grants and document grants can carry an end date, and the dialogs show when access ends or has ended
+- Document version history, with GET /api/knowledge/{kb}/documents/{doc}/versions and a Versions tab
+- Browser tests in CI: the e2e-smoke job boots Postgres, Redis, the API and the web app, signs in, builds and chats with an agent and runs the lostness gate on six routes. Model calls go to a stub provider that only switches on with ABENIX_LLM_STUB=1 and CI=true
+- scripts/uat.sh runs the platform suite by default, with --suite core|autonomy|improvements|admin|apps|all, --spec, --list and --bail, a summary table, and warnings for a rollout in progress or a revoked Claude token
+- e2e/helpers/sidebar.ts opens Show all tools only when Essentials hides a link
+- Background jobs page at /admin/jobs: every scheduled job with schedule, last and next run, outcome, duration, plain error and run count, plus Run now under the job's lock. Runs are recorded in Redis and work across API replicas
+- Lesson retention card on Improvements, with GET and PUT /api/improvements/retention
+- Approval escalation can be set in minutes per risk tier and the escalation job runs every minute
+- Python and TypeScript SDKs: ml_models.upload, get and delete (mlModels in TS), registering a model file with framework, version, feature names and schemas, plus predict in TS
+- Python and TypeScript SDKs: code_assets.create, new_version and get (codeAssets in TS), from a zip, a tar.gz, a folder zipped on the fly or a git URL
+- Python and TypeScript SDKs: kill_switches.list, set and clear, and api_keys.list, create and revoke
+- Python and TypeScript SDKs: decisions.update_test and delete_test, and add_test takes match. TS gains tests and addTest
+- Decision golden tests can match the expected result as a subset, so extra result keys are ignored. Set through the test endpoints and a Match select on the Tests tab. Existing tests stay exact
+- ml_model_register tool: a run registers a model file it made, from the export folder or base64, as a new version owned by the user who started it
+- POST /api/ml-models/{id}/explain: per-feature contributions and a waterfall for one prediction. Exact for linear models, Shapley values for trees and everything else, tree or linear SHAP when the shap package is installed. The baseline is the request's, the model's stored training means, a leading StandardScaler's means, or zeros, and the answer says which
+- Python and TypeScript SDKs: ml_models.explain(name_or_id, input_data, baseline) (mlModels.explain in TS)
+
+### Changed
+
+- code_asset runs default to 8 at a time per tenant and 24 overall, up from 2 and 6. An install still on the old default is lifted on upgrade, a value an admin set is kept
+- Python SDK approvals.wait_for and actions.wait share one long-poll that tracks the deadline by the clock, sizes each request's timeout to its poll, and retries 429, 502, 503, 504 and dropped connections. Any other refusal raises as before. JS SDK waitFor does the same, and a caller's own abort signal is now honoured
+- A synchronous agent run that outlasts wait_timeout_seconds answers 202 with status running and its execution_id, not 504. The SDKs keep polling, so a long ContractIQ extraction no longer fails while it is still working
+- Direct tool calls answer before their log row is written, and the row keeps a 4 KB preview of large arguments and outputs (TOOL_LOG_KEEP_CHARS). code_asset now runs inline by default, its asset already runs in its own runner, so the runtime pool hop only added a round trip
+- deploy.sh pause-apps and resume-apps scale the use-case apps to zero and back to free memory, with the same APPS= selection as a deploy
+- ML predict keeps loaded models in memory per file and version and writes the invocation log after answering. A warm prediction takes 1 to 2 ms on the server and about 8 ms through the SDK, where every call used to reload the model file. ML_MODEL_CACHE_SIZE sets how many models stay loaded, default 32
+- deploy.sh local leaves out an app whose image does not build and deploys the platform and the other apps, then names the app and the command to add it later. One app's build failure used to stop the whole deploy
+- deploy.sh local sizes minikube for the apps you pick, 8 GB for the core plus 0.75 GB per app, checks Docker has the room before creating anything and says how many apps fit. It also reserves the memory minikube does not have, so Kubernetes no longer books pods past what fits and the node no longer stalls under load. A running cluster that is too small gets a warning. New guide docs/06-deployment/09-local-sizing.md with the table for each choice and how to give Docker more memory on WSL 2
+- Background job Run now is limited to platform operators, because jobs act on every workspace. Tenant admins still see every job and its runs
+- dev-minikube.sh no longer creates a 2 GB cluster when none exists, it points at deploy.sh local
+
+### Fixed
+
+- Java SDK approvals().waitFor and actions().waitFor ran each long-poll under the client's 30 second request timeout, so any wait over 30 seconds failed even on a healthy server, and a busy answer threw. Each round now gets its own timeout, the deadline follows the clock, and 429, 502, 503, 504 and dropped connections are retried, as in the Python and JS SDKs
+- POST /api/pipelines/{id}/execute without nodes answered a bare 422 Field required. It now runs the agent's saved pipeline, and an agent with nothing saved gets a 400 that says so. uat_critical_paths used the retired /api/knowledge paths and accepted 4xx as a pass, it now calls /api/knowledge-bases and requires success
+- scripts/uat.sh kept only the last --spec when the flag was given more than once. Repeated flags now add up
+- Approval long-polls held a database connection for up to 120 seconds each, so a dozen waiting clients drained the pool and other requests got 503 busy. The wait now hands its connection back between reads
+- A code asset whose archive was not yet on a pod's disk was remembered as having no runner manifest, so it lost its warm runner, its warm-wait and its prewarm until the pod restarted. A failed read is now tried again
+- A kill switch message named the agent by its id, it now names the agent
+- A kill switch on an agent could miss the next run for up to ten seconds, because a run started from a snapshot refreshed in the background, and each API worker kept its own. Agent and pipeline runs now read a switch list no older than a second before they start
+- A code asset run on the Job path passed its archive and input as environment variables or command arguments, so an input over 128 KB, such as a 430 KB training set, failed with exit 255. They now reach the Job as files, through a short-lived Secret on Kubernetes or a mounted folder on Docker, up to 950 KB, with a plain message beyond that
+- ml_model_register reads a model file only from the calling workspace's own folder in the export area, which every workspace shares, so a run cannot register another workspace's file by name
+- An agent step in a pipeline passed on the agent's prose with a fenced JSON block even when the agent has an output schema, while the same agent run directly returned clean JSON. The step now passes on the JSON its schema describes
+- A direct tool call that was cancelled, because the caller disconnected or timed out or the pod restarted, never gave back its concurrency slot, so a tool could answer 429 with one or two calls in flight until the counter's TTL ran out. Slots are now leases that expire on their own, and a cancelled call releases its lease
+- A code asset with an input or output schema spent about 22 ms per validation re-checking the schema itself on every call, twice per call. Validators are now compiled once per schema. A Groundwork twin step through the API went from 66 ms to 26 ms from a laptop and 17 ms inside the cluster
+- The last-test record of a code asset cut large JSON at 20,000 characters and stored the broken string as jsonb, which Postgres rejected on every large call. A record that is too big is now stored as its size
+- Local Postgres was capped at 512Mi, so a busy backend hit the limit, was killed, and put the whole database into crash recovery, which showed up as random 500s and failed runs during load. values-local.yaml now gives it 512Mi requested and 2Gi limit
+- Every code asset call queried a code_asset_secrets table that no migration creates, logging a database error each time. The tool now checks once and skips it. Per-asset secrets were never finished and remain a known gap
+- A new version of a code asset meant to stay warm ran its first call as a cold Job, 151 s in one case, because its runner only started on that call and the reaper prewarms every two minutes. Uploading a version now starts its runner at once, and a call that finds the runner starting waits for it, up to CODE_RUNNER_WARM_WAIT seconds, default 60, before the Job path
+- On a new agent, picking Claude Sonnet 4.5 in the builder's Model tab snapped back to the platform default, because the builder treated that model as not chosen yet. The platform default is now applied once, when the builder opens
+- Paging through agents, conversations, runs, knowledge bases and other lists could return the same row twice and skip another, because rows inserted in one transaction share a timestamp and the order had no tie-breaker. On a fresh install 23 of 211 agents repeated and 23 were missing, which left the Chat page's agent search showing agents that did not match. Every paged list now orders by id last, the web drops repeats, and a unit test fails on a paged query without a tie-breaker
+- A code step that set result = {...} without printing returned (no output), so the next step in an AI-built pipeline crashed with a raw JSONDecodeError. code_executor now returns a variable named result, and a value that is the step's only output is passed on as plain JSON
+- Searching agents on the Chat page listed matches alphabetically, so an agent that only mentioned the words in its description came before the one with that name. Name matches now come first
+- Chatting with an agent from its own chat page kept no memory and saved nothing, so a follow-up started from scratch, the chat never showed in Chat history and Start here's follow-up step sent people to a blank chat. That page now saves the conversation, sends follow-ups with the earlier turns and lists the chat in Chat history
+- A fresh install had none of the four database triggers the migrations create, because the bootstrap builds tables from the ORM and stamps alembic. The audit log could be edited, runs carried no provenance, run events never reached event subscriptions and Source Watch history could be changed. `bootstrap verify` now creates any missing trigger from the migrations' own SQL, existing installs repair themselves on the next deploy, and a unit test covers every trigger a migration defines
+- GET /api/llm-models/resolve could answer from a minute-old cache in another API worker after an admin changed a model's status. It now reads availability fresh
+- A JWT key pair kept on one line in .env, newlines written as 
+, worked for the runtime but broke sign-in on the API. Both now read it the same way
+- On a fresh install agent-to-agent calls failed with Could not sign a token, because deploy.sh added the JWT keys to the secret after the pods started and never restarted them. It now restarts every service that reads the secret when it creates the keys
+- A kill switch could miss the next tool call on a runtime pod that had been idle, because the snapshot was served stale while it refreshed. A snapshot older than two refresh periods is now reloaded before it is used
+- Connecting a model, a subscription or a provider key left models marked unavailable until the next hourly check, so requests were silently routed to a fallback. Availability is now re-checked a few seconds after the change
+- The code runner reaper failed on a fresh install when it ran before the migrations. It now waits quietly until the schema exists
+- A fresh install never had the model_availability_events table, because the bootstrap builds tables from the ORM and that table only existed in a migration. The hourly model check failed with a 500 on every such install. The table now has a model, `bootstrap verify` creates any ORM table a stamped install skipped, and a unit test fails when a migration creates a table with no model
+- A scheduled trigger that failed on a runtime pool never told its owner. The API's run announcer now sends the same Scheduled trigger failed notice, once per run whichever process finished it
+- Drift scoring for runs on a runtime pool waited for the next backlog scan because the runtime images lacked execution_hooks. Both runtime images now ship it
+- The runtime no longer tries to import the API's triggers router, which no runtime image has, and writes the trigger outcome itself
+- Sharing a knowledge base granted nothing, because KB access never read the share rows
+- An expired document grant made the document open to the whole collection
+- Superseded document versions were still searched and fed to Cognify
+- ML model get, edit, delete and deploy had no owner or share check. Agent memories, comments and favourites now follow agent access
+- The activity feed in settings returned the whole tenant's activity, with IP addresses, to any user. It now returns your own
+- Global search linked to routes that do not exist, never searched knowledge bases and was not scoped to what you can see
+- Runtime dead-letter writes always failed because the runtime image lacks the API services module
+- The Cognify worker could not start under SQLAlchemy 2.1, reload worker never restarted it, and stuck jobs blocked Run Cognify forever
+- A model just added in LLM Pricing failed as unknown for up to a minute
+- Phone layout fixes on the ontology editor, projects page, tables and the top bar
+- A streamed agent run that used its last step on a tool call ended with no answer. It now gets one final turn to answer from what it gathered, as non-streamed runs already did. That last turn offers no tools and passes the earlier tool calls as text, so the model has to answer. The ContractIQ extractor, which ran out of steps on tool calls, returned nothing on upload
+- New agents defaulted to Opus 5 on a fresh subscription install, and the builder's model list was empty because it hid every model the subscription serves. New agents now start on one shared default from the builder, the AI Builder and POST /api/agents: the subscription model when it is the only provider or exclusive, otherwise a Sonnet-class model from a configured provider
+- The runtime and API logged full LLM request bodies at DEBUG through the anthropic and openai SDKs. Requests now log model, message count, token estimate and tool names. ABENIX_LOG_LLM_CONTENT=true brings full bodies back for local debugging and logs a warning
+- The chat agent picker cut your new draft off past its first 60 agents and showed other people's drafts to admins. Your own drafts are listed first with a Draft tag and nobody else's show
+- Every Claude run executed inline in the API failed with "Incorrect label names", because the runtime's cache counter was the API's counter of the same name with an extra tenant_id label
+- A failed pipeline step showed an empty result in the run's tool calls, so a kill switch stop gave no reason. The step's error is shown
+- bootstrap.py crashed on a second run against an existing database with psycopg2
+- The decision Tests tab said there were no golden tests when they failed to load
+- Help described an audio_stt tool on Deepgram that does not exist. It now describes speech_to_text
+- The connector form is a labelled dialog
+- Stale and vacuous browser specs fixed, five one-off specs retired
+- Pipeline steps after a failed `on_error: continue` step run again and get the error as `{{<id>.error}}`. The builder has an On failure tab to set it
+- `{{input.x}}` read `[not available]` on the non-streamed agent execute path. Every execute path now builds its context the same way
+- Healing diffs were not captured for pipelines run through /api/agents/{id}/execute, so Diagnose and fix found nothing
+- Streamed pipeline runs ignored `pipeline.timeout_seconds` and a hanging step ran past it. They stop at the limit with a plain message and RUNTIME_TIMEOUT
+- `min_replicas: 0` on a pool rendered as 1
+- The KEDA p95 trigger and the Scaling Ops dashboard read metrics nothing emitted. The pool consumer now records `abenix_execution_duration_seconds` and `abenix_queue_depth`, and the dashboard reads only emitted metrics
+- Per-agent `rate_limit_qps` is enforced with 429 RATE_LIMITED. Per-agent replicas and concurrency are shown as not applied
+- Per-provider cost columns on executions were never written
+- RATE_LIMITED was shadowed by LLM_RATE_LIMIT in failure classification
+- dev-local.sh: consumer health port moved off 8002 to 8020, PharmaVigil ports tracked, failed seeds reported
+- dev-minikube.sh could not find .env, portforward-azure.sh printed the wrong Grafana password
+- Web chart service and container ports agree on 3000, and the chart ingress follows `web.service.port`
+- SSO providers have Helm keys under `secrets.sso`
+- The Claude subscription default model and on/off rule come from one place, so the runtime, admin screen and pickers agree
+- pep_screening declares CONGRESS_GOV_API_KEY, and check-tool-config.py catches credentials read through a lookup table
+- Evaluation suite Custom cron could not be picked from Only when I run it
+- Archive retention accepted 0 or negative days, it now takes 1 to 3650
+- Event clean-up ran on every replica at once, it now takes its own lock
+- Any tenant admin could flip the deployment-wide marketplace and monetization switches. Only a platform operator can now, set by ABENIX_PLATFORM_OPERATORS or the platform tenant's admins, and other admins see why the toggles are locked
+- The connectors API had no role check. Create, update, delete and test now need manage_settings like the page
+- Secrets saved without ABENIX_DATA_KEY_KEK_BASE64 were stored in plain text with no warning. The API now warns at startup, Tool Configuration and Connectors show a banner, and production refuses to start unless ABENIX_ALLOW_PLAINTEXT_SECRETS is set
+- X-Abenix-Subject was missing from the CORS allowed headers
+- A moderation redact triggered by a provider category passed the text on unmasked. It now masks the sentences that hit and the events list shows what was masked
+- The tenant DLP mode was ignored on execute. Mask and block now apply to agent input and answers on inline, streamed, queued and pipeline runs, and only an admin can change the mode
+- The Dead Letter Queue showed raw failure codes such as LLM_AUTH_ERROR as the reason. Each card now names the failure in words and keeps the code as a small reference
+- The sample plant agent sometimes skipped a setpoint change because the current one was close enough. It now changes it unless the setpoint is already exact
+- A starred agent that had been deleted stayed in the Starred strip on Agents and its link opened a page stuck on Loading. Stars now list only agents that still open for you, and a deleted agent cannot be starred
+- The Atlas review ribbon for parsed sentences sat off centre and slid under the Inspector, so Apply all could not be clicked
+- An agent Info page for a deleted or unshared agent spun forever. It now says the agent is not available and links back to Agents
+- On a Claude subscription in exclusive mode the hourly model check probed Sonnet and Opus directly, got rate limited and marked them unavailable, so runs and the model resolver swapped Claude agents to gpt-4o. The check now probes the model the subscription actually runs.
+- Wingman Price at Risk Lens threw away every scan where the agent showed its working before the final JSON, so Score ended on the empty state and the cached card vanished. Agent answers are now read from the last fenced JSON block, or the largest JSON object in the text, across all Wingman results
+- A failed or unreadable Wingman mispricing scan reset the page with no message. The page now keeps the last good scan, says why the run did not produce a result and what to do next, and the API returns the reason instead of a half-parsed scan
+- ContractIQ Analyst Workbench explains predictions through the SDK's ml_models.explain. It only ever showed the amber fallback banner because the shap_explainer code asset read model files from /data/ml-models, which code runner sandboxes do not mount, and shipped without joblib, numpy or scikit-learn. The asset is retired and the seeder no longer creates it, existing rows are left alone
+- ContractIQ /api/contractiq/workbench/explain requires a signed-in ContractIQ user
+- ML model predict answers 404 to a caller who cannot see the model, the same as the detail page. It checked only the tenant before
+- offtake_storage_cycling and offtake_industrial ship their training means so explanations measure against an average day, the ML model seeder adds them to rows it seeded earlier
+
+### Deprecated
+
+- The moderation policy provider field. OpenAI is the only provider, the API no longer returns it and refuses other values
+
 ## v2.5.5 — 2026-10-09
 
 ### Added

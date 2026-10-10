@@ -122,7 +122,7 @@ const categories: Category[] = [
             <p>Three things make Abenix different from every other agent platform:</p>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
               <FeatureCard icon={Network} accent="violet" title="Atlas — ontology + KB canvas" body="Documents and concepts share one canvas. Drop a PDF, type a sentence, draw a relationship. Agents query the graph, not raw vectors." />
-              <FeatureCard icon={Brain} accent="cyan" title="Knowledge Engine" body="Graph-aware retrieval. Token cost drops 5–10× because agents read curated evidence, not noisy near-neighbours." />
+              <FeatureCard icon={Brain} accent="cyan" title="Knowledge Engine" body="Graph-aware retrieval. Agents read curated, cited evidence, not noisy near-neighbours, so they spend fewer tokens." />
               <FeatureCard icon={Workflow} accent="emerald" title="Pipelines + 100+ tools" body="Visual builder for multi-agent DAGs. Switch nodes, loops, sandboxed code, MCP integrations." />
             </div>
             <Hero src={SS('04-atlas-canvas.png')} alt="Atlas — thinking in graphs" caption="Atlas — drop documents, draw concepts, edges and instances live on one canvas" />
@@ -131,20 +131,37 @@ const categories: Category[] = [
       },
       {
         id: 'tour',
-        title: 'A 60-second tour',
+        title: 'Where to start',
         icon: <Sparkles className="w-4 h-4" />,
         body: (
           <div className="space-y-3 text-[13.5px] text-slate-300 leading-relaxed">
-            <p>This entire page is structured as a left sidebar (categories) and a content pane (this column). Pick any topic to jump.</p>
-            <p>If you&apos;re new, the recommended path:</p>
-            <Steps items={[
-              'Read the <strong>Knowledge Bases</strong> section so you understand how documents become a typed graph.',
-              'Read <strong>Atlas</strong> — the unique differentiator.',
-              'Read <strong>Agent Builder</strong> + <strong>Pipelines</strong>.',
-              'Read <strong>Triggers</strong> + <strong>Executions</strong> to put the agent into production.',
-              'Read <strong>Decisions</strong> and <strong>Governance</strong> when an agent must follow business rules, needs sign-off or must be stoppable.',
-              'Read the <strong>Scaling Out</strong> mega-section before you put it in front of customers.',
-            ]} />
+            <p>The topic list on the left follows the app. Pick a topic to jump to it. For how all the parts connect, with a word list, read <a href="/docs?slug=00-how-abenix-fits-together" target="_blank" rel="noopener noreferrer" className="text-violet-300 underline">How Abenix fits together</a>.</p>
+            <p>Home shows a <strong className="text-white">Start here</strong> checklist for your role. The same paths, in short:</p>
+            <ul className="list-disc pl-5 space-y-1 text-[13px]">
+              <li><strong className="text-white">Admin.</strong> Add a model key under <a href="#tool-configuration" className="text-violet-300 underline">Tool Configuration</a>, invite people from <a href="#team" className="text-violet-300 underline">Team</a>, review the <a href="#risk-tiers" className="text-violet-300 underline">risk tiers</a>, turn on <a href="#moderation" className="text-violet-300 underline">moderation</a>, then keep <a href="#needs-you" className="text-violet-300 underline">Needs you</a> open.</li>
+              <li><strong className="text-white">Creator.</strong> Build an agent in the <a href="#agent-builder" className="text-violet-300 underline">Agent Builder</a>, try it in chat, give it a <a href="#knowledge-bases" className="text-violet-300 underline">knowledge base</a>, add <a href="#evals" className="text-violet-300 underline">tests</a>, enrol an action in <a href="#earned-autonomy" className="text-violet-300 underline">Autonomy</a>, then read what it learned under <a href="#improvements" className="text-violet-300 underline">Improvements</a>.</li>
+              <li><strong className="text-white">Member.</strong> Ask an agent a question in <a href="#ai-chat" className="text-violet-300 underline">AI Chat</a>, ask a follow-up in the same chat, and rate the answer with a thumb.</li>
+            </ul>
+            <p>Going to production? Read <a href="#decisions" className="text-violet-300 underline">Decisions</a> and the Governance topics when an agent must follow business rules or be stoppable, and the Scale &amp; operate section before real traffic arrives.</p>
+          </div>
+        ),
+      },
+      {
+        id: 'finding-your-way',
+        title: 'Finding your way',
+        icon: <Compass className="w-4 h-4" />,
+        badge: 'new',
+        body: (
+          <div className="space-y-3 text-[13.5px] text-slate-300 leading-relaxed">
+            <ul className="list-disc pl-5 space-y-1 text-[13px]">
+              <li><strong className="text-white">Start here</strong> on Home is a short checklist for your role. Each step links to the right page and ticks itself when you have really done it. Hide it if you like, and bring it back with <strong>Show the Start here guide</strong>.</li>
+              <li><strong className="text-white">Needs you</strong> at the top of the sidebar counts everything waiting on you. See <a href="#needs-you" className="text-violet-300 underline">Needs you</a>.</li>
+              <li><strong className="text-white">The sidebar</strong> starts in <strong>Essentials</strong>: Needs you, Home, Agents, AI Chat, Knowledge and Monitor. Reviewers also get Review inbox, creators and admins get Agent Builder, Autonomy and Improvements, and admins get an Admin entry. <strong>Show all tools</strong> at the bottom opens every page, grouped as Pinned, Build, Run &amp; Test, Monitor, Marketplace, Admin and Workspace. Your choice is saved to your account. A page you opened from elsewhere shows under <em>You are here</em>.</li>
+              <li><strong className="text-white">Every page</strong> starts with one line on what it is for, its main button and a <strong>How this works</strong> panel. The panel is open on your first visit and you can reopen it any time. The <strong>Docs</strong> link opens the developer doc for that page.</li>
+              <li><strong className="text-white">After something works</strong>, a &quot;Done. What next?&quot; card suggests the usual next steps.</li>
+              <li>Press <kbd className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-[11px] font-mono">Ctrl</kbd> + <kbd className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-[11px] font-mono">K</kbd> (<kbd className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-[11px] font-mono">Cmd</kbd> on a Mac) to find any page, agent or knowledge base.</li>
+            </ul>
+            <p>What you see depends on your role. <strong className="text-white">Admins</strong> set up the workspace and hold every permission. <strong className="text-white">Creators</strong> build agents, tests, rules and watched sources. <strong className="text-white">Members</strong> use agents, chat and give feedback. An admin can give anyone more through <a href="#permissions" className="text-violet-300 underline">permission sets</a>.</p>
           </div>
         ),
       },
@@ -174,18 +191,38 @@ bash scripts/deploy-azure.sh all       # AKS + ACR + helm`}</pre>
     blurb: 'The pages your operators live in.',
     topics: [
       {
+        id: 'needs-you',
+        title: 'Needs you',
+        icon: <Bell className="w-4 h-4" />,
+        badge: 'new',
+        body: (
+          <div className="space-y-3 text-[13.5px] text-slate-300 leading-relaxed">
+            <p><strong className="text-white">Needs you</strong> is one inbox for everything waiting on you. The sidebar shows the total. Each tab shows its own count and the busiest one opens first. You only see the tabs you can act on.</p>
+            <ul className="list-disc pl-5 space-y-1 text-[13px]">
+              <li><strong className="text-white">Approvals.</strong> Agent actions, autonomy promotions, rule changes and agent gates you can sign.</li>
+              <li><strong className="text-white">Proposals.</strong> Proven fixes to agents, waiting for you to approve the release. See <a href="#improvements" className="text-violet-300 underline">Improvements</a>.</li>
+              <li><strong className="text-white">Watching reviews.</strong> Agents in Watching asking whether you would have done the same.</li>
+              <li><strong className="text-white">Held content.</strong> Messages a moderation policy stopped until someone checks them. Needs <code>moderation.review</code>.</li>
+              <li><strong className="text-white">Marketplace submissions.</strong> Agents waiting for an admin, while the marketplace is on.</li>
+              <li><strong className="text-white">Alerts.</strong> Failure causes that are new today or happening more than yesterday.</li>
+            </ul>
+            <p>Approve, answer or release right in the tab. The count updates as you go. Each tab links to its full page for history, filters and settings. When nothing is waiting, the page says so and lists what would show up there.</p>
+          </div>
+        ),
+      },
+      {
         id: 'dashboard',
         title: 'Dashboard',
         icon: <Layers className="w-4 h-4" />,
         body: (
           <div className="space-y-3 text-[13.5px] text-slate-300 leading-relaxed">
-            <p>The Dashboard is the operator&apos;s home. Total agents, active right now, today&apos;s executions, today&apos;s failures, cost trend, and the recent-executions feed.</p>
+            <p>The Dashboard, <strong>Home</strong> in the short sidebar, is where you land. It shows total agents, runs active now, today&apos;s runs and failures, the success rate and today&apos;s token spend. Until you finish it, the <strong className="text-white">Start here</strong> checklist for your role sits on top. See <a href="#finding-your-way" className="text-violet-300 underline">Finding your way</a>.</p>
             <Hero src={SS('01-dashboard.png')} alt="Dashboard" />
             <p><strong className="text-white">Common tasks:</strong></p>
             <ul className="list-disc pl-5 space-y-1 text-[13px]">
-              <li>Pin an agent to the home for quick re-run.</li>
+              <li>Click a KPI card to open the runs or agents behind it.</li>
               <li>Click a failure to jump straight to the execution detail.</li>
-              <li>Use the cost chart to spot a runaway agent (cost spike on the last hour with no matching execution count = an agent stuck in a retry loop).</li>
+              <li>Token Spend shows today&apos;s cost and tokens. Click it for the trends on Analytics.</li>
             </ul>
           </div>
         ),
@@ -196,14 +233,14 @@ bash scripts/deploy-azure.sh all       # AKS + ACR + helm`}</pre>
         icon: <Wrench className="w-4 h-4" />,
         body: (
           <div className="space-y-3 text-[13.5px] text-slate-300 leading-relaxed">
-            <p><strong className="text-white">Tools</strong> is the catalog of everything an agent can call. Each entry shows its name, what it does, and the arguments it takes. An agent only gets the tools named in its own config, so the catalog is the menu, not the grant.</p>
+            <p><strong className="text-white">Tools Catalogue</strong> is the catalog of everything an agent can call. Each entry shows its name, what it does, and the arguments it takes. An agent only gets the tools named in its own config, so the catalog is the menu, not the grant.</p>
             <p><strong className="text-white">Rough shape of the catalog:</strong></p>
             <ul className="list-disc pl-5 space-y-1 text-[13px]">
               <li><strong className="text-white">Retrieval</strong> — knowledge_search, vector_search, graph_explorer, web_search.</li>
               <li><strong className="text-white">Data</strong> — database_query, csv_analyzer, spreadsheet_analyzer, tsdb_query, market_data.</li>
               <li><strong className="text-white">Compute</strong> — code_executor, sandboxed_job, code_asset, ml_model, financial_calculator.</li>
               <li><strong className="text-white">Documents</strong> — document_extractor, image_analyzer, speech_to_text, text_to_speech.</li>
-              <li><strong className="text-white">Actions</strong> — http_client, email_sender, mqtt_publish, opcua_write, github, integration_hub.</li>
+              <li><strong className="text-white">Actions</strong> — http_client, email_sender, mqtt_publish, github_tool, integration_hub.</li>
               <li><strong className="text-white">Control</strong> — agent_step, sub_pipeline, human_approval, defer_to_human, memory_store.</li>
             </ul>
             <p>Two things catch people out. A tool needing a credential the platform does not have reports &quot;tool not configured&quot; rather than failing the run. And <code className="text-amber-300">knowledge_search</code> is only registered when the agent has a knowledge base granted to it — without a grant the agent will tell you it has no way to look anything up.</p>
@@ -217,16 +254,16 @@ bash scripts/deploy-azure.sh all       # AKS + ACR + helm`}</pre>
         icon: <Activity className="w-4 h-4" />,
         body: (
           <div className="space-y-3 text-[13.5px] text-slate-300 leading-relaxed">
-            <p><strong className="text-white">Executions</strong> lists every run for your tenant, newest first, with status, duration, cost and token count. Click a row to open the Flight Recorder for that run.</p>
+            <p><strong className="text-white">Executions</strong> lists your runs, newest first (admins see every run in the tenant), with status, duration, cost and token count. Click a row to open the Flight Recorder for that run.</p>
             <p>The <strong className="text-white">Flight Recorder</strong> is the execution detail page. It replays a run node by node: the input each node received, the output it produced, every tool call with its arguments and result, the model that actually served each call, and a waterfall of where the time went.</p>
             <p><strong className="text-white">Reading a failed run:</strong></p>
             <ul className="list-disc pl-5 space-y-1 text-[13px]">
-              <li>The row says in plain words what kind of failure it was, with a short reference code next to it. A run that ran out of time, for example, shows the reference <code className="text-amber-300">SANDBOX_TIMEOUT</code>. Raise the limit under Platform settings.</li>
+              <li>The row says in plain words what kind of failure it was, with a short reference code next to it. A step that ran out of time, for example, shows the reference <code className="text-amber-300">SANDBOX_TIMEOUT</code>. Raise <code>timeout_seconds</code> on that step or shrink the work.</li>
               <li>A node whose output is <code className="text-amber-300">[not available]</code> did not run or produced nothing its downstream nodes could read. Look at the node above it, not the one that reports the gap.</li>
               <li>An amber <strong className="text-white">fallback</strong> dot means the requested model was not the one that served the call. Hover it for the reason.</li>
               <li>A node answering in prose where the pipeline expects JSON usually means a tool it needed was unavailable. The tool-call list shows what it actually had.</li>
             </ul>
-            <p><strong className="text-white">Executions &rarr; Live</strong> streams the same view for runs in flight, so you can watch a long pipeline progress rather than waiting for it to land.</p>
+            <p><strong className="text-white">Live Debug</strong> streams the same view for runs in flight, so you can watch a long pipeline progress rather than waiting for it to land. In the short sidebar, Executions is called <strong>Monitor</strong>.</p>
           </div>
         ),
       },
@@ -236,13 +273,13 @@ bash scripts/deploy-azure.sh all       # AKS + ACR + helm`}</pre>
         icon: <Bot className="w-4 h-4" />,
         body: (
           <div className="space-y-3 text-[13.5px] text-slate-300 leading-relaxed">
-            <p>Every agent owned by you or shared with you. Filter by category, tag, or status. Click one to open its detail page (system prompt, tools, KBs, executions, sharing).</p>
+            <p>Every agent owned by you or shared with you. Use the tabs, search and the category list to narrow it. Click one to open its detail page (system prompt, tools, KBs, executions, sharing).</p>
             <Hero src={SS('10-my-agents.png')} alt="My Agents" />
             <Steps items={[
-              'Click <strong>+ New agent</strong> to open the Agent Builder.',
-              'Use the <strong>filter chips</strong> to narrow by category — onboarding, finance, compliance, ops, custom.',
-              'Click an agent to see its full config, click <strong>Run</strong> to fire a one-shot, or <strong>Chat</strong> to open a thread.',
-              'Use <strong>Share</strong> to grant access to teammates with read or edit scope.',
+              'Click <strong>New Agent</strong> to open the Agent Builder.',
+              'Pick a tab, or choose a category from the list.',
+              'Click <strong>Chat</strong> on a card to talk to it, <strong>Docs</strong> for its API and triggers, or <strong>Edit</strong> to open it in the builder.',
+              'On the agent&apos;s page, use <strong>Share</strong> to give a teammate View, Execute or Edit access.',
             ]} />
           </div>
         ),
@@ -253,15 +290,13 @@ bash scripts/deploy-azure.sh all       # AKS + ACR + helm`}</pre>
         icon: <Sparkles className="w-4 h-4" />,
         body: (
           <div className="space-y-3 text-[13.5px] text-slate-300 leading-relaxed">
-            <p>The general-purpose chat surface. Pick an agent, attach files, tools, and KBs, then converse. The chat sidebar is namespaced per app (your standalone apps each have their own threads).</p>
+            <p>The general-purpose chat surface. Pick an agent from the list at the top, optionally attach a text file, then converse. The chat sidebar is namespaced per app (your standalone apps each have their own threads).</p>
             <Hero src={SS('11-ai-chat.png')} alt="AI Chat" />
             <Hero src={SS('detail-tool-call.png')} alt="Tool call expansion" caption="Expand any tool call to see its arguments and result" />
             <p><strong className="text-white">Power moves:</strong></p>
             <ul className="list-disc pl-5 space-y-1 text-[13px]">
-              <li>Press <kbd className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-[11px] font-mono">↑</kbd> to recall the last user message and edit it.</li>
-              <li>Drop any file in any modality (PDF, image, audio, video, DOCX, text) into the input — the agent receives it through the multimodal pipeline.</li>
+              <li>Attach a text file such as .txt, .md, .csv, .json or .py, up to 20,000 characters.</li>
               <li>Click any tool call card to expand its arguments + result inline.</li>
-              <li>Use <code className="text-cyan-300">/agent slug</code> in the input to switch agents mid-thread.</li>
             </ul>
           </div>
         ),
@@ -306,16 +341,16 @@ bash scripts/deploy-azure.sh all       # AKS + ACR + helm`}</pre>
         icon: <Wand2 className="w-4 h-4" />,
         body: (
           <div className="space-y-3 text-[13.5px] text-slate-300 leading-relaxed">
-            <p>Visual canvas for designing single agents and multi-agent pipelines. Drag tools from the catalogue, drop knowledge collections, wire up switch nodes for branching and loop nodes for iteration.</p>
+            <p>Visual canvas for designing single agents and multi-agent pipelines. Drag tools from the palette, bind knowledge bases, and in pipeline mode use switch and for-each nodes.</p>
             <Hero src={SS('02-agent-builder.png')} alt="Agent Builder canvas" />
             <Steps items={[
-              'Click <strong>+ New agent</strong> or <strong>+ New pipeline</strong>.',
-              'Use the AI Builder field — describe what you want in one sentence, a draft pops onto the canvas.',
-              'Drag <strong>tools</strong> from the right rail onto the canvas. Drop them on the agent node to attach.',
-              'Drop a <strong>knowledge collection</strong> for graph-aware retrieval inside the agent.',
-              'For pipelines: use <strong>switch</strong> nodes to branch on output, <strong>loop</strong> nodes to iterate, <strong>code asset</strong> nodes to invoke sandboxed code.',
-              'Click <strong>Test run</strong> with sample input. The right rail streams the trace.',
-              'Click <strong>Publish</strong> to make the agent runnable from anywhere (chat, SDK, triggers).',
+              'Open <strong>Agent Builder</strong> and pick <strong>Agent</strong> or <strong>Pipeline</strong> at the top.',
+              'Click <strong>Build with AI</strong> and describe what you want in a sentence. A draft fills the canvas.',
+              'Drag tools from the <strong>Tool Palette</strong> on the left onto the canvas, or click one to add it.',
+              'Bind a knowledge base on the <strong>Knowledge</strong> tab of the panel on the right.',
+              'For pipelines, use <strong>Condition</strong> or <strong>Switch</strong> to branch, <strong>For Each</strong> to iterate and <strong>Merge</strong> to join branches. A <code>code_asset</code> step runs your own code.',
+              'Click <strong>Test</strong> with sample input to watch it run.',
+              'Click <strong>Save Draft</strong>, then <strong>Publish</strong> to make it callable from chat, the SDK and triggers.',
             ]} />
           </div>
         ),
@@ -330,12 +365,12 @@ bash scripts/deploy-azure.sh all       # AKS + ACR + helm`}</pre>
             <p>A pipeline can declare the values a caller must give it, such as a date, a postcode and a weight. Declared inputs become form fields in chat and in the SDK playground, and the steps read them by name. No step has to dig them out of a chat message.</p>
             <Steps items={[
               'Open <strong>Agent Builder</strong> and switch to <strong>Pipeline</strong> mode.',
-              'With no step selected, the overview panel shows <strong>Input Parameters</strong>. Click <strong>Add</strong> once per value.',
+              'With no step selected, the overview panel shows <strong>Input Parameters</strong>. Click <strong>Add Parameter</strong> once per value.',
               'Give each one a name, a type (Text, Number, Yes/No, URL, File, DB Conn or Dropdown), a description people will see, and tick <strong>required</strong> where the pipeline cannot run without it. A Dropdown takes its options, comma separated, in Default value.',
-              'In any step argument or prompt, write <code>{{input.ship_date}}</code> to use the value. The panel lists the placeholder for each input so you can copy it.',
+              'In any step argument or prompt, write <code>{{input.ship_date}}</code> to use the value. The panel shows the placeholder form for your inputs.',
               'Save and publish. The inputs are stored on the pipeline, so every caller sees the same form.',
             ]} />
-            <p>In chat, the fields sit above the message box and required ones must be filled before the run starts. From the SDK, pass them as the <code className="text-cyan-300">context</code> of the run. Agents in agent mode can declare inputs the same way on the Advanced tab.</p>
+            <p>In the agent&apos;s own chat page, the fields sit above the message box and required ones must be filled before the run starts. From the SDK, pass them as the <code className="text-cyan-300">context</code> of the run. Agents in agent mode can declare inputs the same way on the Advanced tab.</p>
             <Callout tone="info">Names must be unique. The editor marks a second input with the same name before you save.</Callout>
           </div>
         ),
@@ -492,7 +527,7 @@ bash scripts/deploy-azure.sh all       # AKS + ACR + helm`}</pre>
 
             <h4 className="text-white font-semibold pt-3">Add a source</h4>
             <Steps items={[
-              'Open <strong>Build &rarr; Source Watch</strong> and click <strong>Watch a new source</strong>.',
+              'Open <strong>Build &rarr; Source Watch</strong> and click <strong>Add source</strong>.',
               'Paste the address. It is checked as you type and the kind is suggested: HTML page, PDF, Excel, CSV, JSON or RSS.',
               'For a page, narrow the watch to the main content with a selector, so menus, banners and dates elsewhere do not count as changes.',
               'Name it, pick how often to check (at most every 5 minutes), and add a jurisdiction, tags and a risk tier if you like. The tier travels on every change event, so subscribers can route high tier changes for review.',
@@ -523,16 +558,16 @@ bash scripts/deploy-azure.sh all       # AKS + ACR + helm`}</pre>
         icon: <Code2 className="w-4 h-4" />,
         body: (
           <div className="space-y-3 text-[13.5px] text-slate-300 leading-relaxed">
-            <p>Bring your own repository. Upload a zip or paste a git URL. Abenix analyzes the code, identifies entry points, and exposes runnable artefacts as <code className="text-cyan-300">code_asset</code> tools. Pipelines call them like any other tool. Supports <strong>Python, Node, Go, Rust, Ruby, Java</strong>.</p>
+            <p>Bring your own repository. Upload a zip or paste a git URL. Abenix analyzes the code, identifies entry points, and exposes runnable artefacts as <code className="text-cyan-300">code_asset</code> tools. Pipelines call them like any other tool. Supports <strong>Python, Node, Go, Rust, Ruby, Java and Perl</strong>.</p>
             <Hero src={SS('12-code-runner.png')} alt="Code Runner" />
             <Steps items={[
               '<strong>Upload</strong> a zip or paste a git URL.',
               'Abenix clones, analyzes, and lists discovered entry points (e.g. CLI commands, exported functions).',
               'Tag entry points as runnable tools with input/output schemas.',
-              'Each invocation runs in a fresh Docker / Podman sandbox with strict resource quotas (default 512 MB / 30 s).',
+              'Each call runs in a sandbox with its own limits (default 1024 MB and 120 s, up to 4096 MB and 900 s), with no network unless the call asks for it.',
               'Output streams back to the calling agent as a <code>tool</code> message.',
             ]} />
-            <Callout tone="info">Sandboxes are isolation-first: no network unless explicitly allowed, no host filesystem mount, ephemeral overlay FS, and an OOM watchdog. See the <a href="#scaling-sandbox" className="text-violet-300 underline">sandbox scaling notes</a>.</Callout>
+            <Callout tone="info">Sandboxes have no network unless the call and the operator allow it, and a run that goes over its memory cap is killed and fails with <code>SANDBOX_OOM</code>. See the <a href="#scaling-sandbox" className="text-violet-300 underline">sandbox scaling notes</a>.</Callout>
 
             <h4 className="text-white font-semibold pt-3">Source picker is exclusive — zip or git, not both</h4>
             <p>The upload form has two sides: pick a <code>.zip</code> on the left, or paste a git URL on the right. Filling either side grays + disables the other so the precedence question never comes up.</p>
@@ -555,37 +590,37 @@ bash scripts/deploy-azure.sh all       # AKS + ACR + helm`}</pre>
             <p>Register classical ML models (sklearn, XGBoost, ONNX) and serve them as agent tools. Useful for credit scoring, fraud detection, demand forecasts — anywhere the answer doesn&apos;t need an LLM.</p>
             <Hero src={SS('13-ml-models.png')} alt="ML Models" />
             <Steps items={[
-              'Upload a serialised model (<code>.pkl</code>, <code>.onnx</code>, <code>.joblib</code>).',
+              'Upload a model file (<code>.joblib</code>, <code>.pkl</code>, <code>.onnx</code>, <code>.pt</code> or <code>.pth</code>).',
               'Define an input/output schema. Abenix validates every call against it.',
-              'Click <strong>Deploy</strong>. The model spins up as its own pod (the <code>ml-model-&lt;id&gt;</code> Deployment) so a heavy model doesn&apos;t starve agents.',
-              'The model is now callable as <code>ml_predict_&lt;slug&gt;</code> from any agent.',
+              'Optionally click <strong>Deploy</strong>, locally or as Kubernetes pods. Pods run as <code>ml-model-&lt;first 8 characters of the id&gt;</code> so a heavy model does not starve agents.',
+              'Agents call it through the <code>ml_model</code> tool by its name.',
             ]} />
 
             <h4 className="text-white font-semibold pt-3">Wire it into an agent without leaving the page</h4>
-            <p>Once a model is <em>ready</em>, the detail panel shows two new CTAs next to <strong>Activate</strong> / <strong>Delete</strong>:</p>
-            <Hero src={SS('29-ml-use-in-agent.png')} alt="Use in Agent + Edit metadata + Share buttons" caption="Use in Agent · Edit metadata · Share — all live on the model detail panel." />
+            <p>Once a model is <em>ready</em>, the detail panel shows these next to <strong>Set Active</strong> / <strong>Delete Version</strong>:</p>
+            <Hero src={SS('29-ml-use-in-agent.png')} alt="Use in Agent + Edit details + Share buttons" caption="Use in Agent · Edit details · Share — all live on the model detail panel." />
             <ul className="list-disc list-inside space-y-1">
               <li><strong>Use in Agent</strong> → deep-links to <code>/builder?tool=ml_model&model_name=&lt;name&gt;</code>. Lands in a fresh agent canvas with the <code>ml_model</code> tool already added and <code>parameter_defaults.model_name</code> pre-filled.</li>
-              <li><strong>Edit metadata</strong> → inline panel for description + <code>input_schema</code> + <code>output_schema</code>. JSON is linted on blur, so a malformed paste shows the error next to the field instead of silently saving.</li>
-              <li><strong>Share</strong> → opens the generic share dialog (see the <em>Sharing resources</em> note below) so a teammate can <code>view</code>, <code>use</code>, or <code>edit</code> the model without you handing them admin.</li>
+              <li><strong>Edit details</strong> → inline panel for description + <code>input_schema</code> + <code>output_schema</code>. JSON is linted on blur, so a malformed paste shows the error next to the field instead of silently saving.</li>
+              <li><strong>Share</strong> → opens the generic share dialog (see <a href="#sharing-resources" className="text-violet-300 underline">Sharing resources</a>) so a teammate can <code>view</code>, <code>use</code>, or <code>edit</code> the model without you handing them admin.</li>
             </ul>
 
             <h4 className="text-white font-semibold pt-3">Schema editor on upload — no .meta.json required</h4>
-            <p>The upload form has a collapsible <em>Schemas (optional, recommended)</em> section. Paste the feature list inline so the agent's <code>ml_model.get_model_info</code> call returns a real shape from day one. Skip it and the platform tries to infer from the model file, but explicit schemas are more reliable.</p>
+            <p>The upload form has a collapsible <em>Inputs and outputs (optional, recommended)</em> section. Paste the feature list inline so the agent's <code>ml_model.get_model_info</code> call returns a real shape from day one. Skip it and the platform tries to infer from the model file, but explicit schemas are more reliable.</p>
 
             <h4 className="text-white font-semibold pt-3">Kubernetes deployment — replicas + resource preset</h4>
-            <p>When the target is <strong>Kubernetes Pod</strong>, the panel exposes the two knobs that used to be opaque defaults:</p>
+            <p>When the target is <strong>Kubernetes pods</strong>, the panel exposes two settings:</p>
             <Hero src={SS('30-ml-k8s-deploy-config.png')} alt="k8s deploy config" caption="Replicas 1-10 and small/medium/large resource preset. Each preset maps to a fixed cpu/memory request + limit pair." />
             <ul className="list-disc list-inside space-y-1">
               <li><strong>Replicas</strong>: 1-10. Each replica is an independent pod fronted by a single ClusterIP service.</li>
-              <li><strong>Resource preset</strong>: <code>small</code> (100m / 256Mi), <code>medium</code> (250m / 512Mi), <code>large</code> (500m / 1Gi). Limits scale 2-4× the request.</li>
+              <li><strong>Resource preset</strong>: <code>small</code> (100m / 256Mi), <code>medium</code> (250m / 512Mi), <code>large</code> (500m / 1Gi). Limits are 0.5 CPU / 1 GB, 1 CPU / 2 GB and 2 CPU / 4 GB.</li>
             </ul>
             <p>Backend gates both inputs with structured error codes (<code>INVALID_REPLICAS</code>, <code>INVALID_RESOURCE_PRESET</code>) so the toast tells you exactly what went wrong on a bad value.</p>
 
             <h4 className="text-white font-semibold pt-4">Shipped model catalogue</h4>
-            <p>Sixteen models ship with the platform. Each one is registered at first startup via <code>seed_ml_models.py</code> which scans <code>&lt;app&gt;/aimodels/</code> for matching <code>.pkl</code> + <code>.meta.json</code> pairs.</p>
+            <p>Nineteen sample models ship with the platform. The deploy scripts register them with <code>seed_ml_models.py</code>, which scans <code>aimodels/</code>, <code>&lt;app&gt;/aimodels/</code> and <code>wingman/ml-models/</code> for <code>.meta.json</code> + model file pairs.</p>
 
-            <h5 className="text-violet-300 font-semibold pt-3 pb-1">E&C-Copilot (4 models)</h5>
+            <h5 className="text-violet-300 font-semibold pt-3 pb-1">ContractIQ (9 models)</h5>
             <div className="overflow-x-auto">
               <table className="w-full text-[12px] border border-slate-700/40 rounded-md overflow-hidden">
                 <thead className="bg-slate-800/60 text-slate-400 text-[10.5px] uppercase">
@@ -631,6 +666,46 @@ bash scripts/deploy-azure.sh all       # AKS + ACR + helm`}</pre>
                     <td className="py-1.5 px-2 text-emerald-300">100% recall</td>
                     <td className="py-1.5 px-2 text-slate-400">portfolio_valuator</td>
                   </tr>
+                  <tr className="border-t border-slate-800/40">
+                    <td className="py-1.5 px-2 font-mono">offtake_industrial</td>
+                    <td className="py-1.5 px-2">HistGradientBoosting</td>
+                    <td className="py-1.5 px-2 text-slate-400">6 plant and market features</td>
+                    <td className="py-1.5 px-2 text-slate-400">baseload GWh a day</td>
+                    <td className="py-1.5 px-2 text-slate-400">—</td>
+                    <td className="py-1.5 px-2 text-slate-400">—</td>
+                  </tr>
+                  <tr className="border-t border-slate-800/40">
+                    <td className="py-1.5 px-2 font-mono">offtake_residential</td>
+                    <td className="py-1.5 px-2">GradientBoosting</td>
+                    <td className="py-1.5 px-2 text-slate-400">7 demand features</td>
+                    <td className="py-1.5 px-2 text-slate-400">P10 / P50 / P90 forecast</td>
+                    <td className="py-1.5 px-2 text-slate-400">—</td>
+                    <td className="py-1.5 px-2 text-slate-400">—</td>
+                  </tr>
+                  <tr className="border-t border-slate-800/40">
+                    <td className="py-1.5 px-2 font-mono">offtake_storage_cycling</td>
+                    <td className="py-1.5 px-2">GradientBoosting</td>
+                    <td className="py-1.5 px-2 text-slate-400">5 storage features</td>
+                    <td className="py-1.5 px-2 text-slate-400">optimal cycle GWh</td>
+                    <td className="py-1.5 px-2 text-slate-400">—</td>
+                    <td className="py-1.5 px-2 text-slate-400">—</td>
+                  </tr>
+                  <tr className="border-t border-slate-800/40">
+                    <td className="py-1.5 px-2 font-mono">price_fairvalue_gas_hubs</td>
+                    <td className="py-1.5 px-2">BayesianRidge + IsolationForest</td>
+                    <td className="py-1.5 px-2 text-slate-400">6 gas market features</td>
+                    <td className="py-1.5 px-2 text-slate-400">fair value, sigma, z-score, anomaly flag</td>
+                    <td className="py-1.5 px-2 text-slate-400">—</td>
+                    <td className="py-1.5 px-2 text-slate-400">—</td>
+                  </tr>
+                  <tr className="border-t border-slate-800/40">
+                    <td className="py-1.5 px-2 font-mono">price_fairvalue_power_hubs</td>
+                    <td className="py-1.5 px-2">BayesianRidge + IsolationForest</td>
+                    <td className="py-1.5 px-2 text-slate-400">7 power market features</td>
+                    <td className="py-1.5 px-2 text-slate-400">fair value, sigma, z-score, anomaly flag</td>
+                    <td className="py-1.5 px-2 text-slate-400">—</td>
+                    <td className="py-1.5 px-2 text-slate-400">—</td>
+                  </tr>
                 </tbody>
               </table>
             </div>
@@ -655,7 +730,7 @@ bash scripts/deploy-azure.sh all       # AKS + ACR + helm`}</pre>
               </table>
             </div>
 
-            <h5 className="text-amber-300 font-semibold pt-3 pb-1">Industrial-IoT + demo</h5>
+            <h5 className="text-amber-300 font-semibold pt-3 pb-1">Industrial-IoT, PharmaVigil + demo</h5>
             <div className="overflow-x-auto">
               <table className="w-full text-[12px] border border-slate-700/40 rounded-md overflow-hidden">
                 <thead className="bg-slate-800/60 text-slate-400 text-[10.5px] uppercase">
@@ -666,6 +741,7 @@ bash scripts/deploy-azure.sh all       # AKS + ACR + helm`}</pre>
                 </thead>
                 <tbody className="text-slate-300">
                   <tr className="border-t border-slate-800/40"><td className="py-1.5 px-2 font-mono">wind-turbine-failure-classifier</td><td className="py-1.5 px-2 text-slate-400">vibration + temperature features &rarr; 7-class failure type. Used in the Industrial-IoT pump pipeline.</td></tr>
+                  <tr className="border-t border-slate-800/40"><td className="py-1.5 px-2 font-mono">pharmavigil-triage-prioritiser</td><td className="py-1.5 px-2 text-slate-400">probability a reviewer escalates an adverse-event case, to order the review queue</td></tr>
                   <tr className="border-t border-slate-800/40"><td className="py-1.5 px-2 font-mono">iris-species-classifier</td><td className="py-1.5 px-2 text-slate-400">canonical sklearn demo</td></tr>
                   <tr className="border-t border-slate-800/40"><td className="py-1.5 px-2 font-mono">housing-price-predictor</td><td className="py-1.5 px-2 text-slate-400">California housing regression</td></tr>
                   <tr className="border-t border-slate-800/40"><td className="py-1.5 px-2 font-mono">churn-predictor</td><td className="py-1.5 px-2 text-slate-400">SaaS churn binary classifier</td></tr>
@@ -683,7 +759,7 @@ bash scripts/deploy-azure.sh all       # AKS + ACR + helm`}</pre>
             </ol>
 
             <Callout tone="info">
-              <strong>Adding your own model.</strong> Drop a <code>my-model.pkl</code> + <code>my-model.meta.json</code> into <code>aimodels/</code> at the repo root (or under any <code>&lt;app&gt;/aimodels/</code>). Restart the api pod or run <code>seed_ml_models.py</code>. The platform discovers the pair, copies the pickle to the per-tenant PVC, and creates the MLModel + Deployment rows automatically.
+              <strong>Adding your own model.</strong> Drop a <code>my-model.pkl</code> + <code>my-model.meta.json</code> into <code>aimodels/</code> at the repo root (or under one of the folders the seed script lists). Run <code>seed_ml_models.py</code>, or redeploy with the deploy script, which runs it. The platform discovers the pair, copies the pickle to the per-tenant PVC, and creates the MLModel + Deployment rows automatically.
             </Callout>
           </div>
         ),
@@ -694,7 +770,7 @@ bash scripts/deploy-azure.sh all       # AKS + ACR + helm`}</pre>
         icon: <Database className="w-4 h-4" />,
         body: (
           <div className="space-y-3 text-[13.5px] text-slate-300 leading-relaxed">
-            <p>Knowledge Bases (called <em>collections</em> in v2 terminology) store your documents and the entity / relationship graph extracted from them. This is the substrate every other feature is built on.</p>
+            <p>Knowledge Bases (stored as <em>collections</em>) store your documents and the entity / relationship graph extracted from them. This is the substrate every other feature is built on.</p>
             <Hero src={SS('07-knowledge-bases.png')} alt="Knowledge Bases" />
 
             <h4 className="text-white font-semibold pt-3">Batch ingest — drop multiple files at once</h4>
@@ -760,7 +836,7 @@ bash scripts/deploy-azure.sh all       # AKS + ACR + helm`}</pre>
             <ol className="list-decimal pl-5 space-y-1.5 text-[13px]">
               <li><strong>Tenant boundary</strong> — every <code>knowledge_collections</code> row carries a <code>tenant_id</code>. Routers hard-filter on the calling user&apos;s tenant, cross-tenant reads return 404.</li>
               <li><strong>Project visibility</strong> — collections live inside a project. Default visibility is <code>PROJECT</code>: only project members can see them. <code>PRIVATE</code> restricts to the creator. <code>TENANT</code> opens it to anyone in the tenant.</li>
-              <li><strong>Per-resource sharing</strong> — <code>ResourceShare</code> grants override visibility for a specific user with explicit <code>READ</code> or <code>EDIT</code> scope. Used for cross-team handoffs without changing the collection&apos;s default.</li>
+              <li><strong>Per-resource sharing</strong> — <code>ResourceShare</code> grants override visibility for a specific user with explicit <code>VIEW</code>, <code>EXECUTE</code> or <code>EDIT</code> permission. Used for cross-team handoffs without changing the collection&apos;s default.</li>
             </ol>
 
             <Callout tone="success">
@@ -774,21 +850,23 @@ bash scripts/deploy-azure.sh all       # AKS + ACR + helm`}</pre>
               <li>Stores them as nodes + edges in a typed graph alongside the chunks.</li>
               <li>Strengthens edges that lead to good answers, weakens those that don&apos;t (the Knowledge Engine self-tunes).</li>
             </ol>
-            <p>Agents using <code>knowledge_search</code> on a graph-enabled collection get hybrid retrieval: vector similarity AND multi-hop graph walks. This is the 5–10× token reduction story.</p>
+            <p>Agents using <code>knowledge_search</code> on a graph-enabled collection get hybrid retrieval: vector similarity AND multi-hop graph walks. Agents read connected, cited evidence, so they spend fewer tokens than with plain vector search.</p>
 
-            <h4 className="text-white font-semibold pt-3">v2.0 enterprise capabilities <Pill tone="cyan">new</Pill></h4>
-            <p>Sixteen features landed in v2.0 to move the knowledge stack from demo-ready to Fortune-500-ready. Open <code>/settings/cognify</code> for the runtime knobs and <code>/settings/gdpr</code> for the cascade purge UI.</p>
+            <h4 className="text-white font-semibold pt-3">Enterprise knowledge features</h4>
+            <p>Runtime settings are at <code>/settings/cognify</code> and the erasure screen at <code>/settings/gdpr</code>.</p>
 
             <h5 className="text-white font-medium pt-2 flex items-center gap-2"><Shield className="w-3.5 h-3.5 text-cyan-300" /> Document-level ACL</h5>
             <p>A collection grant lets someone read the whole collection. A document grant narrows one document inside it. A document with no grants is visible to everyone who can read the collection. The first grant restricts it to its grantees, which are users or agents, plus tenant admins, the collection creator and anyone holding WRITE or ADMIN on the collection. There are no team or role grants.</p>
             <p>Search drops restricted documents before ranking, so the top-K an agent sees comes only from what it may read, and the document list hides them too. Only people who can edit the collection can add or remove grants, with <code>POST /api/knowledge/{`{kb}`}/documents/{`{doc}`}/grants</code> and <code>DELETE .../grants/{`{grant_id}`}</code>.</p>
 
             <h5 className="text-white font-medium pt-2 flex items-center gap-2"><GitBranch className="w-3.5 h-3.5 text-cyan-300" /> Document versioning + replace</h5>
-            <p>Upload an amendment with <code>POST /api/knowledge/{`{kb}`}/documents/{`{doc}`}/replace</code>. The old row is marked <code>is_current=false, superseded_by=&lt;new_id&gt;</code>. Search and Cognify follow automatically, with no agent or caller change:</p>
-            <ul className="list-disc pl-5 space-y-1 text-[13px]">
-              <li><strong>Hybrid search</strong> filters <code>documents.is_current = true</code> before similarity scoring. The new version&apos;s chunks are the only candidates. Pass <code>?include_superseded=true</code> to surface history.</li>
-                            <li><strong>Cognify</strong> incremental runs only fetch <code>is_current = true AND (cognified_at IS NULL OR updated_at &gt; cognified_at)</code>. The replaced document immediately appears in the next job&apos;s frontier. The superseded one is excluded.</li>
-            </ul>
+            <p>To amend a document, keep the old one as history and add the new one as its next version:</p>
+            <ol className="list-decimal pl-5 space-y-1 text-[13px]">
+              <li>Upload the amended file to the same collection.</li>
+              <li>Call <code>POST /api/knowledge/{`{kb}`}/documents/{`{doc}`}/replace</code> with that file. You need edit rights on the collection, and the file must already sit in this collection.</li>
+              <li>The new version is processed like any upload. The old row stays, marked <code>is_current=false</code> and pointing at its replacement.</li>
+              <li>Search and Cognify use the current version only, with no change to agents or callers.</li>
+            </ol>
 
             <h5 className="text-white font-medium pt-2 flex items-center gap-2"><Settings className="w-3.5 h-3.5 text-cyan-300" /> Cognify config + conflict surface</h5>
             <p>Per-tenant row in <code>cognify_configs</code> (one row, surfaced at <code>/settings/cognify</code>):</p>
@@ -798,7 +876,7 @@ bash scripts/deploy-azure.sh all       # AKS + ACR + helm`}</pre>
               <li><code>max_parallel_docs</code> (default 8). Documents processed at once in a job.</li>
               <li><code>daily_budget_usd</code> (optional). Once the day&apos;s Cognify spend (UTC) reaches it, jobs stop taking documents and say how many they skipped.</li>
             </ul>
-            <p>Flagged conflicts show on the settings page with <strong>Accept A</strong> and <strong>Accept B</strong>. Picking one writes that type to the graph. Three job modes ship: <code>incremental</code> (default, new and updated docs), <code>full</code> (every doc, use when the ontology changes), <code>selective</code> (explicit <code>document_ids</code>).</p>
+            <p>Flagged conflicts show on the settings page with <strong>Accept A</strong> and <strong>Accept B</strong>. Picking one writes that type to the graph. A run is skipped when no document is new since the last one. To process only some documents, pass their ids as <code>doc_ids</code> to <code>POST /api/knowledge/{`{kb}`}/cognify</code>.</p>
 
             <h5 className="text-white font-medium pt-2 flex items-center gap-2"><Wand2 className="w-3.5 h-3.5 text-cyan-300" /> Embedding-model swap</h5>
             <p>Every collection stores its <code>embedding_model</code>, and ingest and search both use it. The allowed models are <code>text-embedding-3-small</code>, <code>text-embedding-3-large</code> (at 1536 dimensions), <code>text-embedding-ada-002</code> and <code>local-hashing-v1</code>, the built-in embedder that needs no provider.</p>
@@ -827,15 +905,15 @@ bash scripts/deploy-azure.sh all       # AKS + ACR + helm`}</pre>
             <p>Vision OCR needs PyMuPDF and <code>ANTHROPIC_API_KEY</code> on the worker. Uploads are still limited to PDF, DOCX, TXT, CSV, MD and JSON.</p>
 
             <h5 className="text-white font-medium pt-2 flex items-center gap-2"><Layers className="w-3.5 h-3.5 text-cyan-300" /> Pagination + cleanup</h5>
-            <p>Every list endpoint now accepts <code>?cursor=&lt;id&gt;&amp;limit=&lt;N&gt;</code> and returns <code>next_cursor</code> for stable forward iteration (replaced hardcoded <code>.limit(500)</code> on persona items, <code>.limit(20)</code> on cognify jobs, and the new conflicts endpoint). The API scheduler queues a Pinecone vacuum daily at 02:30 UTC. It deletes the namespaces of deleted collections, leftover vectors past a document&apos;s chunk count and persona vectors of deleted items. Vectors with no document row are kept.</p>
+            <p>The Cognify conflicts list (<code>GET /api/knowledge/cognify-conflicts</code>) pages with <code>?cursor=&lt;id&gt;&amp;limit=&lt;N&gt;</code> and returns <code>next_cursor</code>. The API scheduler queues a Pinecone vacuum daily at 02:30 UTC. It deletes the namespaces of deleted collections, leftover vectors past a document&apos;s chunk count and persona vectors of deleted items. Vectors with no document row are kept.</p>
 
             <h4 className="text-white font-semibold pt-3">Common tasks</h4>
             <Steps items={[
-              'Click <strong>+ New collection</strong> inside a project.',
-              'Pick a vector backend — <strong>pgvector</strong> (default, in-cluster) or <strong>Pinecone</strong> (managed, scales further).',
-              'Upload documents — PDF, DOCX, TXT, MD, CSV, JSON.',
-              'Toggle <strong>Cognify</strong> on if you want the typed graph.',
-              'Wait for status <code>READY</code>, then attach the collection to any agent.',
+              'Click <strong>New Knowledge Base</strong>, give it a name and a description.',
+              'Upload documents: PDF, DOCX, TXT, MD, CSV, JSON. You can drop several at once.',
+              'For the typed graph, open its engine page and click <strong>Run Cognify</strong>.',
+              'When it shows <strong>Ready</strong>, click <strong>Use in an agent</strong>.',
+              'New collections use pgvector. Pinecone can be chosen only through the API when the collection is created.',
             ]} />
           </div>
         ),
@@ -854,9 +932,9 @@ bash scripts/deploy-azure.sh all       # AKS + ACR + helm`}</pre>
               <li><code>persona_rag</code>, the only tool that reads persona, always searches the running user&apos;s own items only, filtered by tenant, owner and scope in every query.</li>
               <li>In a meeting it only allows the scopes authorised for that meeting.</li>
             </ol>
-            <p>Persona is also where you upload a voice sample for opt-in voice cloning (used by meeting bots — see the Meeting Primitives topic).</p>
+            <p>Persona is also where you upload a voice sample for opt-in voice cloning (used by meeting bots, see <a href="#meetings" className="text-violet-300 underline">Meetings</a>).</p>
 
-            <h4 className="text-white font-semibold pt-3 flex items-center gap-2"><ShieldCheck className="w-4 h-4 text-cyan-300" /> At-rest encryption <Pill tone="cyan">v2.0</Pill></h4>
+            <h4 className="text-white font-semibold pt-3 flex items-center gap-2"><ShieldCheck className="w-4 h-4 text-cyan-300" /> At-rest encryption</h4>
             <p>The platform can encrypt secrets with AES-256-GCM at the application layer. Today that covers tool credentials, Slack and approval webhook URLs and MCP secrets. Persona items and agent memories have columns for it but are not encrypted yet. The cluster KEK lives in <code>ABENIX_DATA_KEY_KEK_BASE64</code>, sourced from a vault, never the database. The per-tenant key is derived as <code>HMAC-SHA256(KEK, tenant_id)</code>, so every pod agrees without storing per-tenant key rows.</p>
             <ul className="list-disc pl-5 space-y-1 text-[13px]">
               <li><strong>No KEK, no encryption.</strong> Without the env var values are stored as entered. Tool Configuration says in its header which mode you are in. Production deployments must set the KEK.</li>
@@ -864,8 +942,8 @@ bash scripts/deploy-azure.sh all       # AKS + ACR + helm`}</pre>
               <li><strong>Scope.</strong> Encryption protects DB-at-rest exfiltration scenarios (stolen snapshot, leaked backup). It does not encrypt vectors in Pinecone — use Pinecone&apos;s own encryption-at-rest for that surface.</li>
             </ul>
 
-            <h4 className="text-white font-semibold pt-3 flex items-center gap-2"><Shield className="w-4 h-4 text-cyan-300" /> GDPR cascade purge <Pill tone="cyan">v2.0</Pill></h4>
-            <p>The right-to-be-forgotten request used to be a forensic exercise. <code>POST /api/gdpr/users/{`{user_id}`}/purge</code> now runs the five-store cascade in one call. The trigger UI sits at <code>/settings/gdpr</code>:</p>
+            <h4 className="text-white font-semibold pt-3 flex items-center gap-2"><Shield className="w-4 h-4 text-cyan-300" /> GDPR cascade purge</h4>
+            <p><code>POST /api/gdpr/users/{`{user_id}`}/purge</code> runs the five-store cascade in one call. The trigger UI sits at <code>/settings/gdpr</code>:</p>
             <div className="overflow-x-auto">
               <table className="w-full text-xs my-2">
                 <thead className="text-[10px] uppercase text-slate-500">
@@ -898,7 +976,8 @@ bash scripts/deploy-azure.sh all       # AKS + ACR + helm`}</pre>
               <li><strong>Related tables</strong> — foreign keys, searchable columns, KV stores for extracted data.</li>
               <li><strong>Domain context</strong> — record nouns, display labels.</li>
             </ul>
-            <p>Three starters ship: <strong>Energy Contracts</strong>, <strong>Real Estate</strong>, <strong>M&amp;A Documents</strong>. Schemas are tenant-scoped and stored in Postgres.</p>
+            <p>Click <strong>Create from a spreadsheet</strong> to build one from your data, or <strong>Try with a sample</strong>.</p>
+            <p>Three starters ship: <strong>Energy Contracts</strong>, <strong>Real Estate</strong>, <strong>M&amp;A Documents</strong>. Each starter saves only once its tables exist in the database. Schemas are tenant-scoped and stored in Postgres.</p>
           </div>
         ),
       },
@@ -916,7 +995,7 @@ bash scripts/deploy-azure.sh all       # AKS + ACR + helm`}</pre>
               'Wait for the analysis. The right side renders the report — markdown tables, headings, callouts.',
               'Ask follow-up questions in the chat input — the model still sees the original artefact.',
               'Click <strong>Build Agents</strong> to open the wizard. Each suggested agent goes through synthesise → create → smoke-test in real time.',
-              'Click <strong>Download PDF</strong> to export the full analysis as a beautifully formatted PDF.',
+              'Click <strong>Download PDF</strong> to export the full analysis as a PDF.',
             ]} />
           </div>
         ),
@@ -962,7 +1041,7 @@ bash scripts/deploy-azure.sh all       # AKS + ACR + helm`}</pre>
             <h4 className="text-white font-semibold pt-3">Why this matters for agents</h4>
             <ul className="list-disc pl-5 space-y-1 text-[13px]">
               <li><strong>Schema-grounded extraction</strong> — agents extract <em>into</em> the typed graph, not into a free-form bag of strings.</li>
-              <li><strong>Better-than-vector retrieval</strong> — agents walk the graph, then pull only the chunks bound to those nodes. Token cost drops 5–10×.</li>
+              <li><strong>Better-than-vector retrieval</strong> — agents walk the graph, then pull only the chunks bound to those nodes, so they read fewer tokens.</li>
               <li><strong>Cross-agent disambiguation</strong> — “Trade” means the same thing across every agent reading this domain.</li>
               <li><strong>Multi-hop reasoning</strong> — the visual-query endpoint exposed as a tool lets agents draw patterns instead of stitching SQL.</li>
               <li><strong>Validation</strong> — outputs validated against the ontology&apos;s cardinalities and types, bad outputs reject before they land.</li>
@@ -970,16 +1049,16 @@ bash scripts/deploy-azure.sh all       # AKS + ACR + helm`}</pre>
             </ul>
 
             <h4 className="text-white font-semibold pt-3">Agent tools — read the graph</h4>
-            <p>Five tools ship in the catalogue. Attach any of them to an agent from the Builder palette under <em>Knowledge</em>:</p>
+            <p>Five tools ship in the catalogue. Attach any of them to an agent from the Builder palette under <em>Enterprise</em>, or click <strong>Use in an agent</strong> on the atlas page:</p>
             <ul className="list-disc pl-5 space-y-1.5 text-[13px]">
               <li><code className="text-cyan-300">atlas_describe</code> — summarise the graph (counts by kind, top edge labels, most-connected concepts). Use first when the user asks "what do you know about X?".</li>
               <li><code className="text-cyan-300">atlas_query</code> — pattern-match nodes by <code>label_like</code> + <code>kind</code>. Returns structured rows, the typed alternative to vector search.</li>
               <li><code className="text-cyan-300">atlas_traverse</code> — 1-hop neighbourhood of a node. Use after locating a concept to walk to related concepts.</li>
               <li><code className="text-cyan-300">atlas_search_grounded</code> — find KB documents bound to nodes near a target term. Better than vector-only when the chunks must be tied to a typed concept.</li>
-              <li><code className="text-cyan-300">atlas_as_of</code> <Pill tone="cyan">v2.0</Pill> — shows an atlas graph as it stood at a past moment, from the newest snapshot saved at or before that time, or the live graph when nothing changed since. Inputs are <code>graph_id</code>, <code>as_of</code>, <code>label_like</code>, <code>kind</code> and <code>limit</code>. Answers &quot;what did the ontology say on 2025-01-15?&quot;. With no snapshot that old it says so.</li>
+              <li><code className="text-cyan-300">atlas_as_of</code> — shows an atlas graph as it stood at a past moment, from the newest snapshot saved at or before that time, or the live graph when nothing changed since. Inputs are <code>graph_id</code>, <code>as_of</code>, <code>label_like</code>, <code>kind</code> and <code>limit</code>. Answers &quot;what did the ontology say on 2025-01-15?&quot;. With no snapshot that old it says so.</li>
             </ul>
 
-            <h4 className="text-white font-semibold pt-3">Bi-temporal Atlas <Pill tone="cyan">v2.0</Pill></h4>
+            <h4 className="text-white font-semibold pt-3">Bi-temporal Atlas</h4>
             <p>Every Atlas node and edge carries four time and provenance columns:</p>
             <ul className="list-disc pl-5 space-y-1 text-[13px]">
               <li><code>valid_from</code> — when the fact became true in the world</li>
@@ -991,7 +1070,7 @@ bash scripts/deploy-azure.sh all       # AKS + ACR + helm`}</pre>
 
             <h4 className="text-white font-semibold pt-3">Per-agent + per-application segregation</h4>
             <p>Atlas graphs are tenant-scoped by default — every other tenant sees nothing. Inside a tenant, you can pin an agent to specific graphs:</p>
-            <pre className="text-xs bg-slate-950/60 border border-slate-800 rounded p-3 overflow-x-auto">{`# In the agent's model_config (Builder → Settings → Advanced JSON):
+            <pre className="text-xs bg-slate-950/60 border border-slate-800 rounded p-3 overflow-x-auto">{`# model_config, set by Use in an agent on the atlas page or through the API:
 {
   "model": "claude-sonnet-4-5-20250929",
   "tools": ["atlas_describe", "atlas_query"],
@@ -1015,7 +1094,7 @@ bash scripts/deploy-azure.sh all       # AKS + ACR + helm`}</pre>
   {
     id: 'pipeops',
     label: 'Pipeline operations',
-    blurb: 'Three flagship features for keeping pipelines healthy: self-healing, the talk-to-workflow shell, and per-agent pod scaling.',
+    blurb: 'Three features for keeping pipelines healthy: self-healing, the workflow shell and per-agent scaling.',
     topics: [
       {
         id: 'self-healing',
@@ -1024,7 +1103,7 @@ bash scripts/deploy-azure.sh all       # AKS + ACR + helm`}</pre>
         body: (
           <div className="space-y-3 text-[13.5px] text-slate-300 leading-relaxed">
             <p>When a pipeline node fails, Abenix captures a structured failure-diff (error class, observed-vs-expected output shape, the inputs the node received, last-N successful runs of the same node). The <strong className="text-white">Pipeline Surgeon</strong> agent reads that diff plus the live DSL and proposes a JSON-Patch (RFC 6902) fix.</p>
-            <p><strong className="text-white">How to use it.</strong> On any pipeline agent's <code>/info</code> page, click the cyan <strong>Healing</strong> button. The page lists pending proposals, applied patches (with one-click rollback), recent failures, and the audit history. Click <strong>Diagnose latest failure</strong> to invoke the Surgeon. Each proposal shows the title, rationale, risk level, confidence score, and the JSON-Patch ops side-by-side with the resulting DSL.</p>
+            <p><strong className="text-white">How to use it.</strong> On a pipeline&apos;s <code>/info</code> page, click the cyan <strong>Healing</strong> button. The Self-healing page lists pending proposals, applied patches (with one-click rollback), recent failures, and the audit history. Click <strong>Diagnose latest failure</strong> to invoke the Surgeon. Each proposal shows the title, rationale, risk level and confidence, each change as before and after, and <strong>Show JSON-Patch</strong> for the raw ops.</p>
             <p><strong className="text-white">What the Surgeon writes.</strong> Minimal patches — typically one or two ops:</p>
             <ul className="list-disc pl-6 space-y-1">
               <li>Add a fallback default for a missing field on a node's input mapping.</li>
@@ -1032,8 +1111,8 @@ bash scripts/deploy-azure.sh all       # AKS + ACR + helm`}</pre>
               <li>Insert a defensive coerce / validate node before the failing one.</li>
               <li>Swap the LLM model on an agent_step node (last-resort, marked <em>medium</em> risk).</li>
             </ul>
-            <p><strong className="text-white">Apply and rollback.</strong> Patches never apply automatically. Apply records the user, the timestamp, and stores <code>dsl_before</code> in the proposal row so rollback is one click. Rollback writes <code>dsl_before</code> back to the live agent and marks the proposal <em>rolled_back</em> for audit.</p>
-            <p><strong className="text-white">Configurable model.</strong> The Surgeon's model is read from <strong>Admin → Settings → <code>pipeline_surgeon.model</code></strong>. Defaults to <code>claude-sonnet-4-5-20250929</code>. Switch it cluster-wide from the central model selection page so every LLM-using primitive shares one configuration surface.</p>
+            <p><strong className="text-white">Apply and rollback.</strong> Patches never apply on their own. <strong>Apply</strong> records who and when, and refuses with 409 if the pipeline changed since the proposal was drafted. <strong>Roll back</strong> restores the pipeline as it was before the patch, records who rolled it back and when, and writes an audit row. It also refuses with 409 if the pipeline was edited after the patch went in.</p>
+            <p><strong className="text-white">Configurable model.</strong> The Surgeon&apos;s model is the <code>pipeline_surgeon.model</code> setting on <strong>Admin &rarr; Model Selection</strong> (<code>/admin/llm-settings</code>). It defaults to <code>claude-sonnet-4-5-20250929</code>.</p>
           </div>
         ),
       },
@@ -1043,20 +1122,20 @@ bash scripts/deploy-azure.sh all       # AKS + ACR + helm`}</pre>
         icon: <Terminal className="w-4 h-4" />,
         body: (
           <div className="space-y-3 text-[13.5px] text-slate-300 leading-relaxed">
-            <p>A typed verb grammar — over 30 verbs across five intents — that drives every aspect of a pipeline. The LLM is only used to translate natural language into a verb invocation (when you type prose), the parser, the dispatcher, and every mutating verb are deterministic.</p>
-            <p>Open it from any pipeline agent's <code>/info</code> page via the <strong>Shell</strong> button next to <strong>Healing</strong>. Tab-completion comes from the live verb registry. Up/down recalls history. Mutating verbs draft a Healing patch you Apply or Reject — same ledger as the Surgeon, same one-click rollback.</p>
-            <p><strong className="text-white">Five intents, ~30 verbs:</strong></p>
+            <p>A typed verb grammar of 28 verbs in five intents. A model only translates prose into a verb, and only when the line has a question mark or runs past 80 characters. The parser and the dispatcher are deterministic.</p>
+            <p>Open it from a pipeline&apos;s <code>/info</code> page with the <strong>Shell</strong> button next to <strong>Healing</strong>. Tab completion comes from the verb list. Up and down recall history. Mutating verbs draft a Healing proposal you Apply or Reject, the same ledger and rollback as the Surgeon.</p>
+            <p><strong className="text-white">Five intents, 28 verbs:</strong></p>
             <div className="overflow-x-auto">
               <table className="w-full text-xs">
                 <thead className="text-[10px] uppercase text-slate-500">
                   <tr><th className="text-left py-1">Intent</th><th className="text-left py-1">Verbs</th><th className="text-left py-1">Purpose</th></tr>
                 </thead>
                 <tbody className="text-slate-300 align-top">
-                  <tr className="border-t border-slate-800/60"><td className="py-1 font-mono text-cyan-300">INSPECT</td><td className="py-1 font-mono text-[11px]">show, describe, diff, why, list</td><td className="py-1">Read the workflow object — DSL, runs, failures, costs, schedule, patches, history.</td></tr>
-                  <tr className="border-t border-slate-800/60"><td className="py-1 font-mono text-amber-300">MUTATE</td><td className="py-1 font-mono text-[11px]">add, remove, rename, set, swap-model, add-fallback, attach</td><td className="py-1">Compile to JSON-Patch ops. Always create a draft proposal — never live-edit.</td></tr>
-                  <tr className="border-t border-slate-800/60"><td className="py-1 font-mono text-emerald-300">EXECUTE</td><td className="py-1 font-mono text-[11px]">run, replay, simulate, branch, merge, rollback</td><td className="py-1">Drive runs. <code>simulate</code> is idempotent (dry-run). <code>branch</code> creates a sandbox version.</td></tr>
-                  <tr className="border-t border-slate-800/60"><td className="py-1 font-mono text-purple-300">GOVERN</td><td className="py-1 font-mono text-[11px]">watch, budget, pin, unpin, approve, reject</td><td className="py-1">Alert thresholds, budgets, model pins, patch decisions.</td></tr>
-                  <tr className="border-t border-slate-800/60"><td className="py-1 font-mono text-pink-300">LEARN</td><td className="py-1 font-mono text-[11px]">suggest, diagnose, explain, help</td><td className="py-1">Ask the shell for ideas, run the Surgeon, explain costs/latency/routing.</td></tr>
+                  <tr className="border-t border-slate-800/60"><td className="py-1 font-mono text-cyan-300">INSPECT</td><td className="py-1 font-mono text-[11px]">show, describe, diff, why, list</td><td className="py-1">Read the pipeline: DSL, runs, failures, patches, history. <code>why</code> is not wired yet.</td></tr>
+                  <tr className="border-t border-slate-800/60"><td className="py-1 font-mono text-amber-300">MUTATE</td><td className="py-1 font-mono text-[11px]">add, remove, rename, set, swap-model, add-fallback, attach</td><td className="py-1">Compile to JSON-Patch ops and create a draft proposal, never a live edit. <code>attach</code> is not wired yet.</td></tr>
+                  <tr className="border-t border-slate-800/60"><td className="py-1 font-mono text-emerald-300">EXECUTE</td><td className="py-1 font-mono text-[11px]">run, replay, simulate, branch, merge, rollback</td><td className="py-1">Not wired yet. They reply with a placeholder.</td></tr>
+                  <tr className="border-t border-slate-800/60"><td className="py-1 font-mono text-purple-300">GOVERN</td><td className="py-1 font-mono text-[11px]">watch, budget, pin, unpin, approve, reject</td><td className="py-1">Not wired yet. Decide patches on the Self-healing page.</td></tr>
+                  <tr className="border-t border-slate-800/60"><td className="py-1 font-mono text-pink-300">LEARN</td><td className="py-1 font-mono text-[11px]">suggest, diagnose, explain, help</td><td className="py-1"><code>help</code> lists the verbs. The others are not wired yet, use <strong>Diagnose latest failure</strong> on the Self-healing page.</td></tr>
                 </tbody>
               </table>
             </div>
@@ -1064,13 +1143,12 @@ bash scripts/deploy-azure.sh all       # AKS + ACR + helm`}</pre>
             <pre className="bg-slate-950/60 border border-slate-800 rounded-md p-3 overflow-x-auto text-[11px] font-mono text-slate-300">
 {`> show failures
 > diff last last-2
-> swap-model extractor gemini-2.5-pro       # → draft patch, awaits approval
+> swap-model extractor gemini-2.5-pro
 > add-fallback extractor counterparty UNKNOWN
-> watch cost alert if > 5/run
-> simulate fixture:weekend-batch
-> approve p9d1`}
+> list history`}
             </pre>
-            <p><strong className="text-white">Configurable model.</strong> Natural-language translation goes through <strong>Admin → Settings → <code>workflow_shell.model</code></strong> (lower-latency models work best here).</p>
+            <p>The two mutating lines each draft a patch that waits on the Self-healing page.</p>
+            <p><strong className="text-white">Configurable model.</strong> Translation uses the <code>workflow_shell.model</code> setting on <strong>Admin &rarr; Model Selection</strong>. A lower-latency model works best here.</p>
           </div>
         ),
       },
@@ -1080,105 +1158,105 @@ bash scripts/deploy-azure.sh all       # AKS + ACR + helm`}</pre>
         icon: <Cpu className="w-4 h-4" />,
         body: (
           <div className="space-y-3 text-[13.5px] text-slate-300 leading-relaxed">
-            <p>Most agents run beautifully on a shared pool. But for the long tail — a noisy extractor, a finetuned model with a 4 GB checkpoint, an agent with strict tenant-isolation needs — Abenix lets you opt that single agent into its own pod with one click.</p>
-            <p><strong className="text-white">How to flip it on.</strong> Visit <strong>Admin → Scaling</strong>. The agents table now has a <strong>Mode</strong> column with a pill button: <em>Shared</em> (slate) or <em>Dedicated</em> (cyan). Click to toggle. Hover for the trade-off tooltip.</p>
+            <p>Most agents run fine on a shared pool. For the long tail, such as a noisy extractor or an agent with strict isolation needs, an admin can mark a single agent as dedicated.</p>
+            <p><strong className="text-white">How to flip it.</strong> Visit <strong>Admin &rarr; Scaling</strong>. The agents table has a <strong>Mode</strong> column with a pill: <em>Shared</em> (slate) or <em>Dedicated</em> (cyan). Click to toggle.</p>
             <p><strong className="text-white">What changes when you flip.</strong></p>
             <ul className="list-disc pl-6 space-y-1">
-              <li><code>agents.dedicated_mode</code> goes <code>false → true</code>.</li>
-              <li>The runtime reads <code>effective_pool</code> as <code>dedicated-&lt;agent-id&gt;</code> instead of the shared <code>runtime_pool</code>.</li>
-              <li>Helm provisions a per-agent Deployment + KEDA ScaledObject keyed off the per-agent NATS subject (<code>abenix.runtime.dedicated-&lt;agent-id&gt;</code>).</li>
-              <li>The runtime_pool field is left intact — you can flip back without losing your original pool selection.</li>
+              <li><code>agents.dedicated_mode</code> goes <code>false → true</code>, through <code>POST /api/admin/scaling/agents/{'{'}id{'}'}/dedicated-mode</code>.</li>
+              <li>The admin API reports <code>effective_pool</code> as <code>dedicated-&lt;agent-id&gt;</code>.</li>
+              <li>The <code>runtime_pool</code> field is left as it was, so you can flip back without losing the pool.</li>
             </ul>
-            <p><strong className="text-white">See the cost before you flip.</strong> The endpoint <code>GET /api/admin/scaling/agents/{'{'}id{'}'}/cost-projection</code> returns three scenarios — <em>shared</em>, <em>dedicated</em>, <em>peak</em> (worst case at <code>max_replicas</code>) — computed from the trailing-24h execution rate × per-run avg cost × replica count plus an explicit <code>$0.012/h</code> per-pod baseline. Tune the baseline in <code>app/routers/admin_scaling.py</code> if your cluster billing differs.</p>
-            <p><strong className="text-white">When to flip it on:</strong></p>
+            <Callout tone="warn">Today the flag is only recorded. Runs still go to the agent&apos;s <code>runtime_pool</code>, and the chart does not create per-agent Deployments. For real isolation, add a pool for the agent in the helm values and move it there with Edit scaling.</Callout>
+            <p><strong className="text-white">See the cost first.</strong> <code>GET /api/admin/scaling/agents/{'{'}id{'}'}/cost-projection</code> returns three scenarios, <em>shared</em>, <em>dedicated</em> and <em>peak</em> (at <code>max_replicas</code>), from the trailing-24h run rate and average cost per run plus a <code>$0.012/h</code> per-pod baseline. Tune the baseline in <code>app/routers/admin_scaling.py</code> if your cluster billing differs. The Scaling page does not show it yet.</p>
+            <p><strong className="text-white">When a pool of its own helps:</strong></p>
             <ul className="list-disc pl-6 space-y-1">
-              <li>Noisy-neighbour isolation — a runaway extraction agent must not slow chat down.</li>
-              <li>Per-agent resource limits — memory, GPU, custom node-pool affinity.</li>
-              <li>Distinct image dependencies — proprietary SDKs, region-specific binaries.</li>
-              <li>Cleaner reasoning — kubectl top per-agent.</li>
+              <li>Noisy-neighbour isolation. A runaway extraction agent must not slow chat down.</li>
+              <li>Its own resource limits, such as memory, GPU or node-pool affinity.</li>
+              <li>Clearer numbers. kubectl top shows that agent alone.</li>
             </ul>
-            <p><strong className="text-white">When NOT to flip it on:</strong></p>
+            <p><strong className="text-white">When it does not:</strong></p>
             <ul className="list-disc pl-6 space-y-1">
-              <li>Stateless LLM-API callers — 200 in one pod scale identically to 200 in 200 pods at much higher control-plane overhead.</li>
-              <li>Sub-2-second agents — the shared <code>chat</code> pool is already kept warm for them.</li>
+              <li>Stateless LLM-API callers. 200 in one pod scale the same as 200 in 200 pods, at much higher control-plane overhead.</li>
+              <li>Sub-2-second agents. They stream fastest on the <code>inline</code> pool.</li>
             </ul>
           </div>
         ),
       },
     ],
   },
-  // PRODUCTION TOOLS — v1.1.0 industrial primitives
+  // PRODUCTION TOOLS
   {
     id: 'prod-tools',
-    label: 'Production tools (v1.1)',
-    blurb: 'The 13 primitives that turn the IoT showcases into something an enterprise can run live.',
+    label: 'Production tools',
+    blurb: 'Tools for live industrial and enterprise work: streams, write-back, connectors, state, approvals, time series and edge.',
     topics: [
       {
         id: 'streaming-triggers',
-        title: 'Streaming triggers — MQTT & Kafka',
+        title: 'Event streams — MQTT, Kafka, Redis',
         icon: <Radio className="w-4 h-4" />,
         badge: 'new',
         body: (
           <div className="space-y-3 text-[13.5px] text-slate-300 leading-relaxed">
-            <p>Until v1.1 every agent ran in response to an HTTP call, a cron, or a webhook. Streaming triggers let an agent or pipeline subscribe directly to an MQTT topic or a Kafka consumer group, so a vibration packet, a temperature waypoint, or a SCADA alarm wakes the agent the instant it lands on the broker — no polling, no batch lag.</p>
-            <p><strong className="text-white">What it solves.</strong> The Pump Vibration showcase used to call a synthetic generator on a 5-second timer. With the MQTT trigger an agent subscribed to <code className="text-cyan-300">vibration.raw</code> reacts to every packet a SCADA gateway publishes, exactly the way a plant historian would in production.</p>
-            <p><strong className="text-white">When to use.</strong> High-rate machine telemetry, IoT fleet messages, alarm fan-outs, change-data-capture from a Debezium Kafka topic. <strong className="text-white">When not to use.</strong> Low-rate human-in-the-loop flows (a Slack mention or a calendar event) — those are still a webhook trigger.</p>
-            <p><strong className="text-white">How to wire.</strong></p>
+            <p>Triggers start a run on a schedule or from a webhook (<code>POST /api/triggers/webhook/{`{token}`}</code>). There is no MQTT or Kafka trigger. To react to a broker, put a small bridge in front that posts each message to a webhook trigger, or have a scheduled agent read the stream with a tool.</p>
+            <p><strong className="text-white">Stream tools.</strong></p>
+            <ul className="list-disc pl-5 space-y-1 text-[13px]">
+              <li><code className="text-cyan-300">kafka_consumer</code> reads messages from a Kafka topic. It needs <code>KAFKA_BOOTSTRAP_SERVERS</code>.</li>
+              <li><code className="text-cyan-300">redis_stream_consumer</code> and <code className="text-cyan-300">redis_stream_publisher</code> read and write Redis Streams, with consumer groups to share load.</li>
+              <li><code className="text-cyan-300">event_buffer</code> reads events that webhook triggers have buffered, filtered by type and time window.</li>
+              <li><code className="text-cyan-300">mqtt_publish</code> sends to an MQTT topic, see <a href="#bidirectional-tools" className="text-violet-300 underline">Write-back tools</a>.</li>
+            </ul>
+            <p><strong className="text-white">When to use.</strong> Machine telemetry, alarm fan-outs, change-data-capture. The dev stack runs a Mosquitto broker, and <code>infra/helm/mosquitto</code> deploys one in a cluster.</p>
+            <p><strong className="text-white">How to wire a broker to a webhook.</strong></p>
             <Steps items={[
-              'Open the agent or pipeline in the Builder.',
-              'Click the <strong>Triggers</strong> tab on the right rail.',
-              'Click <strong>+ Add trigger</strong> and pick <strong>MQTT subscribe</strong> or <strong>Kafka consume</strong>.',
-              'Enter the broker URL (defaults to the in-cluster <code>mosquitto:1883</code>) and the topic — wildcards <code>+</code> and <code>#</code> work.',
-              'Pick the <strong>QoS</strong> (0 fire-and-forget, 1 at-least-once, 2 exactly-once) and an optional message <strong>filter</strong>.',
-              'Save. The trigger registers a long-lived consumer in the streaming-trigger pod and shows up on the agent&apos;s <strong>/triggers</strong> page.',
+              'Open <strong>Triggers</strong> and click <strong>New Trigger</strong>.',
+              'Pick <strong>Webhook</strong>, select the agent or pipeline and click <strong>Create Trigger</strong>.',
+              'Copy the webhook URL from the list.',
+              'Point your broker bridge at it so each message is posted as the run input.',
             ]} />
-            <Callout tone="warn"><strong>Gotcha.</strong> A single agent can only consume one MQTT topic per trigger. For multi-topic routing put a fan-in pipeline in front and use a switch node. Kafka consumer groups are tenant-scoped — two tenants subscribing to the same external topic stay isolated automatically.</Callout>
+            <Callout tone="warn"><strong>Gotcha.</strong> Every webhook call starts a run. For high-rate telemetry, batch messages in the bridge or read them on a schedule with a stream tool.</Callout>
           </div>
         ),
       },
       {
         id: 'bidirectional-tools',
-        title: 'Bidirectional tools — OPC-UA write, MQTT publish, CMMS write',
+        title: 'Write-back tools — MQTT publish and connector writes',
         icon: <ArrowRight className="w-4 h-4" />,
         badge: 'new',
         body: (
           <div className="space-y-3 text-[13.5px] text-slate-300 leading-relaxed">
-            <p>Read-only agents are demos. Production agents have to <em>act</em> — open a valve, raise a work order, push a setpoint back to the PLC. v1.1 ships three palette tools that write back to the systems of record: <code className="text-cyan-300">opcua_write</code> for OPC-UA tag writes, <code className="text-cyan-300">mqtt_publish</code> for command topics, and <code className="text-cyan-300">cmms_write</code> for SAP-style work-order creates via the connector framework.</p>
-            <p><strong className="text-white">What it solves.</strong> The Alarm Desk showcase couldn&apos;t actually reset an alarm — it could only suggest one. With <code className="text-cyan-300">opcua_write</code> gated by an <code>approval_gate</code> the agent now drafts a remote-reset command, blocks for two human signoffs, and on approval pushes the setpoint to the device through the platform OPC-UA bridge.</p>
-            <p><strong className="text-white">When to use.</strong> Anywhere an agent&apos;s output is meant to change the physical or business world: closing a CMMS work order, publishing a control message, raising a partial-loss claim. <strong className="text-white">When not to use.</strong> Inside the agent&apos;s reasoning loop. Always put the write at the end of the pipeline behind a clear human or programmatic gate.</p>
+            <p>Production agents have to <em>act</em>: raise a work order, push a command to a device. Two tools write back to other systems: <code className="text-cyan-300">mqtt_publish</code> for command topics, and <code className="text-cyan-300">connector_call</code> for writes through a connector, such as <code>create_work_order</code> on a CMMS. There is no OPC-UA tool. Reach a PLC through an MQTT or HTTP gateway.</p>
+            <p><strong className="text-white">What it solves.</strong> The Alarm Desk showcase drafts a remote reset, waits on an <code>approval_gate</code> that needs two signoffs, and on approval publishes the command to <code>controls.write</code> with <code>mqtt_publish</code>.</p>
+            <p><strong className="text-white">When to use.</strong> Anywhere an agent&apos;s output is meant to change the physical or business world: closing a work order, publishing a control message. <strong className="text-white">When not to use.</strong> Inside the agent&apos;s reasoning loop. Put the write at the end of the pipeline behind a clear human or programmatic gate.</p>
             <p><strong className="text-white">How to wire.</strong></p>
             <Steps items={[
-              'Drag <strong>OPC-UA write</strong>, <strong>MQTT publish</strong>, or <strong>CMMS write</strong> from the Builder palette onto the canvas.',
-              'In the config panel, pick the target connector or broker URL.',
-              'For OPC-UA: enter the node-id (e.g. <code>ns=2;s=Pump1.SetpointRPM</code>) and the value template.',
-              'For MQTT publish: pick topic + retain flag + QoS.',
-              'For CMMS write: pick the operation (<code>create_work_order</code>, <code>update_status</code>, <code>attach_photo</code>) — the dropdown auto-discovers from the connector preset.',
-              'Connect the tool node to the upstream agent that produces the payload.',
+              'Drag <strong>MQTT Publish</strong> or <strong>Connector Call</strong> from the Tool Palette onto the canvas.',
+              'For MQTT publish, set <code>topic</code>, <code>payload</code>, <code>qos</code> (0, 1 or 2) and <code>retain</code>. The broker comes from <code>MQTT_URL</code>, default <code>mqtt://abenix-mosquitto:1883</code>.',
+              'For a connector write, set <code>connector_id</code>, an <code>operation</code> from its preset, such as <code>create_work_order</code>, <code>update_status</code> or <code>attach_photo</code>, and <code>parameters</code>.',
+              'Put an <strong>Approval gate</strong> before the write and connect the tool to the step that builds the payload.',
             ]} />
-            <Callout tone="warn"><strong>Gotcha.</strong> Every bidirectional tool emits an audit-log event with the calling agent&apos;s identity, the tenant, and the full payload — the regulated-environment flag automatically enforces a human approval gate before the write fires.</Callout>
+            <Callout tone="warn"><strong>Gotcha.</strong> Nothing forces a gate in front of a write. Wire one yourself before any action that changes the physical or business world.</Callout>
           </div>
         ),
       },
       {
         id: 'connector-framework',
-        title: 'Connector framework — CMMS, HRIS, telematics, weather, market data',
+        title: 'Connector framework — CMMS, HRIS, telematics, weather, cost data',
         icon: <Plug className="w-4 h-4" />,
         badge: 'new',
         body: (
           <div className="space-y-3 text-[13.5px] text-slate-300 leading-relaxed">
-            <p>An agent that has to call SAP, ServiceNow, Workday, Sensitech, BNEF, and ECMWF gets unmaintainable fast if every integration is a hand-rolled tool. The connector framework gives you one generic <code className="text-cyan-300">connector_call(connector_id, operation, payload)</code> tool plus a registry of presets — each connector has a kind (cmms / hris / telematics / standards / market-data / custom), a base URL, an auth profile, and an operation catalogue.</p>
-            <p><strong className="text-white">What it solves.</strong> Field Guide needs CMMS for fleet + WO read, HRIS for the technician roster, weather for forecasts, and CMMS-write for closeout — all four are now the same tool with different connector IDs. Cold Chain swaps the telematics preset from Sensitech to Geotab without touching the agent prompt.</p>
-            <p><strong className="text-white">When to use.</strong> Any third-party SaaS or enterprise system the agent has to read from or write to. <strong className="text-white">When not to use.</strong> Public web pages — that&apos;s still <code>web_search</code> + <code>web_scrape</code>. Internal databases — that&apos;s <code>postgres_query</code>.</p>
+            <p>An agent that calls SAP, ServiceNow, Workday and a weather service gets hard to maintain if each integration is its own tool. The connector framework gives one <code className="text-cyan-300">connector_call(connector_id, operation, parameters)</code> tool plus connectors you configure per tenant. Each has a kind (cmms, hris, telematics, standards, weather, cost_data or custom), a base URL, an auth type and a list of operations.</p>
+            <p>Eight presets ship in <code>packages/db/seeds/connector_presets</code>: IBM Maximo, SAP PM and ServiceNow Work Orders (cmms), Workday HCM (hris), Sensitech ColdStream and Carrier Lynx Fleet (telematics), DTN Weather (weather) and Bloomberg NEF (cost_data). The CMMS presets offer <code>create_work_order</code>, <code>update_status</code>, <code>attach_photo</code> and <code>query_wos</code>.</p>
+            <p><strong className="text-white">When to use.</strong> Any third-party SaaS or enterprise system the agent has to read from or write to. <strong className="text-white">When not to use.</strong> Public web pages, that&apos;s <code>web_search</code>. Internal databases, that&apos;s <code>database_query</code>.</p>
             <p><strong className="text-white">How to wire.</strong></p>
             <Steps items={[
-              'Open <strong>/admin/connectors</strong>.',
-              'Click <strong>+ New connector</strong>, pick a kind, and either start from a preset (SAP / ServiceNow / Workday / Sensitech / Geotab / BNEF / ECMWF) or roll a custom one.',
-              'Enter the base URL, pick the auth type (none / bearer / basic / oauth2-client-creds), and store the secret in the platform vault.',
-              'Click <strong>Test</strong> — the connector pings its <code>/health</code> or first read operation.',
-              'In the agent Builder, open the <strong>Knowledge</strong> tab → <strong>Connectors</strong> sub-tab and check the connectors this agent may use.',
-              'Drop the <strong>Connector call</strong> tool from the palette. The operation dropdown is populated from the preset.',
+              'Open <strong>/admin/connectors</strong> and click <strong>New connector</strong>.',
+              'Start from a preset or a custom connector, enter the base URL and pick the auth type: none, api_key, bearer, basic or oauth2.',
+              'Enter the secret. It is write-only and never shown again.',
+              'Click <strong>Test</strong>. It sends a GET to the base URL with the auth, and any 2xx or 3xx counts as reachable.',
+              'In the builder, add <strong>Connector Call</strong> from the Tool Palette and give it the connector id and an operation from its preset.',
             ]} />
-            <Callout tone="info">Connectors are tenant-scoped, secrets are referenced by ID never inlined, and every <code>connector_call</code> is auditable from the execution detail page.</Callout>
+            <Callout tone="info">Connectors are tenant-scoped. Secrets are stored in <code>tenant_tool_credentials</code> and are encrypted only when <code>ABENIX_DATA_KEY_KEK_BASE64</code> is set. Base URLs and redirects pass a URL guard that refuses private and internal addresses.</Callout>
           </div>
         ),
       },
@@ -1189,18 +1267,18 @@ bash scripts/deploy-azure.sh all       # AKS + ACR + helm`}</pre>
         badge: 'new',
         body: (
           <div className="space-y-3 text-[13.5px] text-slate-300 leading-relaxed">
-            <p>An agent that has to spot a cascade — three correlated alarms in 90 seconds, five vibration spikes in five minutes, two failed logins in a row — needs short-term memory keyed by an asset, not by a chat thread. The <code className="text-cyan-300">windowed_state</code> tool gives every agent a Redis-backed sorted set per <code>(tenant, asset, name)</code> with append, query, count, and pattern-match operations.</p>
-            <p><strong className="text-white">What it solves.</strong> Alarm Desk now detects <em>cascades</em> — alarm A followed by alarm B within a configurable window — instead of only firing on individual events. Pump Vibration uses <code>count(asset, &quot;high_severity&quot;, since=now-1h)</code> to suppress duplicate work orders.</p>
-            <p><strong className="text-white">When to use.</strong> Anywhere temporal correlation matters — debouncing, cascade detection, last-N reasoning, simple counters. <strong className="text-white">When not to use.</strong> Long-term memory or auditable history — that&apos;s the time-series store. Cross-asset analytics — that&apos;s a real OLAP query.</p>
+            <p>An agent that has to spot a cascade, such as three correlated alarms in a short time, needs short-term memory keyed by an asset, not by a chat thread. The <code className="text-cyan-300">windowed_state</code> tool keeps a Redis sorted set per <code>(tenant, asset, name)</code> with <code>append</code>, <code>query</code>, <code>count</code> and <code>pattern_match</code>.</p>
+            <p><strong className="text-white">What it solves.</strong> Alarm Desk reads recent alarms per asset with <code>query</code> to spot cascades instead of firing on single events.</p>
+            <p><strong className="text-white">When to use.</strong> Debouncing, cascade detection, last-N reasoning, simple counters. <strong className="text-white">When not to use.</strong> Long-term memory or auditable history, that&apos;s the time-series store. Cross-asset analytics, that&apos;s a real OLAP query.</p>
             <p><strong className="text-white">How to wire.</strong></p>
             <Steps items={[
-              'Drag <strong>Windowed state</strong> from the palette.',
-              'Pick the operation: <code>append</code>, <code>query</code>, <code>count</code>, or <code>pattern_match</code>.',
-              'Set the <strong>asset_id</strong> (template-resolved from upstream output, e.g. <code>{`{{trigger.payload.asset_id}}`}</code>) and the <strong>name</strong> (e.g. <code>vibration_spikes</code>).',
-              'For <code>append</code>: pick the payload template. For <code>query</code>: enter the <code>since</code>/<code>until</code> window — relative (<code>now-15m</code>) or absolute timestamps.',
-              'For <code>pattern_match</code>: define the sequence (e.g. <code>[&quot;A&quot;, &quot;B&quot;]</code> within 90s).',
+              'Drag <strong>Windowed State</strong> from the palette.',
+              'Pick the operation: <code>append</code>, <code>query</code>, <code>count</code> or <code>pattern_match</code>.',
+              'Set <strong>asset_id</strong> from an upstream output and a <strong>name</strong>, e.g. <code>vibration_spikes</code>.',
+              'For <code>query</code> and <code>count</code>, give <code>since</code> and <code>until</code> as ISO timestamps or epoch seconds. Relative forms such as <code>now-15m</code> are not understood and read as the start of time.',
+              'For <code>pattern_match</code>, give <code>pattern_seq</code>. It checks whether the latest labels match that sequence, with no time limit.',
             ]} />
-            <Callout tone="warn"><strong>Gotcha.</strong> Window TTL defaults to 24 hours per key. Raise it for slow processes (a daily reconciliation) and lower it for hot loops (a per-second alarm stream) so Redis stays small.</Callout>
+            <Callout tone="warn"><strong>Gotcha.</strong> Each append trims entries older than <code>max_age_seconds</code>, 24 hours by default. Raise it for slow processes and lower it for hot loops so Redis stays small. The key itself has no TTL.</Callout>
           </div>
         ),
       },
@@ -1212,7 +1290,7 @@ bash scripts/deploy-azure.sh all       # AKS + ACR + helm`}</pre>
         body: (
           <div className="space-y-3 text-[13.5px] text-slate-300 leading-relaxed">
             <p>Some agent actions must not fire without human signoff — a remote PLC reset, a refund above $1k, a contract execute. The approval workflow is enforced server-side: when an agent calls <code className="text-cyan-300">approval_gate</code> the execution blocks, a row lands in the <code>approvals</code> table, the right humans get a notification, and the agent only resumes once the configured number of signoffs land (or the request expires / is denied).</p>
-            <p><strong className="text-white">What it solves.</strong> Alarm Desk&apos;s remote-reset flow now requires two operator signoffs before <code>opcua_write</code> fires. ResolveAI&apos;s refund flow blocks any amount over policy until a supervisor approves. The gate is enforced in the API layer so a malicious or buggy agent cannot bypass it.</p>
+            <p><strong className="text-white">What it solves.</strong> Alarm Desk&apos;s remote-reset flow needs two operator signoffs before <code>mqtt_publish</code> sends the command. Signoffs are recorded by the API and the gate step waits for them. The step after the gate only runs on approval if the pipeline wires it that way, so put the write after the gate.</p>
             <p><strong className="text-white">When to use.</strong> Any irreversible or expensive action. Anything a regulator might audit. <strong className="text-white">When not to use.</strong> Internal reasoning steps — humans should not be in the inner loop.</p>
             <p><strong className="text-white">How to wire.</strong></p>
             <Steps items={[
@@ -1220,13 +1298,13 @@ bash scripts/deploy-azure.sh all       # AKS + ACR + helm`}</pre>
               'Set the <strong>required signoffs</strong> count (1 for a single approver, 2+ for sensitive ops).',
               'Set <strong>expires_seconds</strong>, 30 minutes by default and at most 7 days. A request nobody approves in time ends as <code>expired</code>, and the agent should treat it like a denial.',
               'Optionally set a <strong>kind</strong>, such as <code>device.remote_reset</code>, so reviewers and SDK consumers can tell gates apart. Who may sign follows the tier policy, see <a href="#approvals" class="text-violet-300 underline">Approvals</a>.',
-              'Wire the gate before the action tool. The downstream tool only runs on <code>status=approved</code>.',
+              'Wire the gate before the action tool, and make the action depend on <code>status=approved</code>.',
               'Operators see pending requests on the <strong>/approvals</strong> page (sidebar item) and on Slack/email if those channels are configured.',
             ]} />
-            <Callout tone="info">Every approval action is hashed into the audit log: who approved, when, and the full payload that was approved. The sidebar shows a live count of pending approvals for the current user. Returning, tier floors and escalation are covered under <a href="#approvals" className="text-violet-300 underline">Approvals</a>.</Callout>
+            <Callout tone="info">Each signoff is stored on the approval with who and when, and emits an approval event. Pending approvals also show in <strong>Needs you</strong>. Returning, tier floors and escalation are covered under <a href="#approvals" className="text-violet-300 underline">Approvals</a>.</Callout>
 
             <h4 className="text-white font-semibold pt-3">Reading the payload — no JSON parsing required</h4>
-            <p>The approval card&apos;s <em>Payload, signoff history</em> section now renders the request body as a readable key/value grid (nested objects and arrays are indented). A compliance reviewer can scan vendor, amount, risk tier, etc. at a glance instead of squinting at raw JSON. <strong>Show raw JSON</strong> keeps the full payload one click away for power users.</p>
+            <p>The approval card&apos;s <em>Payload, signoff history</em> section renders the request body as a readable key/value grid (nested objects and arrays are indented). A compliance reviewer can scan vendor, amount, risk tier, etc. at a glance instead of squinting at raw JSON. <strong>Show raw JSON</strong> keeps the full payload one click away.</p>
             <Hero src={SS('33-approvals-payload.png')} alt="Approval payload key/value renderer" caption="Structured fields up top, 'Show raw JSON' toggle at the bottom." />
 
             <h4 className="text-white font-semibold pt-3">Live expiry countdown</h4>
@@ -1241,15 +1319,15 @@ bash scripts/deploy-azure.sh all       # AKS + ACR + helm`}</pre>
         badge: 'new',
         body: (
           <div className="space-y-3 text-[13.5px] text-slate-300 leading-relaxed">
-            <p>Every shareable resource — <strong>agent</strong>, <strong>pipeline</strong>, <strong>ML model</strong>, <strong>code asset</strong>, <strong>knowledge base</strong> — uses the same dialog. Open it from the <strong>Share</strong> button on the resource detail page.</p>
+            <p>Agents and pipelines share through their own dialog, with View, Execute and Edit. <strong>ML models</strong>, <strong>code assets</strong>, <strong>knowledge bases</strong> and <strong>atlases</strong> use one shared dialog. Open either from the <strong>Share</strong> button on the resource&apos;s page.</p>
             <Hero src={SS('34-resource-share-dialog.png')} alt="Resource share dialog" caption="One dialog, four resource kinds, three permission levels." />
             <ul className="list-disc list-inside space-y-1">
               <li><strong>View</strong> — recipient sees it in their list. Cannot run or change it.</li>
               <li><strong>Use</strong> — recipient can call / run the resource but not modify the definition.</li>
               <li><strong>Edit</strong> — full editor access. Can change config, schema, version.</li>
             </ul>
-            <p>The recipient must already be a member of your tenant — invite them first via <em>Settings → Team</em>. Shares are notification-aware: the recipient gets an in-app notification (and email, if configured) so they know what just landed in their queue. Anyone in the share list can be revoked one-click. The revoke action is audit-logged with the actor and timestamp.</p>
-            <Callout tone="info">All sharing routes through one polymorphic <code>resource_shares</code> table. The same RBAC predicate gates every endpoint, so you can&apos;t accidentally over-grant by going through one resource&apos;s UI vs another&apos;s.</Callout>
+            <p>The recipient must already be a member of your tenant — invite them first via <em>Settings → Team</em>. The recipient gets an in-app notification. A share can carry an expiry. Revoke any share in one click, it takes effect on the next request.</p>
+            <Callout tone="info">All shares live in one <code>resource_shares</code> table, so the same check applies whichever page granted them.</Callout>
           </div>
         ),
       },
@@ -1260,21 +1338,21 @@ bash scripts/deploy-azure.sh all       # AKS + ACR + helm`}</pre>
         badge: 'new',
         body: (
           <div className="space-y-3 text-[13.5px] text-slate-300 leading-relaxed">
-            <p>The SDK turns approval gates into a first-class outcome of <code className="text-cyan-300">execute()</code>. You no longer have to scrape stream events or poll a queue to find out an agent paused — you ask for a wait mode and get an <code className="text-cyan-300">ApprovalRef</code> back. All three SDKs (Python, TypeScript, Java) ship the same surface.</p>
+            <p>The SDK makes a paused approval gate a normal result of <code className="text-cyan-300">execute()</code>. You don&apos;t scrape stream events or poll a queue to find out an agent paused, you ask for a wait mode and get an <code className="text-cyan-300">ApprovalRef</code> back. The Python, TypeScript and Java SDKs all support it. The Java SDK lives in <code>claimsiq/sdk</code>.</p>
 
-            <p><strong className="text-white">Wait modes.</strong> The third value is the new one.</p>
+            <p><strong className="text-white">Wait modes.</strong></p>
             <ul className="list-disc list-inside text-slate-300 ml-2 space-y-1 text-[12.5px]">
               <li><code className="text-cyan-300">wait="completed"</code> (default) — block until the agent finishes or fails.</li>
               <li><code className="text-cyan-300">wait="submitted"</code> — kick off and return an <code>execution_id</code>. You handle resumption from a worker or scheduler.</li>
               <li><code className="text-cyan-300">wait="until_gate"</code> — block, but if the agent hits an approval gate, return immediately with <code>status="paused"</code> and a populated <code>paused_at</code> field. This covers <code>approval_gate</code> and <code>human_approval</code> gates. For a <code>human_approval</code> gate the id starts with <code>hitl:</code> and <code>signoff</code> accepts it.</li>
             </ul>
 
-            <p><strong className="text-white">The approvals client.</strong> Same shape in every language: <code>create</code>, <code>list</code>, <code>get</code>, <code>signoff</code> (or <code>approve</code>/<code>deny</code>), <code>wait_for</code>, <code>subscribe</code>, <code>configure_webhook</code>. <code>signoff</code> and <code>create</code> both take an optional <code>client_token</code> so retries collapse to a single decision instead of a 409. <code>wait_for</code> uses a server-side long poll under the hood — one round trip covers up to 120 seconds of real waiting.</p>
+            <p><strong className="text-white">The approvals client.</strong> Python and TypeScript have <code>create</code>, <code>list</code>, <code>get</code>, <code>signoff</code> (or <code>approve</code>/<code>deny</code>), <code>wait_for</code>, <code>subscribe</code> and <code>configure_webhook</code>. Java has the same except <code>subscribe</code>. <code>signoff</code> and <code>create</code> both take an optional <code>client_token</code> so retries collapse to a single decision instead of a 409. <code>wait_for</code> uses a server-side long poll under the hood — one round trip covers up to 120 seconds of real waiting.</p>
 
             <p><strong className="text-white"><code>create</code> — human-initiated approvals.</strong> Two ways an approval gate lands in the queue:</p>
             <ul className="list-disc list-inside text-slate-300 ml-2 space-y-1 text-[12.5px]">
               <li><strong>Agent-initiated</strong>: an agent calls the <code className="text-cyan-300">approval_gate</code> tool inside its execution. The execution pauses until a human decides. Use this when the agent is the one needing permission.</li>
-              <li><strong>Human-initiated</strong> (new): your app code calls <code className="text-cyan-300">forge.approvals.create(...)</code> directly — typically on a user button click (e.g. &quot;Acknowledge to broker&quot;, &quot;Activate strategy&quot;, &quot;Approve PO&quot;). Use this when a UI action needs governance signoff before it proceeds.</li>
+              <li><strong>Human-initiated</strong>: your app code calls <code className="text-cyan-300">forge.approvals.create(...)</code> directly — typically on a user button click (e.g. &quot;Acknowledge to broker&quot;, &quot;Activate strategy&quot;, &quot;Approve PO&quot;). Use this when a UI action needs governance signoff before it proceeds.</li>
             </ul>
             <p>Wingman uses both. Broker Inbox &quot;Acknowledge&quot; and Strategy Lab &quot;Activate&quot; call <code>create()</code> to open a senior-trader signoff before the action fires. Pipeline-internal gates (e.g. before MQTT-publishing a remote command) use <code>approval_gate</code>. Both surface in the same <code>/approvals</code> queue and the same top-bar bell.</p>
 
@@ -1287,7 +1365,7 @@ approval = await forge.approvals.create(
     gate_kind="broker.acknowledge",
     client_token=f"ack-{offer_id}",   # idempotent retries
 )
-print(approval["id"])  # surfaces in /approvals; bell rings`}</pre>
+print(approval["id"])  # surfaces in /approvals and rings the bell`}</pre>
 
             <pre className="text-xs bg-slate-950/60 border border-slate-800 rounded p-3 overflow-x-auto">{`// TypeScript
 const approval = await forge.approvals.create(
@@ -1347,9 +1425,9 @@ if (result.isPaused()) {
 
             <p><strong className="text-white">Discriminating gate types.</strong> Pass <code className="text-cyan-300">kind: "device.remote_reset"</code> when the agent calls <code>approval_gate</code>. The value flows into the <code>gate_kind</code> column and lets reviewer UIs (or your own SDK code) dispatch handlers per gate kind without parsing the payload.</p>
 
-            <p><strong className="text-white">Webhooks.</strong> Tenant admins can register a webhook URL via <code className="text-cyan-300">forge.approvals.configure_webhook(url=..., secret=...)</code>. The platform fires <code>approval_pending</code> and <code>approval_resolved</code> events to that URL with an HMAC-SHA256 signature in <code>X-Abenix-Signature</code>. Replaces every bespoke poller wrapping a Slack or PagerDuty integration.</p>
+            <p><strong className="text-white">Webhooks.</strong> Tenant admins can register a webhook URL via <code className="text-cyan-300">forge.approvals.configure_webhook(url=..., secret=...)</code>. The platform fires <code>approval_pending</code> and <code>approval_resolved</code> events to that URL with an HMAC-SHA256 signature in <code>X-Abenix-Signature</code>.</p>
 
-            <Callout tone="info">The SDK Playground&apos;s <strong>HITL</strong> use case generates this exact pattern in any of the three languages with the agent slug already wired in. Pick an agent, hit Generate, copy/paste.</Callout>
+            <Callout tone="info">The SDK Playground&apos;s <strong>HITL</strong> use case generates this exact pattern in any of the three languages with the agent slug already wired in. Pick an agent, click <strong>Generate code</strong>, copy and paste.</Callout>
           </div>
         ),
       },
@@ -1360,18 +1438,17 @@ if (result.isPaused()) {
         badge: 'new',
         body: (
           <div className="space-y-3 text-[13.5px] text-slate-300 leading-relaxed">
-            <p>Pump readings, fridge temperatures, alarm rates, market ticks — all of that fits Postgres badly and pgvector worse. v1.1 ships TimescaleDB as a sidecar in the dev-local stack (port <code>5433</code>) and exposes a <code className="text-cyan-300">tsdb_query</code> tool with first-class hypertable support: ingest with <code>insert</code>, query with <code>select</code> + time-bucket aggregates, and pull a sample with <code>recent</code>.</p>
-            <p><strong className="text-white">What it solves.</strong> Pump Vibration now writes every severity reading to TSDB, so a downstream agent can answer "what was the average severity for asset X last week?" without scanning every execution row. Cold Chain pivots waypoints to a daily mean. Design Studio caches BNEF cost coefficients with daily-bucket aggregates.</p>
-            <p><strong className="text-white">When to use.</strong> Sensor data, KPIs, financial ticks, anything timestamped + numeric you want to aggregate over a window. <strong className="text-white">When not to use.</strong> Document content (that&apos;s a knowledge base). Mutable rows (that&apos;s Postgres).</p>
+            <p>Pump readings, temperatures and market ticks fit Postgres badly. The dev stack runs TimescaleDB on port <code>5433</code>, and <code>infra/helm/timescaledb</code> deploys it in a cluster with one hypertable, <code>metrics(ts, asset_id, metric, value)</code>. The <code className="text-cyan-300">tsdb_query</code> tool reads it.</p>
+            <p><strong className="text-white">What it solves.</strong> The pump pipeline reads the <code>pump_rpm</code> metric for an asset instead of scanning execution rows.</p>
+            <p><strong className="text-white">When to use.</strong> Sensor data, KPIs, financial ticks, anything timestamped and numeric you want over a window. <strong className="text-white">When not to use.</strong> Document content (that&apos;s a knowledge base). Mutable rows (that&apos;s Postgres).</p>
             <p><strong className="text-white">How to wire.</strong></p>
             <Steps items={[
-              'Drop the <strong>TSDB query</strong> tool onto the canvas.',
-              'Pick the operation: <code>insert</code>, <code>select</code>, <code>recent</code>, or <code>aggregate</code>.',
-              'Set the <strong>hypertable name</strong> — pre-seeded ones include <code>iot_pump_readings</code>, <code>iot_cold_chain_waypoints</code>, <code>iot_alarms</code>.',
-              'For <code>aggregate</code>: pick the bucket (<code>1m</code>, <code>1h</code>, <code>1d</code>) and the aggregate function (<code>avg</code>, <code>p95</code>, <code>max</code>, <code>count</code>).',
-              'Connect the tool, then either downstream of the trigger (insert) or upstream of the agent that needs the rollup.',
+              'Drop <strong>TSDB Query</strong> onto the canvas.',
+              'Set <code>metric</code> and optionally <code>asset_id</code>, <code>since</code>, <code>until</code> and <code>limit</code> (up to 10,000 rows). <code>table</code> defaults to <code>metrics</code>.',
+              'Pick the <code>aggregation</code>: <code>none</code>, <code>avg_5m</code>, <code>max_1h</code> or <code>last</code>.',
+              'Connect it upstream of the agent that needs the numbers.',
             ]} />
-            <Callout tone="info">Production swap-out targets are documented under <strong>Scale &amp; operate</strong>: AWS Timestream, Azure Data Explorer, InfluxDB Cloud — each takes one connection-string change.</Callout>
+            <Callout tone="info">The tool only reads. Write rows into <code>metrics</code> from your own ingest, such as a bridge from the broker.</Callout>
           </div>
         ),
       },
@@ -1382,17 +1459,17 @@ if (result.isPaused()) {
         badge: 'new',
         body: (
           <div className="space-y-3 text-[13.5px] text-slate-300 leading-relaxed">
-            <p>An at-least-once trigger is going to redeliver. A network blip is going to retry. v1.1 makes both safe with two new primitives: an <code className="text-cyan-300">Idempotency-Key</code> header on <code>/api/agents/{`{id}`}/execute</code> (same key inside 24h returns the original execution) and a dead-letter queue for executions the stale sweeper aborts as <code>STALE_SWEEP</code>.</p>
+            <p>An at-least-once caller is going to redeliver. A network blip is going to retry. Two things make both safe: an <code className="text-cyan-300">Idempotency-Key</code> header on <code>/api/agents/{`{id}`}/execute</code> (the same key inside 24h returns the stored response) and a dead-letter queue for executions the stale sweeper aborts as <code>STALE_SWEEP</code>.</p>
             <p><strong className="text-white">What it solves.</strong> A retry storm on a vibration packet no longer creates ten work orders for the same window. An execution killed by a pod restart shows up on the DLQ page with the full failure context and a one-click <strong>Replay</strong>, so it never just disappears.</p>
-            <p><strong className="text-white">When to use.</strong> Idempotency: every external caller that can retry — webhooks, MQTT triggers, an SDK with auto-retry. DLQ: it&apos;s on by default. Nothing to wire.</p>
+            <p><strong className="text-white">When to use.</strong> Idempotency: every external caller that can retry, such as webhooks, broker bridges or an SDK with auto-retry. DLQ: it&apos;s on by default. Nothing to wire.</p>
             <p><strong className="text-white">How to wire.</strong></p>
             <Steps items={[
               'Caller passes <code>Idempotency-Key: {`{any-uuid}`}</code> on the execute call.',
-              'Server stores key + execution ID in <code>execution_idempotency</code> (TTL 24h).',
-              'Same key + same tenant inside the TTL returns the original <code>execution_id</code> and current status — no second run.',
-              'For DLQ inspection: open <strong>/admin/dlq</strong>, sort by failure code, click <strong>Replay</strong> to re-enqueue the execution, click <strong>Discard</strong> to mark resolved.',
+              'The server stores the key and the response in <code>execution_idempotency</code> (TTL 24h).',
+              'The same key in the same tenant inside the TTL returns the stored response, marked <code>idempotent_replay: true</code>. A repeat that arrives before the first call has stored its response runs again. Streaming calls are not covered.',
+              'For the DLQ, open <strong>/admin/dlq</strong> (Dead Letter Queue) and click <strong>Replay</strong> to run the execution again.',
             ]} />
-            <Callout tone="warn"><strong>Gotcha.</strong> The idempotency key is scoped per-tenant + per-agent — two tenants reusing the same UUID don&apos;t collide. Don&apos;t rely on idempotency to deduplicate semantically different inputs. Use a hash of the canonical payload as the key.</Callout>
+            <Callout tone="warn"><strong>Gotcha.</strong> The key is unique per tenant, not per agent. Two tenants reusing the same UUID don&apos;t collide, but the same key sent to two agents in one tenant returns the first agent&apos;s response. Use a hash of the agent and the canonical payload as the key.</Callout>
           </div>
         ),
       },
@@ -1403,39 +1480,35 @@ if (result.isPaused()) {
         badge: 'new',
         body: (
           <div className="space-y-3 text-[13.5px] text-slate-300 leading-relaxed">
-            <p>Some data is read so often, and changes so rarely, that calling the upstream API from every agent run is wasteful — weather forecasts, FX rates, electricity prices, BNEF cost benchmarks. The <code className="text-cyan-300">subscribed_feed</code> tool lets you register a feed once with a refresh interval, the platform polls in the background, and every agent reads from a TTL cache.</p>
-            <p><strong className="text-white">What it solves.</strong> Field Guide&apos;s weather forecast went from "five Open-Meteo calls per work order" to "one cached read." Design Studio&apos;s BNEF cost coefficients refresh once a day at 06:00 UTC instead of on every scenario.</p>
-            <p><strong className="text-white">When to use.</strong> Slow-changing reference data — currencies, weather, market indices, public dataset snapshots. <strong className="text-white">When not to use.</strong> User-specific or sensor data — those need fresh reads on every call.</p>
+            <p>Some data is read often and changes rarely, such as weather forecasts or cost benchmarks. The <code className="text-cyan-300">subscribed_feed</code> tool reads a feed&apos;s latest value from a Redis cache under <code>{`tenant:{tenant_id}:feed:{feed_id}`}</code> instead of calling the provider on every run.</p>
+            <p>Nothing in the platform fills that cache for you. Write it from a job of your own, such as a scheduled pipeline that fetches the feed through a connector.</p>
+            <p><strong className="text-white">When to use.</strong> Slow-changing reference data, such as currencies, weather or market indices. <strong className="text-white">When not to use.</strong> User-specific or sensor data, which needs a fresh read on every call.</p>
             <p><strong className="text-white">How to wire.</strong></p>
             <Steps items={[
-              'Drag <strong>Subscribed feed</strong> from the palette.',
-              'Pick a registered feed (<strong>weather.open-meteo</strong>, <strong>fx.exchangerate-host</strong>, <strong>bnef.cost-coefficients</strong>) or click <strong>+ Register feed</strong>.',
-              'Set the <strong>refresh interval</strong> (60s minimum, 24h default for daily series).',
-              'Set the <strong>TTL</strong> for the cache (defaults to 2× refresh interval).',
-              'Wire the tool wherever the agent needs the data — the read is a hash-map lookup, sub-millisecond.',
+              'Add the <code>subscribed_feed</code> tool from the palette.',
+              'Set <code>feed_id</code>.',
+              'Set <code>max_age_seconds</code> (default 60), the oldest value the agent should accept.',
+              'Fill the cache from your own scheduled job under the same key.',
             ]} />
-            <Callout tone="info">Subscribed feeds count against the platform&apos;s outbound API budget rather than per-agent cost lines, so a hot agent doesn&apos;t blow its tenant cap on weather lookups.</Callout>
           </div>
         ),
       },
       {
         id: 'audio-stt',
-        title: 'Audio STT',
+        title: 'Speech to text',
         icon: <Camera className="w-4 h-4" />,
         badge: 'new',
         body: (
           <div className="space-y-3 text-[13.5px] text-slate-300 leading-relaxed">
-            <p>Field technicians dictate work-order closeouts. Customer-service agents listen to call recordings. Plant operators speak shift reports. The <code className="text-cyan-300">audio_stt</code> tool transcribes any uploaded audio (or an MQTT-published audio blob) using a Deepgram preset — language autodetect, speaker diarisation optional, punctuation always on.</p>
-            <p><strong className="text-white">What it solves.</strong> Field Guide&apos;s voice-driven closeout (technician taps the mic, dictates "valve replaced, leak resolved, took 35 min") flows through STT into a structured WO. Alarm Desk&apos;s shift handover ingests the operator&apos;s verbal summary into the EOD report.</p>
-            <p><strong className="text-white">When to use.</strong> Any audio you want to feed into a downstream LLM step. <strong className="text-white">When not to use.</strong> Real-time conversational voice — that&apos;s the LiveKit meeting bot path. STT is one-shot.</p>
+            <p>Field technicians dictate closeouts and support teams have call recordings. The <code className="text-cyan-300">speech_to_text</code> tool transcribes an audio file from a URL with OpenAI Whisper (<code>whisper-1</code>).</p>
+            <p><strong className="text-white">When to use.</strong> Any audio you want to feed into a later LLM step. <strong className="text-white">When not to use.</strong> Real-time conversational voice, that&apos;s the LiveKit meeting bot path. Speech to text is one-shot.</p>
             <p><strong className="text-white">How to wire.</strong></p>
             <Steps items={[
-              'Drop the <strong>Audio STT</strong> tool onto the canvas.',
-              'Pick the input source: file upload, URL, MQTT topic, or upstream <code>audio_url</code> field.',
-              'Pick the language (auto-detect default) and toggle <strong>diarise speakers</strong> if the recording has two or more voices.',
-              'The tool returns a <code>{`{text, words, language, confidence}`}</code> object that flows into the next agent.',
+              'Drop <strong>Speech to Text</strong> onto the canvas.',
+              'Pass <code>audio_url</code> and optionally a <code>language</code>. Files can be up to 25 MB.',
+              'The tool returns status, text, language, duration_seconds and the first 20 segments, which flow into the next step.',
             ]} />
-            <Callout tone="warn"><strong>Gotcha.</strong> Deepgram&apos;s API key is required (set <code>DEEPGRAM_API_KEY</code>). Without it the tool falls back to Gemini&apos;s audio path with a warning surfaced into the execution trace.</Callout>
+            <Callout tone="warn"><strong>Gotcha.</strong> It needs <code>OPENAI_API_KEY</code>. There is no fallback provider, without the key the tool fails.</Callout>
           </div>
         ),
       },
@@ -1456,18 +1529,17 @@ if (result.isPaused()) {
             <p><strong className="text-white">Where to download.</strong> Open <code>/edge</code> in the sidebar — the top section shows all three variants with copy-to-clipboard <strong>Helm install</strong> and <strong>Docker pull</strong> commands. Or call <code>GET /api/edge/runtime/download</code> for the JSON manifest. Helm charts live at <code>infra/helm/edge-runtime/</code>, <code>infra/helm/edge-runtime-rust/</code>, <code>infra/helm/edge-runtime-c/</code>.</p>
             <p><strong className="text-white">How to create a gateway in AgentForge.</strong></p>
             <Steps items={[
-              'Mint a registration token: <strong>API Keys → New key</strong>, scopes <code>agents:execute, edge:register</code>. Copy the <code>af_…</code> value — that\'s the gateway\'s <code>PLATFORM_TOKEN</code>.',
-              'Helm-install the runtime variant on the plant gateway: <code>helm install abenix-edge ./infra/helm/edge-runtime --set platform.url=$URL --set platform.token=$AF_KEY --set gateway.id=$GW</code>. (Or <code>edge-runtime-rust</code> / <code>edge-runtime-c</code>.)',
+              'On <strong>/edge</strong>, click <strong>Mint edge token + pubkey</strong>. Copy the <code>af_…</code> token, which is the gateway&apos;s <code>PLATFORM_TOKEN</code>, and the signing public key. The token is shown once.',
+              'Helm-install the runtime variant on the plant gateway: <code>helm install abenix-edge ./infra/helm/edge-runtime --set platform_url=$URL --set platform_token=$AF_KEY --set gateway_id=$GW --set-file signing_pubkey=pubkey.pem</code>. (Or <code>edge-runtime-rust</code> / <code>edge-runtime-c</code>.)',
               'The pod boots, calls <code>POST /api/edge/gateways/register</code> every 60 s with <code>Authorization: Bearer af_…</code>. The first call inserts the row in <code>edge_gateways</code>. The gateway shows up in the platform UI under <strong>/edge → Registered gateways</strong> within ~60 s.',
-              'Mark an agent <strong>Edge eligible</strong> in the Builder → Settings → Advanced. Set <code>edge_constraints</code> (max payload, max runtime, allowed MQTT publish/subscribe topics).',
-              'On the gateway card click <strong>Deploy agent</strong>. The platform compiles the <code>.agent</code> bundle (tar with <code>agent.yaml</code>, <code>system_prompt.md</code>, optional <code>tools/*.py</code>, <code>signature.sig</code>), signs it with RSA-PSS / SHA-256, and publishes to <code>edge.{`{gateway_id}`}.deploy</code> over MQTT (HTTP POST fallback). The runtime hot-reloads and the bundle digest appears on the card.',
+              'Tick <strong>Edge compatible</strong> on the builder&apos;s Advanced tab. Set <code>edge_constraints</code> (max payload, max runtime, allowed MQTT publish and subscribe topics).',
+              'On the gateway card click <strong>Deploy agent</strong>. The platform compiles the <code>.agent</code> bundle (tar with <code>agent.yaml</code>, <code>system_prompt.md</code> and <code>signature.sig</code>), signs it with RSA-PSS / SHA-256, and publishes to <code>edge.{`{gateway_id}`}.deploy</code> over MQTT (HTTP POST fallback). The runtime hot-reloads and the bundle digest appears on the card.',
             ]} />
             <p><strong className="text-white">How interactions work.</strong></p>
             <ul className="list-disc pl-5 space-y-1 text-[13px]">
-              <li><strong>Bundle delivery (default):</strong> MQTT topic <code>edge.{`{gateway_id}`}.deploy</code> at QoS 1. The runtime verifies the RSA-PSS signature, refuses tampered bundles, extracts to <code>/var/edge/agents/{`{slug}`}/</code>.</li>
+              <li><strong>Bundle delivery (default):</strong> MQTT topic <code>edge.{`{gateway_id}`}.deploy</code> at QoS 0. The runtime verifies the RSA-PSS signature, refuses tampered bundles, extracts to <code>/var/edge/agents/{`{slug}`}/</code>.</li>
               <li><strong>Bundle delivery (fallback):</strong> if MQTT publish fails, the platform <code>POST</code>s the tar bytes to <code>{`{endpoint_url}`}/agents/{`{slug}`}/bundle</code> on the gateway.</li>
               <li><strong>Sync execution:</strong> <code>POST {`{endpoint_url}`}/agents/{`{slug}`}/execute</code> with a JSON body — runtime returns <code>{`{slug, duration_ms, result}`}</code>.</li>
-              <li><strong>Async execution:</strong> publish to <code>agents.{`{slug}`}.input</code> over MQTT — runtime invokes the agent and publishes the result on <code>agents.{`{slug}`}.output</code> (subject to <code>edge_constraints.mqtt_publish[]</code> ACL).</li>
               <li><strong>Tool budget:</strong> only <code>mqtt_publish, mqtt_subscribe, current_time, windowed_state, connector_call, code_executor</code> are allowed on edge. Bundle compiler refuses anything else. Runtime re-checks on load.</li>
             </ul>
             <p><strong className="text-white">When to use.</strong> Latency-sensitive sites (sub-100 ms), intermittent connectivity, data-residency regulations. <strong className="text-white">When NOT to use.</strong> Anything that needs platform-only tools (<code>knowledge_search</code>, <code>atlas_*</code>, MCP) or a &gt;2 GB model.</p>
@@ -1487,14 +1559,14 @@ if (result.isPaused()) {
                     <td className="px-2 py-1.5 text-amber-300">runtime logs 401, gateway shows offline</td>
                   </tr>
                   <tr className="border-t border-slate-800/40">
-                    <td className="px-2 py-1.5 font-mono text-cyan-300">SIGNING_PUBKEY</td>
+                    <td className="px-2 py-1.5 font-mono text-cyan-300">SIGNING_PUBKEY_PEM</td>
                     <td className="px-2 py-1.5">RSA-PSS-2048 pub key to verify bundles</td>
                     <td className="px-2 py-1.5">Same mint dialog returns it</td>
-                    <td className="px-2 py-1.5 text-rose-300">Rust: accepts UNVERIFIED bundles. C: hard-rejects. Real security gap.</td>
+                    <td className="px-2 py-1.5 text-rose-300">Rust and C accept unverified bundles. Python refuses unless <code>EDGE_ALLOW_UNSIGNED=true</code>. Always set it.</td>
                   </tr>
                   <tr className="border-t border-slate-800/40">
                     <td className="px-2 py-1.5 font-mono text-cyan-300">ANTHROPIC_API_KEY</td>
-                    <td className="px-2 py-1.5">Cloud LLM. Or <code>LOCAL_LLM_URL</code> for air-gapped.</td>
+                    <td className="px-2 py-1.5">Cloud LLM.</td>
                     <td className="px-2 py-1.5">helm <code>--set anthropic_api_key=$KEY</code></td>
                     <td className="px-2 py-1.5 text-slate-400">Execute returns <code>stub: true</code>. Tool-only agents still work.</td>
                   </tr>
@@ -1502,28 +1574,29 @@ if (result.isPaused()) {
               </table>
             </div>
             <p className="text-[12px] text-slate-400">
-              <strong>On a fresh Azure deploy</strong>, <code>scripts/deploy-azure.sh</code> mints both token and signing pubkey for every edge runtime variant (Python / Rust / C) automatically and passes them into the helm install. For a gateway you provision manually (a real plant box), open <code>/edge</code>, click <strong>Mint edge token + pubkey</strong>, copy both values into the gateway's helm chart or systemd env file. The token is shown ONCE — store it before closing the dialog.
+              <strong>On a fresh Azure deploy</strong>, <code>scripts/deploy-azure.sh</code> mints the token, fetches the signing pubkey and passes both into the helm install. It installs the Python variant by default. Set <code>EDGE_RUNTIME_VARIANT</code> or <code>EDGE_RUNTIME_ALL_VARIANTS=true</code> for Rust and C. For a gateway you provision by hand (a real plant box), open <code>/edge</code>, click <strong>Mint edge token + pubkey</strong> and copy both values into the gateway&apos;s helm values or systemd env file. The token is shown once, store it before closing the dialog.
             </p>
             <p className="text-[12px] text-slate-400">
-              <strong>Local-LLM vs cloud-LLM at the edge.</strong> Set <code>LOCAL_LLM_URL=http://ollama:11434/v1</code> on the gateway and pin <code>model: ollama/qwen2.5:7b</code> in the agent YAML for air-gapped sites. The Rust runtime auto-detects the <code>ollama/</code> prefix and routes to local. The C runtime is tool-only — no LLM key needed for sensor-loop agents like the IoT pump classifier.
+              <strong>Without a cloud LLM key.</strong> The runtimes have no local-model path. Tool-only agents, such as a sensor loop, still run, and an LLM step returns <code>stub: true</code>.
             </p>
           </div>
         ),
       },
       {
         id: 'iot-modernized-examples',
-        title: 'Example workflows — modernized IoT use cases',
+        title: 'Example workflows — IoT use cases',
         icon: <Workflow className="w-4 h-4" />,
         body: (
           <div className="space-y-3 text-[13.5px] text-slate-300 leading-relaxed">
-            <p>Every Industrial-IoT showcase has a <strong>Live mode</strong> toggle in v1.1 that wires the tab&apos;s pipeline to the new primitives end-to-end. Use them as templates when you build your own.</p>
+            <p>The Industrial-IoT showcase is a separate app in <code>industrial-iot/</code>. Its Pump Vibration, Cold Chain, Design Studio, Field Guide and Alarm Desk tabs each have a <strong>Live mode</strong> toggle. Use their pipelines as templates when you build your own.</p>
             <ul className="list-disc pl-5 space-y-2 text-[13px]">
-              <li><strong>Pump Vibration → live mode.</strong> The simulator agent publishes packets to <code>vibration.raw</code>. An MQTT trigger wakes the pump pipeline. Severity readings are written to the <code>iot_pump_readings</code> hypertable. High-severity windows raise a CMMS work order via the connector framework.</li>
-              <li><strong>Cold Chain → live mode.</strong> Telematics connector (Sensitech preset) feeds waypoints into <code>cold-chain.waypoints</code>. The excursion adjudicator uses <code>windowed_state</code> to detect repeated-breach patterns. The partial-loss claim drops into the broker portal via a custom connector.</li>
-              <li><strong>Design Studio → live mode.</strong> The <code>bnef.cost-coefficients</code> subscribed feed refreshes daily. Scenarios re-rank automatically. RFI drafts post into Ariba via a connector preset.</li>
-              <li><strong>Field Guide → live mode.</strong> CMMS preset for fleet + WO read. HRIS preset for the tech roster. <code>weather.open-meteo</code> subscribed feed for next-day conditions. Voice closeout flows through <code>audio_stt</code> → CMMS write.</li>
-              <li><strong>Alarm Desk → live mode.</strong> MQTT trigger on <code>alarms.realtime</code>. <code>windowed_state</code> for cascade detection. Safe-reset writes via <code>opcua_write</code> behind an <code>approval_gate</code> requiring two operator signoffs. Shift report posts to a logbook connector.</li>
+              <li><strong>Pump Vibration.</strong> Packets on <code>pump.vibration.raw</code> reach the tab through the IoT app&apos;s own stream. The pump pipeline reads the <code>pump_rpm</code> metric with <code>tsdb_query</code> and raises a work order with <code>connector_call</code> <code>create_work_order</code>.</li>
+              <li><strong>Cold Chain.</strong> Waypoints come from the Sensitech telematics preset on <code>cold-chain.waypoints</code>. A partial-loss claim is filed through <code>connector_call</code>.</li>
+              <li><strong>Design Studio.</strong> A scheduled pipeline, off by default, refreshes the BNEF offshore wind capex feed daily. RFI drafts come from a <code>code_executor</code> step.</li>
+              <li><strong>Field Guide.</strong> The CMMS preset reads and creates work orders (<code>query_wos</code>, <code>create_work_order</code>). Weather comes from the DTN preset on a 6-hour schedule, off by default. Voice dictation is a mock.</li>
+              <li><strong>Alarm Desk.</strong> Live alarms arrive on <code>alarms.realtime</code>. <code>windowed_state</code> reads recent alarms per asset for cascade detection. A reset waits on an <code>approval_gate</code> with two signoffs, then <code>mqtt_publish</code> sends it to <code>controls.write</code>.</li>
             </ul>
+            <Callout tone="warn">Some platform calls the IoT app makes, such as registering per-agent triggers, are not in the API. The app then falls back to demo mode.</Callout>
           </div>
         ),
       },
@@ -1563,7 +1636,7 @@ if (result.isPaused()) {
         icon: <Gauge className="w-4 h-4" />,
         body: (
           <div className="space-y-3 text-[13.5px] text-slate-300 leading-relaxed">
-            <p>Fire N parallel executions against any agent or pipeline, watch p50/p99/p999 latency and per-tool timing. Use it before promoting an agent to production.</p>
+            <p>Pick an agent or pipeline and a load shape, such as a steady burst or everything at once, set how many requests and how many at a time, and generate a load-test script. Admins can run it from the page. The report shows p50, p95, p99 and max latency, requests per second and what failed. Use it before real traffic arrives.</p>
             <Hero src={SS('17-load-playground.png')} alt="Load Playground" />
           </div>
         ),
@@ -1577,11 +1650,11 @@ if (result.isPaused()) {
             <p>Run any agent or pipeline on a schedule (cron) or on incoming webhooks. Triggers go through the same execution path as manual runs, so observability and quotas apply identically.</p>
             <Hero src={SS('detail-trigger-config.png')} alt="Triggers" />
             <Steps items={[
-              'Click <strong>+ New trigger</strong>.',
-              'Pick <strong>cron</strong> or <strong>webhook</strong>.',
-              'Select the agent or pipeline, provide the input template.',
-              'For cron: pick a timezone, set the schedule. For webhook: copy the URL + secret.',
-              'Hit <strong>Save</strong>. Activations show up in <em>Executions</em> with a <code>trigger_id</code> tag.',
+              'Click <strong>New Trigger</strong>.',
+              'Pick <strong>Webhook</strong> or <strong>Schedule (Cron)</strong>.',
+              'Select the agent or pipeline, name it and set the default message.',
+              'For a schedule, enter a cron expression in UTC. For a webhook, copy its URL from the list after saving.',
+              'Click <strong>Create Trigger</strong>. Use <strong>See its runs</strong> to list the runs it starts.',
             ]} />
           </div>
         ),
@@ -1624,6 +1697,25 @@ if (result.isPaused()) {
 
             <h4 className="text-white font-semibold pt-3">The publish gate</h4>
             <p>When the tier policy for an agent&apos;s tier requires passing evaluations, which High and Critical do by default, a new version publishes only once every gating suite has a passing run against that exact version. Runs on another model do not count. A suite shows <em>Agent changed since</em> when its last run is out of date. Turn the gate on or off per tier under <a href="#risk-tiers" className="text-violet-300 underline">Risk &amp; Controls</a>.</p>
+          </div>
+        ),
+      },
+      {
+        id: 'meetings',
+        title: 'Meetings: rehearse, then join',
+        icon: <Radio className="w-4 h-4" />,
+        badge: 'new',
+        body: (
+          <div className="space-y-3 text-[13.5px] text-slate-300 leading-relaxed">
+            <p>A meeting bot sits in a call for you and answers only on the topics you allow. Everything else it hands back to you. Open <strong>Run &amp; Test &rarr; Meetings</strong>.</p>
+            <Steps items={[
+              'Click <strong>New meeting</strong> and give it a title. It gets its own room.',
+              'On the meeting page, set the scope: <strong>Answers on</strong> for the topics the bot may answer and <strong>Always hands back</strong> for the rest. Pricing and commitments are always handed back. Add notes to your <a href="#persona-kb" class="text-violet-300 underline">Persona KB</a> so it has something to cite.',
+              '<strong>Rehearse</strong> first. Type or dictate what someone in the call might ask. Each line shows whether it was in scope, what the bot cited, what it handed back and how long the reply took. Nothing is said in a real room. Rehearsal needs at least one allowed topic and is not available while the bot is live.',
+              'Click <strong>Start bot</strong>. It joins the room, tells the people there it is a bot, answers within scope and writes a summary at the end. Questions it hands back show on the meeting page for you to answer.',
+              'To be there yourself, click <strong>Join the room</strong>. You join from the browser with your microphone off until you turn it on, and can talk or type in the room chat.',
+            ]} />
+            <p>From the meeting page you can also remove the bot, or restart it or bring it back with the transcript kept. A cloned voice is opt-in and needs your consent on the Persona KB page. Live meetings need a LiveKit server, and hearing and speaking need a speech provider key. The meeting page says what is missing.</p>
           </div>
         ),
       },
@@ -1704,13 +1796,13 @@ if (result.isPaused()) {
         badge: 'new',
         body: (
           <div className="space-y-3 text-[13.5px] text-slate-300 leading-relaxed">
-            <p>Roles (user, creator, admin) give everyone a baseline. Capabilities add specific abilities on top, so a compliance reviewer can sign rule changes without being made an admin. The sidebar only shows what you can use.</p>
+            <p>Roles (Member, Creator, Admin) give everyone a baseline. Capabilities add specific abilities on top, so a compliance reviewer can sign rule changes without being made an admin. The sidebar only shows what you can use.</p>
             <ul className="list-disc pl-5 space-y-1 text-[13px]">
-              <li><strong className="text-white">Users</strong> can view and evaluate decisions, view risk policies, run evaluations and replay runs.</li>
-              <li><strong className="text-white">Creators</strong> can also author decisions, manage evaluation suites, watched sources and event subscriptions.</li>
+              <li><strong className="text-white">Members</strong> can view and evaluate decisions, view risk policies, run evaluations, replay runs, view autonomy, answer watching reviews and give feedback.</li>
+              <li><strong className="text-white">Creators</strong> can also author decisions, manage evaluation suites, watched sources, event subscriptions and autonomy, and view and propose improvements.</li>
               <li><strong className="text-white">Admins</strong> hold every capability.</li>
             </ul>
-            <p>Other capabilities include <code>decisions.review</code>, <code>decisions.publish</code>, <code>approvals.sign</code>, <code>risk.manage</code>, <code>killswitch.manage</code>, <code>audit.view</code>, <code>audit.verify</code> and <code>permissions.manage</code>. <code>approvals.sign:legal</code> limits signing to gates that ask for the legal group, while plain <code>approvals.sign</code> covers every gate.</p>
+            <p>Other capabilities include <code>decisions.review</code>, <code>decisions.publish</code>, <code>approvals.sign</code>, <code>risk.manage</code>, <code>killswitch.manage</code>, <code>audit.view</code>, <code>audit.verify</code>, <code>autonomy.grant</code>, <code>moderation.review</code>, <code>improvements.approve</code> and <code>permissions.manage</code>. <code>approvals.sign:legal</code> limits signing to gates that ask for the legal group, while plain <code>approvals.sign</code> covers every gate.</p>
             <h4 className="text-white font-semibold pt-3">Permission sets</h4>
             <Steps items={[
               'Open <strong>Admin &rarr; Permissions</strong>. It needs <code>permissions.manage</code>. The top of the page shows what each role already has.',
@@ -1808,11 +1900,10 @@ if (result.isPaused()) {
             <p>Every run, with status, duration, model, cost, tokens, tool-call list, and the full trace. Click any execution for the per-step breakdown.</p>
             <Hero src={SS('18-executions.png')} alt="Executions" />
             <Hero src={SS('detail-pipeline-trace.png')} alt="Pipeline trace" caption="Pipeline detail — per-step durations, inputs, outputs" />
-            <p><strong className="text-white">Pro tips:</strong></p>
+            <p><strong className="text-white">Tips:</strong></p>
             <ul className="list-disc pl-5 space-y-1 text-[13px]">
-              <li>The filter pill row supports <code>status</code>, <code>agent</code>, <code>trigger</code>, <code>failure_code</code>, and free-text in the input/output.</li>
+              <li>Filter by status and by what started the run, and search the input message. Links from an agent or a trigger narrow the list to it.</li>
               <li>Use the <em>Re-run</em> button to open the agent with the same input filled in, handy for fix-then-verify cycles. The <em>Step replay</em> panel lists every node in the order it ran with its input, output and duration.</li>
-              <li>Use the <em>Export NDJSON</em> button to pull the trace into a notebook for ad-hoc analysis.</li>
             </ul>
           </div>
         ),
@@ -1833,7 +1924,7 @@ if (result.isPaused()) {
         icon: <BarChart3 className="w-4 h-4" />,
         body: (
           <div className="space-y-3 text-[13.5px] text-slate-300 leading-relaxed">
-            <p>Trends over time: executions per day, cost per day, top agents, top tools, p99 latency. The data is the same Prometheus that drives Grafana, projected for the operator who doesn&apos;t want to leave the app.</p>
+            <p>Trends over 7, 30 or 90 days: runs over time, cost by agent, daily cost, top agents, error rate and token use by model, plus drift alerts. It reads the platform database. Grafana covers the infrastructure side.</p>
             <Hero src={SS('19-analytics.png')} alt="Analytics" />
           </div>
         ),
@@ -1844,17 +1935,45 @@ if (result.isPaused()) {
         icon: <ShieldCheck className="w-4 h-4" />,
         body: (
           <div className="space-y-3 text-[13.5px] text-slate-300 leading-relaxed">
-            <p>Tenant-scoped moderation gate. Runs <strong>pre-LLM</strong> on user input and <strong>post-LLM</strong> on model output for every agent execution. Non-bypassable — the agent itself cannot disable it.</p>
+            <p>A moderation policy checks what goes into and comes out of your agents. It runs on user input before the model, on the model&apos;s output, and on tool output, for every run in the tenant. An agent cannot turn it off.</p>
             <Hero src={SS('20-moderation.png')} alt="Moderation" />
             <p><strong className="text-white">Actions:</strong></p>
             <ul className="list-disc pl-5 space-y-0.5 text-[12px]">
-              <li><code className="text-rose-300">block</code> — refuse, execution fails with <code>MODERATION_BLOCKED</code>.</li>
-              <li><code className="text-violet-300">redact</code> — mask matching spans, allow through.</li>
-              <li><code className="text-amber-300">flag</code> — pass through, log + notify only.</li>
-              <li><code className="text-emerald-300">allow</code> — default for un-triggered categories.</li>
+              <li><code className="text-rose-300">block</code> — refuse, the run fails with <code>MODERATION_BLOCKED</code>.</li>
+              <li><code className="text-sky-300">hold</code> — <strong>Hold for review</strong>. The message waits in the Review inbox until a person releases, redacts or rejects it.</li>
+              <li><code className="text-violet-300">redact</code> — mask matching text, allow the rest through.</li>
+              <li><code className="text-amber-300">flag</code> — pass through, log and notify only.</li>
+              <li><code className="text-emerald-300">allow</code> — the default for categories that did not trigger.</li>
             </ul>
-            <p>Provider: OpenAI <code>omni-moderation-latest</code> (free for OpenAI customers, ~40–150ms). Falls open if the API key is missing, tenants who want strict fail-closed can set <code>fail_closed=true</code> on the policy.</p>
-            <p>The Observability section&apos;s observability stack also gives you the <code>/alerts</code> page, which surfaces moderation blocks alongside other failure codes — see <a href="#alerts" className="text-violet-300 underline">Alerts</a>.</p>
+            <p>The checks use OpenAI <code>omni-moderation-latest</code> plus your own patterns. If the OpenAI key is missing the check lets content through, unless the policy is set to fail closed.</p>
+            <h4 className="text-white font-semibold pt-3">Review inbox and retention</h4>
+            <p><strong>Review inbox</strong> in the sidebar lists held content for anyone with <code>moderation.review</code>, and marketplace submissions for admins. Open an item, read why it was held, then release it, redact and release it, or reject it. The same items show under <a href="#needs-you" className="text-violet-300 underline">Needs you</a>.</p>
+            <p>Admins set how long moderation data is kept, on the retention card of the Moderation page: the full text of held content after a decision (30 days by default), decision records (365 days) and event previews (30 days). After that, the record keeps only the masked text.</p>
+            <p>Blocked runs also show on <a href="#alerts" className="text-violet-300 underline">Alerts</a> with the other failure causes.</p>
+          </div>
+        ),
+      },
+      {
+        id: 'improvements',
+        title: 'Improvements: feedback, lessons and fixes',
+        icon: <Sparkles className="w-4 h-4" />,
+        badge: 'new',
+        body: (
+          <div className="space-y-3 text-[13.5px] text-slate-300 leading-relaxed" data-testid="help-improvements">
+            <p>Agents get better from their mistakes, but never change themselves without a person saying yes.</p>
+            <h4 className="text-white font-semibold pt-1">Give feedback</h4>
+            <p>Under an answer in chat, on a run&apos;s page or on an action card, click thumbs up or thumbs down. With a thumbs down, say what the answer should have been. Every role can do this. Your note becomes a <strong className="text-white">lesson</strong>, and a link takes you to it. Lessons are kept for 180 days by default.</p>
+            <h4 className="text-white font-semibold pt-3">How a lesson becomes a fix</h4>
+            <Steps items={[
+              'Thumbs down, corrections, failed runs, rejected or edited actions and harm flags all become lessons. Similar lessons are grouped so one fix covers them.',
+              'Each group suggests test cases. Accept the ones that describe what the agent should do, edit them, or drop them.',
+              'Click <strong>Propose a fix</strong>. The platform drafts one change to the agent&apos;s instructions, tools or settings and proves it against the accepted tests and recent real inputs before anyone sees it.',
+              'A proven fix waits under <strong>Needs you &rarr; Proposals</strong>. Someone other than the agent&apos;s author approves it, except on the sample agent or for a builder working alone. A rejected fix becomes a lesson too.',
+              'The fix goes live as a new version and is watched against the old one. If it does worse it is rolled back on its own, with the reason.',
+            ]} />
+            <p><strong className="text-white">Where to look.</strong> <strong>Improvements</strong> in the sidebar lists agents with open lessons, worst first. Each agent has its own Improvements page with its groups, suggested tests, proposed fixes and releases. The agent&apos;s owner can require the accepted tests to pass before any change goes live.</p>
+            <p><strong className="text-white">Try it.</strong> Click <strong>Try the sample agent</strong> on the Improvements page. Its planted mistake is answering in Fahrenheit when asked for Kelvin. Give it a thumbs down with the right answer, propose a fix and follow it through.</p>
+            <Callout tone="info">Seeing Improvements needs <code>improvements.view</code> and proposing needs <code>improvements.propose</code>, which creators and admins have. Approving needs <code>improvements.approve</code>.</Callout>
           </div>
         ),
       },
@@ -1888,21 +2007,21 @@ if (result.isPaused()) {
                 <text x="160" y="68" textAnchor="middle" fill="#a5f3fc" fontSize="14" fontWeight="bold">Web tier</text>
                 <text x="160" y="90" textAnchor="middle" fill="#94a3b8" fontSize="11">Stateless · scale by replicas</text>
                 <text x="160" y="108" textAnchor="middle" fill="#94a3b8" fontSize="11">CDN + ingress in front</text>
-                <text x="160" y="126" textAnchor="middle" fill="#64748b" fontSize="10">3 replicas → 30 by HPA</text>
+                <text x="160" y="126" textAnchor="middle" fill="#64748b" fontSize="10">2 replicas → 8 by HPA</text>
 
                 {/* API tier */}
                 <rect x="320" y="40" width="240" height="100" rx="10" fill="#0f172a" stroke="#a855f7" />
                 <text x="440" y="68" textAnchor="middle" fill="#ddd6fe" fontSize="14" fontWeight="bold">API tier</text>
-                <text x="440" y="90" textAnchor="middle" fill="#94a3b8" fontSize="11">Stateless · HPA by CPU + RPS</text>
-                <text x="440" y="108" textAnchor="middle" fill="#94a3b8" fontSize="11">Connection pool 20 per pod</text>
-                <text x="440" y="126" textAnchor="middle" fill="#64748b" fontSize="10">3 replicas → 50 typical</text>
+                <text x="440" y="90" textAnchor="middle" fill="#94a3b8" fontSize="11">Stateless · HPA on CPU 70%</text>
+                <text x="440" y="108" textAnchor="middle" fill="#94a3b8" fontSize="11">DB pool 10 + 5 per worker</text>
+                <text x="440" y="126" textAnchor="middle" fill="#64748b" fontSize="10">3 replicas → 10 by HPA</text>
 
                 {/* Runtime tier */}
                 <rect x="600" y="40" width="240" height="100" rx="10" fill="#0f172a" stroke="#10b981" />
                 <text x="720" y="68" textAnchor="middle" fill="#bbf7d0" fontSize="14" fontWeight="bold">Runtime tier</text>
                 <text x="720" y="90" textAnchor="middle" fill="#94a3b8" fontSize="11">Per-agent pools · KEDA</text>
                 <text x="720" y="108" textAnchor="middle" fill="#94a3b8" fontSize="11">Queue-depth scaling</text>
-                <text x="720" y="126" textAnchor="middle" fill="#64748b" fontSize="10">Scale to zero between bursts</text>
+                <text x="720" y="126" textAnchor="middle" fill="#64748b" fontSize="10">Scales on NATS consumer lag</text>
 
                 {/* Pools row */}
                 <text x="720" y="170" textAnchor="middle" fill="#94a3b8" fontSize="10">Pools</text>
@@ -1928,7 +2047,7 @@ if (result.isPaused()) {
                 <text x="350" y="308" textAnchor="middle" fill="#dbeafe" fontSize="11">Redis · queues · cache</text>
 
                 <rect x="460" y="284" width="180" height="40" rx="6" fill="#1e293b" stroke="#475569" />
-                <text x="550" y="308" textAnchor="middle" fill="#dbeafe" fontSize="11">Object storage S3</text>
+                <text x="550" y="308" textAnchor="middle" fill="#dbeafe" fontSize="11">Object storage · local/S3/Azure</text>
 
                 <rect x="660" y="284" width="160" height="40" rx="6" fill="#1e293b" stroke="#475569" />
                 <text x="740" y="308" textAnchor="middle" fill="#dbeafe" fontSize="11">Pinecone (optional)</text>
@@ -1951,15 +2070,15 @@ if (result.isPaused()) {
             <div className="overflow-x-auto">
               <table className="w-full text-[12px] my-2">
                 <thead className="text-slate-400 border-b border-slate-700">
-                  <tr><th className="text-left py-1.5">Tier</th><th className="text-left py-1.5">CPU req</th><th className="text-left py-1.5">Mem req</th><th className="text-left py-1.5">Replicas (default)</th><th className="text-left py-1.5">Replicas (1k tenants)</th></tr>
+                  <tr><th className="text-left py-1.5">Tier</th><th className="text-left py-1.5">CPU req</th><th className="text-left py-1.5">Mem req</th><th className="text-left py-1.5">Min replicas</th><th className="text-left py-1.5">Max replicas</th></tr>
                 </thead>
                 <tbody className="text-slate-300">
-                  <tr className="border-b border-slate-800/60"><td className="py-1.5">Web</td><td>200 m</td><td>256 Mi</td><td>3</td><td>10–30</td></tr>
-                  <tr className="border-b border-slate-800/60"><td className="py-1.5">API</td><td>500 m</td><td>1 Gi</td><td>3</td><td>20–50</td></tr>
-                  <tr className="border-b border-slate-800/60"><td className="py-1.5">Runtime · chat</td><td>500 m</td><td>1.5 Gi</td><td>2 → 0/burst</td><td>20–100</td></tr>
-                  <tr className="border-b border-slate-800/60"><td className="py-1.5">Runtime · default</td><td>500 m</td><td>1.5 Gi</td><td>2 → 0/burst</td><td>50–200</td></tr>
-                  <tr className="border-b border-slate-800/60"><td className="py-1.5">Runtime · long-running</td><td>1</td><td>4 Gi</td><td>1</td><td>5–20</td></tr>
-                  <tr><td className="py-1.5">Runtime · heavy-reasoning</td><td>2</td><td>8 Gi</td><td>1</td><td>2–10</td></tr>
+                  <tr className="border-b border-slate-800/60"><td className="py-1.5">Web</td><td>100 m</td><td>256 Mi</td><td>2</td><td>8</td></tr>
+                  <tr className="border-b border-slate-800/60"><td className="py-1.5">API</td><td>250 m</td><td>512 Mi</td><td>3</td><td>10</td></tr>
+                  <tr className="border-b border-slate-800/60"><td className="py-1.5">Runtime · default (Azure)</td><td>200 m</td><td>512 Mi</td><td>1</td><td>5</td></tr>
+                  <tr className="border-b border-slate-800/60"><td className="py-1.5">Runtime · chat (Azure)</td><td>200 m</td><td>512 Mi</td><td>1</td><td>3</td></tr>
+                  <tr className="border-b border-slate-800/60"><td className="py-1.5">Runtime · long-running (Azure)</td><td>500 m</td><td>1 Gi</td><td>1</td><td>3</td></tr>
+                  <tr><td className="py-1.5">Runtime · heavy-reasoning (Azure)</td><td>500 m</td><td>1 Gi</td><td>1</td><td>4</td></tr>
                 </tbody>
               </table>
             </div>
@@ -1993,8 +2112,8 @@ if (result.isPaused()) {
                   </tr>
                   <tr>
                     <td className="py-2"><code>remote</code> <span className="text-emerald-300 text-[10px] uppercase ml-1">production</span></td>
-                    <td>Runtime pods (NATS-routed)</td>
-                    <td>Production · all multi-tenant traffic</td>
+                    <td>The agent-runtime service, over HTTP at <code>RUNTIME_URL</code></td>
+                    <td>A single shared runtime Deployment</td>
                   </tr>
                 </tbody>
               </table>
@@ -2010,27 +2129,25 @@ if (result.isPaused()) {
 
             <h4 className="text-white font-semibold pt-2">remote mode — what it does</h4>
             <ol className="list-decimal pl-5 space-y-1 text-[13px]">
-              <li>API loads the agent config + tools and builds an <code>ExecutionConfig</code>.</li>
-              <li>API publishes the work to NATS JetStream: stream <code>agents</code>, subject <code>agents.&lt;pool&gt;</code> (default, chat, heavy-reasoning, long-running).</li>
-              <li>A runtime pod (matching the pool) consumes the message via <code>consumer.py</code>, loads the LLM + tools, runs the agent.</li>
-              <li>Runtime publishes events back over Redis: <code>start</code>, <code>tool_call</code>, <code>tool_result</code>, <code>token</code>, <code>done</code> or <code>error</code>.</li>
-              <li>API streams those events to the caller (or blocks if <code>wait=true</code>).</li>
+              <li>API builds an <code>ExecutionConfig</code>.</li>
+              <li>API streams the run from <code>RUNTIME_URL/execute/stream</code> (default <code>http://abenix-agent-runtime:8001</code>, timeout <code>RUNTIME_TIMEOUT</code> 300 s).</li>
+              <li>API passes the runtime&apos;s events on to the caller.</li>
             </ol>
+            <p>Queued runs are a separate switch. With <code>scaling.execRemote</code> on, the API publishes the run to JetStream stream <code>agents</code>, subject <code>agents.&lt;pool&gt;</code>, for every agent whose pool is not <code>inline</code>. A pool pod runs <code>consumer.py</code>, executes the agent and sends events back over Redis.</p>
 
-            <h4 className="text-white font-semibold pt-2">Why remote is more robust</h4>
+            <h4 className="text-white font-semibold pt-2">Why queue runs onto pools</h4>
             <ul className="list-disc pl-5 space-y-1 text-[13px]">
               <li><strong>Crash recovery</strong>. If a runtime pod dies mid-agent, NATS redelivers the message and another pod reruns the agent from the start. Tool side effects from the first try can repeat. After 3 pickups the run fails with <code>STALE_SWEEP</code>.</li>
               <li><strong>Resource isolation</strong> — heavy-reasoning agents can&apos;t OOM the API.</li>
-              <li><strong>Independent scaling</strong> — API runs at predictable CPU. Runtime pools KEDA-autoscale per pool to 0 between bursts.</li>
+              <li><strong>Independent scaling</strong> — API runs at predictable CPU. Runtime pools scale per pool with KEDA.</li>
               <li><strong>Per-pool routing</strong> — chat agents on a small pool, heavy on the big pool, governed independently by per-pool KEDA triggers on JetStream consumer lag.</li>
             </ul>
 
             <h4 className="text-white font-semibold pt-2">Toggling</h4>
-            <pre className="text-xs bg-slate-950/60 border border-slate-800 rounded p-3 overflow-x-auto">{`# Production — default in this Helm chart
-kubectl -n abenix set env deployment/abenix-api RUNTIME_MODE=remote
-
-# Dev / single-pod — agent runs in the API process
-kubectl -n abenix set env deployment/abenix-api RUNTIME_MODE=embedded`}</pre>
+            <pre className="text-xs bg-slate-950/60 border border-slate-800 rounded p-3 overflow-x-auto">{`runtimeMode: embedded  # chart default
+scaling:
+  execRemote: true
+  queueBackend: nats`}</pre>
 
             <Callout tone="info">
               All Atlas tools work in both modes. In embedded mode the tools execute in-process, in remote mode they execute on the runtime pod. The tenant + per-agent <code>atlas_graphs</code> allow-list is enforced identically in both code paths.
@@ -2044,37 +2161,38 @@ kubectl -n abenix set env deployment/abenix-api RUNTIME_MODE=embedded`}</pre>
         icon: <Cpu className="w-4 h-4" />,
         body: (
           <div className="space-y-3 text-[13.5px] text-slate-300 leading-relaxed">
-            <p>The runtime tier is split into pools, one per agent profile. Each pool has its own Deployment, its own Redis queue, and its own KEDA <code>ScaledObject</code> watching that queue&apos;s depth.</p>
+            <p>The runtime tier is split into pools, one per agent profile. Each pool has its own Deployment, its own NATS subject <code>agents.&lt;pool&gt;</code> and its own KEDA <code>ScaledObject</code> watching that consumer&apos;s lag.</p>
             <p>Pools by purpose:</p>
             <ul className="list-disc pl-5 space-y-1 text-[13px]">
+              <li><strong>inline</strong> — no pool, the run stays on the API pod.</li>
               <li><strong>chat</strong> — short-lived (under 30s), low memory, autoscales aggressively.</li>
               <li><strong>default</strong> — bulk workhorse for typical agents.</li>
               <li><strong>long-running</strong> — over-30s executions, bigger CPU/RAM, slower scale.</li>
-              <li><strong>heavy-reasoning</strong> — 8GB RAM, large-context models, tightest concurrency cap.</li>
+              <li><strong>heavy-reasoning</strong> — large-context models, 2 runs per pod in the Azure values, tightest concurrency cap.</li>
             </ul>
             <p>Why split? A long-running research agent shouldn&apos;t starve a chat session. Different concurrency, different SLOs, different LLM rate-limit budgets per pool.</p>
 
             <h4 className="text-white font-semibold pt-3">KEDA queue-depth scaling</h4>
-            <p>Each pool autoscales by Redis list length. Conceptually: if 200 messages sit in <code>chat-queue</code> and the per-pod target is 10, KEDA grows the pool to 20 pods.</p>
-            <pre className="text-xs bg-slate-950/60 border border-slate-800 rounded p-3 overflow-x-auto">{`# infra/helm/abenix/templates/keda-chat.yaml (simplified)
+            <p>Each pool autoscales on its JetStream consumer lag. Conceptually: if 200 messages wait on <code>agents.chat</code> and the per-pod target is 10, KEDA grows the pool to 20 pods.</p>
+            <pre className="text-xs bg-slate-950/60 border border-slate-800 rounded p-3 overflow-x-auto">{`# rendered from infra/helm/abenix/templates/agent-runtime-pools.yaml (simplified)
 apiVersion: keda.sh/v1alpha1
 kind: ScaledObject
 metadata:
-  name: abenix-runtime-chat
+  name: abenix-agent-runtime-chat
 spec:
   scaleTargetRef:
     name: abenix-agent-runtime-chat
-  minReplicaCount: 0          # scale to zero on idle
-  maxReplicaCount: 100
-  pollingInterval: 10
-  cooldownPeriod: 60
+  minReplicaCount: 1
+  maxReplicaCount: 3
+  pollingInterval: 15
+  cooldownPeriod: 300
   triggers:
-  - type: redis
+  - type: nats-jetstream
     metadata:
-      address: redis:6379
-      listName: chat-queue
-      listLength: "10"        # target items per pod`}</pre>
-            <p>Tune <code>listLength</code> down for lower latency at higher cost, tune up to save money at the cost of queue wait. The <code>/admin/scaling</code> page exposes these knobs to admins without a helm upgrade — see the <a href="#admin-scaling" className="text-violet-300 underline">Scaling Console</a> topic below.</p>
+      stream: agents
+      consumer: abenix-chat-consumer
+      lagThreshold: "3"       # target pending messages per pod`}</pre>
+            <p>Set <code>keda_queue_trigger</code> on a pool in the values file, default 3. Lower means lower latency at higher cost, higher saves money at the cost of queue wait. The <a href="#admin-scaling" className="text-violet-300 underline">Scaling Console</a> sets per-agent settings only.</p>
           </div>
         ),
       },
@@ -2091,7 +2209,7 @@ spec:
               <div className="rounded-lg border border-violet-700/40 bg-violet-900/15 p-3">
                 <div className="text-violet-300 font-semibold mb-1">Layer 1 — Agents + pods</div>
                 <div className="text-slate-400 mb-2"><a href="/admin/scaling" className="text-violet-300 underline">/admin/scaling</a></div>
-                <p className="text-slate-300 mb-2">Per-agent <code>runtime_pool</code>, <code>min_replicas</code>, <code>max_replicas</code>, <code>concurrency_per_replica</code>, <code>rate_limit_qps</code>, <code>daily_budget_usd</code>. Once a tenant has spent <code>daily_budget_usd</code> on the agent in a UTC day, or the agent has spent its <code>daily_cost_limit</code> across everyone, new runs are refused with <code>BUDGET_EXCEEDED</code> until midnight UTC. 0 means no cap.</p>
+                <p className="text-slate-300 mb-2">Per-agent <code>runtime_pool</code>, <code>min_replicas</code>, <code>max_replicas</code>, <code>concurrency_per_replica</code>, <code>rate_limit_qps</code>, <code>daily_budget_usd</code>. Once a tenant has spent <code>daily_budget_usd</code> on the agent in a UTC day, or the agent has spent its <code>daily_cost_limit</code> across everyone, new runs are refused with <code>BUDGET_EXCEEDED</code> until midnight UTC. 0 means no cap. Over <code>rate_limit_qps</code> runs per second a call is turned away with <code>RATE_LIMITED</code> and a retry time. The replica and concurrency fields are a sizing note only, the pool&apos;s Helm settings decide those.</p>
                 <p className="text-slate-300 mb-2">The daily caps are checked before any run starts on every path: the agent page, the API, triggers, pipelines and pipeline steps, meetings, OracleNet, governance replays, a2a and batch. A refusal is 429 <code>BUDGET_EXCEEDED</code> with today&apos;s spend (UTC) and who can raise the cap. A saved agent run as a pipeline step counts toward its own caps once the pipeline finishes, without counting twice in the organization totals.</p>
                 <p className="text-slate-300 mb-2"><code>per_execution_cost_limit</code> caps one run. After each model call the run checks its spend, and once the limit is reached and the agent wants another step it stops with <code>BUDGET_EXCEEDED</code>. The answer so far and every step stay in the Flight Recorder, ending with a <code>budget_stop</code> step. A final answer that crosses the limit is kept. Pipelines apply the same limit across steps, and an API caller can only tighten it with <code>cost_limit</code>. A pipeline run&apos;s cost includes what failed and retried steps spent.</p>
                 <p className="text-slate-400 text-[11.5px]">Stops the api pod from doing agent work itself. KEDA scales the pool deployments on NATS JetStream consumer lag.</p>
@@ -2125,7 +2243,7 @@ spec:
 
             <h4 className="text-white font-semibold pt-3">Decision tree for an incident</h4>
             <ol className="list-decimal pl-5 space-y-1 text-[13px]">
-              <li><strong>Open <a href="/admin/scaling" className="text-violet-300 underline">/admin/scaling</a>.</strong> Is the pool pinned at max replicas? Move the loud agent to a less-contested pool or raise its <code>max_replicas</code>.</li>
+              <li><strong>Open <a href="/admin/scaling" className="text-violet-300 underline">/admin/scaling</a>.</strong> Is the pool pinned at max replicas? Move the loud agent to a less-contested pool or raise the pool&apos;s <code>max_replicas</code> in the Helm values. The per-agent field is not applied.</li>
               <li><strong>Open <a href="/admin/tool-scaling" className="text-cyan-300 underline">/admin/tool-scaling</a>.</strong> Any tool with red breaker dot or many 24h calls? Raise its qps (if external can take it) or its cache TTL.</li>
               <li><strong>Open <a href="/admin/pipeline-scaling" className="text-emerald-300 underline">/admin/pipeline-scaling</a>.</strong> Expand the slow pipeline. The slow node is either an agent (go to step 1) or a tool (step 2). Control nodes don&apos;t scale separately.</li>
               <li>Only after all three show green: it&apos;s the external provider. Add a breaker and an alert.</li>
@@ -2146,13 +2264,13 @@ spec:
             <p>Postgres is the source of truth for everything that needs to be transactional: tenants, users, agents, conversations, executions, atlas graphs, KB metadata, and (when <code>vector_backend=pgvector</code>) the embeddings themselves.</p>
             <p><strong className="text-white">Vertical first, horizontal later.</strong> A managed Postgres at 8 vCPU / 32 GB will comfortably hold ~1k tenants and 10M executions. Beyond that:</p>
             <ul className="list-disc pl-5 space-y-1 text-[13px]">
-              <li><strong>Read replicas</strong> for the <em>list</em> endpoints (executions, dashboards, analytics). The API supports a <code>DATABASE_URL_RO</code> env var that read-routes those queries.</li>
-              <li><strong>Partitioning</strong> on <code>executions</code> and <code>messages</code> by <code>created_at</code> (monthly). A migration helper lives in <code>packages/db/scripts/partition_executions.py</code>.</li>
-              <li><strong>Connection pooling</strong> via PgBouncer. The default pod-side pool is 20 per API replica, PgBouncer collapses N×20 client conns to a fixed primary-side limit.</li>
-              <li><strong>pgvector → Pinecone</strong> when embeddings exceed ~5M rows. Per-collection toggle, no code change.</li>
+              <li><strong>Read replicas</strong>. The base chart runs one Postgres read replica, but the API sends every query to <code>DATABASE_URL</code>. Read routing is not built in.</li>
+              <li><strong>Partitioning</strong> is not shipped. The nightly archiver keeps executions and messages small, see <a href="#archives" className="text-violet-300 underline">Archives</a>.</li>
+              <li><strong>Connection pooling</strong> via PgBouncer. The API pool is 10 plus 5 overflow per worker (<code>DB_POOL_SIZE</code>, <code>DB_MAX_OVERFLOW</code>), with 2 workers per pod. PgBouncer collapses those client connections to a fixed primary-side limit.</li>
+              <li><strong>pgvector → Pinecone</strong> when embeddings exceed ~5M rows. Pick Pinecone when you create the collection, the backend cannot be changed later.</li>
               <li><strong>Aggressive vacuum</strong> on the <code>executions</code> table — it&apos;s the high-churn one.</li>
             </ul>
-            <Callout tone="warn">Running embeddings on the same Postgres as the OLTP workload is fine until it&apos;s not. Watch <code>p99(http_request_duration)</code> — if it doubles when a Cognify job runs, move embeddings to Pinecone or a dedicated pgvector.</Callout>
+            <Callout tone="warn">Running embeddings on the same Postgres as the OLTP workload is fine until it&apos;s not. Watch the p99 of <code>abenix_http_request_duration_seconds</code> — if it doubles when a Cognify job runs, move embeddings to Pinecone or a dedicated pgvector.</Callout>
           </div>
         ),
       },
@@ -2164,8 +2282,8 @@ spec:
           <div className="space-y-3 text-[13.5px] text-slate-300 leading-relaxed">
             <p>Redis carries: rate-limit counters, KB ingestion job state, the WebSocket broker for real-time updates, the LLM cache, and the Celery queues for document, cognify and KB jobs. Agent runs never queue on Redis.</p>
             <ul className="list-disc pl-5 space-y-1 text-[13px]">
-              <li>Default deployment: a single Redis pod, persistence off — fine for ~50 RPS.</li>
-              <li>Above 50 RPS, switch to <strong>Redis Cluster mode</strong> (the bundled bitnami chart supports it) and enable AOF persistence.</li>
+              <li>Default deployment: a single standalone Redis pod with a persistent volume, fine for ~50 RPS.</li>
+              <li>Above 50 RPS, give Redis more memory and turn on AOF, as <code>values-production.yaml</code> does. The bundled bitnami chart also supports <code>redis.architecture: replication</code>.</li>
               <li>Queued agent runs need <strong>NATS JetStream</strong>. See the NATS topic next.</li>
             </ul>
           </div>
@@ -2218,11 +2336,11 @@ spec:
         icon: <Terminal className="w-4 h-4" />,
         body: (
           <div className="space-y-3 text-[13.5px] text-slate-300 leading-relaxed">
-            <p>Each runtime pod ships Docker / Podman, sandboxes are spawned per-execution. Resource caps live on <code>SandboxImagePolicy</code>: default 512 MB / 30s / no network. Three things matter at scale:</p>
+            <p>Code runs through the <code>sandboxed_job</code> tool, as a Kubernetes Job in the cluster or a docker container on a host. Defaults per call: 512 MB, 1 CPU, 60s, no network, read-only filesystem. Only images in <code>SANDBOXED_JOB_ALLOWED_IMAGES</code> run. Three things matter at scale:</p>
             <ol className="list-decimal pl-5 space-y-1 text-[13px]">
               <li><strong>Image pre-warming</strong> — pull the standard images (python, node, go, …) into the runtime nodes via a DaemonSet. Cold pulls add 8–15s of latency on the first execution per pod.</li>
-              <li><strong>Per-tenant quotas</strong> — set <code>tenant.sandbox_concurrency_max</code> so a runaway agent in one tenant can&apos;t exhaust a runtime pod.</li>
-              <li><strong>OOM watchdog</strong> — the runtime kills sandboxes that exceed their memory cap and surfaces <code>SANDBOX_OOM</code> on the failed execution. Don&apos;t silence those — they&apos;re a real signal.</li>
+              <li><strong>Network</strong> — off unless an admin turns it on under Settings &rarr; Sandbox or the operator sets <code>SANDBOXED_JOB_ALLOW_NETWORK=true</code>.</li>
+              <li><strong>Memory limit</strong> — Kubernetes or docker kills a sandbox that goes over its memory cap and the run fails with <code>SANDBOX_OOM</code>. Don&apos;t silence those, they&apos;re a real signal.</li>
             </ol>
           </div>
         ),
@@ -2245,7 +2363,7 @@ spec:
                 </tbody>
               </table>
             </div>
-            <p>Switch by setting <code>collection.vector_backend</code>. Existing chunks aren&apos;t migrated automatically — re-Cognify the collection.</p>
+            <p>Pick the backend when you create the collection. It can&apos;t be changed later. New collections get pgvector unless the API call asks for Pinecone.</p>
           </div>
         ),
       },
@@ -2255,8 +2373,8 @@ spec:
         icon: <FileText className="w-4 h-4" />,
         body: (
           <div className="space-y-3 text-[13.5px] text-slate-300 leading-relaxed">
-            <p>KB documents, code-asset zips, exported PDFs, and BPM-analyzer attachments live on object storage. Default: a PVC inside the cluster (good for dev). Production: S3 / Azure Blob / GCS.</p>
-            <p>Set <code>STORAGE_BACKEND=s3</code> and the standard AWS env vars, the API + worker share the bucket through the <code>StorageService</code> abstraction. Multi-region: set the bucket region close to the cluster, large blobs are streamed, not buffered, so latency doesn&apos;t spike memory.</p>
+            <p>KB documents, code-asset zips, exported PDFs, and BPM-analyzer attachments live on object storage. Default: local disk under <code>/data</code> (good for dev). Production: S3 or Azure Blob.</p>
+            <p>Set <code>objectStorage.type</code> (<code>STORAGE_BACKEND</code>) to <code>s3</code> with <code>STORAGE_S3_BUCKET</code> and the AWS keys, or <code>azure</code> with <code>STORAGE_AZURE_CONNECTION_STRING</code>. The API + worker share the bucket through the <code>StorageService</code> abstraction. Multi-region: set the bucket region close to the cluster, large blobs are streamed, not buffered, so latency doesn&apos;t spike memory.</p>
           </div>
         ),
       },
@@ -2268,11 +2386,11 @@ spec:
           <div className="space-y-3 text-[13.5px] text-slate-300 leading-relaxed">
             <p>Multi-tenant fairness is enforced at three places:</p>
             <ul className="list-disc pl-5 space-y-1 text-[13px]">
-              <li><strong>Rate limiter middleware</strong> — per-tenant token bucket on the API, configurable via <code>tenant.rate_limit_per_minute</code>.</li>
-              <li><strong>Budget</strong> — per-tenant monthly USD cap, on overage the gate returns <code>BUDGET_EXCEEDED</code>.</li>
-              <li><strong>Sandbox concurrency</strong> — described above.</li>
+              <li><strong>Rate limiter middleware</strong> — a per-user sliding window of 300 requests a minute (<code>RATE_LIMIT_USER_REQ_PER_MIN</code>), and 60 per IP for anonymous calls.</li>
+              <li><strong>Budget</strong> — per-agent daily caps: <code>daily_cost_limit</code> for the agent across every caller and <code>daily_budget_usd</code> for one tenant on that agent. Over the cap a run gets 429 <code>BUDGET_EXCEEDED</code>.</li>
+              <li><strong>Per-tenant tool caps</strong> — qps, daily calls and in-flight limits per tool.</li>
             </ul>
-            <p>Surface tenant fairness on the dashboard: the <code>abenix_active_executions{`{tenant_id}`}</code> gauge is per-tenant, Grafana&apos;s &quot;Top tenants&quot; panel highlights the loud neighbours.</p>
+            <p>Surface tenant fairness on the dashboard: the <code>abenix_active_executions{`{tenant_id}`}</code> gauge is per-tenant, Grafana&apos;s &quot;Abenix — Scaling Ops&quot; dashboard shows token spend by tenant and rate-limit hits per tenant.</p>
           </div>
         ),
       },
@@ -2286,11 +2404,29 @@ spec:
             <ol className="list-decimal pl-5 space-y-1 text-[13px]">
               <li>Pick a write region. Postgres + Redis live there. Read replicas in other regions.</li>
               <li>Deploy the full stack per region, route traffic via Cloudflare / Akamai based on lowest latency.</li>
-              <li>Set <code>DATABASE_URL_RO</code> in non-write regions so list endpoints stay local.</li>
+              <li>The API has no read-only connection setting, so every region reads and writes through the one primary.</li>
               <li>Object storage: prefer a single bucket with cross-region replication enabled.</li>
               <li>LLM provider keys: keep one set globally, provider rate-limits aggregate across regions.</li>
             </ol>
-            <Callout tone="warn">Cross-region writes are eventually consistent. The Atlas time-slider is an exception — it serialises through the write region. If you need strict regional isolation, deploy independent clusters and federate via the SDK.</Callout>
+            <Callout tone="warn">The chart has no cross-region features. For strict regional isolation deploy independent clusters and connect them through the SDK.</Callout>
+          </div>
+        ),
+      },
+      {
+        id: 'cluster-health',
+        title: 'Cluster Health',
+        icon: <Cpu className="w-4 h-4" />,
+        badge: 'admin',
+        body: (
+          <div className="space-y-3 text-[13.5px] text-slate-300 leading-relaxed">
+            <p><strong>Admin &rarr; Cluster Health</strong> says whether the Kubernetes cluster running the platform is healthy, read live from Kubernetes. Only admins see it.</p>
+            <ul className="list-disc pl-5 space-y-1 text-[13px]">
+              <li>A banner gives one verdict for the whole cluster and lists the reasons, if any.</li>
+              <li>Node cards show CPU, memory and pressure for each machine.</li>
+              <li>Services are grouped as Core, Runtime pools, Data and Apps, with ready counts, image, restarts and a scaling sparkline. Filter by name or status.</li>
+              <li>Click a pod for its events and the end of its log. A warnings timeline shows recent trouble.</li>
+            </ul>
+            <p>The page refreshes every 15 seconds unless you pause it. If something is hidden, it says which helm value turns it on. When the API runs outside Kubernetes, as with <code>dev-local.sh</code>, the page explains that there is no cluster to read.</p>
           </div>
         ),
       },
@@ -2301,7 +2437,7 @@ spec:
         badge: 'admin',
         body: (
           <div className="space-y-3 text-[13.5px] text-slate-300 leading-relaxed">
-            <p>The <code className="text-cyan-300">/admin/scaling</code> page lets admins tune scaling without a helm upgrade. Per-pool min/max replicas, KEDA <code>listLength</code>, sandbox concurrency caps — change values, click Apply, the API reconciles them via the kube API.</p>
+            <p>The <code className="text-cyan-300">/admin/scaling</code> page (Admin &rarr; Scaling) sets per-agent scaling without a helm upgrade. Pool health cards show agents and 24h runs per pool. In the agent table, Edit scaling sets pool, min and max replicas, concurrency, rate limit and daily budget, and Save writes them to the agent. Pause and Resume stop or restart an agent. Pool replica bounds and KEDA triggers stay in helm values.</p>
             <Hero src={SS('23-admin-scaling.png')} alt="Scaling console" />
           </div>
         ),
@@ -2312,7 +2448,7 @@ spec:
         icon: <BarChart3 className="w-4 h-4" />,
         body: (
           <div className="space-y-3 text-[13.5px] text-slate-300 leading-relaxed">
-            <p>Pre-wired observability ships with <code>scripts/deploy.sh</code>. <strong>Prometheus</strong> scrapes <code>/api/metrics</code> on the API every 15s, <strong>Grafana</strong> renders the bundled &quot;Abenix Operations&quot; dashboard.</p>
+            <p>Pre-wired observability ships with <code>scripts/deploy.sh</code>. <strong>Prometheus</strong> scrapes <code>/api/metrics</code> on the API every 15s, <strong>Grafana</strong> renders the bundled &quot;Abenix — Operations Overview&quot; dashboard.</p>
             <Hero src={SS('09-grafana-dashboard.png')} alt="Grafana — Abenix Operations dashboard" caption="Operations Overview — LLM spend, tokens, execution outcomes, failure breakdown by code, stale sweeps" />
             <Callout tone="info">
               Grafana is intentionally <strong>not exposed on the public ingress</strong>. Reach it via port-forward:
@@ -2333,23 +2469,23 @@ spec:
               <li>abenix_notifications_sent_total{`{channel,severity}`}</li>
               <li>abenix_tool_calls_total{`{tool_name,outcome}`}</li>
               <li>abenix_http_requests_total + abenix_http_request_duration_seconds</li>
-              <li className="text-emerald-300">abenix_code_asset_invocations_total{`{code_asset_id,status}`} <span className="text-slate-500">(v1.4.0)</span></li>
+              <li className="text-emerald-300">abenix_code_asset_invocations_total{`{code_asset_id,status}`}</li>
               <li className="text-emerald-300">abenix_code_asset_duration_seconds (histogram)</li>
-              <li className="text-emerald-300">abenix_ml_model_invocations_total{`{ml_model_id,operation,status}`} <span className="text-slate-500">(v1.4.0)</span></li>
+              <li className="text-emerald-300">abenix_ml_model_invocations_total{`{ml_model_id,operation,status}`}</li>
               <li className="text-emerald-300">abenix_ml_model_duration_seconds (histogram)</li>
               <li className="text-emerald-300">abenix_ml_model_cost_usd_total{`{ml_model_id}`}</li>
               <li className="text-emerald-300">abenix_kb_query_invocations_total{`{kb_collection_id,status}`}</li>
               <li className="text-emerald-300">abenix_kb_query_duration_seconds (histogram)</li>
             </ul>
 
-            <h4 className="text-white font-semibold pt-3">Resource invocation log (v1.4)</h4>
-            <p>Every <code>code_asset</code> pod run, <code>ml_model</code> prediction, and <code>knowledge_search</code> query is now persisted as a first-class row in the new <code>code_asset_invocations</code>, <code>ml_model_invocations</code>, and <code>kb_query_invocations</code> tables. The Invocations panel on <a href="/code-runner" className="text-cyan-300 underline">/code-runner</a> and <a href="/ml-models" className="text-cyan-300 underline">/ml-models</a> reads from these tables: 24h stats card (totals, error rate, p95 duration, top calling agents, total ML cost) plus a scrollable list of recent runs. Click any row → expand to see input, output, stdout/stderr, predicted class, confidence, parent agent execution link.</p>
-            <p><strong className="text-white">Live updates (v1.4.1):</strong> Once you open the Invocations tab, new runs stream into the panel via SSE — the "live" indicator turns on, and new rows prepend to the list automatically as agents fire elsewhere. Powered by Redis pub/sub channel <code>invocations:{`{kind}:{resource_id}`}</code> with a 15-second heartbeat to keep the connection alive.</p>
-            <h4 className="text-white font-semibold pt-3">Backfill from existing executions (v1.4.2)</h4>
-            <p>Historical agent runs from before the v1.4.0 deploy live in <code>executions.tool_calls</code> JSONB blobs but not in the new invocation tables. Run <code>scripts/backfill_resource_invocations.py</code> via <code>kubectl exec abenix-api ... python /app/scripts/backfill_resource_invocations.py</code> with optional <code>BACKFILL_DAYS</code> env var (default 30). Script is idempotent — re-runs skip rows already backfilled (marked <code>caller_source=&apos;backfill&apos;</code>).</p>
-            <h4 className="text-white font-semibold pt-3">Pre-built Grafana dashboard (v1.4.3)</h4>
+            <h4 className="text-white font-semibold pt-3">Resource invocation log</h4>
+            <p>Every <code>code_asset</code> pod run, <code>ml_model</code> prediction, and <code>knowledge_search</code> query is stored as a row in the <code>code_asset_invocations</code>, <code>ml_model_invocations</code>, and <code>kb_query_invocations</code> tables. The Invocations panel on <a href="/code-runner" className="text-cyan-300 underline">/code-runner</a> and <a href="/ml-models" className="text-cyan-300 underline">/ml-models</a> reads from these tables: 24h stats card (totals, error rate, p95 duration, top calling agents, total ML cost) plus a scrollable list of recent runs. Click any row → expand to see input, output, stdout/stderr, predicted class, confidence, parent agent execution link.</p>
+            <p><strong className="text-white">Live updates:</strong> Once you open the Invocations tab, new runs stream into the panel via SSE — the "live" indicator turns on, and new rows prepend to the list automatically as agents fire elsewhere. Powered by Redis pub/sub channel <code>invocations:{`{kind}:{resource_id}`}</code> with a 15-second heartbeat to keep the connection alive.</p>
+            <h4 className="text-white font-semibold pt-3">Backfill from existing executions</h4>
+            <p>Historical agent runs from before the invocation tables existed live in <code>executions.tool_calls</code> JSONB blobs but not in the new invocation tables. The API image does not include <code>scripts/</code>, so copy it in with <code>kubectl cp scripts/backfill_resource_invocations.py abenix/&lt;api-pod&gt;:/tmp/</code> and run <code>python /tmp/backfill_resource_invocations.py</code> in the pod, with optional <code>BACKFILL_DAYS</code> env var (default 30). Script is idempotent — re-runs skip rows already backfilled (marked <code>caller_source=&apos;backfill&apos;</code>).</p>
+            <h4 className="text-white font-semibold pt-3">Pre-built Grafana dashboard</h4>
             <p>Dashboard JSON at <code>infra/observability/dashboards/resource-invocations.json</code> ships via the existing Grafana ConfigMap provisioning. Nine panels: invocation rate per resource, p95 latency, error rate stat, cumulative ML cost, 24h spend stat. Auto-loaded by Grafana at startup. Template variables let you filter by <code>code_asset_id</code> or <code>ml_model_id</code>.</p>
-            <h4 className="text-white font-semibold pt-3">Distributed tracing (v1.5.0)</h4>
+            <h4 className="text-white font-semibold pt-3">Distributed tracing</h4>
             <p><strong className="text-white">What it does:</strong> Every agent execution becomes a single timeline ("trace") you can open in Grafana to see <em>exactly</em> where the seconds went. An agent run that took 47s shows as a flame graph: HTTP request (200ms) → desk-copilot ReAct loop (43s) → tool.recall_trajectory (120ms) → tool.invoke_agent (3.2s) → child agent (2.9s) → tool.ml_model (180ms) → … The pattern that took 80% of the wall clock is the one you optimize.</p>
             <p><strong className="text-white">Implementation:</strong> <code>opentelemetry-sdk</code> in both <code>apps/api</code> + <code>apps/agent-runtime</code>. New <code>engine/tracing.py</code> init helper. Manual spans wrap <code>agent.execute</code> and <code>tool.{`{name}`}</code> at runtime. FastAPI + httpx auto-instrumentation captures every inbound and outbound HTTP call. Trace context propagates via W3C TraceContext headers (auto-handled) and via <code>traceparent</code> in NATS message envelopes for the queue-backed remote runs.</p>
             <p><strong className="text-white">Backend:</strong> Grafana Tempo, deployed as <code>abenix-tempo</code> in the cluster — single-replica, local storage, 7-day retention. Configured as a Grafana datasource so admins can search by trace_id, drill into spans, and view the service-map graph.</p>
@@ -2358,8 +2494,8 @@ spec:
             <p><strong className="text-white">Linking from executions:</strong> Each <code>executions</code> row now has a <code>trace_id</code> column (32-char hex). The execution detail page exposes a "View Trace" link that deep-links into Grafana → Tempo → that exact trace.</p>
             <p><strong className="text-white">End-user walkthrough:</strong></p>
             <ol className="list-decimal pl-5 space-y-1 text-[13px]">
-              <li>Trader at <code>/desk</code> asks a question → desk-copilot fans out → Anthropic Sonnet 4.5 thinks → invokes 3 specialists → stitches a brief. Total 47s.</li>
-              <li>Trader (or admin) opens <code>/executions/{`{exec_id}`}</code>, sees the standard execution detail page. Bottom-right has a <strong>View Trace</strong> button (only renders when <code>trace_id</code> is present).</li>
+              <li>A user asks an orchestrator agent a question in chat → it fans out → Anthropic Sonnet 4.5 thinks → invokes 3 specialists → stitches a brief. Total 47s.</li>
+              <li>The user opens <code>/executions/{`{exec_id}`}</code>, sees the standard execution detail page. The header has a <strong>View Trace</strong> button (only renders when <code>trace_id</code> is present).</li>
               <li>Click → opens Grafana Explore in a new tab with the Tempo datasource pre-selected and the trace pre-loaded.</li>
               <li>Flame graph: 47s wall clock decomposes as 3.5s LLM call (Anthropic 200 OK), 2.8s sub-agent 1 (mispricing), 11.2s sub-agent 2 (forecaster — the long one), 0.4s sub-agent 3, 28s waiting on the final LLM stitch. Action: tune the forecaster's model_config.</li>
               <li>Click any span → side panel shows attributes (agent.id, tool.name, llm.model, llm.tokens.input). Prompts and outputs are <code>&lt;redacted&gt;</code> with a sha256 hash so the trace is shareable with the SRE team without leaking trader data.</li>
@@ -2371,11 +2507,11 @@ spec:
             <h4 className="text-white font-semibold pt-3">Notification fan-out</h4>
             <ul className="list-disc pl-5 space-y-0.5 text-[12px]">
               <li><strong>WebSocket</strong> — always on, powers the bell.</li>
-              <li><strong>Slack</strong> — set <code>ABENIX_SLACK_WEBHOOK_URL</code>. Per-user opt-in via Settings.</li>
+              <li><strong>Slack</strong> — each tenant sets its Slack webhook in Settings &rarr; Notifications and users opt in. <code>ABENIX_SLACK_WEBHOOK_URL</code> is the operator channel.</li>
               <li><strong>Email</strong> — set <code>SMTP_HOST / SMTP_USER / SMTP_PASS / SMTP_FROM</code>.</li>
             </ul>
             <h4 className="text-white font-semibold pt-3">Stale-execution sweeper</h4>
-            <p>An APScheduler job runs every 5 minutes and marks any execution still <code>RUNNING</code> for &gt;<code>STALE_EXECUTION_MAX_MINUTES</code> (default 30) as <code>FAILED</code> with <code>failure_code=STALE_SWEEP</code>. A Postgres advisory lock ensures only one API replica runs the sweep per interval.</p>
+            <p>An APScheduler job runs every 5 minutes and marks any execution still <code>RUNNING</code> for &gt;<code>STALE_EXECUTION_MAX_MINUTES</code> (default 10) as <code>FAILED</code> with <code>failure_code=STALE_SWEEP</code>. A Postgres advisory lock ensures only one API replica runs the sweep per interval.</p>
           </div>
         ),
       },
@@ -2386,7 +2522,7 @@ spec:
         badge: 'admin',
         body: (
           <div className="space-y-3 text-[13.5px] text-slate-300 leading-relaxed">
-            <p>Recording tables (anything that&apos;s append-only — invocations, executions, messages, activity logs) get garbage-collected on a schedule so they don&apos;t balloon the live DB. Old rows are streamed to gzipped JSONL on a persistent volume, then deleted from the source table after a sha256 verification.</p>
+            <p>Recording tables (anything that&apos;s append-only — invocations, executions, messages, activity logs) get garbage-collected on a schedule so they don&apos;t balloon the live DB. Old rows are written as gzipped JSONL to object storage, then deleted from the live table in 1000-row batches. The dump&apos;s sha256 is saved on the run.</p>
             <p><strong className="text-white">Schedule:</strong> nightly at <code>02:00 UTC</code> via APScheduler inside <code>abenix-api</code> — same scheduler that handles cron triggers and the stale-execution sweeper.</p>
             <p><strong className="text-white">Default retention:</strong></p>
             <ul className="list-disc pl-5 space-y-0.5 text-[12px] font-mono">
@@ -2398,16 +2534,16 @@ spec:
               <li>activity_logs — 90 days</li>
             </ul>
             <p>Admin-editable per-table at <a href="/admin/archives" className="text-cyan-300 underline">/admin/archives</a>. Toggle <code>enabled</code> off to pause archiving for a table. Bump <code>retention_days</code> upward to keep more history.</p>
-            <p><strong className="text-white">Dump format:</strong> <code>/data/archives/{`{table}/{YYYY-MM}/{table}-{timestamp}-{batch}.jsonl.gz`}</code>. Each line is one row as JSON. Files survive pod restarts (hostPath volume). Sha256 of the dump is stored in <code>archive_runs.file_sha256</code> so you can verify offline copies haven&apos;t been tampered with.</p>
+            <p><strong className="text-white">Dump format:</strong> <code>archives/{`{tenant_id}/{run_id}`}.jsonl.gz</code> on the <code>STORAGE_BACKEND</code> store. Each line is one row as JSON. Sha256 of the dump is stored in <code>archive_runs.file_sha256</code> so you can verify offline copies haven&apos;t been tampered with.</p>
             <p><strong className="text-white">Manual trigger:</strong> on the admin page, click any table button to fire an archive right now. Useful before a long retention-policy change (archive what&apos;s about-to-expire first so it lands in a clean dump).</p>
-            <p><strong className="text-white">Restore:</strong> v1 has no restore UI by design. Admin downloads the .jsonl.gz via the &quot;dump&quot; link, extracts on a workstation, and re-imports into a forensic database. The original rows have stable UUIDs so a careful <code>INSERT ... ON CONFLICT DO NOTHING</code> can re-hydrate the live table if needed. Restore-from-UI ships in v1.5.0.</p>
+            <p><strong className="text-white">Restore:</strong> There is no restore button yet. <code>POST /api/admin/archives/{`{run_id}`}/restore</code> loads a run&apos;s rows back into the live table. You can also download the .jsonl.gz through the &quot;dump&quot; link and read it on a workstation.</p>
             <Callout tone="warn">
-              The hostPath volume is single-node. For multi-node clusters or higher durability, mount a PVC (RWX storage class) at <code>/data/archives</code> instead. The archiver writes via <code>ARCHIVE_ROOT</code> env, default <code>/data/archives</code>.
+              With the local backend the dumps sit on the API pod&apos;s disk. For multi-node clusters enable <code>archives.pvc.enabled</code> and <code>api.archivesPVC.enabled</code> with an RWX storage class, or use the <code>s3</code> or <code>azure</code> backend.
             </Callout>
             <h4 className="text-white font-semibold pt-3">End-user walkthrough</h4>
             <ol className="list-decimal pl-5 space-y-1 text-[13px]">
               <li>Day 0: admin opens <code>/admin/archives</code>, sees the seeded default retention policies, leaves them alone.</li>
-              <li>Day 30 at 02:00 UTC: scheduler fires the first archive job for <code>code_asset_invocations</code> — streams rows older than 30 days into <code>code_asset_invocations-2026-06-15T020000-{`{rand}`}.jsonl.gz</code> on the abenix-api pod&apos;s <code>/data/archives/</code>, verifies sha256, then deletes those rows in 1000-row batches.</li>
+              <li>Day 30 at 02:00 UTC: scheduler fires the first archive job for <code>code_asset_invocations</code> — writes rows older than 30 days to <code>archives/{`{tenant}/{run}`}.jsonl.gz</code>, then deletes them in 1000-row batches.</li>
               <li>Compliance audit hits: open <code>/admin/archives</code>, find the run for May 2026, click <strong>dump</strong>, download the gzipped JSONL, grep with <code>zcat | jq</code>.</li>
               <li>If a row was hot-data that shouldn&apos;t have been archived, edit the retention policy upward (e.g. 30 → 90 days) so the same window stays live going forward.</li>
             </ol>
@@ -2421,11 +2557,11 @@ spec:
         badge: 'admin',
         body: (
           <div className="space-y-3 text-[13.5px] text-slate-300 leading-relaxed">
-            <p>Cost is an operations problem at scale. The two admin pages tackle it:</p>
+            <p>Cost is an operations problem at scale. Three admin pages cover it:</p>
             <Hero src={SS('25-admin-llm-pricing.png')} alt="LLM pricing" />
             <ul className="list-disc pl-5 space-y-1 text-[13px]">
-              <li><code>/admin/llm-pricing</code> — provider × model price overrides. The router multiplies these by <code>tokens_in × cost_in + tokens_out × cost_out</code> and writes per-execution cost.</li>
-              <li><code>/admin/llm-settings</code> — which models are exposed to which agents. Disable expensive models tenant-wide, force a fallback to cheaper ones.</li>
+              <li><code>/admin/llm-pricing</code> (LLM Pricing) — price per million input, output and cached input tokens for each model.</li>
+              <li><code>/admin/llm-settings</code> (Model Selection) — which model runs each built-in feature across the platform, plus the Claude subscription token.</li>
               <li><code>/admin/tool-config</code> — every API key and setting a built-in tool needs, grouped by provider and generated from the tools themselves. Save a value and agents use it within 30 seconds, no redeploy. Rows show where the value comes from (saved here, environment, defaults file) and a Test button checks the key with the provider. A tool that is missing a required key tells the user so, and names this screen.</li>
             </ul>
             <Hero src={SS('24-admin-llm-settings.png')} alt="Model selection" />
@@ -2438,15 +2574,31 @@ spec:
   {
     id: 'monetize',
     label: 'Marketplace',
-    blurb: 'Publish, discover, and monetise agents.',
+    blurb: 'List agents for others, install theirs, and optionally charge for them.',
     topics: [
+      {
+        id: 'marketplace-switches',
+        title: 'Turning the marketplace on or off',
+        icon: <Store className="w-4 h-4" />,
+        badge: 'admin',
+        body: (
+          <div className="space-y-3 text-[13.5px] text-slate-300 leading-relaxed">
+            <p>Two separate switches on <strong>Admin &rarr; Marketplace &amp; Billing</strong> decide what everyone on this deployment sees, every tenant included. Changes reach everyone within a few seconds, with no redeploy, and are written to the audit log.</p>
+            <ul className="list-disc pl-5 space-y-1 text-[13px]">
+              <li><strong className="text-white">Marketplace</strong>, on by default. People list their agents for free, an admin reviews each listing, and anyone can install what was approved. Off hides Marketplace and Creator Hub from the sidebar.</li>
+              <li><strong className="text-white">Monetization</strong>, off by default. Adds prices, Stripe checkout, creator payouts and the Billing tab in Settings. Off means every listing is free.</li>
+            </ul>
+            <p>New listings wait in the <strong>Review inbox</strong> on its Marketplace submissions tab, and under <a href="#needs-you" className="text-violet-300 underline">Needs you</a>, until an admin approves or rejects them.</p>
+          </div>
+        ),
+      },
       {
         id: 'marketplace',
         title: 'Marketplace',
         icon: <Store className="w-4 h-4" />,
         body: (
           <div className="space-y-3 text-[13.5px] text-slate-300 leading-relaxed">
-            <p>Browse agents and pipelines published by other creators. Install one into your tenant with a click — it copies the spec, attaches your KBs, and is ready to run.</p>
+            <p>Agents built by people on this platform and checked by an admin. Search or pick a category, open a card to read what it does, its tools and its reviews, then install it. It shows in My Agents and runs like one you built. Prices show only while monetization is on.</p>
             <Hero src={SS('21-marketplace.png')} alt="Marketplace" />
           </div>
         ),
@@ -2457,7 +2609,13 @@ spec:
         icon: <DollarSign className="w-4 h-4" />,
         body: (
           <div className="space-y-3 text-[13.5px] text-slate-300 leading-relaxed">
-            <p>Publish your own agents. Set price (free / per-call / monthly), pick a license, define usage limits. Earnings show up in the Creator Hub dashboard.</p>
+            <Steps items={[
+              'Click <strong>List an agent</strong>, pick one of your agents and submit it. Listing is free.',
+              'An admin reviews it. Until then it shows as waiting for review.',
+              'Once approved, anyone on the platform can find and install it. Live listings, installs and runs in the last 30 days show here.',
+              'If it is not approved, read the reviewer&apos;s note, fix the agent and submit again.',
+            ]} />
+            <p>With monetization on, you can set a price when you publish with <strong>Marketplace (Public)</strong>. Click <strong>Connect with Stripe</strong> here to get paid. The platform keeps a 20% fee on paid subscriptions, and revenue and payouts show at the bottom of the page. Listing needs the publish permission, which creators and admins have.</p>
             <Hero src={SS('22-creator-hub.png')} alt="Creator Hub" />
           </div>
         ),
@@ -2476,7 +2634,7 @@ spec:
         icon: <Plug className="w-4 h-4" />,
         body: (
           <div className="space-y-3 text-[13.5px] text-slate-300 leading-relaxed">
-            <p>The Model Context Protocol lets you wire in external servers (filesystem, browser, database, custom) so their tools become available to every agent. Register the URL — Abenix introspects the manifest and surfaces the tools.</p>
+            <p>The Model Context Protocol lets you connect outside tool servers. Click <strong>Add Server</strong> and give its URL. Abenix discovers its tools, resources and prompts. Connections are yours, and you add a server&apos;s tools to an agent in the builder. Servers must use streamable HTTP. Private and loopback addresses are refused unless an operator lists them in <code>MCP_ALLOWED_HOSTS</code>.</p>
             <Hero src={SS('detail-mcp-config.png')} alt="MCP servers" />
           </div>
         ),
@@ -2487,10 +2645,10 @@ spec:
         icon: <Key className="w-4 h-4" />,
         body: (
           <div className="space-y-3 text-[13.5px] text-slate-300 leading-relaxed">
-            <p>Mint platform keys for SDK use. Scopes: <code>execute</code>, <code>read</code>, <code>write</code>, <code>can_delegate</code>. Bcrypt-hashed at rest, the plaintext is shown once at creation.</p>
+            <p>Click <strong>Generate Key</strong> and name it to get a key for the SDK or REST API. The full key is shown once, then only its prefix. Keys are stored as SHA-256 hashes. To let a key act for your end users, give it the <code>can_delegate</code> scope with <code>PATCH /api/api-keys/{`{id}`}</code>.</p>
             <Hero src={SS('27-api-keys.png')} alt="API keys" />
             <h4 className="text-white font-semibold pt-3">actAs delegation</h4>
-            <p>For third-party apps holding a platform key: pass <code>X-Abenix-Subject: &lt;end-user-id&gt;</code> on every request. The runtime treats the request as if that subject were calling, and applies row-level RBAC accordingly.</p>
+            <p>For third-party apps holding a platform key: send <code>X-Abenix-Subject</code> with a JSON value such as <code>{`{"subject_type": "myapp", "subject_id": "u-42"}`}</code>. Runs are stamped with that subject, and agents also read the knowledge collection named after it. A key without <code>can_delegate</code> gets 403.</p>
           </div>
         ),
       },
@@ -2502,7 +2660,7 @@ spec:
         body: (
           <div className="space-y-3 text-[13.5px] text-slate-300 leading-relaxed">
             <p>Events let the platform tell your systems what happened, or start an agent or pipeline when it does. Each event is recorded together with the change that caused it, so none are lost, and failed deliveries retry on their own.</p>
-            <p>Events you can subscribe to: a run completed or failed, an approval requested or resolved, a decision proposed, published or retired, a kill switch set or cleared, a watched source changed, and an evaluation run completed.</p>
+            <p>Events you can subscribe to: a run completed or failed, an approval requested or resolved, a decision proposed, published or retired, a kill switch set or cleared, a watched source changed, an evaluation run completed, an action proposed, executed or its outcome recorded, a moderation hold placed or decided, an autonomy change recommended, promoted or demoted, a lesson captured, a failure cluster opened, and an improvement proposed, proved, released, rolled back or kept.</p>
             <h4 className="text-white font-semibold pt-3">Create a subscription</h4>
             <Steps items={[
               'Open <strong>Admin &rarr; Events</strong> and click <strong>New subscription</strong>. Creating and changing subscriptions needs <code>events.manage</code>, which creators and admins hold.',
@@ -2514,7 +2672,7 @@ spec:
             <h4 className="text-white font-semibold pt-3">Signing</h4>
             <p>Every call to a URL carries <code>X-Abenix-Signature</code>, an HMAC-SHA256 of the body with your signing secret. Check it on your side before trusting the call. <code>X-Abenix-Event</code> names the event and <code>X-Abenix-Delivery</code> is its id, which you can use to ignore repeats.</p>
             <h4 className="text-white font-semibold pt-3">Deliveries</h4>
-            <p>Each subscription card has <strong>Send test</strong>, which sends a sample event that appears in the delivery log within seconds. The log lists each delivery with its status. For agent and pipeline targets it links to the run it started. Failed calls retry with growing gaps for about eight hours. <strong>Redeliver</strong> sends any delivery again. The pause button stops a subscription without deleting it.</p>
+            <p>Each subscription card has <strong>Send test</strong>, which sends a sample event that appears in the delivery log within seconds. The log lists each delivery with its status. For agent and pipeline targets it links to the run it started. Failed calls are tried 8 times with growing gaps, over about 20 minutes, then marked dead. <strong>Redeliver</strong> sends any delivery again. The pause button stops a subscription without deleting it. After 25 failed deliveries in a row it pauses on its own and shows the last error.</p>
             <Callout tone="info">A typical use: subscribe a pipeline to <code>source.changed</code> with a condition on the source&apos;s tags, so every change to a tariff page gets a first read and a summary for review.</Callout>
           </div>
         ),
@@ -2547,7 +2705,7 @@ spec:
         badge: 'Read first',
         body: (
           <div className="space-y-4 text-[13.5px] text-slate-300 leading-relaxed">
-            <p>Abenix is multi-tenant by design. The model is intentionally small enough to fit on one page, and every endpoint enforces it server-side regardless of what the UI shows.</p>
+            <p>Abenix is multi-tenant. Each organisation is a tenant, and the API keeps every tenant&apos;s data apart whatever the UI shows.</p>
 
             {/* Hierarchy diagram */}
             <figure className="rounded-xl overflow-hidden border border-slate-700/60 bg-slate-950/40 p-4 my-3">
@@ -2565,12 +2723,12 @@ spec:
 
                 <rect x="80" y="125" width="280" height="60" rx="8" fill="#0f172a" stroke="#06b6d4" />
                 <text x="220" y="148" textAnchor="middle" fill="#a5f3fc" fontSize="12" fontWeight="bold">Users</text>
-                <text x="220" y="166" textAnchor="middle" fill="#94a3b8" fontSize="10">role ∈ admin · creator · user</text>
+                <text x="220" y="166" textAnchor="middle" fill="#94a3b8" fontSize="10">role ∈ admin · creator · member</text>
                 <text x="220" y="180" textAnchor="middle" fill="#64748b" fontSize="10">+ per-user quotas · profile</text>
 
                 <rect x="400" y="125" width="280" height="60" rx="8" fill="#0f172a" stroke="#10b981" />
                 <text x="540" y="148" textAnchor="middle" fill="#bbf7d0" fontSize="12" fontWeight="bold">Tenant settings</text>
-                <text x="540" y="166" textAnchor="middle" fill="#94a3b8" fontSize="10">feature flags · retention</text>
+                <text x="540" y="166" textAnchor="middle" fill="#94a3b8" fontSize="10">retention · cost limits</text>
                 <text x="540" y="180" textAnchor="middle" fill="#64748b" fontSize="10">moderation policy · DLP</text>
 
                 <rect x="80" y="210" width="280" height="50" rx="8" fill="#0f172a" stroke="#f59e0b" />
@@ -2615,14 +2773,14 @@ spec:
                 </thead>
                 <tbody className="text-slate-300">
                   <tr className="border-b border-slate-800/60">
-                    <td className="py-2"><strong>Invite by email</strong></td>
+                    <td className="py-2"><strong>Invite</strong></td>
                     <td><code>POST /api/team/invite</code></td>
-                    <td>Real users, they accept via emailed link, set their own password.</td>
+                    <td>Real users. Click <strong>Invite Member</strong>, copy the link and send it yourself. It works once and expires in 7 days. They set their own password. No email is sent.</td>
                   </tr>
                   <tr>
                     <td className="py-2"><strong>Dev create</strong></td>
                     <td><code>POST /api/team/dev-create-member</code></td>
-                    <td>E2E tests / immediate provisioning, admin sets the password.</td>
+                    <td>E2E tests / immediate provisioning, admin sets the password. Off unless <code>ALLOW_DEV_CREATE_MEMBER=true</code>.</td>
                   </tr>
                 </tbody>
               </table>
@@ -2635,67 +2793,66 @@ spec:
             <p>Three roles, hot-applied (next request reads the new role from <code>/api/me/permissions</code>):</p>
             <ul className="list-disc pl-5 space-y-1 text-[13px]">
               <li><strong>admin</strong> — full control inside the tenant. Can invite, change roles, set quotas, configure tenant settings, see all members&apos; activity, hit every <code>/admin/*</code> page.</li>
-              <li><strong>creator</strong> — same as user, plus can publish agents/pipelines to the marketplace and earn from subscriptions.</li>
-              <li><strong>user</strong> — default. Builds and runs their own agents, cannot manage team / quotas / tenant settings.</li>
+              <li><strong>creator</strong> — same as user, plus can edit ontology schemas, list agents in the marketplace and, when monetization is on, earn from paid listings.</li>
+              <li><strong>user</strong> (shown as Member) — default. Builds and runs their own agents, cannot manage team / quotas / tenant settings.</li>
             </ul>
             <p className="text-[12px]">Change a member&apos;s role: <code>PUT /api/team/members/{`{id}`}/role</code> with body <code>{`{"role": "admin" | "creator" | "user"}`}</code>.</p>
 
             <h4 className="text-white font-semibold pt-3">4 · Per-user quotas</h4>
             <p>Each member gets independent caps so a runaway agent in one user&apos;s account can&apos;t drain the tenant&apos;s budget:</p>
             <ul className="list-disc pl-5 space-y-1 text-[13px]">
-              <li>Monthly USD spend cap.</li>
-              <li>Executions per day.</li>
-              <li>Tokens (input + output) per day.</li>
+              <li>Monthly token allowance.</li>
+              <li>Monthly USD cost limit.</li>
             </ul>
-            <p className="text-[12px]">Set via <code>PUT /api/team/members/{`{id}`}/quota</code>. Overage returns <code>BUDGET_EXCEEDED</code> on the next execution.</p>
+            <p className="text-[12px]">Set them under <strong>Settings &rarr; Token Quotas</strong> or with <code>PUT /api/team/members/{`{id}`}/quota</code>. Going over returns 429 on the next run.</p>
 
             <h4 className="text-white font-semibold pt-3">5 · Per-feature flags</h4>
-            <p>The 3 roles drive coarse access, <strong>feature flags</strong> drive fine-grained access. The flag table is <code>ROLE_FEATURES</code> in <code>apps/api/app/core/permissions.py</code>. Every user gets <code>view_dashboard</code>, <code>create_agents</code>, <code>use_builder</code>, <code>create_pipelines</code>, <code>use_chat</code>, <code>use_kb</code>, <code>use_persona</code>, <code>use_ml_models</code>, <code>use_code_runner</code>, <code>use_meetings</code>, <code>use_triggers</code>, <code>view_executions</code>, <code>view_analytics</code>, <code>view_alerts</code>, <code>use_marketplace</code>, <code>use_sdk_playground</code>, <code>use_load_playground</code>, <code>manage_api_keys</code> and <code>manage_mcp</code>. Creators add <code>manage_ontology</code> and <code>publish_to_marketplace</code>. Admins add <code>review_queue</code>, <code>manage_team</code>, <code>manage_settings</code> and <code>see_other_users_resources</code>. Each sidebar item declares the <code>feature</code> that shows it (Meetings is <code>use_meetings</code>, Review Queue is <code>review_queue</code>, Model Selection / Tool Configuration / LLM Pricing / Connectors / Integrations are <code>manage_settings</code>, Team is <code>manage_team</code>). <code>see_other_users_resources</code> is read by the API list scopes, <code>publish_to_marketplace</code> by the publish check and <code>manage_ontology</code> by the schema editor routes. The frontend renders the sidebar from <code>/api/me/permissions</code>, which resolves:</p>
+            <p>The 3 roles drive coarse access, <strong>feature flags</strong> drive fine-grained access. The flag table is <code>ROLE_FEATURES</code> in <code>apps/api/app/core/permissions.py</code>. Every user gets <code>view_dashboard</code>, <code>create_agents</code>, <code>use_builder</code>, <code>create_pipelines</code>, <code>use_chat</code>, <code>use_kb</code>, <code>use_persona</code>, <code>use_ml_models</code>, <code>use_code_runner</code>, <code>use_meetings</code>, <code>use_triggers</code>, <code>view_executions</code>, <code>view_analytics</code>, <code>view_alerts</code>, <code>use_marketplace</code>, <code>use_sdk_playground</code>, <code>use_load_playground</code>, <code>manage_api_keys</code> and <code>manage_mcp</code>. Creators add <code>manage_ontology</code> and <code>publish_to_marketplace</code>. Admins add <code>review_queue</code>, <code>manage_team</code>, <code>manage_settings</code> and <code>see_other_users_resources</code>. Each sidebar item declares the <code>feature</code> that shows it (Meetings is <code>use_meetings</code>, Review inbox is <code>review_queue</code> or the <code>moderation.review</code> capability, Model Selection / Tool Configuration / LLM Pricing / Connectors / Integrations / Marketplace &amp; Billing are <code>manage_settings</code>, Team is <code>manage_team</code>). <code>see_other_users_resources</code> is read by the API list scopes, <code>publish_to_marketplace</code> by the publish check and <code>manage_ontology</code> by the schema editor routes. The frontend renders the sidebar from <code>/api/me/permissions</code>, which resolves:</p>
             <ol className="list-decimal pl-5 space-y-1 text-[13px]">
               <li>Default flags from the user&apos;s role.</li>
-              <li>Tenant overrides applied on top (admin can disable a feature for everyone, e.g. turn off Marketplace for an enterprise deployment).</li>
+              <li>The capabilities from the role plus any permission sets assigned under Admin &rarr; Permissions. The marketplace and monetization switches apply to the whole deployment.</li>
               <li>The merged map is returned and consumed.</li>
             </ol>
             <Callout tone="warn">
-              The sidebar is a UX hint, <strong>not</strong> the security boundary. Every route on the API independently re-checks role + feature flag. Hiding a sidebar item without disabling the feature flag does not actually deny access.
+              The sidebar is a UX hint, <strong>not</strong> the security boundary. The sidebar only hides links. Protected API routes check the role or capability themselves.
             </Callout>
 
             <h4 className="text-white font-semibold pt-3">6 · Per-resource sharing</h4>
-            <p>The <code>ResourceShare</code> table grants a specific user <code>READ</code> or <code>EDIT</code> on a specific agent / pipeline / KB / atlas — without changing their role. Click <strong>Share</strong> on any agent / KB / atlas detail page, pick teammates + scope. Used for cross-team handoffs without elevating roles.</p>
+            <p>The <code>ResourceShare</code> table grants a specific user View, Use or Edit on one agent, pipeline, ML model, code asset, knowledge base or atlas, without changing their role. Click <strong>Share</strong> on any agent / KB / atlas detail page, pick teammates + scope. Used for cross-team handoffs without elevating roles.</p>
             <p className="text-[12px]">A <code>creator</code> shared into <code>EDIT</code> on a single agent gets to edit only that one agent — nothing else changes about their permissions. Revoking a share is instant, the next API call from that user will fail.</p>
 
             <h4 className="text-white font-semibold pt-3">7 · Multiplexing many end-users through one tenant — actAs</h4>
-            <p>When a SaaS app holds a platform API key and serves many end-users (a typical &quot;build on top of Abenix&quot; scenario), the app passes <code>X-Abenix-Subject: &lt;end-user-id&gt;</code> on every request. The API treats the request as if that subject were calling — applies row-level RBAC, attributes audit-log events to that subject, scopes resource lookups to subject-bound collections.</p>
-            <p className="text-[12px]">Critical property: <strong>the actAs subject can&apos;t escape the agent&apos;s tenant</strong>. Rows still belong to the agent&apos;s <code>tenant_id</code>. Cross-app reads remain impossible at the SQL layer. The subject is a sub-identity inside the tenant, not a different tenant.</p>
-            <p className="text-[12px]">API key needs the <code>can_delegate</code> scope. Mint via <code>/settings/api-keys</code>.</p>
+            <p>When a SaaS app holds a platform API key and serves many end-users (a typical &quot;build on top of Abenix&quot; scenario), the app sends <code>X-Abenix-Subject</code> with a JSON value such as <code>{`{"subject_type": "myapp", "subject_id": "u-42"}`}</code>. Runs are stamped with that subject, and agents also read the knowledge collection named after it. A key without <code>can_delegate</code> gets 403.</p>
+            <p className="text-[12px]">The <strong>actAs subject can&apos;t escape the agent&apos;s tenant</strong>. Rows still belong to the agent&apos;s <code>tenant_id</code>. Cross-app reads remain impossible at the SQL layer. The subject is a sub-identity inside the tenant, not a different tenant.</p>
+            <p className="text-[12px]">The API key needs the <code>can_delegate</code> scope. Generate the key at <code>/settings/api-keys</code>, then set the scope with <code>PATCH /api/api-keys/{`{id}`}</code>.</p>
 
             <h4 className="text-white font-semibold pt-3">8 · Tenant isolation under the hood</h4>
             <ul className="list-disc pl-5 space-y-1 text-[13px]">
               <li>Every readable row carries a <code>tenant_id</code> indexed for fast filter.</li>
               <li><code>TenantMiddleware</code> resolves the caller&apos;s tenant once per request from the JWT or API key.</li>
-              <li>Routers add <code>WHERE tenant_id = :user.tenant_id</code> at the top of every query — no exceptions.</li>
-              <li>Cross-tenant reads return <code>404</code> (never <code>403</code>) so probing can&apos;t enumerate other tenants.</li>
-              <li>The vector backends (pgvector / Pinecone) enforce the same <code>tenant_id</code> filter at the index level so even a maliciously-shared agent can&apos;t walk to a different tenant&apos;s embeddings.</li>
+              <li>Routers add <code>WHERE tenant_id = :user.tenant_id</code> in their queries.</li>
+              <li>Cross-tenant reads usually return <code>404</code> so probing can&apos;t enumerate other tenants.</li>
+              <li>Vector search only runs over the knowledge bases the agent may read. Pinecone keeps each knowledge base in its own namespace.</li>
             </ul>
 
             <h4 className="text-white font-semibold pt-3">9 · The end-to-end &quot;I want N organisations&quot; flow</h4>
             <Steps items={[
               'Each organisation has one person sign up at <code>/</code>. That mints their tenant + makes them admin.',
-              'They open <code>/settings/team</code> and invite teammates by email, choose <code>admin</code> / <code>creator</code> / <code>user</code> per invite.',
-              'Teammates click the email link, set a password, are dropped into the same tenant with the assigned role.',
-              'Admin sets per-user quotas in <code>Settings → Team → ⋮ → Quotas</code>.',
-              'Resource-level sharing happens organically — every Share button on an agent / KB / atlas page goes through ResourceShare.',
+              'They open <code>/settings/team</code>, click <strong>Invite Member</strong>, choose <code>admin</code> / <code>creator</code> / <code>member</code> and send the invite link to the teammate.',
+              'Teammates open the link, set a password, and land in the same tenant with the assigned role.',
+              'Admin sets per-user quotas under <strong>Settings &rarr; Token Quotas</strong>.',
+              'The Share button on agents, knowledge bases, atlases, code assets and ML models goes through ResourceShare.',
               'For SaaS apps fronting many end-users: mint a platform API key with <code>can_delegate</code>, pass <code>X-Abenix-Subject</code> per request.',
             ]} />
 
             <h4 className="text-white font-semibold pt-3">10 · What&apos;s not in the platform today</h4>
             <ul className="list-disc pl-5 space-y-1 text-[13px]">
               <li>No global <em>super-admin</em> cockpit listing/creating/hopping into all tenants.</li>
-              <li>No SSO / SAML / OIDC / SCIM (auth is JWT + email/password today).</li>
+              <li>No SAML or SCIM. Sign-in is email and password, plus Google, GitHub or Microsoft when their OIDC keys are set, and a workspace OpenID Connect provider an admin sets through <code>PUT /api/settings/sso</code>.</li>
               <li>No &quot;my organisations&quot; picker (one user = one tenant).</li>
-              <li>No custom roles beyond the three (you can simulate them with feature-flag overrides + ResourceShare).</li>
+              <li>No custom roles beyond the three (use permission sets under Admin &rarr; Permissions and ResourceShare).</li>
             </ul>
-            <p className="text-[12px] italic text-slate-400">All four are tracked as roadmap items. PRs welcome.</p>
+            <p className="text-[12px] italic text-slate-400">Open a PR or an issue if you need one of these.</p>
           </div>
         ),
       },
@@ -2705,7 +2862,7 @@ spec:
         icon: <Users className="w-4 h-4" />,
         body: (
           <div className="space-y-3 text-[13.5px] text-slate-300 leading-relaxed">
-            <p>The <strong>Team</strong> page at <code>/settings/team</code> is where the tenant admin manages members, roles, quotas, and pending invites. See the <a href="#tenants-users-permissions" className="text-violet-300 underline">Tenants, users, and permissions</a> topic above for the full model.</p>
+            <p>The <strong>Team</strong> page at <code>/settings/team</code> is where the tenant admin manages members, roles and pending invites. Quotas are under <strong>Settings &rarr; Token Quotas</strong>. See the <a href="#tenants-users-permissions" className="text-violet-300 underline">Tenants, users, and permissions</a> topic above for the full model.</p>
             <Hero src={SS('26-team.png')} alt="Team management" />
           </div>
         ),
@@ -2759,7 +2916,7 @@ export default function HelpPage() {
           icon={BookOpen}
           iconClassName="text-violet-300"
           storageKey="help"
-          docSlug="08-howto/07-finding-your-way-around"
+          docSlug="00-how-abenix-fits-together"
           primaryAction={{ label: 'Developer docs', icon: Code2, href: '/docs' }}
           steps={[
             'Pick a topic from the topic list, or just scroll. The list follows where you are.',

@@ -10,20 +10,52 @@ With the Azure values and every standalone app selected, the namespace holds:
 
 | Kind | Objects |
 |---|---|
-| Deployments from subcharts | `abenix-api`, `abenix-web`, `abenix-worker`, `abenix-agent-runtime` |
-| Deployments from the umbrella chart | `abenix-agent-runtime-<pool>` per `scaling.pools` entry, `abenix-cognify-worker`, `abenix-alertmanager` |
-| StatefulSets | `abenix-postgresql`, `abenix-redis-master`, `abenix-neo4j`, `abenix-nats` (NATS backend only) |
-| Separate Helm releases | `abenix-mosquitto`, `abenix-timescaledb`, the edge runtime, LiveKit |
-| Plain manifests | Prometheus, Grafana and Tempo from `infra/observability/`, each standalone app from `<app>/k8s/<app>.yaml` |
+| Deployments from subcharts | `abenix-api`, `abenix-web`, `abenix-worker`. `abenix-agent-runtime` only when `agent-runtime.enabled` is not `false`, so not with the local or Azure values |
+| Deployments from the umbrella chart | `abenix-agent-runtime-<pool>` per `scaling.pools` entry, `abenix-cognify-worker`, `abenix-alertmanager`, `abenix-improvements-proof` when `improvements.proofPool.enabled` |
+| StatefulSets | `abenix-postgresql` (`-primary` and `-read` with `architecture: replication`), `abenix-redis-master`, `abenix-neo4j`, `abenix-nats` (NATS backend only) |
+| Separate Helm releases | `abenix-mosquitto` (Deployment), `abenix-timescaledb` (StatefulSet), the edge gateway `abenix-edge` (StatefulSet) |
+| Plain manifests | Prometheus, Grafana and Tempo from `infra/observability/` (Tempo on AKS only), LiveKit from `infra/k8s/livekit-dev.yaml`, each standalone app from `<app>/k8s/<app>.yaml` |
 | Created at run time | One Deployment, Service and scaler per warm code runner, one Job per one-off sandbox run, one Pod per deployed ML model |
 | ScaledObjects | One per runtime pool when `scaling.keda.enabled`, one per warm runner when `codeRunners.keda.enabled` |
-| HPAs | `api`, `web`, `worker`, `agent-runtime` subcharts, plus KEDA's own |
+| HPAs | KEDA's own, one per ScaledObject, and a CPU HPA per warm runner when runner KEDA is off. The subchart HPAs are off in the Azure values |
 | PodDisruptionBudgets | `minAvailable: 1` for api, web, agent-runtime and the cognify worker, each only when it runs more than one replica |
 | CronJobs | `abenix-code-runner-reaper`, `abenix-pg-backup` and `abenix-neo4j-backup` when backups are on |
 | PVCs | Postgres, Redis, Neo4j, NATS, `abenix-shared-data`, `ml-models-storage`, `abenix-archives` |
 | Ingress | `abenix-ingress`, applied by `deploy-azure.sh` |
 
 ---
+
+## Service ports
+
+| Service | Port | Notes |
+|---|---|---|
+| `abenix-api` | 8000 | `/api/metrics` for Prometheus |
+| `abenix-web` | 3000 | `web.service.port`. The subchart default is 80, the local and Azure values set 3000 |
+| `abenix-agent-runtime-<pool>` | 8001 (`http`) | `/health` and `/metrics`. `abenix-agent-runtime` uses the same port when the subchart is on |
+| `abenix-postgresql` | 5432 | Bitnami |
+| `abenix-redis-master` | 6379 | Bitnami |
+| `abenix-neo4j` | 7687 bolt, 7474 http | |
+| `abenix-nats` | 4222 client, 8222 monitor | Headless. NATS backend only |
+| `abenix-alertmanager` | 9093 | |
+| `abenix-prometheus` | 9090 | Plain manifest |
+| `abenix-grafana` | 3000 | Plain manifest |
+| `abenix-tempo` | 3200 http, 9095 grpc, 4317 OTLP gRPC, 4318 OTLP HTTP | Plain manifest, AKS only |
+| `abenix-mosquitto` | 1883 | Own release |
+| `abenix-timescaledb` | 5432 | Own release |
+| edge gateways | 8080 | Own releases |
+| `livekit-server` | 7880 | Plain manifest |
+| warm code runners | 9464 `metrics` | Created at run time |
+
+For the ports these land on at your desk, see
+[Reaching it once it is up](00-overview.md#reaching-it-once-it-is-up).
+
+---
+
+## Port forwards are for poking around, not for measuring
+
+On Windows, `kubectl port-forward` adds a flat 40 to 45 ms to any request whose body is bigger than about 6 KB, when the client sends headers and body as separate writes, which `httpx` and the SDKs do. The same call inside the cluster takes about 1.5 ms. Responses are not affected, a 180 KB GET through the forward is about 12 ms.
+
+So an app that calls Abenix many times a second with sizeable payloads, such as a simulator stepping a code asset, belongs inside the cluster, talking to `http://abenix-api:8000`. Use the forwards for the browser and for one-off calls. Latency measured through a forward on Windows says more about the forward than about Abenix.
 
 ## Pod-to-pod networking
 
@@ -124,10 +156,12 @@ before the filesystem grows. Take a backup first.
 | `abenix-cluster-reader` ClusterRole + binding | cluster | get, list, watch on nodes, pods and PVCs for the `default` ServiceAccount in `abenix` | `deploy-azure.sh` applies `infra/k8s/abenix-cluster-reader.yaml`. The chart's cluster view role now covers it |
 | `<release>-sandboxed-job-runner` Role + binding | `sandboxedJob.namespace` or the release namespace | Jobs, pods and logs, Deployments, Services, Secrets, HPAs and ScaledObjects for the `default` ServiceAccount | The chart, when `sandboxedJob.enabled` |
 
-The cluster view roles feed the `/admin/cluster` page. Both bind
-`clusterView.rbac.serviceAccount`, `default` unless the API runs as another
-account. The metrics and KEDA rules render when helm sees those APIs at install
-time. Set `clusterView.rbac.metrics` or `clusterView.rbac.keda` to `"true"` to
+The cluster view roles feed the
+[Cluster Health page](04-observability.md#cluster-health-page) at
+`/admin/cluster`. Both bind `clusterView.rbac.serviceAccount`, `default` unless
+the API runs as another account. The metrics rules render when helm sees
+`metrics.k8s.io` at install time. The KEDA rule renders when helm sees
+`keda.sh` or `scaling.keda.enabled` is on. Set `clusterView.rbac.metrics` or `clusterView.rbac.keda` to `"true"` to
 force them, for example under `helm template` or when KEDA lands after the
 platform. With the roles off the page still loads, lists what it cannot read and
 names the value to turn back on. The namespaced Role is what

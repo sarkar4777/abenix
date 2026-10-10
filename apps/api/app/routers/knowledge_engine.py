@@ -23,6 +23,53 @@ from models.user import User
 router = APIRouter(prefix="/api/knowledge-engines", tags=["knowledge-engine"])
 
 
+STALLED_PENDING_MINUTES = 15
+STALLED_RUNNING_HOURS = 6
+
+
+async def fail_stalled_cognify_jobs(db: AsyncSession, tenant_id: uuid.UUID) -> int:
+    """Close jobs no worker took or finished, so they stop blocking Run Cognify."""
+    from datetime import datetime, timedelta, timezone
+
+    from sqlalchemy import func, update
+
+    from models.knowledge_engine import CognifyJob, CognifyStatus
+
+    now = datetime.now(timezone.utc)
+    running = [
+        CognifyStatus.EXTRACTING,
+        CognifyStatus.RESOLVING,
+        CognifyStatus.GRAPHING,
+        CognifyStatus.EMBEDDING,
+    ]
+    total = 0
+    for statuses, since, why in (
+        (
+            [CognifyStatus.PENDING],
+            now - timedelta(minutes=STALLED_PENDING_MINUTES),
+            "No Cognify worker picked this job up. Run Cognify again.",
+        ),
+        (
+            running,
+            now - timedelta(hours=STALLED_RUNNING_HOURS),
+            "The Cognify worker stopped before finishing. Run Cognify again.",
+        ),
+    ):
+        res = await db.execute(
+            update(CognifyJob)
+            .where(
+                CognifyJob.tenant_id == tenant_id,
+                CognifyJob.status.in_(statuses),
+                func.coalesce(CognifyJob.started_at, CognifyJob.created_at) < since,
+            )
+            .values(status=CognifyStatus.FAILED, error_message=why, completed_at=now)
+        )
+        total += res.rowcount or 0
+    if total:
+        await db.commit()
+    return total
+
+
 @router.get("/cognify/active")
 async def list_active_cognify_jobs(
     user: User = Depends(get_current_user),
@@ -37,6 +84,7 @@ async def list_active_cognify_jobs(
     except Exception as e:
         return error(f"Failed to load cognify models: {e}", 500)
 
+    await fail_stalled_cognify_jobs(db, user.tenant_id)
     terminal = {CognifyStatus.COMPLETE.value, CognifyStatus.FAILED.value}
     running_statuses = [s.value for s in CognifyStatus if s.value not in terminal]
 
@@ -119,6 +167,7 @@ async def trigger_cognify(
     doc_query = select(Document).where(
         Document.kb_id == kb_id,
         Document.status == DocumentStatus.READY,
+        Document.is_current.is_(True),
     )
     if body and body.doc_ids:
         doc_query = doc_query.where(
@@ -488,6 +537,7 @@ async def list_cognify_jobs(
     try:
         from models.knowledge_engine import CognifyJob, CognifyReport
 
+        await fail_stalled_cognify_jobs(db, user.tenant_id)
         result = await db.execute(
             select(CognifyJob)
             .where(

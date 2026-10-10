@@ -64,8 +64,8 @@ class RecordingDB:
         return None
 
 
-def _user(tenant=T1):
-    return SimpleNamespace(id=uuid.uuid4(), tenant_id=tenant)
+def _user(tenant=T1, role="admin"):
+    return SimpleNamespace(id=uuid.uuid4(), tenant_id=tenant, role=role)
 
 
 def _connector(tenant=T1, **kw) -> Connector:
@@ -497,3 +497,25 @@ async def test_test_allows_private_with_the_opt_in(monkeypatch):
         "data"
     ]
     assert len(calls) == 1 and data["ok"] is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("role", ["user", "creator"])
+async def test_writes_and_test_need_manage_settings(role) -> None:
+    db = RecordingDB()
+    c = _connector()
+    member = _user(role=role)
+    body = ConnectorCreate(
+        name="Acme", kind="cmms", base_url="https://api.example.com/v1"
+    )
+    calls = [
+        router.create_connector(body, user=member, db=db),
+        router.update_connector(c.id, ConnectorUpdate(name="x"), user=member, db=db),
+        router.delete_connector(c.id, user=member, db=db),
+        router.test_connector(c.id, user=member, db=db),
+    ]
+    for coro in calls:
+        resp = await coro
+        assert resp.status_code == 403
+        assert "admin" in json.loads(resp.body)["error"]["message"].lower()
+    assert db.commits == 0 and not db.added and not db.deleted

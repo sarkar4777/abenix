@@ -285,6 +285,23 @@ def _load_db_pricing() -> dict[str, dict[str, float]]:
         return {}
 
 
+_PRICING_MISS_REFRESH_AT: float = 0.0
+
+
+def _refresh_pricing_for_miss() -> bool:
+    """Reload the pricing cache early on an unknown model, at most every 5 seconds."""
+    global _DB_PRICING_CACHE_AT, _PRICING_MISS_REFRESH_AT
+    import time as _time_m
+
+    now = _time_m.monotonic()
+    if now - _PRICING_MISS_REFRESH_AT < 5.0:
+        return False
+    _PRICING_MISS_REFRESH_AT = now
+    _DB_PRICING_CACHE_AT = 0.0
+    _load_db_pricing()
+    return True
+
+
 def _calc_cost(
     model: str, input_tokens: int, output_tokens: int, latency_ms: int = 0
 ) -> float:
@@ -763,6 +780,31 @@ _EFFORT_MODEL_PREFIXES = (
     "claude-fable-",
     "claude-mythos-",
 )
+
+
+# Output token ceilings the provider APIs enforce. An agent set up for one
+# model keeps its max_tokens when the resolver falls back to another, and a
+# Gemini sized 65536 sent to Haiku was refused outright.
+_OUTPUT_TOKEN_CAPS: tuple[tuple[str, int], ...] = (
+    ("claude-opus-4-1", 32000),
+    ("claude-opus-4-2025", 32000),
+    ("claude-sonnet-4", 64000),
+    ("claude-haiku-4", 64000),
+    ("claude-3-7-sonnet", 64000),
+    ("claude-3-5", 8192),
+    ("gpt-4o", 16384),
+    ("gpt-4.1", 32768),
+    ("gemini-2.5", 65536),
+    ("gemini-2.0", 8192),
+)
+
+
+def _cap_output_tokens(model: str, max_tokens: int) -> int:
+    name = (model or "").lower()
+    for prefix, cap in _OUTPUT_TOKEN_CAPS:
+        if name.startswith(prefix) and max_tokens > cap:
+            return cap
+    return max_tokens
 
 
 def _supports_effort(model: str) -> bool:
@@ -1284,7 +1326,37 @@ class AzureOpenAIProvider(OpenAIProvider):
         return await self._non_stream(kwargs, model_full)
 
 
+class StubProvider(LLMProvider):
+    """Echoes the last user message, only reachable when llm_stub.enabled()."""
+
+    async def complete(
+        self,
+        messages: list[dict[str, Any]],
+        system: str | None = None,
+        tools: list[dict[str, Any]] | None = None,
+        model: str | None = None,
+        temperature: float = 0.7,
+        stream: bool = False,
+        max_tokens: int = 4096,
+    ) -> LLMResponse | AsyncGenerator[StreamEvent, None]:
+        from engine import llm_stub
+
+        text = llm_stub.reply_for(messages)
+        if stream:
+            return llm_stub.stream_reply(text, model or "stub")
+        return LLMResponse(
+            content=text,
+            model=model or "stub",
+            input_tokens=0,
+            output_tokens=len(text.split()),
+            cost=0.0,
+            latency_ms=0,
+            stop_reason="end_turn",
+        )
+
+
 PROVIDER_MAP: dict[str, type[LLMProvider]] = {
+    "stub": StubProvider,
     "anthropic": AnthropicProvider,
     "claude_subscription": ClaudeSubscriptionProvider,
     "openai": OpenAIProvider,
@@ -1386,7 +1458,12 @@ class LLMRouter:
         _load_db_pricing()
         if m in _DB_PROVIDER_CACHE or m in MODEL_TO_PROVIDER:
             return True
-        return m.startswith(("claude", "gpt", "gemini", "azure-"))
+        if m.startswith(("claude", "gpt", "gemini", "azure-")):
+            return True
+        # a model an admin just added is in the table but not yet in the cache
+        if _refresh_pricing_for_miss():
+            return m in _DB_PROVIDER_CACHE
+        return False
 
     def candidate_chain(self, model: str) -> list[tuple[str, str]]:
         """Ordered (provider, model) attempts for a request.
@@ -1405,6 +1482,11 @@ class LLMRouter:
                 f"Unknown model '{model}'. Configure it in Admin -> LLM Pricing "
                 f"or use one of the ids that deployment lists."
             )
+
+        from engine import llm_stub
+
+        if llm_stub.enabled():
+            return [("stub", model)]
 
         chain: list[tuple[str, str]] = []
         cfg = claude_subscription.get_config()
@@ -1509,7 +1591,7 @@ class LLMRouter:
                         model=attempt_model,
                         temperature=temperature,
                         stream=stream,
-                        max_tokens=max_tokens,
+                        max_tokens=_cap_output_tokens(attempt_model, max_tokens),
                     )
                     if not stream and isinstance(result, LLMResponse):
                         result.requested_model = requested_model

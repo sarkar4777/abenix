@@ -4,6 +4,7 @@
  *   BASE=http://localhost:3100 API=http://localhost:8000 npx playwright test e2e/uat_governance.spec.ts --workers=1
  */
 import { test, expect, type Page } from '@playwright/test';
+import { openFromSidebar } from './helpers/sidebar';
 
 const BASE = process.env.BASE || 'http://localhost:3100';
 const API = process.env.API || 'http://localhost:8000';
@@ -47,13 +48,22 @@ async function clearSwitches(page: Page) {
 
 test.describe.configure({ mode: 'serial' });
 
+// a switch left on stops the calculator for every later spec, so clear them however this file ends
+test.afterAll(async ({ request }) => {
+  const res = await request.post(`${API}/api/auth/login`, { data: ADMIN }).catch(() => null);
+  const tok = res && res.ok() ? (await res.json())?.data?.access_token : '';
+  if (!tok) return;
+  const headers = { Authorization: `Bearer ${tok}` };
+  const list = await request.get(`${API}/api/governance/kill-switches`, { headers }).catch(() => null);
+  const switches = list && list.ok() ? (await list.json())?.data?.switches || [] : [];
+  for (const s of switches) await request.post(`${API}/api/governance/kill-switches/${s.id}/clear`, { headers }).catch(() => null);
+});
+
 test('admin sees Risk and Controls in the sidebar and all four tiers', async ({ page }) => {
   await login(page);
   await api(page, 'DELETE', '/api/governance/risk/high');
   await visit(page, '/dashboard');
-  await page.getByRole('button', { name: /ADMIN/ }).click().catch(() => {});
-  await expect(page.getByRole('link', { name: 'Risk & Controls' })).toBeVisible();
-  await page.getByRole('link', { name: 'Risk & Controls' }).click();
+  await openFromSidebar(page, '/admin/risk');
   await expect(page.getByRole('heading', { name: 'Risk and Controls' })).toBeVisible();
   await expect(page.locator('header').first()).toContainText('Risk & Controls');
   for (const t of ['low', 'medium', 'high', 'critical']) await expect(page.getByTestId(`tier-card-${t}`)).toBeVisible();
@@ -100,20 +110,35 @@ test('a kill switch is set from the screen, stops the tool in a run, and resumes
   await expect(page.getByTestId('kill-switch-tool-calculator')).toContainText('UAT: wrong rounding');
   await expect(page.getByTestId('risk-tab-switches')).toContainText('1');
 
-  const agents = (await api(page, 'GET', '/api/agents?limit=100')).json.data;
-  const calc = agents.find((a: any) => (a.model_config?.tools || []).includes('calculator'));
-  test.skip(!calc, 'no agent with the calculator tool');
-  await page.waitForTimeout(6000);
-  const run = await api(page, 'POST', `/api/agents/${calc.id}/execute`, { message: 'Use the calculator tool to compute 17*23.', stream: false, wait: true });
-  const exid = run.json?.data?.execution_id;
-  const ex = (await api(page, 'GET', `/api/executions/${exid}`)).json.data;
-  const call = (ex.tool_calls || []).find((t: any) => t.name === 'calculator');
-  expect(call?.is_error).toBeTruthy();
-  expect(String(call?.result_preview || call?.result)).toContain('kill switch');
+  // a one-node pipeline calls the tool every time, no model in the way
+  const made = await api(page, 'POST', '/api/agents', {
+    name: `UAT kill switch ${Date.now().toString(36)}`,
+    system_prompt: '',
+    model_config: {
+      mode: 'pipeline',
+      tools: ['calculator'],
+      pipeline_config: { nodes: [{ id: 'multiply', label: 'Multiply', tool_name: 'calculator', arguments: { expression: '17 * 23' }, depends_on: [] }], edges: [] },
+    },
+  });
+  expect(made.status, JSON.stringify(made.json)).toBeLessThan(300);
+  const calcId = made.json.data.id;
+  try {
+    await page.waitForTimeout(6000);
+    const run = await api(page, 'POST', `/api/agents/${calcId}/execute`, { message: 'go', stream: false, wait: true });
+    const exid = run.json?.data?.execution_id;
+    expect(exid, JSON.stringify(run.json)).toBeTruthy();
+    const ex = (await api(page, 'GET', `/api/executions/${exid}`)).json.data;
+    const call = (ex.tool_calls || []).find((t: any) => t.name === 'calculator');
+    expect(call?.is_error, JSON.stringify(ex.tool_calls)).toBeTruthy();
+    expect(String(call?.result_preview || call?.result)).toContain('kill switch');
 
-  await page.getByTestId(/kill-switch-resume-/).click();
-  await page.getByRole('button', { name: 'Resume' }).last().click();
-  await expect(page.getByTestId('kill-switch-empty')).toBeVisible();
+    await page.getByTestId(/kill-switch-resume-/).click();
+    await page.getByRole('button', { name: 'Resume' }).last().click();
+    await expect(page.getByTestId('kill-switch-empty')).toBeVisible();
+  } finally {
+    await clearSwitches(page);
+    await api(page, 'DELETE', `/api/agents/${calcId}`);
+  }
 });
 
 test('tool tiers are searchable and audit verification passes', async ({ page }) => {

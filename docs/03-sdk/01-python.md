@@ -71,6 +71,11 @@ class Abenix:
     decisions: DecisionsClient
     sources: SourcesClient
     events: EventsClient
+    actions: ActionsClient
+    autonomy: AutonomyClient
+    improvements: ImprovementsClient
+    lessons: LessonsClient
+    feedback: FeedbackClient
 
     http: httpx.AsyncClient   # authenticated client for endpoints with no typed method
 ```
@@ -123,6 +128,10 @@ class ExecutionResult:
     execution_id: str | None = None
     status: str = "completed"               # completed | failed | paused | running
     paused_at: ApprovalRef | None = None    # set when status == "paused"
+    trigger_kind: str | None = None         # schedule, webhook, manual, event, api ...
+    trigger_id: str | None = None
+    trigger_name: str | None = None
+    started_by: str | None = None
 
 @dataclass
 class ApprovalRef:
@@ -194,11 +203,12 @@ async for event in client.stream("deep-research", "Analyze market trends for EVs
         print(f"\n  tool {event.name}")
     elif event.type == "done":
         print(f"\n  cost ${event.cost} in {event.duration_ms}ms")
+        run = await client.executions.get(event.execution_id)
     elif event.type == "error":
         print("\n  failed:", event.message, event.error_code)
 ```
 
-Each event is a `StreamEvent` dataclass. `type` is one of `token`, `tool_call`, `tool_result`, `node_start`, `node_complete`, `done`, `error`, with type-specific fields such as `text`, `name`, `arguments`, `result`, `node_id`, `status`, `duration_ms`, `cost`, `message`. The iterator ends when the server closes the stream. There is no automatic reconnect.
+Each event is a `StreamEvent` dataclass. `type` is one of `token`, `tool_call`, `tool_result`, `node_start`, `node_complete`, `done`, `error`, with type-specific fields such as `text`, `name`, `arguments`, `result`, `node_id`, `status`, `duration_ms`, `cost`, `message`. `done` carries `execution_id`. Any other event the server sends, such as `moderation`, `reply_checking` or `node_trace`, arrives with `type` set to its name. Only `error` means the run failed. `data` holds the raw payload of every event. The iterator ends when the server closes the stream. There is no automatic reconnect.
 
 To follow a run started elsewhere, use `watch`. It yields a `DagSnapshot` per `snapshot` event (status, progress, nodes, edges, cost so far) and stops on `end`.
 
@@ -223,7 +233,7 @@ from abenix_sdk.tracing import init_tracing
 init_tracing("wingman-api", fastapi_app=app)
 ```
 
-`init_tracing(service_name, fastapi_app=None)` does nothing and returns `False` unless `OTEL_EXPORTER_OTLP_ENDPOINT` (or `OTEL_TEMPO_ENDPOINT`) is set and the OpenTelemetry packages are installed. The SDK does not install them. It needs the OTel SDK, the OTLP gRPC exporter, and the `httpx` and `fastapi` instrumentations. Sampling reads `OTEL_TRACES_SAMPLER_ARG` (default `0.1`). It also adds a span processor that redacts prompt, tool and body attributes. `current_trace_id()` returns the active trace id or `None`. See [`packages/sdk/python/abenix_sdk/tracing.py`](../../packages/sdk/python/abenix_sdk/tracing.py).
+`init_tracing(service_name, fastapi_app=None)` does nothing and returns `False` unless `OTEL_EXPORTER_OTLP_ENDPOINT` (or `OTEL_TEMPO_ENDPOINT`) is set and the OpenTelemetry packages are installed. The SDK does not install them. It needs the OTel SDK, the OTLP gRPC exporter, and the `httpx` and `fastapi` instrumentations. Sampling reads `OTEL_TRACES_SAMPLER_ARG` (default `0.1`), and `OTEL_SERVICE_NAME` overrides `service_name`. It also adds a span processor that redacts prompt, tool and body attributes. `current_trace_id()` returns the active trace id or `None`. See [`packages/sdk/python/abenix_sdk/tracing.py`](../../packages/sdk/python/abenix_sdk/tracing.py).
 
 ---
 
@@ -233,10 +243,10 @@ What a failure raises depends on the method.
 
 | Methods | Raises |
 |---|---|
-| `me`, `permissions`, `agents.by_slug/create/update`, `sources`, `events` | `AbenixError` |
+| `me`, `permissions`, `agents.by_slug/create/update`, `sources`, `events`, `actions`, `autonomy`, `improvements`, `lessons`, `feedback`, `ml_models` and `code_assets` (all but `list`), `kill_switches`, `api_keys` | `AbenixError` |
 | `decisions` | `AbenixDecisionError` (a subclass of `AbenixError`) |
-| `execute`, `stream`, `watch`, `executions`, `approvals`, `knowledge`, `chat`, `tools`, `presets`, `ml_models`, `agents.list/get/find_by_slug` | `httpx.HTTPStatusError` |
-| `execute` or `stream` with an unknown slug, `approvals.return_for_changes` with a blank reason, `events.subscribe([])`, `decisions.import_rules` with a bad `mode` | `ValueError` |
+| `execute`, `stream`, `watch`, `executions`, `approvals`, `knowledge`, `chat`, `tools`, `presets`, `ml_models.list`, `code_assets.list`, `agents.list/get/find_by_slug` | `httpx.HTTPStatusError` |
+| `execute` or `stream` with an unknown slug, `approvals.return_for_changes`, `actions.flag_harm` or `lessons.report` with a blank text, `feedback.give` with a rating other than 1 or -1, `events.subscribe([])`, `decisions.import_rules` with a bad `mode`, `decisions.update_test` with an unknown field, `ml_models.upload` with bytes and no filename or framework, `code_assets.create` with no source or git URL, `api_keys.create` with an unknown scopes shape | `ValueError` |
 
 `approve` and `reject` on the client do not check the response at all.
 
@@ -294,13 +304,14 @@ except AbenixDecisionError as e:
 
 ```python
 me = await client.me()
+print(me["user"]["email"])
 perms = await client.permissions()
 print(perms["email"], perms["role"])
 if "decisions.publish" not in perms["capabilities"]:
     print("this key cannot publish decisions")
 ```
 
-`permissions()` returns `user_id`, `tenant_id`, `email`, `name`, `role`, `is_admin`, `features` and `capabilities`.
+`me()` returns `{"user": {...}}` with `id`, `email`, `full_name`, `role` and `tenant_id`. `permissions()` returns `user_id`, `tenant_id`, `email`, `name`, `role`, `is_admin`, `features` and `capabilities`.
 
 ### Agents
 
@@ -403,13 +414,25 @@ print(await client.decisions.tests(key))
 | `version` | `(key, n)` |
 | `export` | `(key, version=None)` |
 | `propose_rules` | `(key, rules, *, note, mode="merge")`, new draft, import and propose in one call |
-| `add_test` | `(key, name, facts, *, expected=None, expected_outcome="decided", as_of=None)` |
+| `add_test` | `(key, name, facts, *, expected=None, expected_outcome="decided", as_of=None, match="exact")`, `match` is `exact` or `subset` |
+| `update_test` | `(key, test_id, **fields)`, any of `name`, `facts`, `expected`, `expected_outcome`, `as_of`, `match`. The rest stay as they are |
+| `delete_test` | `(key, test_id)` |
 | `evaluations` | `(key, limit=50)` |
 | `reference_sets` | `()` |
 | `reference_set` | `(key)` |
 | `put_reference_set` | `(key, name, values, description="")`, creates the set on a 404, otherwise saves a new version |
 
-No SDK method yet for `/check`, `/versions/{n}/try`, `/versions/{n}/presence`, changing or deleting a test, deleting a reference set, or archiving a decision. Use `client.http` for those.
+A golden test with `match="subset"` passes when every key in `expected` is in the result with the same value. Extra keys in the result are ignored and nested objects are matched the same way. Lists and plain values must be equal. The default `exact` needs the whole result to equal `expected`.
+
+```python
+t = await client.decisions.add_test(
+    key, "gold tier", {"tenure_years": 6}, expected={"tier": "gold"}, match="subset",
+)
+await client.decisions.update_test(key, t["id"], expected={"tier": "gold", "limit": 5000})
+await client.decisions.delete_test(key, t["id"])
+```
+
+No SDK method yet for `/check`, `/versions/{n}/try`, `/versions/{n}/presence`, deleting a reference set, or archiving a decision. Use `client.http` for those.
 
 ### Sources
 
@@ -539,8 +562,8 @@ Tell an agent what it got wrong and follow the fixes that come of it. A lesson n
 
 | Method | Calls |
 |---|---|
-| `feedback.give(rating, *, execution_id=None, conversation_id=None, message_id=None, agent_id=None, correction=None)` | `POST /api/improvements/feedback`. `rating` is 1 or -1, `ValueError` otherwise. A thumbs down with a correction becomes a lesson with it as the right answer |
-| `lessons.report(agent_id, note, *, expected=None, execution_id=None, input=None, output=None)` | `POST /api/improvements/lessons` with `source: "sdk"`. `ValueError` on a blank note |
+| `feedback.give(rating, *, execution_id=None, conversation_id=None, message_id=None, agent_id=None, correction=None)` | `POST /api/improvements/feedback`. Returns `id`, `lesson_id`, `agent_id`, `rating`. `rating` is 1 or -1, `ValueError` otherwise. A thumbs down with a correction becomes a lesson with it as the right answer, its id is `lesson_id` |
+| `lessons.report(agent_id, note, *, expected=None, execution_id=None, input=None, output=None)` | `POST /api/improvements/lessons` with `source: "sdk"`. Returns `{lesson_id, agent_id}`. `ValueError` on a blank note |
 | `improvements.list(*, agent_id=None, state=None, limit=50)` | `GET /api/improvements/proposals`, returns the items. `state` is one of `drafting`, `proving`, `failed_proof`, `awaiting_approval`, `approved`, `rejected`, `released`, `kept`, `rolled_back`, `superseded` |
 | `improvements.get(proposal_id)` | `GET /api/improvements/proposals/{id}` with its proof and watch result |
 
@@ -549,6 +572,102 @@ await client.feedback.give(-1, execution_id=run_id, correction="0 °C is 273.15 
 for p in await client.improvements.list(agent_id=agent_id, state="rolled_back"):
     print(p["cluster"]["title"], p["watch_result"]["reason"])
 ```
+
+### ML models
+
+Register trained models and call them. A name stands for its active version, a UUID for one exact version.
+
+```python
+model = await client.ml_models.upload(
+    "churn",
+    "churn.joblib",
+    feature_names=["age", "income", "tenure"],
+    description="Churn risk, retrained weekly",
+)
+print(model["version"], model["status"])                # 1.0.0 ready
+print(await client.ml_models.predict("churn", {"age": 35, "income": 50000, "tenure": 24}))
+why = await client.ml_models.explain("churn", {"age": 35, "income": 50000, "tenure": 24})
+print(why["method"], why["contributions"][0])
+print(await client.ml_models.get("churn"))
+await client.ml_models.delete("churn", all_versions=True)
+```
+
+| Method | Calls |
+|---|---|
+| `list()` | `GET /api/ml-models`, every version you can see |
+| `get(name_or_id)` | `GET /api/ml-models/{id}`, the version with its deployments |
+| `upload(name, file, *, filename=None, framework=None, version=None, description="", input_schema=None, feature_names=None, output_schema=None, tags=None)` | `POST /api/ml-models` as multipart. `file` is a path or raw bytes. Bytes need a `filename` with the extension, or a `framework` (`sklearn`, `xgboost`, `onnx`, `pytorch`). `feature_names` is stored on the input schema so predictions can take rows keyed by name. A version is picked for you when left out |
+| `predict(name_or_id, input_data, *, timeout=None)` | `POST /api/ml-models/{id}/predict` |
+| `explain(name_or_id, input_data, baseline=None, *, timeout=None)` | `POST /api/ml-models/{id}/explain`. One row in, per-feature `contributions` and a `waterfall` from the baseline value to the prediction out. `baseline` is a dict by feature name or a list, the model's training means are used when it is left out. See [Explanations](../02-runtime/12-ml-models.md#explanations) |
+| `delete(name_or_id, *, all_versions=False)` | `DELETE /api/ml-models/{id}`. With a name, the active version, or every version with `all_versions=True`. Returns `{"deleted": [ids]}` |
+
+`upload` raises `AbenixError` with these codes:
+
+| Code | Status | Meaning |
+|---|---|---|
+| `MODEL_LOAD_FAILED` | 422 | The file did not load. `details["model"]` is the stored error version, the active version did not change |
+| `VERSION_EXISTS` | 409 | That version is taken, `details["next_version"]` is free |
+| `UNSUPPORTED_FRAMEWORK` | 422 | TensorFlow or an unknown `.bin`, convert to ONNX |
+| none | 400 | An extension the registry does not take |
+
+A name that matches no model raises `AbenixError` 404 `NOT_FOUND`. See [02-runtime/12-ml-models](../02-runtime/12-ml-models.md).
+
+### Code assets
+
+Bring your own code, then run it from agents and pipelines with the `code_asset` tool. See [02-runtime/11-sandboxed-code-execution](../02-runtime/11-sandboxed-code-execution.md).
+
+```python
+asset = await client.code_assets.create("scorer", "./scorer", description="Scores rows")
+if asset["status"] != "ready":
+    raise RuntimeError(asset["error"])
+asset = await client.code_assets.new_version(asset["id"], "./scorer")
+print(asset["version"])
+print(await client.code_assets.run(asset["id"], {"rows": [[1, 2]]}))
+```
+
+| Method | Calls |
+|---|---|
+| `list()` | `GET /api/code-assets` |
+| `get(name_or_id)` | `GET /api/code-assets/{id}` |
+| `create(name, source=None, *, description="", git_url=None, git_ref=None, filename=None)` | `POST /api/code-assets` as multipart. `source` is a zip, a tar.gz, a folder or raw bytes of either. A folder is zipped in memory, leaving out `.git`, virtualenvs, `node_modules` and caches. Or give `git_url` and `git_ref` and no source |
+| `new_version(name_or_id, source=None, *, git_url=None, git_ref=None, filename=None)` | `POST /api/code-assets/{id}/versions`. Agents keep the same asset id |
+| `run(code_asset_id, input=None, *, timeout_seconds=None, timeout=None)` | Runs the asset through `tools.execute("code_asset", ...)` |
+
+`create` answers once analysis is done. It returns the row even when analysis failed, so check `status` (`ready` or `failed`) and `error`. `new_version` raises `AbenixError` 422 when the new code does not analyse cleanly, and the live version stays.
+
+### Kill switches
+
+Stop part of the platform for the whole tenant until someone clears it. Needs `risk.view` to list and `killswitch.manage` to set or clear.
+
+```python
+sw = await client.kill_switches.set("agent", "groundwork-trainer", "Bad outputs after the 2.1 data load")
+print([k["target"] for k in await client.kill_switches.list()])
+await client.kill_switches.clear(sw["id"])
+```
+
+| Method | Calls |
+|---|---|
+| `list(*, include_cleared=False)` | `GET /api/governance/kill-switches`, returns the switches |
+| `set(scope, target, reason)` | `POST /api/governance/kill-switches`. `scope` is `all`, `agent`, `pipeline`, `tool`, `model`, `trigger`, `decision`, `source` or `improvements`. `target` is a name or id in that scope, `*` for all of them, and is always `*` for `all` and `improvements`. `reason` needs at least 3 characters. A switch already on comes back as it is |
+| `clear(switch_id)` | `POST /api/governance/kill-switches/{id}/clear` |
+
+### API keys
+
+Keys of the calling user. An admin sees every key in the tenant.
+
+```python
+key = await client.api_keys.create("groundwork-ci", ["can_delegate"], max_monthly_tokens=2_000_000)
+store_secret(key["raw_key"])                         # only in this response
+for k in await client.api_keys.list():
+    print(k["name"], k["key_prefix"], k["last_used_at"])
+await client.api_keys.revoke(key["id"])
+```
+
+| Method | Calls |
+|---|---|
+| `list()` | `GET /api/api-keys`, active keys only |
+| `create(name, scopes=None, *, expires_at=None, max_monthly_tokens=None, max_monthly_cost=None)` | `POST /api/api-keys`. `scopes` is `{"can_delegate": True}`, `{"allowed_actions": [...]}` or a list of actions. Any other shape raises `ValueError` before the call, the server would drop it silently |
+| `revoke(key_id)` | `DELETE /api/api-keys/{id}`, returns `{id, status: "revoked"}` |
 
 ---
 
@@ -562,6 +681,7 @@ The older sub-clients. They return the `data` field and raise `httpx.HTTPStatusE
 |---|---|
 | `live()` | `GET /api/executions/live`, returns a list of `LiveExecution` dataclasses (`execution_id`, `agent_id`, `agent_name`, `status`, `current_step`, `current_tool`, tokens, `cost`, `iteration`, `max_iterations`, `confidence_score`) |
 | `get(execution_id)` | `GET /api/executions/{id}`, the stored row with `status`, `output_message` and the trace |
+| `list(*, agent_id=None, status=None, trigger_kind=None, trigger_id=None, search="", limit=20, offset=0)` | `GET /api/executions`. `trigger_kind` takes a string or a list |
 | `replay(execution_id)` | `GET /api/executions/{id}/replay`, the trace for step-through viewing. It does not run anything again |
 | `tree(execution_id)` | `GET /api/executions/tree/{id}`, parent plus child runs |
 | `pending_approvals()` | `GET /api/executions/approvals`, open human-approval gates in the tenant |
@@ -588,7 +708,7 @@ Besides `by_slug`, `create` and `update` above:
 | `approve(approval_id, *, reason="", client_token=None, edited_arguments=None)` | `signoff` with `approve` |
 | `deny(approval_id, *, reason="", client_token=None)` | `signoff` with `deny` |
 | `return_for_changes(approval_id, reason, *, client_token=None)` | see above |
-| `wait_for(approval_id, *, timeout_seconds=60, poll_seconds=2.0)` | Long-polls `/wait` in chunks of up to 120 s. Returns the last row seen, still `pending` if time ran out |
+| `wait_for(approval_id, *, timeout_seconds=60, poll_seconds=2.0)` | Long-polls `/wait` in chunks of up to 120 s. A busy answer (429, 502, 503, 504) or a dropped connection is retried until the timeout. Returns the last row seen, still `pending` if time ran out |
 | `subscribe()` | Async iterator over `GET /api/notifications/stream?types=approval_pending,approval_resolved`. Yields `{event, data}` |
 | `configure_webhook(*, url, secret=None)` | `PUT /api/approvals/webhooks`. Needs the admin or owner role |
 
@@ -598,9 +718,11 @@ Besides `by_slug`, `create` and `update` above:
 |---|---|
 | `bootstrap_project(slug, name, description="", collections=None)` | `POST /api/knowledge-projects/bootstrap`. Idempotent. Unknown `agent_slugs` in a collection come back in `skipped_agents` |
 | `ensure_subject_collection(project_slug, subject_type, subject_id, description="", default_visibility="private", vector_backend="pgvector")` | `POST /api/knowledge-projects/{slug}/subject-collections/ensure` |
+| `upload(kb_id, file, *, filename=None, content_type=None)` | `POST /api/knowledge-bases/{kb_id}/upload` as multipart. `file` is a path or raw bytes, bytes need a `filename`. Returns the document row with `status: processing`. `AbenixError` 400 for an empty or unsupported file |
+| `documents(kb_id)` | `GET /api/knowledge-bases/{kb_id}/documents`. Poll it until the document is `ready` before you search |
 | `cognify(kb_id, doc_ids=None, model="claude-sonnet-4-5-20250929", chunk_size=1000, chunk_overlap=200)` | `POST /api/knowledge-engines/{kb_id}/cognify` |
 | `graph_stats(kb_id)` | `GET /api/knowledge-engines/{kb_id}/graph-stats` |
-| `search(kb_id, query, mode="hybrid", top_k=5, graph_depth=2)` | `POST /api/knowledge-engines/{kb_id}/search` |
+| `search(kb_id, query, mode="hybrid", top_k=5, graph_depth=2)` | `POST /api/knowledge-engines/{kb_id}/search`. Returns `results` (each with `content`, `score`, `source`, `metadata`), `mode_used`, `vector_count`, `graph_count`, `entities_found` and `latency_ms` |
 | `graph(kb_id, limit=100)` | `GET /api/knowledge-engines/{kb_id}/graph` |
 | `cognify_jobs(kb_id)` | `GET /api/knowledge-engines/{kb_id}/cognify-jobs` |
 
@@ -625,9 +747,9 @@ Persistent threads on `/api/conversations`. Every method takes an optional `act_
 - `presets.list(*, tool_slug=None, ui_group=None, asset_class=None)`, `presets.get(slug)`, `presets.upsert(body)` and `presets.delete(slug)` manage `/api/tool-presets`
 - `presets.run(slug, arguments=None, config=None, *, timeout=None)` runs a preset, your arguments merged over its defaults
 
-### `ml_models`
+### `ml_models` and `code_assets`
 
-`list()` returns `GET /api/ml-models`. It is the only method. Use `client.http` for predict and deploy.
+See [ML models](#ml-models) and [Code assets](#code-assets) above. Their calls raise `AbenixError`, except `list()` which raises `httpx.HTTPStatusError`. Deploy has no SDK method, use `client.http`.
 
 ---
 

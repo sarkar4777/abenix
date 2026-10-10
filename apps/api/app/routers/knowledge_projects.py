@@ -97,7 +97,11 @@ async def list_projects(
             q = q.where(KnowledgeProject.id.in_(ids))
     if search:
         q = q.where(KnowledgeProject.name.ilike(f"%{search}%"))
-    q = q.order_by(KnowledgeProject.created_at.desc()).limit(limit).offset(offset)
+    q = (
+        q.order_by(KnowledgeProject.created_at.desc(), KnowledgeProject.id)
+        .limit(limit)
+        .offset(offset)
+    )
     rows = (await db.execute(q)).scalars().all()
 
     # Cheap collection counts in one round-trip.

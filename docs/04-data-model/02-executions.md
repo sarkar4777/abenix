@@ -7,19 +7,20 @@ Source: [`packages/db/models/execution.py`](../../packages/db/models/execution.p
 ## `executions`
 
 One row per agent or pipeline run. Written when the run starts, updated when it
-reaches a terminal state. It is an ordinary Postgres table. The TimescaleDB
-hypertable in the stack is `metrics`, used by `tsdb_query`, not this one.
+reaches a terminal state. It is an ordinary Postgres table. TimescaleDB is a
+separate database (`TSDB_URL`) that the `tsdb_query` tool reads, not this one.
+The table has `created_at` but no `updated_at`.
 
 | Column | Type | Notes |
 |---|---|---|
 | `id` | uuid | Primary key. Surfaced to clients so they can poll or stream. |
-| `tenant_id` / `agent_id` / `user_id` | uuid | Scope and ownership. |
-| `subject_id` / `subject_type` | text | The acting subject when a call is delegated (`actAs`). Lets a standalone app run as one of its own users while authenticating with its platform key. Added by `e2f3a4b5c6d7`. |
+| `tenant_id` / `agent_id` / `user_id` | uuid | Scope and ownership. Each is a foreign key and indexed. |
+| `subject_id` / `subject_type` | varchar(128) / varchar(64) | The acting subject when a call is delegated (`actAs`). Lets a standalone app run as one of its own users while authenticating with its platform key. `subject_id` is indexed. Added by `e2f3a4b5c6d7`. |
 | `input_message` | text | What was asked. |
 | `output_message` | text | The answer, or the moderation or grounding refusal. |
-| `status` | enum | `running`, `completed`, `failed`, `cancelled`. Stored uppercase in Postgres. |
-| `parent_execution_id` | uuid | Set when one agent invokes another, and on a replay, so a fan-out is reconstructable. |
-| `retry_count` | int | Incremented on replay. |
+| `status` | enum `execution_status` | `running` (default), `completed`, `failed`, `cancelled`. Stored as the uppercase member names in Postgres. |
+| `parent_execution_id` | uuid | Self foreign key. Set when one agent invokes another, and on a replay, so a fan-out is reconstructable. |
+| `retry_count` | int | Default 0. Incremented on replay. |
 | `trigger_id` | uuid | The `agent_triggers` row that started the run. `ON DELETE SET NULL`, so the run outlives its trigger. Indexed. Added by `trig0prov01`. |
 | `trigger_kind` | varchar(32) | What started the run. See [Started by](#started-by). Indexed. NULL on runs older than `trig0prov01`. |
 | `trigger_name` | varchar(255) | The trigger, subscription, source or parent agent name at the time of the run. Kept when the trigger is deleted. |
@@ -51,9 +52,8 @@ A browser may only claim `chat`, `playground` or `builder` through `source` on
 ### Status is not the same as success
 
 A pipeline execute returns HTTP 200 with `status = failed` rather than a 5xx.
-That is deliberate: the caller needs the `execution_id` to inspect what went
-wrong, and a 5xx body would not carry one. Check `status`, never just the HTTP
-code.
+The caller needs the `execution_id` to inspect what went wrong, and a 5xx body
+would not carry one. Check `status`, never just the HTTP code.
 
 ---
 
@@ -61,12 +61,12 @@ code.
 
 | Column | Notes |
 |---|---|
-| `input_tokens` / `output_tokens` | Aggregated across every turn of the run. |
-| `cost` | Total in USD. For a pipeline, the sum over every step, failed and retried ones included. |
-| `anthropic_cost` / `openai_cost` / `google_cost` / `other_cost` | Per-provider split, so a run that fell back mid-way shows where the spend went. These are `NOT NULL` and default to 0. |
-| `model_requested` | What the agent's `model_config` asked for. Added by `a8b9c0d1e2f3`. |
-| `model_used` | What actually served the run. `pipeline` for a pipeline run. |
-| `model_fallback_reason` | Why they differ, when they do. |
+| `input_tokens` / `output_tokens` | int, nullable. Aggregated across every turn of the run. |
+| `cost` | numeric(10,6), nullable. Total in USD. |
+| `anthropic_cost` / `openai_cost` / `google_cost` / `other_cost` | numeric(10,6). Per-provider split, so a run that fell back mid-way shows where the spend went. `NOT NULL`, default 0. Written on every terminal update, see `provider_cost_values()` in `models/execution.py`. |
+| `model_requested` | varchar(100). What the agent's `model_config` asked for. Added by `a8b9c0d1e2f3`. |
+| `model_used` | varchar(100). What actually served the run. `pipeline` for a pipeline run. |
+| `model_fallback_reason` | varchar(64). Why they differ, when they do. |
 
 `model_requested` and `model_used` differ whenever the router swaps provider, and
 always under exclusive subscription mode, which pins every call to the
@@ -94,14 +94,15 @@ Added by `c1d2e3f4a5b6_governance_core`. These answer "exactly what ran, and how
 None of this depends on the insert path remembering it. A `BEFORE INSERT`
 trigger, `executions_provenance`, fills the columns from the `agents` row when
 `provenance` is NULL. It hashes `system_prompt || '|' || model_config` into
-`config_hash` and writes the pair into `execution_config_snapshots`.
+`config_hash` and writes the pair into `execution_config_snapshots`. A row
+inserted with `provenance` already set, or with no `agent_id`, is left alone.
 
 ### `execution_config_snapshots`
 
 | Column | Notes |
 |---|---|
 | `config_hash` | Primary key. SHA-256 hex. |
-| `agent_id` | Indexed, no foreign key, so the snapshot outlives the agent. |
+| `agent_id` | Nullable, indexed, no foreign key, so the snapshot outlives the agent. |
 | `system_prompt` / `model_config` | Exactly what the run used. |
 | `created_at` | First time this config was seen. `ON CONFLICT DO NOTHING` keeps one row per hash. |
 
@@ -122,9 +123,7 @@ A second trigger, `executions_emit_event` (`AFTER UPDATE OF status`, added by
 ## Timing
 
 `created_at`, `started_at` and `completed_at` are separate because a queued run
-waits before it starts, and queue latency is worth seeing on its own.
-`duration_ms` is computed at the terminal transition rather than derived at read
-time.
+waits before it starts. `duration_ms` (int) is stored, not derived at read time.
 
 ## Queue lease
 
@@ -149,25 +148,29 @@ Inline runs in the API leave all three empty. See
 | `tool_calls` | jsonb. Every tool invoked, its arguments and whether it errored. |
 | `node_results` | jsonb. Per-node outcome for a pipeline run. |
 | `execution_trace` | jsonb. Node traces plus the tool-call summary, used by the flight recorder in the UI. |
-| `confidence_score` | Heuristic over tool-call count, failures and output length. |
+| `confidence_score` | numeric(3,2). Heuristic over tool-call count, failures and output length. |
 | `error_message` | Free text. |
-| `failure_code` | Stable identifier such as `MODERATION_BLOCKED` or `GROUNDING_REQUIRED_VIOLATION`. Group alerts on this, not on the message. |
-| `trace_id` | varchar(32). Correlates with OpenTelemetry spans and the Grafana dashboards. Partial index where not NULL. |
+| `failure_code` | varchar(64), indexed. Stable identifier such as `MODERATION_BLOCKED` or `GROUNDING_REQUIRED_VIOLATION`. Group alerts on this, not on the message. |
+| `trace_id` | varchar(32), indexed. Correlates with OpenTelemetry spans and the Grafana dashboards. |
+
+Composite indexes: `ix_executions_agent_status` on `(agent_id, status)`,
+`ix_executions_user_agent` on `(user_id, agent_id)`, `ix_executions_tenant_created`
+on `(tenant_id, created_at)`. `selfimp0001` adds `ix_executions_failed_completed`
+on `completed_at` where status is `FAILED`.
 
 ---
 
 ## Invocation side tables
 
 `executions` records the run. These record what the run reached into, each with
-its own latency and outcome, so a slow agent can be attributed to a slow
-dependency:
+its own `duration_ms`, `is_error` and `error_message`.
 
 | Table | Records |
 |---|---|
-| `tool_invocations` | Direct tool execute calls from the SDK or REST, outside an agent loop. Tool calls inside a run live in `executions.tool_calls`. Columns include `tool_slug`, `via`, `arguments`, `status` (`ok` / `error` / `timeout`), `acting_subject`, `api_key_id`, `trace_id`. |
-| `ml_model_invocations` | Predictions against a deployed ML model, with `predicted_class`, `confidence`, `deployment_type`. |
-| `code_asset_invocations` | Code asset runs with `stdout`, `stderr`, `exit_code`, `image_tag`, `schema_validated`. |
-| `kb_query_invocations` | Knowledge searches, with `search_mode`, `top_k` and `hit_count`. |
+| `tool_invocations` | Direct tool execute calls from the SDK or REST, outside an agent loop. Tool calls inside a run live in `executions.tool_calls`. Columns include `tool_slug`, `via` (`direct`, `agent` or `pipeline`), `parent_execution_id`, `arguments`, `status` (`ok` / `error` / `timeout`), `acting_subject`, `api_key_id`, `trace_id`. Only `created_at`. |
+| `ml_model_invocations` | Predictions against a deployed ML model, with `ml_model_id`, `execution_id`, `predicted_class`, `confidence`, `deployment_type`, `caller_source`. |
+| `code_asset_invocations` | Code asset runs with `code_asset_id`, `execution_id`, `stdout`, `stderr`, `exit_code`, `image_tag`, `schema_validated`, `caller_source`. |
+| `kb_query_invocations` | Knowledge searches, with `kb_collection_id`, `execution_id`, `search_mode`, `top_k`, `hit_count`, `caller_source`. |
 
 ---
 
@@ -175,23 +178,23 @@ dependency:
 
 | Table | Key columns | Notes |
 |---|---|---|
-| `execution_idempotency` | `key`, `agent_id`, `execution_id`, `status`, `cached_response`, `expires_at` | Caches the execute response per `Idempotency-Key` header. Added by `1100_c_idempotency`. |
+| `execution_idempotency` | `key`, `agent_id`, `execution_id`, `status`, `cached_response`, `expires_at` | Caches the execute response per `Idempotency-Key` header. Unique on `(tenant_id, key)`. Added by `1100_c_idempotency`. |
 | `batch_jobs` | `agent_id`, `user_id`, `status`, `total_inputs`, `completed_count`, `failed_count`, `results` | One row per batch execute request. |
-| `dead_letter_executions` | `execution_id`, `agent_id`, `failure_code`, `error_message`, `original_input`, `replay_count`, `last_replay_at`, `resolved`, `replay_execution_id` | Added by `1100_d_dead_letter`. `f2a3b4c5d6e7` makes `execution_id` unique, so one failed run has one row, and adds `replay_execution_id` (`ON DELETE SET NULL`) pointing at the latest run spawned by replay. |
-| `drift_alerts` | `agent_id`, `execution_id`, `severity`, `metric`, `baseline_value`, `current_value`, `deviation_pct`, `acknowledged` | Written by the drift detector. |
+| `dead_letter_executions` | `execution_id`, `agent_id`, `failure_code`, `error_message`, `original_input`, `replay_count`, `last_replay_at`, `resolved`, `replay_execution_id` | Added by `1100_d_dead_letter`. `f2a3b4c5d6e7` makes `execution_id` unique, so one failed run has one row, and adds `replay_execution_id` pointing at the latest run spawned by replay. |
+| `drift_alerts` | `agent_id`, `execution_id`, `severity`, `metric`, `baseline_value`, `current_value`, `deviation_pct`, `acknowledged` | Written by the drift detector. `agent_id` cascades on delete, `execution_id` is set to NULL. |
 
 ---
 
 ## Self-healing tables
 
 `pipeline_run_diffs` captures a failing node's shape and a sample of its inputs
-and outputs so Pipeline Surgeon has something concrete to diagnose. It is
-written best-effort from the runtime and keyed on `execution_id`, so a row with
-no valid execution id is dropped on the foreign key.
+and outputs so Pipeline Surgeon has something concrete to diagnose. `pipeline_id`
+and `execution_id` are foreign keys with `ON DELETE CASCADE`, so a row with no
+valid execution id cannot be written.
 
-`pipeline_patch_proposals` holds the drafted fix: `dsl_before`, `json_patch`,
-`dsl_after`, `confidence`, `risk_level`, `status`, who decided and when, and
-rollback columns. `1100_f_patch_cas` added `dsl_before_sha256` and
+`pipeline_patch_proposals` holds the drafted fix. Columns are `dsl_before`, `json_patch`,
+`dsl_after`, `confidence`, `risk_level`, `status` (`pending`, `accepted`,
+`rejected`, `superseded`), who decided and when, and rollback columns. `1100_f_patch_cas` added `dsl_before_sha256` and
 `applied_snapshot`. Applying a patch compares the live pipeline against
 `dsl_before_sha256` first, so a patch drafted against an older version cannot
 overwrite a newer edit. See
@@ -201,16 +204,15 @@ overwrite a newer edit. See
 
 ## Retention
 
-Executions accumulate quickly. A stale-execution sweeper marks runs abandoned
-past their timeout, and the archiver moves old rows out per tenant. Both take an
-advisory lock so only one pod does the work. The archive tables are covered in
+A stale-execution sweeper fails runs left `running` past their timeout, and the
+archiver moves old rows out per tenant. The archive tables are covered in
 [07-tools-and-operations](07-tools-and-operations.md).
 
 ---
 
 ## See also
 
-- [01-agents](01-agents.md) — the agent side of the relationship
-- [05-governance-decisions](05-governance-decisions.md) — risk tiers and policies
-- [02-runtime/04-streaming-tracing](../02-runtime/04-streaming-tracing.md) — how a run streams while it writes this row
-- [02-runtime/09-state-machines](../02-runtime/09-state-machines.md) — the legal status transitions
+- [01-agents](01-agents.md): the agent side of the relationship
+- [05-governance-decisions](05-governance-decisions.md): risk tiers and policies
+- [02-runtime/04-streaming-tracing](../02-runtime/04-streaming-tracing.md): how a run streams while it writes this row
+- [02-runtime/09-state-machines](../02-runtime/09-state-machines.md): the legal status transitions

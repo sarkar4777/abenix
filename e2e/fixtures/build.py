@@ -33,10 +33,14 @@ def _pdf_object(num: int, body: bytes) -> bytes:
 
 def build_pdf() -> bytes:
     # 4-object PDF: catalog, pages, page, content stream + font.
-    stream = (
-        f"BT /F1 12 Tf 50 750 Td ({PDF_TEXT}) Tj ET".encode("latin-1")
+    stream = f"BT /F1 12 Tf 50 750 Td ({PDF_TEXT}) Tj ET".encode("latin-1")
+    content = (
+        b"<< /Length "
+        + str(len(stream)).encode()
+        + b" >>\nstream\n"
+        + stream
+        + b"\nendstream"
     )
-    content = b"<< /Length " + str(len(stream)).encode() + b" >>\nstream\n" + stream + b"\nendstream"
 
     objects = [
         b"<< /Type /Catalog /Pages 2 0 R >>",
@@ -115,15 +119,18 @@ def build_zip() -> bytes:
     return out.getvalue()
 
 
-# ─── ML model stub ────────────────────────────────────────────────────
-# Tiny pickled identity-function model — not a real model artifact, but
-# a valid binary the upload endpoint will accept. We are testing the UI
-# pipeline (register → list → page renders), not inference correctness.
+# ─── ML model ─────────────────────────────────────────────────────────
+# upload loads the file and rejects anything without predict(), so ship a real one
 def build_model() -> bytes:
-    """Use a stdlib-friendly pickled object — a dict is enough for the
-    UAT to verify the upload flow end-to-end."""
-    import pickle
-    return pickle.dumps({"name": "uat-identity-model", "version": "0.1", "weights": [1.0, 2.0, 3.0]})
+    import io as _io
+
+    import joblib
+    from sklearn.linear_model import LinearRegression
+
+    model = LinearRegression().fit([[0.0], [1.0], [2.0]], [0.0, 1.0, 2.0])
+    buf = _io.BytesIO()
+    joblib.dump(model, buf)
+    return buf.getvalue()
 
 
 # ─── Main ─────────────────────────────────────────────────────────────
@@ -136,9 +143,15 @@ def main() -> int:
     zip_path.write_bytes(build_zip())
     pkl_path.write_bytes(build_model())
 
-    print(f"  wrote {pdf_path.relative_to(OUT_DIR.parent.parent)} ({pdf_path.stat().st_size}B)")
-    print(f"  wrote {zip_path.relative_to(OUT_DIR.parent.parent)} ({zip_path.stat().st_size}B)")
-    print(f"  wrote {pkl_path.relative_to(OUT_DIR.parent.parent)} ({pkl_path.stat().st_size}B)")
+    print(
+        f"  wrote {pdf_path.relative_to(OUT_DIR.parent.parent)} ({pdf_path.stat().st_size}B)"
+    )
+    print(
+        f"  wrote {zip_path.relative_to(OUT_DIR.parent.parent)} ({zip_path.stat().st_size}B)"
+    )
+    print(
+        f"  wrote {pkl_path.relative_to(OUT_DIR.parent.parent)} ({pkl_path.stat().st_size}B)"
+    )
     return 0
 
 

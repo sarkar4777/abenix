@@ -2,6 +2,15 @@
 
 > The second half of the loop in [22-lessons-and-improvements](22-lessons-and-improvements.md). A group of lessons gets one proposed fix, the fix is proven offline against the agent's own tests and history, a person approves it, it is released as a revision and watched against the old version. Worse means an automatic rollback with the reason. Tables are in [04-data-model/09-self-improvement](../04-data-model/09-self-improvement.md).
 
+## In short
+
+1. **Propose.** A group of lessons gets one small change: examples, a prompt edit, a tool setting, a read-only tool, a model, or a pipeline patch. A person can ask for it, or it is proposed on its own once the group has 5 lessons or turns high severity.
+2. **Prove.** The change runs offline against the agent's tests and a replay of recent real inputs. Tools that act are never executed during a proof. Only a proposal that fixes something, breaks nothing and stays within cost and speed margins goes on.
+3. **Approve.** A person with `improvements.approve` who did not build the agent signs it on `/approvals`. A rejection becomes a lesson for the next draft.
+4. **Watch.** The change is released as a new revision and compared with the old one for 7 days or 200 runs. Anything worse rolls it back at once, with the reason.
+
+Find it on `/improvements` (sidebar **Improvements**, needs `improvements.view`) and on each agent's Improvements tab at `/agents/{id}/improvements`. The step-by-step guide is [08-howto/16-self-improvement](../08-howto/16-self-improvement.md).
+
 ---
 
 ## Where it lives
@@ -42,7 +51,7 @@ One model call on the tenant's own credentials. The model is the tenant's cheape
 |---|---|---|
 | `examples` | `{"examples": [{"input", "output"}]}` | 1 to 5, appended under one header, at most 8 kept, a repeated input replaces the old one |
 | `prompt_edit` | `{"edits": [{"find", "replace"}]}` or `{"append": "..."}` | Each `find` must match exactly once, at most 5 edits, never more than 60% of the instructions |
-| `tool_config` | `{"tool", "set": {...}}` | Only a tool the agent uses, only `parameter_defaults`, `locked_defaults`, `max_calls`, `require_approval`. Never removes an approval step or unlocks a value |
+| `tool_config` | `{"tool", "set": {...}}` | Only a tool the agent uses, only `parameter_defaults`, `locked_defaults`, `max_calls`, `require_approval`. Never removes an approval step or frees a locked value |
 | `tool_set` | `{"add": [..]}` or `{"remove": [..]}` | One tool. Only read-only tools are added, tools that act need a person |
 | `model` | `{"model": "..."}` | Must be on the tier's allowed list |
 | `pipeline_patch` | `{"patch": [JSON-Patch]}` | Pipelines only, drafted by the [Pipeline Surgeon](10-pipeline-healing-drift.md) and checked by its validator |

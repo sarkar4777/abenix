@@ -1,6 +1,7 @@
 import os
 
 from celery import Celery
+from celery.signals import after_setup_logger
 
 broker_url = os.environ.get("CELERY_BROKER_URL", "redis://localhost:6379/1")
 result_backend = os.environ.get("CELERY_RESULT_BACKEND", "redis://localhost:6379/2")
@@ -10,6 +11,16 @@ celery_app = Celery(
     broker=broker_url,
     backend=result_backend,
 )
+
+
+@after_setup_logger.connect
+def _redact_llm_bodies(**_kwargs):
+    try:
+        from engine import log_redaction
+    except ImportError:
+        return
+    log_redaction.install()
+
 
 celery_app.conf.update(
     task_serializer="json",

@@ -22,6 +22,9 @@ dependencies = [
     "PyJWT[crypto]>=2.10.1",
     "passlib[bcrypt]>=1.7.4",
     "httpx>=0.27.0",
+    # QR code for two-step sign-in enrolment, pure python
+    "segno>=1.6",
+    "aiosmtplib>=3.0.0",
     "stripe>=9.0.0",
     "structlog>=24.1.0",
     "prometheus-client>=0.20.0",

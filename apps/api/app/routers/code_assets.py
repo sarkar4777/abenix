@@ -443,6 +443,20 @@ def _snapshot(a: CodeAsset, by: str) -> dict[str, Any]:
     return snap
 
 
+def _prewarm(a: Any) -> None:
+    """Start the new revision's runner now, so the first call after an upload is not a cold start."""
+    try:
+        from engine import code_runners as cr
+
+        if not cr.configured() or not cr.keeps_warm({"storage_uri": a.storage_uri}):
+            return
+        db_url = os.environ.get("DATABASE_URL", "")
+        if db_url:
+            cr.fire(cr.warm_asset(db_url, str(a.id)))
+    except Exception as e:  # noqa: BLE001
+        logger.warning("prewarm of %s skipped: %s", a.id, e)
+
+
 @router.post("/{asset_id}/versions")
 async def upload_version(
     asset_id: uuid.UUID,
@@ -533,6 +547,7 @@ async def upload_version(
     await db.commit()
     await _prune(prune)
     await db.refresh(a)
+    _prewarm(a)
     return success(_serialize(a, user, await _owner_names(db, {a.created_by})))
 
 

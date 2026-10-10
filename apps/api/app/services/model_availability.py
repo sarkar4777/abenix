@@ -52,7 +52,10 @@ async def _ping_anthropic(model: str) -> tuple[bool, str | None, int | None]:
         # from the very models the subscription serves.
         helper = _subscription_helper()
         if helper is not None:
-            client, _ = helper.build_async_client()
+            client, used_sub = helper.build_async_client()
+            if used_sub:
+                # exclusive mode runs every request on its own model, probe that one
+                model = helper.effective_model(model)
         else:
             client = anthropic.AsyncAnthropic()
         t0 = time.monotonic()
@@ -158,6 +161,19 @@ _PINGER = {
 
 
 async def ping_one(model: str, provider: str) -> dict[str, Any]:
+    try:
+        from engine import llm_stub
+
+        if llm_stub.enabled():
+            return {
+                "model": model,
+                "ok": True,
+                "error": None,
+                "latency_ms": 0,
+                "provider": provider,
+            }
+    except ImportError:
+        pass
     pinger = _PINGER.get(provider)
     if not pinger:
         return {
@@ -238,6 +254,39 @@ async def _persist_result(db, row: dict[str, Any]) -> tuple[str | None, str | No
         )
         return old_status, new_status
     return old_status, old_status
+
+
+_reprobe_task: Any = None
+
+# keys that change which provider can serve a model
+PROVIDER_KEYS = (
+    "ANTHROPIC_API_KEY",
+    "OPENAI_API_KEY",
+    "GOOGLE_API_KEY",
+    "AZURE_OPENAI_API_KEY",
+)
+
+
+def schedule_reprobe(delay: float = 3.0) -> None:
+    """Re-check every model soon after a model connection changes, not at the next hourly run."""
+    import asyncio
+
+    global _reprobe_task
+    if _reprobe_task is not None and not _reprobe_task.done():
+        return
+
+    async def _later() -> None:
+        # settings snapshots refresh within a few seconds
+        await asyncio.sleep(delay)
+        try:
+            await run_pings()
+        except Exception as e:  # noqa: BLE001
+            logger.warning("model re-check after a connection change failed: %s", e)
+
+    try:
+        _reprobe_task = asyncio.get_running_loop().create_task(_later())
+    except RuntimeError:
+        _reprobe_task = None
 
 
 async def run_pings() -> dict[str, Any]:

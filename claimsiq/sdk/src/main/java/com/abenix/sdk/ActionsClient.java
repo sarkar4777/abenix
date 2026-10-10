@@ -33,19 +33,11 @@ public final class ActionsClient {
         return propose(ProposeRequest.of(actionKey).arguments(arguments));
     }
 
-    /** Block until a person decides or the timeout fires, in long-poll chunks of up to 120 s. */
+    /** Block until a person decides or the timeout fires, in long-poll rounds of up to 120 s. A busy server is retried. */
     public ActionDecision waitFor(String actionId, int timeoutSeconds) {
-        int deadline = Math.max(1, timeoutSeconds);
-        int elapsed = 0;
-        ActionDecision last = null;
-        while (elapsed < deadline) {
-            int chunk = Math.min(120, deadline - elapsed);
-            last = decision(kit.dataOrRoot(kit.getJson(
-                "/api/autonomy/actions/" + actionId + "/wait", Map.of("timeout_s", chunk), null)));
-            if (last != null && !last.isWaiting()) return last;
-            elapsed += chunk;
-        }
-        return last;
+        return HttpKit.longPoll(timeoutSeconds, chunk -> decision(kit.dataOrRoot(kit.getJson(
+            "/api/autonomy/actions/" + actionId + "/wait", Map.of("timeout_s", chunk), null,
+            java.time.Duration.ofSeconds(chunk + 30L)))), d -> !d.isWaiting());
     }
 
     /** Say the action ran, or failed. Starts the outcome clock when the action type has a probe. */

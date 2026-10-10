@@ -4,10 +4,10 @@ import { test, expect, type Page } from '@playwright/test';
 // form via Chromium against http://localhost:3004 (port-forwarded).
 //
 // To run:
-//   BASE=http://localhost:3004 npx playwright test e2e/uat_resolveai_browser.spec.ts \
+//   RESOLVEAI_BASE=http://localhost:3004 npx playwright test e2e/uat_resolveai_browser.spec.ts \
 //     --reporter=list --workers=1 --timeout=180000
 
-const BASE = process.env.BASE || 'http://localhost:3004';
+const BASE = process.env.RESOLVEAI_BASE || 'http://localhost:3004';
 
 async function gotoOk(page: Page, path: string) {
   const resp = await page.goto(`${BASE}${path}`, { waitUntil: 'domcontentloaded' });

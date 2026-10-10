@@ -30,8 +30,12 @@ from models.moderation_policy import (  # noqa: E402
 # dataclass cross the module boundary since both processes run the same
 # codebase.
 sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "apps" / "agent-runtime"))
-from engine.moderation_client import mask_spans, pattern_spans  # noqa: E402
-from engine.moderation_gate import GateConfig  # noqa: E402
+from engine.moderation_client import (  # noqa: E402
+    event_provider_response,
+    mask_spans,
+    pattern_spans,
+)
+from engine.moderation_gate import GateConfig, with_dlp  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -90,8 +94,16 @@ async def build_gate_context(
 ) -> ModerationGateContext:
     """Load the active policy and return a ready-to-use gate context."""
     ctx = ModerationGateContext()
+    dlp_policy = None
+    try:
+        from engine.dlp import load_tenant_policy
+
+        dlp_policy = await load_tenant_policy(db, tenant_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("tenant DLP setting not loaded: %s", exc)
     policy = await load_active_policy(db, tenant_id)
     if policy is None:
+        ctx.gate = with_dlp(None, dlp_policy, str(tenant_id))
         return ctx
     released: dict[str, str] = {}
     try:
@@ -136,7 +148,7 @@ async def build_gate_context(
                 "category_scores": dict(
                     getattr(decision, "category_scores", None) or {}
                 ),
-                "provider_response": decision.provider_response,
+                "provider_response": event_provider_response(decision),
                 "latency_ms": decision.latency_ms,
                 "hold": kw.get("hold"),
                 "consumed_review_id": kw.get("consumed_review_id"),
@@ -171,6 +183,7 @@ async def build_gate_context(
         released=released,
     )
     ctx.redaction_mask = policy.redaction_mask or "█████"
+    ctx.gate = with_dlp(ctx.gate, dlp_policy, str(tenant_id))
     return ctx
 
 

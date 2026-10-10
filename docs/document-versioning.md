@@ -1,73 +1,87 @@
-# Document versioning + how queries handle a replaced document
+# Document versioning
 
-Abenix tracks every uploaded document as a version. Replacing a contract, manual, or report with a corrected version is one API call. Existing agents and queries automatically resolve to the new version — no code change anywhere.
+A knowledge base document can have versions. Each version is its own row in `documents`, linked by four columns on [`Document`](../packages/db/models/knowledge_base.py):
+
+| Column | Meaning |
+|---|---|
+| `parent_document_id` | The first version of the chain. `NULL` on the first version itself |
+| `version_number` | 1 for the first version, one higher for each replacement |
+| `is_current` | `true` on the newest version only |
+| `superseded_by` | On an old version, the id of the version that replaced it |
+
+Two things create a new version: the replace call below, and Source Watch when it files a changed page into a knowledge base.
 
 ## Replace a document
+
+The route is in [`apps/api/app/routers/knowledge_v2.py`](../apps/api/app/routers/knowledge_v2.py). The body names a file that is already in storage.
 
 ```
 POST /api/knowledge/{kb_id}/documents/{doc_id}/replace
 {
   "new_filename": "contract-v2.pdf",
-  "new_storage_url": "/data/uploads/<kb>/<new-blob>",
+  "new_storage_url": "<tenant>/kb/<kb>/<new-blob>",
   "new_file_type": "application/pdf",
   "new_file_size": 482917
 }
 ```
 
-The old document row is marked `is_current=false, superseded_by=<new_id>`. The new row becomes the current head with `version_number = old.version_number + 1`.
+The call adds a new row with the same `parent_document_id` and `version_number` one higher, and marks the old row `is_current = false` with `superseded_by` set to the new id. It answers 201:
 
-## What happens to existing queries
+```json
+{"id": "<new id>", "version_number": 2, "parent_document_id": "<first version id>", "supersedes": "<old id>"}
+```
 
-Three things resolve automatically:
+The checks, in order:
 
-### 1. Knowledge-base search
+- The collection must be in your tenant and readable by you, else 404. You need edit rights on it, else 403.
+- The new file must already be uploaded to this collection, so its storage path sits under the tenant and collection prefix, else 400.
+- Replacing a version that is already superseded answers 400. Replace the current head instead.
 
-Agents asking `knowledge_search("contract X")` get chunks from the **new version only**. The search layer pre-filters by `is_current=true` before similarity scoring, so superseded chunks never enter the candidate pool. Citations returned to the agent point at the new file with page + chunk anchors.
+## What happens next
 
-If you need an explicit audit query against historical state, pass `include_superseded=true` to the search endpoint.
+1. The new version is queued for processing like any upload: extraction, chunking and embedding.
+2. Search and Cognify use the current version only. Vector search (pgvector and Pinecone) and graph search drop chunks and facts that come only from a superseded row, and a Cognify run skips superseded rows even when you name them. The old row stays as history.
+3. The document list and the knowledge base detail return the current version only. Each row carries `version_number`, `is_current`, `parent_document_id` and `superseded_by`.
 
-### 2. Atlas (knowledge graph)
+## View history
 
-A replace does not change the Atlas graph. To see an Atlas graph as it stood before a change, agents call `atlas_as_of`:
+People who can edit the collection, and tenant admins, can see the old versions:
+
+```
+GET /api/knowledge/{kb_id}/documents/{doc_id}/versions
+GET /api/knowledge-bases/{kb_id}/documents?include_history=true
+```
+
+The first returns the whole chain for one document, oldest first. The second returns every row in the collection, current or not. Anyone else gets 403.
+
+To remove an old version for good, delete it with `DELETE /api/knowledge/{kb_id}/documents/{doc_id}`, which also removes its vectors.
+
+## Source Watch
+
+When a watched source has `ingest_to_kb` set, each baseline and changed snapshot becomes a new text document in that knowledge base, and a new version of the previous one from the same source. Like the replace call, Source Watch queues the new document for processing. See [Source Watch](02-runtime/17-source-watch.md#knowledge-base-ingestion).
+
+## Atlas history
+
+Replacing a document does not change any Atlas graph. To see a graph as it stood before a change, agents call `atlas_as_of`:
 
 ```
 atlas_as_of(graph_id=..., as_of="2025-01-15T00:00:00Z")
 ```
 
-It reads the newest snapshot saved at or before that time, or the live graph when nothing has changed since. With no snapshot that old it says so instead of guessing.
+If the graph has not changed since `as_of`, it reads the live rows. Otherwise it reads the newest snapshot saved at or before that time, and says so when there is none. See [06-atlas-knowledge-engine](01-architecture/06-atlas-knowledge-engine.md#agent-tools).
 
-### 3. Cognify (graph builder)
+## Audit
 
-The next Cognify job only processes documents where:
+Every replace writes an `activity_logs` row with the action `document.replaced` and the old id, new id and version number in its details. The table is append-only and hash-chained, see [07-governance](01-architecture/07-governance.md#tamper-evident-audit-log).
 
-- `is_current = true`, AND
-- `cognified_at IS NULL OR updated_at > cognified_at`
-
-So the new version of a 10k-document KB doesn't re-process 10k docs — only the replaced one (and any other recent uploads). The superseded document is excluded from the frontier.
-
-## What the agent sees, end to end
-
-A line manager asks the agent **"What are the current termination clauses in contract Acme-2024?"**
-
-1. Agent calls `knowledge_search(query="termination Acme-2024")`.
-2. Hybrid search returns chunks from version 2 only.
-3. Agent composes the answer with citations like `Acme-2024.pdf · page 17 · chunk 4`, read from each hit's `metadata.citation`.
-
-Asked how the contract ontology looked before the November amendment, the agent calls `atlas_as_of(as_of="2024-10-15T00:00:00Z")` and gets the Atlas graph from the newest snapshot saved by then.
-
-## Auditor + compliance workflow
-
-Every replace operation writes an `activity_log` row tagged `document.replaced` with the old doc ID, new doc ID, and version number. The `activity_log` is append-only, so an auditor can reconstruct the timeline of any document.
-
-The `/api/gdpr/users/{id}/receipts` endpoint covers the parallel right-to-erasure path — see [GDPR docs](sso.md) (same admin surface).
+Erasing a person's data across stores is a separate path, see [GDPR cascade](02-runtime/15-v2-knowledge-enterprise.md#gdpr-cascade).
 
 ## Limits
 
-- A document chain has no version cap. A contract amended 50 times has 50 rows.
-- `superseded_by` is a single pointer — branched versions (forks) are not modeled. If you need divergent branches, create them as separate documents and use document grants to scope visibility.
-- The Pinecone storage for superseded versions stays until GDPR or a manual delete on the KB. Cost amortizes well — only the active chunks are scored on every query.
+- A chain has no version cap. A contract replaced 50 times has 50 rows.
+- `superseded_by` is a single pointer, so branches are not modelled. For divergent versions, upload separate documents and scope them with document grants.
 
 ## Related
 
-- [`docs/02-runtime/15-v2-knowledge-enterprise.md`](02-runtime/15-v2-knowledge-enterprise.md) — the full developer reference
-- [`docs/02-runtime/10-pipeline-healing-drift.md`](02-runtime/10-pipeline-healing-drift.md) — the Surgeon's view of pipeline-level versioning
+- [02-runtime/15-v2-knowledge-enterprise](02-runtime/15-v2-knowledge-enterprise.md#document-versioning), the developer reference
+- [04-data-model/03-knowledge](04-data-model/03-knowledge.md), the `documents` columns

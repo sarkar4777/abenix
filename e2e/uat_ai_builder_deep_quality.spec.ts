@@ -164,35 +164,41 @@ test('E. /admin/pipeline-scaling DEEP — DAG rendering for at least one pipelin
   expect(hasAgents && hasTools).toBeTruthy();
 });
 
-test('F. /admin/tool-scaling DEEP — 15 seeded rows visible + edit drawer', async ({ page }) => {
+test('F. /admin/tool-scaling DEEP — seeded rows visible and the edit drawer opens', async ({ page }) => {
   await login(page);
   await page.goto(`${BASE}/admin/tool-scaling`);
   await page.waitForLoadState('domcontentloaded');
-  await page.waitForTimeout(3500);
-
-  const tableRows = await page.locator('tbody tr').count();
-  const editBtns = await page.locator('button:has-text("Edit"), button:has-text("edit"), button[aria-label*="edit" i]').count();
-  const yfRow = await page.locator('tbody tr', { hasText: /yahoo_finance/i }).count();
-  console.log(`/admin/tool-scaling — tableRows=${tableRows} editBtns=${editBtns} yahoo_finance_row=${yfRow}`);
-
-  await page.screenshot({ path: 'test-results/uat-deep-tool-scaling.png', fullPage: true });
+  const rows = page.locator('tbody tr').filter({ has: page.getByRole('button', { name: /^Edit / }) });
+  await expect(rows.first()).toBeVisible({ timeout: 20_000 });
+  const tableRows = await rows.count();
+  console.log(`/admin/tool-scaling — tableRows=${tableRows}`);
   expect(tableRows).toBeGreaterThanOrEqual(5);
+
+  const edit = rows.first().getByRole('button', { name: /^Edit / });
+  const slug = ((await edit.getAttribute('aria-label')) || '').replace(/^Edit /, '');
+  await edit.click();
+  await expect(page.getByRole('heading', { name: slug })).toBeVisible();
+  await expect(page.getByText('Inflight cap (global)')).toBeVisible();
+  await page.screenshot({ path: 'test-results/uat-deep-tool-scaling.png', fullPage: true });
+  await page.keyboard.press('Escape');
+  await page.mouse.click(5, 5);
+  await expect(page.getByText('Inflight cap (global)')).toHaveCount(0);
 });
 
-test('G. /ml-models DEEP — 16 models visible with metadata', async ({ page }) => {
+test('G. /ml-models DEEP — every registered model is listed', async ({ page }) => {
   await login(page);
+  const tok = await page.evaluate(() => localStorage.getItem('access_token'));
+  const r = await page.request.get(`${API}/api/ml-models`, { headers: { Authorization: `Bearer ${tok}` } });
+  const d = (await r.json()).data;
+  const models: Array<{ name: string }> = Array.isArray(d) ? d : d.items;
+  expect(models.length, 'models registered').toBeGreaterThan(0);
   await page.goto(`${BASE}/ml-models`);
   await page.waitForLoadState('domcontentloaded');
-  await page.waitForTimeout(3500);
-
-  const cards = await page.locator('[class*="card" i], tr, [class*="rounded" i]').count();
-  const text = (await page.locator('body').innerText()).toLowerCase();
-  const hasContractIQModels = /contractiq.*clause|contractiq.*risk|contractiq.*counterparty|contractiq.*anomaly/.test(text);
-  const hasWingmanModels = /wingman.*mispricing|wingman.*scenario|wingman.*broker/.test(text);
-  console.log(`/ml-models — cards=${cards} contractiq_models=${hasContractIQModels} wingman_models=${hasWingmanModels}`);
-
+  await expect(page.getByText(models[0].name, { exact: false }).first()).toBeVisible({ timeout: 20_000 });
+  const text = await page.locator('main').innerText();
+  const missing = models.filter((m) => !text.includes(m.name)).map((m) => m.name);
   await page.screenshot({ path: 'test-results/uat-deep-ml-models.png', fullPage: true });
-  expect(cards).toBeGreaterThan(8);
+  expect(missing, 'models missing from the page').toEqual([]);
 });
 
 test('H. /help — Scale & operate section visible with three-layer content', async ({ page }) => {

@@ -45,6 +45,7 @@ interface Invite {
   expires_at: string;
   expired?: boolean;
   invite_url?: string;
+  emailed?: boolean;
 }
 
 const ROLE_COLORS: Record<string, string> = {
@@ -82,6 +83,7 @@ export default function TeamPage() {
   const [removingMember, setRemovingMember] = useState<Member | null>(null);
   const [removeLoading, setRemoveLoading] = useState(false);
   const [inviteLink, setInviteLink] = useState<string | null>(null);
+  const [invitedTo, setInvitedTo] = useState<{ email: string; emailed: boolean } | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
   const [showNext, setShowNext] = useState(false);
 
@@ -110,9 +112,13 @@ export default function TeamPage() {
         setInviteEmail('');
         setShowInvite(false);
         setInviteLink(res.data.invite_url || null);
+        setInvitedTo({ email: res.data.email, emailed: !!res.data.emailed });
         setShowNext(true);
         mutateTeam();
-        toastSuccess('Invite created', 'Copy the link and send it to your teammate');
+        toastSuccess(
+          res.data.emailed ? 'Invite emailed' : 'Invite created',
+          res.data.emailed ? `We emailed the link to ${res.data.email}` : 'Copy the link and send it to your teammate',
+        );
       } else {
         setInviteError(res.error || 'Failed to invite');
         toastError('Failed to create invitation', res.error || undefined);
@@ -210,7 +216,7 @@ export default function TeamPage() {
         primaryAction={{ label: 'Invite Member', icon: Plus, onClick: () => setShowInvite(true) }}
         steps={[
           'Invite someone by email and pick their role.',
-          'Copy the invite link and send it to them. It works once and expires in 7 days.',
+          'The invite link is emailed to them when email is set up, or copy it and send it yourself. It works once and expires in 7 days.',
           'Admins manage everything, creators build agents, members use what is shared with them.',
           'Use the menu on a person to change their role or remove them.',
         ]}
@@ -285,8 +291,10 @@ export default function TeamPage() {
       {inviteLink && (
         <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-xl p-4">
           <div className="flex items-start justify-between mb-2">
-            <p className="text-sm text-emerald-400 font-medium">
-              Invite link ready. It works once and expires in 7 days.
+            <p className="text-sm text-emerald-400 font-medium" data-testid="invite-result">
+              {invitedTo?.emailed
+                ? `Invite emailed to ${invitedTo.email}. You can also copy the link. It works once and expires in 7 days.`
+                : 'Invite link ready. Email is not set up here, so send it yourself. It works once and expires in 7 days.'}
             </p>
             <button
               onClick={() => setInviteLink(null)}

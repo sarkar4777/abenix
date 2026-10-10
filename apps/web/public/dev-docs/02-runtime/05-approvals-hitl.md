@@ -15,9 +15,9 @@ There are two stores behind the `/approvals` queue.
 | Decisions | approve, deny, return | approve or deny. A return ends it as rejected |
 | Expiry | `expires_seconds`, default 86400 on the API, 1800 on the tool, max 7 days | `timeout_seconds`, default 3600, capped at 7200 |
 | Row id | UUID | `hitl:{execution_id}:{gate_id}` |
-| Used by | Explicit gates, decision publishing (`gate_kind: decision_publish`), SDK-created approvals | Most seeded agents, `tool_config.require_approval`, and the tier policy's `approval` action |
+| Used by | Explicit gates, decision publishing (`gate_kind: decision_publish`), earned-autonomy action gates (`action:<key>`) and promotions (`autonomy.promote`), improvement releases (`improvement.release`), SDK-created approvals | Most seeded agents, `tool_config.require_approval`, and the tier policy's `approval` action |
 
-Both show on `/approvals` and in `GET /api/approvals`, and both are signed off through `POST /api/approvals/{id}/signoff`.
+Both show on `/approvals`, in the **Needs you** inbox and in `GET /api/approvals`, and both are signed off through `POST /api/approvals/{id}/signoff`. The autonomy and improvement gates are covered in [21-earned-autonomy](21-earned-autonomy.md) and [23-governed-self-improvement](23-governed-self-improvement.md).
 
 ## How a run waits
 
@@ -124,7 +124,7 @@ pipeline_config:
         body: "{{extract.draft}}"
 ```
 
-The pipeline's wall-clock budget (`PIPELINE_TIMEOUT_SECONDS`, default 300) is checked between layers. A gate that waits longer than that makes every later layer fail with "Pipeline timeout exceeded". See [01-pipelines](01-pipelines.md).
+The pipeline's wall-clock budget (300 seconds on queued runs, 120 on the `/api/pipelines` routes by default, see [Pipeline timeout](01-pipelines.md#pipeline-timeout)) is checked between layers. A gate that waits longer than that makes every later layer fail with "Pipeline timeout exceeded".
 
 ---
 
@@ -185,9 +185,18 @@ A signer can send an approval back instead of denying it. `POST /api/approvals/{
 
 ## Who may sign
 
-Without a policy on the row, admins and creators sign off. A sign-off by the user who requested it is allowed and recorded with `self_approved: true`, because most tenants have one admin. Users with the `user` role get 403 "Only admins and creators can sign off on approvals".
+Without a policy on the row, admins and creators sign off, and so does anyone whose permission set grants `approvals.sign`. A sign-off by the user who requested it is allowed and recorded with `self_approved: true`, because most tenants have one admin. Anyone else gets 403 "Only admins and creators can sign off on approvals".
 
 With a policy, the capability check replaces the role rule. See below.
+
+Some gate kinds add their own rule on top:
+
+| `gate_kind` | Extra rule |
+|---|---|
+| `decision_publish` | The signer needs `decisions.review` |
+| `autonomy.promote` | The agent's creator gets 403 `AUTHOR_CANNOT_GRANT` while someone else in the tenant could sign. See [self-approval](21-earned-autonomy.md#self-approval) |
+| `improvement.release` | The agent's creator gets 403 `AUTHOR_CANNOT_APPROVE` on an approve, same rule |
+| `action:<key>` | The approver may send `edited_arguments` with an approve. The runtime runs the action with them |
 
 ## Tier floor
 
@@ -268,7 +277,7 @@ All under `/api/approvals`.
 | GET | `/api/approvals` | List. Filters `status`, `execution_id`, `agent_id`, `kind`, `limit` (1 to 500). Pending `human_approval` gates are merged in when the filters allow |
 | GET | `/api/approvals/{id}` | One row. Takes a UUID or a `hitl:` id |
 | GET | `/api/approvals/{id}/wait` | Long-poll until the status leaves `pending`, `timeout_seconds` 1 to 120, default 30 |
-| POST | `/api/approvals/{id}/signoff` | `decision` (`approve`, `deny`, `return`), `reason` (up to 1,000 characters), `client_token` |
+| POST | `/api/approvals/{id}/signoff` | `decision` (`approve`, `deny`, `return`), `reason` (up to 1,000 characters), `client_token`, and `edited_arguments` for `action:` gates only |
 | GET | `/api/approvals/webhooks` | The tenant's approval webhook URL and whether a secret is set |
 | PUT | `/api/approvals/webhooks` | Set or clear the URL and secret. Admins only |
 
@@ -285,13 +294,19 @@ flowchart LR
   C --> H[Signoff history]
 ```
 
-The `/approvals` page shows pending and recent rows, including `human_approval` gates from running agents, marked with a gate kind badge. Payload renders as a key/value grid so a reviewer can scan vendor, amount and risk at a glance. **Return for changes** is hidden on `human_approval` gates. See the [page catalogue](../05-ui/03-page-catalogue.md).
+The `/approvals` page (sidebar **Approvals**) shows pending and recent rows, including `human_approval` gates from running agents, marked with a gate kind badge. Payload renders as a key/value grid so a reviewer can scan vendor, amount and risk at a glance. **Return for changes** is hidden on `human_approval` gates. A second tab, **Reviews**, holds earned-autonomy watching reviews. See the [page catalogue](../05-ui/03-page-catalogue.md).
+
+### Needs you inbox
+
+Pending approvals also show in the **Needs you** inbox at `/inbox`, the first sidebar item, with a count badge. Its **Approvals** tab lists only the rows the caller can sign, using the same rules as the signoff route (role or capability, the policy's capability and requester exclusion, `decisions.review`, a user who already signed). Pending `human_approval` gates are added for admins, creators and holders of `approvals.sign`. Improvement releases sit under the separate **Proposals** tab for holders of `improvements.approve`. The inbox offers Approve and Deny. Return for changes stays on `/approvals`.
+
+`GET /api/me/inbox-counts` ([`inbox.py`](../../apps/api/app/routers/inbox.py)) returns `total`, `counts` per tab, `available` and `unavailable`. Counts are cached per user for 15 seconds, `?fresh=true` skips the cache. The tabs are `approvals`, `proposals`, `watching`, `held`, `marketplace` and `alerts`, each shown only to users who can act on it.
 
 ---
 
 ## Notifications
 
-When a Postgres approval is created, every other active user in the tenant gets an `approval_pending` notification linking to `/approvals`. When it settles, the requester and every earlier signer, except the person who settled it, get `approval_resolved`. Each notification is stored, pushed over the notification WebSocket, and sent to Slack or email by the user's notification settings and the tenant's Slack webhook.
+When an approval is created through `POST /api/approvals` (the `approval_gate` tool and SDK path), every other active user in the tenant gets an `approval_pending` notification linking to `/approvals`. When it settles, the requester and every earlier signer, except the person who settled it, get `approval_resolved`. Each notification is stored, pushed over the notification WebSocket, and sent to Slack or email by the user's notification settings and the tenant's Slack webhook.
 
 A pending `human_approval` gate is in Redis only, so it sends no `approval_pending` notification. Its decision writes a history row, which sends `approval_resolved`.
 
@@ -325,4 +340,5 @@ The tenant's approval webhook, if set, gets `{"event": "approval_pending" | "app
 | **`until_gate`** | [`apps/api/app/routers/agents.py`](../../apps/api/app/routers/agents.py) — `_watch_for_gate` |
 | **Legacy gate endpoints** | [`apps/api/app/routers/executions.py`](../../apps/api/app/routers/executions.py) — `/approvals`, `/{id}/approve` |
 | **/approvals UI** | [`apps/web/src/app/(app)/approvals/page.tsx`](../../apps/web/src/app/(app)/approvals/page.tsx) |
+| **Needs you inbox** | [`apps/api/app/routers/inbox.py`](../../apps/api/app/routers/inbox.py) — `can_sign`, `compute_counts`. [`apps/web/src/app/(app)/inbox/page.tsx`](../../apps/web/src/app/(app)/inbox/page.tsx), [`ApprovalsPanel.tsx`](../../apps/web/src/components/inbox/ApprovalsPanel.tsx) |
 | **SDK** | [`packages/sdk/python/abenix_sdk/__init__.py`](../../packages/sdk/python/abenix_sdk/__init__.py) — `ApprovalsClient`, `execute(wait=...)`. [`packages/sdk/js/src/index.ts`](../../packages/sdk/js/src/index.ts) |

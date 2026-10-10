@@ -33,11 +33,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.audit import log_action
 from app.core.deps import get_db
 from app.core.responses import error, success
-from app.core.security import (
-    create_access_token,
-    create_refresh_token,
-    verify_token,
-)
+from app.core.security import verify_token
 import jwt
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "packages" / "db"))
@@ -59,7 +55,11 @@ def _api_base() -> str:
 
 
 def _web_base() -> str:
-    return os.environ.get("WEB_BASE_URL", "http://localhost:3000").rstrip("/")
+    return (
+        os.environ.get("WEB_BASE_URL")
+        or os.environ.get("FRONTEND_URL")
+        or "http://localhost:3000"
+    ).rstrip("/")
 
 
 def _state_secret() -> str:
@@ -463,8 +463,10 @@ async def callback(
     )
     await db.commit()
 
-    access = create_access_token(user.id, user.tenant_id, user.role.value)
-    refresh = create_refresh_token(user.id)
+    from app.core import sessions
+
+    pair = await sessions.sign_in(db, user, request, f"sso:{provider}")
+    access, refresh = pair["access_token"], pair["refresh_token"]
 
     spa_target = (
         f"{_web_base()}/auth/callback"

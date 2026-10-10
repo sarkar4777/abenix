@@ -10,6 +10,7 @@ import { usePageTitle } from '@/hooks/usePageTitle';
 import { holds, useMyPermissions } from '@/lib/capabilities';
 import { SeverityPill, TrendBars } from '@/components/improvements/TrendBars';
 import BudgetMeter from '@/components/improvements/proposals/BudgetMeter';
+import LessonRetention from '@/components/improvements/LessonRetention';
 import { improvementsApi, plural, type Overview } from '@/lib/improvements';
 
 const IMPROVEMENT_STEPS = [
@@ -215,6 +216,7 @@ export default function ImprovementsPage() {
           )}
         </>
       ) : null}
+      {data && <LessonRetention />}
     </div>
   );
 }

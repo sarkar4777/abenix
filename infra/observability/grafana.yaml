@@ -3,8 +3,8 @@
 # dashboards baked in via ConfigMap. Operators land on the dashboards
 # the moment they `kubectl port-forward` to port 3000.
 #
-# Default admin: admin / abenix-admin
-# Override `GF_SECURITY_ADMIN_PASSWORD` env or supply your own Secret.
+# Admin password comes from the abenix-grafana-admin Secret, which the deploy
+# scripts create from GRAFANA_ADMIN_PASSWORD (default abenix-admin) when it is missing.
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -92,7 +92,10 @@ spec:
             - name: GF_SECURITY_ADMIN_USER
               value: admin
             - name: GF_SECURITY_ADMIN_PASSWORD
-              value: abenix-admin
+              valueFrom:
+                secretKeyRef:
+                  name: abenix-grafana-admin
+                  key: admin-password
             - name: GF_USERS_ALLOW_SIGN_UP
               value: "false"
             # We don't expose Grafana to the internet; turning off

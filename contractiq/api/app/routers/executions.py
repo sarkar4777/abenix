@@ -13,7 +13,6 @@ from __future__ import annotations
 import os
 from typing import AsyncIterator
 
-import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy import select
@@ -52,26 +51,8 @@ def _subject_header(user) -> dict[str, str]:
     return {"X-Abenix-Subject": json.dumps(payload)}
 
 
-def _headers(user=None) -> dict[str, str]:
-    h: dict[str, str] = {"Accept": "application/json"}
-    if API_KEY:
-        h["X-API-Key"] = API_KEY
-    h.update(_subject_header(user))
-    return h
-
-
-def _sse_headers(user=None) -> dict[str, str]:
-    h = {"Accept": "text/event-stream"}
-    if API_KEY:
-        h["X-API-Key"] = API_KEY
-    h.update(_subject_header(user))
-    return h
-
-
-def _sdk():
-    """Lazy AbenixSDK constructor for read-side endpoints (ml-models registry,
-    agent-id lookup, etc). Use this instead of raw httpx for any Abenix call.
-    """
+def _sdk(timeout: float = 30.0):
+    """AbenixSDK client, every Abenix call in this router goes through it."""
     import sys
     from pathlib import Path
     sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "sdk"))
@@ -79,7 +60,28 @@ def _sdk():
     # SDK takes base_url, not api_base. The old kwarg name silently raised
     # TypeError, swallowed by the broad except in _resolve_agent_id, and
     # surfaced as the "agent slug not found" UI error.
-    return Abenix(base_url=ABENIX_URL, api_key=API_KEY or "dev")
+    return Abenix(base_url=ABENIX_URL, api_key=API_KEY or "dev", timeout=timeout)
+
+
+def _acting(user):
+    """The CIQ caller as the SDK's acting subject, None on background paths."""
+    if user is None:
+        return None
+    from abenix_sdk import ActingSubject
+
+    return ActingSubject(
+        subject_type="contractiq",
+        subject_id=str(user.id),
+        email=getattr(user, "email", None) or None,
+        display_name=getattr(user, "full_name", None) or None,
+    )
+
+
+def _envelope(r) -> object:
+    j = r.json()
+    if isinstance(j, dict):
+        return j.get("data") if "data" in j else j.get("items", j)
+    return j
 
 
 def _execution_belongs_to(data: dict, user: ContractIQUser) -> bool:
@@ -126,20 +128,15 @@ async def list_executions(
     anyone on the LB. Now requires a CIQ token and filters results to rows
     owned by the caller's user id OR tenant id.
     """
-    params: dict[str, str] = {"limit": str(limit)}
-    if status:
-        params["status"] = status
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            r = await client.get(
-                f"{ABENIX_URL}/api/executions/live" if status == "running" else f"{ABENIX_URL}/api/executions",
-                headers=_headers(),
-                params=params,
-            )
-            if r.status_code >= 400:
-                return JSONResponse({"data": [], "error": f"abenix returned {r.status_code}"})
-            j = r.json()
-            items = j.get("data") or j.get("items") or j or []
+        async with _sdk(10.0) as forge:
+            if status == "running":
+                r = await forge.http.get("/api/executions/live", params={"limit": str(limit)})
+                if r.status_code >= 400:
+                    return JSONResponse({"data": [], "error": f"abenix returned {r.status_code}"})
+                items = _envelope(r) or []
+            else:
+                items = await forge.executions.list(status=status, limit=limit)
             if not isinstance(items, list):
                 items = []
             items = [it for it in items if _execution_belongs_to(it, user)]
@@ -157,15 +154,11 @@ async def get_execution(
     tenant so we never leak so much as the existence of another tenant's run.
     """
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            r = await client.get(
-                f"{ABENIX_URL}/api/executions/{execution_id}",
-                headers=_headers(),
-            )
+        async with _sdk(10.0) as forge:
+            r = await forge.http.get(f"/api/executions/{execution_id}")
             if r.status_code >= 400:
                 return JSONResponse({"data": None, "error": f"abenix returned {r.status_code}"})
-            j = r.json()
-            data = j.get("data") or j
+            data = _envelope(r)
             if not _execution_belongs_to(data, user):
                 # Same shape as a real miss — no info disclosure about the
                 # other tenant's execution id.
@@ -185,15 +178,11 @@ async def _authorize_execution(execution_id: str, user: ContractIQUser) -> None:
     get_execution's information-hiding behaviour.
     """
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            r = await client.get(
-                f"{ABENIX_URL}/api/executions/{execution_id}",
-                headers=_headers(),
-            )
+        async with _sdk(10.0) as forge:
+            r = await forge.http.get(f"/api/executions/{execution_id}")
             if r.status_code >= 400:
                 raise HTTPException(status_code=404, detail="execution not found")
-            j = r.json()
-            data = j.get("data") or j
+            data = _envelope(r)
             if not _execution_belongs_to(data, user):
                 raise HTTPException(status_code=404, detail="execution not found")
     except HTTPException:
@@ -218,14 +207,9 @@ async def watch_execution(
 
     async def gen() -> AsyncIterator[bytes]:
         try:
-            async with httpx.AsyncClient(timeout=None) as client:
-                async with client.stream(
-                    "GET",
-                    f"{ABENIX_URL}/api/executions/{execution_id}/watch",
-                    headers=_sse_headers(),
-                ) as upstream:
-                    async for chunk in upstream.aiter_raw():
-                        yield chunk
+            async with _sdk(None) as forge:
+                async for chunk in forge.executions.watch_raw_sse(execution_id):
+                    yield chunk
         except Exception:
             return
 
@@ -252,11 +236,11 @@ async def narration_passthrough(
 
     async def gen() -> AsyncIterator[bytes]:
         try:
-            async with httpx.AsyncClient(timeout=None) as client:
-                async with client.stream(
+            async with _sdk(None) as forge:
+                async with forge.http.stream(
                     "GET",
-                    f"{ABENIX_URL}/api/executions/{execution_id}/stream",
-                    headers=_sse_headers(),
+                    f"/api/executions/{execution_id}/stream",
+                    headers={"Accept": "text/event-stream"},
                 ) as upstream:
                     async for chunk in upstream.aiter_raw():
                         yield chunk
@@ -286,12 +270,8 @@ async def ml_model_registry(
     finding.
     """
     try:
-        sdk = _sdk()
-        items = await sdk.ml_models.list()
-        try:
-            await sdk._http.aclose()
-        except Exception:
-            pass
+        async with _sdk() as sdk:
+            items = await sdk.ml_models.list()
         return JSONResponse({"data": items})
     except Exception as e:
         return JSONResponse({"data": [], "error": str(e)})
@@ -308,12 +288,8 @@ async def _resolve_agent_id(slug: str) -> str | None:
     if slug in _AGENT_ID_CACHE:
         return _AGENT_ID_CACHE[slug]
     try:
-        sdk = _sdk()
-        a = await sdk.agents.find_by_slug(slug)
-        try:
-            await sdk._http.aclose()
-        except Exception:
-            pass
+        async with _sdk() as sdk:
+            a = await sdk.agents.by_slug(slug)
         if a and a.get("id"):
             _AGENT_ID_CACHE[slug] = a["id"]
             return a["id"]
@@ -338,51 +314,25 @@ async def _execute_agent(slug: str, payload: dict, user=None) -> dict:
     if not agent_id:
         return {"status": "failed", "error": f"agent slug '{slug}' not found in Abenix. Run seed_agents.py."}
     try:
-        async with httpx.AsyncClient(timeout=300.0) as client:
-            r = await client.post(
-                f"{ABENIX_URL}/api/agents/{agent_id}/execute",
-                headers={**_headers(user), "Content-Type": "application/json"},
-                json={"message": _json.dumps(payload), "context": payload, "wait": True, "stream": False, "wait_timeout_seconds": 240},
+        async with _sdk(300.0) as forge:
+            # the SDK waits for the run and reads it back when the answer comes async
+            result = await forge.execute(
+                agent_id,
+                _json.dumps(payload),
+                act_as=_acting(user),
+                context=payload,
+                wait_timeout_seconds=240,
             )
-            if r.status_code >= 400:
-                return {"status": "failed", "error": f"abenix returned {r.status_code}", "body": r.text[:600]}
-            j = r.json()
-            data = j.get("data") or j
-            output_text = (
-                data.get("output")
-                or data.get("final_output")
-                or data.get("result")
-                or data.get("output_message")
-                or ""
-            )
-            import asyncio as _asyncio
-
-            exec_id = data.get("execution_id")
-            if (not output_text or not str(output_text).strip()) and exec_id:
-                for _delay in (0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 5.0, 6.0):
-                    try:
-                        er = await client.get(
-                            f"{ABENIX_URL}/api/executions/{exec_id}",
-                            headers=_headers(),
-                        )
-                        if er.status_code < 400:
-                            ej = er.json()
-                            edata = ej.get("data") or ej
-                            cand = (
-                                edata.get("output_message")
-                                or edata.get("output")
-                                or edata.get("final_output")
-                                or edata.get("result")
-                                or ""
-                            )
-                            if cand and str(cand).strip():
-                                output_text = cand
-                                break
-                            if edata.get("status") in ("failed", "error", "cancelled"):
-                                break
-                    except Exception:
-                        pass
-                    await _asyncio.sleep(_delay)
+            data = {
+                "execution_id": result.execution_id,
+                "status": result.status,
+                "output": result.output,
+                "cost": result.cost,
+                "duration_ms": result.duration_ms,
+            }
+            if result.status == "failed" and not (result.output or "").strip():
+                return {"status": "failed", "error": "the agent run failed", "execution_id": result.execution_id}
+            output_text = result.output or ""
             parsed: dict = {}
             if isinstance(output_text, dict):
                 parsed = output_text
@@ -471,134 +421,53 @@ async def run_recommendations(
     return JSONResponse(result)
 
 
+_EXPLAIN_FIELDS = (
+    "method",
+    "target",
+    "prediction",
+    "base_value",
+    "baseline",
+    "baseline_source",
+    "feature_names",
+    "contributions",
+    "waterfall",
+    "predicted_class",
+    "model_version",
+)
+
+
 @router.post("/workbench/explain")
-async def run_workbench_explain(payload: dict):
-    """Per-prediction explainability for the Analyst Workbench.
-
-    Preferred path: route (model_name, feature_vector) to the
-    `shap_explainer` code-asset on the platform — that returns real
-    SHAP / linear-coef attributions. Fallback path: when the code-asset
-    isn't registered or its run fails, return ok:false with the real
-    ml-predict prediction value + raw feature magnitudes flagged as
-    `feature-magnitude-fallback` so the UI can render an explicit
-    "not a real attribution" banner instead of pretending magnitudes
-    are SHAP values.
-    """
+async def run_workbench_explain(
+    payload: dict,
+    user: ContractIQUser = Depends(get_contractiq_user),
+):
+    """Per-feature contributions for one prediction, worked out by Abenix's ml_models.explain."""
     model_name = (payload.get("model_name") or "").strip()
-    feature_vector: dict = payload.get("feature_vector") or {}
+    feature_vector = payload.get("feature_vector")
     if not model_name:
-        return JSONResponse({"ok": False, "error": "model_name required"})
+        raise HTTPException(status_code=400, detail="model_name is required")
+    if not isinstance(feature_vector, dict) or not feature_vector:
+        raise HTTPException(
+            status_code=400, detail="feature_vector must be an object of feature values"
+        )
+    forge = _sdk(60.0)
+    from abenix_sdk import AbenixError
 
-    # ── 1. resolve the ml-model row + pull the real prediction (used by
-    # both the SHAP path and the fallback so the UI always shows a real
-    # number, never null).
-    metrics: dict = {}
-    cols = list(feature_vector.keys())
-    prediction: float | None = None
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            r = await client.get(
-                f"{ABENIX_URL}/api/ml-models",
-                headers=_headers(),
-                params={"search": model_name, "limit": "10"},
-            )
-            if r.status_code >= 400:
-                return JSONResponse({"ok": False, "error": f"ml-models list returned {r.status_code}"})
-            items = (r.json().get("data") or r.json().get("items") or [])
-            model_row = next((m for m in items if m.get("name") == model_name), None)
-            if not model_row:
-                return JSONResponse({"ok": False, "error": f"model {model_name} not registered"})
-            model_id = model_row["id"]
-            metrics = model_row.get("training_metrics") or {}
-
-            pr = await client.post(
-                f"{ABENIX_URL}/api/ml-models/{model_id}/predict",
-                headers={**_headers(), "Content-Type": "application/json"},
-                json={"input_data": feature_vector},
-            )
-            if pr.status_code < 400:
-                pj = pr.json()
-                pdata = pj.get("data") or pj
-                p = pdata.get("prediction") or pdata.get("output") or pdata.get("result")
-                if isinstance(p, list) and p:
-                    prediction = float(p[0]) if isinstance(p[0], (int, float)) else None
-                elif isinstance(p, (int, float)):
-                    prediction = float(p)
+        async with forge:
+            out = await forge.ml_models.explain(model_name, feature_vector)
+    except AbenixError as e:
+        status = e.status if 400 <= e.status < 500 else 502
+        raise HTTPException(status_code=status, detail=str(e))
     except Exception as e:
-        return JSONResponse({"ok": False, "error": f"ml-predict failed: {e}"})
-
-    # ── 2. try the real shap_explainer code-asset.
-    shap_error: str | None = None
-    try:
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            lr = await client.get(
-                f"{ABENIX_URL}/api/code-assets",
-                headers=_headers(),
-            )
-            if lr.status_code >= 400:
-                shap_error = f"code-assets list returned {lr.status_code}"
-            else:
-                lj = lr.json()
-                assets = lj.get("data") or lj.get("items") or (lj if isinstance(lj, list) else [])
-                asset = next(
-                    (a for a in assets if (a.get("name") or "").strip() == "shap_explainer"),
-                    None,
-                )
-                if not asset:
-                    shap_error = "shap_explainer code-asset not registered"
-                elif (asset.get("status") or "").lower() != "ready":
-                    shap_error = f"shap_explainer is {asset.get('status') or 'unknown'} — not ready"
-                else:
-                    tr = await client.post(
-                        f"{ABENIX_URL}/api/code-assets/{asset['id']}/test",
-                        headers={**_headers(), "Content-Type": "application/json"},
-                        json={
-                            "input": {
-                                "model_name": model_name,
-                                "feature_vector": feature_vector,
-                            },
-                            "timeout_seconds": 120,
-                        },
-                    )
-                    if tr.status_code >= 400:
-                        shap_error = f"shap_explainer /test returned {tr.status_code}: {tr.text[:200]}"
-                    else:
-                        tj = tr.json()
-                        data = tj.get("data") or tj
-                        exe = data.get("execution") or data
-                        # The code-asset tool wraps stdout as {"result": <parsed>, ...}
-                        out = exe.get("result") if isinstance(exe, dict) else None
-                        if not isinstance(out, dict):
-                            out = exe if isinstance(exe, dict) else {}
-                        if out.get("ok") and out.get("contributions"):
-                            return JSONResponse({
-                                "ok": True,
-                                "method": out.get("method") or "shap",
-                                "model_name": model_name,
-                                "prediction": out.get("prediction", prediction),
-                                "feature_columns": out.get("feature_columns") or cols,
-                                "contributions": out.get("contributions") or [],
-                                "waterfall": out.get("waterfall") or [],
-                                "training_metrics": metrics,
-                            })
-                        shap_error = out.get("error") or "shap_explainer returned no contributions"
-    except Exception as e:
-        shap_error = f"shap_explainer call failed: {e}"
-
-    # ── 3. fallback — surface honestly. Raw feature magnitudes are NOT
-    # SHAP. ok:false so the UI shows the amber banner.
-    contributions = [{"feature": c, "value": float(feature_vector.get(c) or 0)} for c in cols]
-    contributions.sort(key=lambda c: abs(c["value"]), reverse=True)
-    return JSONResponse({
-        "ok": False,
-        "method": "feature-magnitude-fallback",
-        "error": shap_error or "real SHAP unavailable",
-        "model_name": model_name,
-        "prediction": prediction,
-        "feature_columns": cols,
-        "contributions": contributions,
-        "training_metrics": metrics,
-    })
+        raise HTTPException(status_code=502, detail=f"Could not reach Abenix: {e}")
+    return JSONResponse(
+        {
+            "ok": True,
+            "model_name": model_name,
+            **{k: out[k] for k in _EXPLAIN_FIELDS if k in out},
+        }
+    )
 
 
 # Registry view of the market-data category tools that agents can call.
@@ -676,10 +545,33 @@ async def data_fabric_sources(
         "errors": [],
     }
 
-    # Telemetry enrichment (last-used timestamps, ML registry, execution
-    # counts) must come through the AbenixSDK passthrough — not direct httpx
-    # to Abenix routes. The /data-fabric page renders the static registry
-    # synchronously and the Live Activity rail surfaces real-time state.
+    # ML registry and run counts come from the platform through the SDK. A
+    # failed read is reported in errors, never shown as a zero.
+    try:
+        async with _sdk(15.0) as forge:
+            models = await forge.ml_models.list()
+            out["summary"]["ml_models"] = [
+                {
+                    "name": m.get("name"),
+                    "version": m.get("version"),
+                    "status": m.get("status"),
+                    "framework": m.get("framework"),
+                    "last_run_at": m.get("last_invoked_at") or m.get("last_run_at"),
+                    "purpose": m.get("description"),
+                }
+                for m in models
+            ]
+            out["summary"]["ml_models_registered"] = len(models)
+            runs = await forge.executions.list(limit=200)
+            mine = [r for r in runs if _execution_belongs_to(r, _user)]
+            by_status: dict[str, int] = {}
+            for r in mine:
+                k = str(r.get("status") or "unknown")
+                by_status[k] = by_status.get(k, 0) + 1
+            out["summary"]["recent_executions_total"] = len(mine)
+            out["summary"]["recent_executions_by_status"] = by_status or None
+    except Exception as e:  # noqa: BLE001
+        out["errors"].append(f"Platform telemetry unavailable: {e}")
 
     # Category-level summary for the page header.
     by_cat: dict[str, dict[str, int]] = {}
@@ -713,16 +605,11 @@ async def list_ml_invocations(
     if status:
         params["status"] = status
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            r = await client.get(
-                f"{ABENIX_URL}/api/ml-models/invocations",
-                headers=_headers(),
-                params=params,
-            )
+        async with _sdk(10.0) as forge:
+            r = await forge.http.get("/api/ml-models/invocations", params=params)
             if r.status_code >= 400:
                 return JSONResponse({"data": []})
-            j = r.json()
-            return JSONResponse({"data": j.get("data") or j.get("items") or j or []})
+            return JSONResponse({"data": _envelope(r) or []})
     except Exception as e:
         return JSONResponse({"data": [], "error": str(e)})
 

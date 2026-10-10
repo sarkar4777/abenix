@@ -127,6 +127,7 @@ export default function CognifyIndicator() {
           : `${completedRecently} cognify job${completedRecently === 1 ? '' : 's'} completed in the last hour`}
         className={`flex items-center gap-1.5 h-7 pl-2 pr-2.5 rounded-full border ${tone.ring} ${tone.bg} ${tone.text} text-[11px] font-medium hover:brightness-125 transition-all`}
         data-testid="cognify-indicator"
+        aria-label={`Cognify: ${label}`}
       >
         {running > 0 ? (
           <Loader2 className="w-3 h-3 animate-spin" />
@@ -135,7 +136,7 @@ export default function CognifyIndicator() {
         ) : (
           <CheckCircle2 className="w-3 h-3" />
         )}
-        <span>{label}</span>
+        <span className="hidden sm:inline whitespace-nowrap">{label}</span>
       </button>
 
       <AnimatePresence>

@@ -13,6 +13,9 @@ at an Abenix ApiKey whose prefix used to be sent as the credential. It is no
 longer read as a credential, a connector that still has one and no stored
 secret reports ``needs_secret``.
 
+Reads are open to every tenant member, the builder lists connectors. Create,
+update, delete and test need ``manage_settings``, the same as the admin page.
+
 Every base URL is checked by ``engine.url_guard`` on save and again, with each
 redirect hop, before the test request. ``CONNECTORS_ALLOW_PRIVATE_TARGETS``
 lets a dev cluster reach in-cluster services.
@@ -36,6 +39,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.connector_presets import get_preset, list_presets_summary
 from app.core.deps import get_current_user, get_db
+from app.core.permissions import features_for
 from app.core.responses import error, success
 from app.core.tool_secrets import TENANT_TABLE, encode_for_storage
 from app.schemas.connectors import ConnectorCreate, ConnectorUpdate
@@ -64,6 +68,11 @@ PRIVATE_HINT = (
     "private ones with CONNECTORS_ALLOW_PRIVATE_TARGETS."
 )
 TEST_TIMEOUT = 5.0
+MANAGE_DENIED = "Only an admin can add, change, remove or test connectors."
+
+
+def can_manage(user: User) -> bool:
+    return bool(features_for(user).get("manage_settings"))
 
 
 def _needs_secret(c: Connector, has_secret: bool) -> bool:
@@ -197,6 +206,8 @@ async def create_connector(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
+    if not can_manage(user):
+        return error(MANAGE_DENIED, 403)
     try:
         kind_enum = ConnectorKind(body.kind)
         auth_enum = ConnectorAuthType(body.auth_type)
@@ -261,6 +272,8 @@ async def update_connector(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
+    if not can_manage(user):
+        return error(MANAGE_DENIED, 403)
     c = await _load(db, connector_id, user.tenant_id)
     if not c:
         return error("Connector not found", 404)
@@ -299,6 +312,8 @@ async def delete_connector(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
+    if not can_manage(user):
+        return error(MANAGE_DENIED, 403)
     c = await _load(db, connector_id, user.tenant_id)
     if not c:
         return error("Connector not found", 404)
@@ -345,6 +360,8 @@ async def test_connector(
     The URL and every redirect hop (at most 3) are checked against the
     private-address guard first. Only a 2xx or 3xx answer counts as ok.
     """
+    if not can_manage(user):
+        return error(MANAGE_DENIED, 403)
     c = await _load(db, connector_id, user.tenant_id)
     if not c:
         return error("Connector not found", 404)

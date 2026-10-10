@@ -58,27 +58,29 @@ The rule is **Postgres is authoritative** for anything that needs to survive a r
 
 ## Postgres
 
-The relational source of truth. The chart installs the Bitnami `postgresql` chart (15.5.38). The base values use a Postgres 16 image with pgvector layered in. The Azure overlay runs a single standalone primary with `max_connections = 400`.
+The relational source of truth. The chart installs the Bitnami `postgresql` chart (15.5.38). The base values use a Postgres 16 image with pgvector layered in. The Azure overlay runs a single standalone primary on the `bitnamilegacy/postgresql` image with `max_connections = 400`. Local `docker-compose.yml` uses `pgvector/pgvector:pg16`.
 
 There is no TimescaleDB in the main database. `deploy-azure.sh` installs a separate `abenix-timescaledb` release, but only the `tsdb_*` tools talk to it, through `TSDB_URL`.
 
 ### Schema groups
 
-`packages/db/models` defines 107 ORM tables. The main groups, with real table names:
+`packages/db/models` defines 117 ORM tables. The main groups, with real table names:
 
 1. **Identity and tenancy**: `tenants`, `users`, `api_keys`, `team_invites`, `workspaces`, `subject_policies`.
 2. **Agents and pipelines**: `agents` (a pipeline is an agent with `model_config.mode = "pipeline"` and its DAG in `model_config.pipeline_config`), `agent_revisions`, `agent_comments`, `agent_favorites`, `agent_triggers`, `agent_shares`, `pipeline_states`, `pipeline_run_diffs`, `pipeline_patch_proposals`.
-3. **Execution**: `executions`, `execution_idempotency`, `execution_config_snapshots`, `dead_letter_executions`, `conversations`, `messages`. Per-call logs: `tool_invocations` (tool playground calls), `ml_model_invocations`, `code_asset_invocations`, `kb_query_invocations`. An agent run's own tool calls live in `executions.tool_calls`.
-4. **Knowledge**: `knowledge_collections`, `knowledge_projects`, `documents`, `document_grants`, `agent_collection_grants`, `user_collection_grants`, `cognify_jobs`, `cognify_configs`, `graph_entities`, `graph_relationships`, plus the raw-SQL `chunks` table (pgvector, `vector(1536)`, HNSW index when the pgvector build supports it) that `main.py` creates at startup.
+3. **Execution**: `executions`, `execution_idempotency`, `execution_config_snapshots`, `dead_letter_executions`, `drift_alerts`, `conversations`, `messages`. Per-call logs: `tool_invocations` (tool playground calls), `ml_model_invocations`, `code_asset_invocations`, `kb_query_invocations`. An agent run's own tool calls live in `executions.tool_calls`.
+4. **Knowledge**: `knowledge_collections`, `knowledge_projects`, `documents`, `document_grants`, `agent_collection_grants`, `user_collection_grants`, `cognify_jobs`, `cognify_configs`, `graph_entities`, `graph_relationships`, plus the raw-SQL `chunks` table (pgvector, `vector(1536)`, HNSW index when the pgvector build supports it) that `main.py` creates at startup. If the database role cannot run `CREATE EXTENSION vector`, the table is skipped and knowledge search reports "vector store unavailable".
 5. **Atlas**: `atlas_graphs`, `atlas_nodes`, `atlas_edges`, `atlas_snapshots`. Atlas lives in Postgres, see [06-atlas-knowledge-engine](06-atlas-knowledge-engine.md).
 6. **ML models and code assets**: `ml_models`, `ml_model_deployments`, `code_assets`.
-7. **Approvals and HITL**: `approvals` (sign-offs live in its `signoffs` JSONB column).
+7. **Approvals and HITL**: `approvals` (sign-offs live in its `signoffs` JSONB column), `moderation_reviews` for held content.
 8. **Decisions**: `decision_models`, `decision_versions`, `decision_tests`, `decision_evaluations`, `reference_sets`, `reference_set_versions`.
 9. **Governance**: `risk_policies`, `kill_switches`, `permission_sets`, `permission_assignments`, `execution_config_snapshots`.
 10. **Events, sources, evals**: `event_outbox`, `webhooks`, `webhook_deliveries`, `watch_sources`, `source_snapshots`, `source_changes`, `eval_suites`, `eval_cases`, `eval_runs`, `eval_results`.
 11. **Sharing and audit**: `resource_shares`, `activity_logs` (the hash-chained audit log), `notifications`, `gdpr_purge_log`.
 12. **Marketplace and billing**: `reviews`, `subscriptions`, `payouts`, `usage_records`, `llm_model_pricing`.
 13. **Admin and retention**: `platform_settings`, `retention_policies`, `archive_runs`, `tool_runtime_config`, `tenant_tool_credentials`, `moderation_policies`, `moderation_events`.
+14. **Autonomy and self-improvement**: `action_types`, `agent_actions`, `autonomy_grants`, `autonomy_changes`, `feedback`, `lessons`, `lesson_clusters`, `improvement_proposals`.
+15. **Memory and meetings**: `agent_memories`, the `memory_*` tables, `persona_items`, `persona_chunks`, `meetings`, `meeting_deferrals`.
 
 See [04-data-model/00-overview](../04-data-model/00-overview.md) for the ERD.
 
@@ -98,7 +100,7 @@ Alembic, in [`packages/db/alembic/versions/`](../../packages/db/alembic/versions
 kubectl exec -n abenix <api-pod> -- bash -c 'cd /app/packages/db && python -m alembic upgrade heads'
 ```
 
-`deploy-azure.sh` runs this and then checks the sentinel columns in `scripts/_schema-sentinels.sh`. The API also applies a short list of idempotent `ADD COLUMN IF NOT EXISTS` statements at startup under an advisory lock. See [06-deployment/00-overview](../06-deployment/00-overview.md).
+`deploy-azure.sh` first runs `python -m bootstrap` (creates the schema and stamps `heads` on an empty database, a no-op otherwise), then this, then checks the sentinel columns in `scripts/_schema-sentinels.sh`. The API also applies a short list of idempotent `ADD COLUMN IF NOT EXISTS` statements at startup under an advisory lock. See [06-deployment/00-overview](../06-deployment/00-overview.md).
 
 ---
 
@@ -160,7 +162,7 @@ Tenant-scoped keys carry the tenant id.
 Optional. The chart renders it only when `scaling.queueBackend` is `nats`, which the local and Azure overlays set. One StatefulSet, `nats:2.10-alpine`, file store on a PVC (`nats.jetstream.fileStorage.size`, 5Gi on Azure).
 
 ### Streams and subjects
-- Stream `agents`, subjects `agents.>`. The API publishes one message per pool run to `agents.<pool>`. Each pool has a durable pull consumer `abenix-<pool>-consumer`, which is also what KEDA reads for lag. The runtime acks a message when it picks it up, not when the run ends, so a pod that dies mid-run does not get the message back. The stale sweeper fails the row instead.
+- Stream `agents`, subjects `agents.>`. The API publishes one message per pool run to `agents.<pool>`. Each pool has a durable pull consumer `abenix-<pool>-consumer`, which is also what KEDA reads for lag. The runtime acks a message only after the run ends and holds a lease on the execution row meanwhile. If a pod dies mid-run, JetStream redelivers and another pod takes the run over once the lease lapses, see [08-queue-scaling](../02-runtime/08-queue-scaling.md#at-least-once-delivery).
 - `code.<tenant>.<asset>.<revision>` request/reply for warm code runners. Core NATS, not JetStream.
 - `abenix.events.<tenant>.<type>`, a best-effort copy of every outbound platform event for internal consumers.
 
@@ -181,6 +183,7 @@ User `abenix` for platform services, `coderun` limited to `code.>` for code runn
 | `/data/exports` | Files tools hand back for download (`EXPORT_DIR`) |
 | `/data/ml-models/<tenant>/<file_id>_<filename>` | ML model files (`ML_MODELS_DIR`) |
 | `/data/code-assets`, `/data/code-asset-cache` | Code asset archives and the build cache |
+| `/data/trajectories` | Past runs the `recall_trajectory` tool reads (`TRAJECTORY_DIR`) |
 | `archives/<tenant>/<run>.jsonl.gz` | Nightly archive dumps, through the object storage backend |
 | `sources/<tenant>/raw/...`, `sources/<tenant>/text/...` | Source watch snapshots, through the object storage backend |
 
@@ -195,7 +198,7 @@ Volumes that back `/data`:
 
 Two abstractions sit over this: [`apps/agent-runtime/engine/storage/service.py`](../../apps/agent-runtime/engine/storage/service.py) for the runtime and [`apps/api/app/core/object_storage.py`](../../apps/api/app/core/object_storage.py) for archives and source snapshots.
 
-> **Trap on Azure Files SMB** — `shutil.copy2` and `shutil.copy` call `chmod` and `utime` under the hood. Both fail on SMB mounts. The seed scripts use `shutil.copyfile` (bytes-only) for that reason. See [`packages/db/seeds/seed_ml_models.py`](../../packages/db/seeds/seed_ml_models.py).
+> **Trap on Azure Files SMB**: `shutil.copy2` and `shutil.copy` call `chmod` and `utime` under the hood. Both fail on SMB mounts. The seed scripts use `shutil.copyfile` (bytes-only) for that reason. See [`packages/db/seeds/seed_ml_models.py`](../../packages/db/seeds/seed_ml_models.py).
 
 ---
 

@@ -256,7 +256,7 @@ export const TOOL_DOCS: Record<string, ToolDoc> = {
     name: "Code Executor",
     description: "Execute Python code safely in a sandboxed environment. Supports complex data transformations, statistical computations, file generation (Excel, PDF, charts, PowerPoint), image processing, and algorithmic operations. Core libraries always available: pandas, numpy, openpyxl, json, csv, re, math, datetime, collections, itertools, statistics, uuid, io, base64. Extended libraries available: scipy, matplotlib, seaborn, reportlab, fpdf, Pillow (PIL), beautifulsoup4 (bs4), python-pptx (pptx), scikit-learn (sklearn), plotly, tabulate, xlsxwriter, lxml, zipfile, gzip. Can save files to the export directory using open('file.ext', 'wb') or save_export('file.ext', bytes_data). Pipeline data available via context['node_id']. Does NOT support network calls, system commands, or arbitrary file system access. Additional modules can be requested via extra_modules \u2014 they are LLM-validated for safety.",
     parameters: [
-      { name: "code", type: "string", required: true, description: "Python code to execute. Use print() for output. Last expression is captured as result." },
+      { name: "code", type: "string", required: true, description: "Python code to execute. Use print() for output. A last expression, or a variable named result, is captured as the result." },
       { name: "variables", type: "object", required: false, description: "Pre-defined variables available in the execution context as globals" },
       { name: "extra_modules", type: "array", required: false, description: "Additional Python modules to allow for this execution. These are validated by an LLM safety review before being permitted. Example: ['networkx', 'sympy', 'shapely']. Modules that provide network access, system commands, or code execution are rejected.", items: { type: "string" } },
     ],
@@ -1049,6 +1049,24 @@ export const TOOL_DOCS: Record<string, ToolDoc> = {
       { name: "model_name", type: "string", required: false, description: "Name of the model (required for everything except list_models)" },
       { name: "model_version", type: "string", required: false, description: "Version of the model (default: latest)", default: "latest" },
       { name: "input_data", type: "object", required: false, description: "Input features for prediction. Usually {features: [1.0, 2.0, ...]} or {col1: val1, col2: val2}. For batch_predict pass {batch: [[...], [...], ...]} or {rows: [{...}, {...}]}" },
+    ],
+  },
+  ml_model_register: {
+    category: "ML Models",
+    name: "ML Model Register",
+    description: "Register a trained model file made earlier in this run as an Abenix ML model, so a training pipeline can publish its own output. Give the file as file_path (a file the run saved to its export folder, for example with save_export in code_executor or with data_exporter) or as file_base64 (for example from a code step's output). The model is loaded and checked like an upload on the ML Models page, gets the next version of model_name and becomes the active version when it loads. It is owned by the user who started the run. Supported files: .joblib and .pkl (scikit-learn, XGBoost), .onnx, .pt and .pth (PyTorch).",
+    parameters: [
+      { name: "model_name", type: "string", required: true, description: "Name in the registry. A new name starts at 1.0.0, an existing one gets its next version." },
+      { name: "file_path", type: "string", required: false, description: "Path of the model file in the run's export folder, or just its file name." },
+      { name: "file_base64", type: "string", required: false, description: "The model file as base64. Use instead of file_path." },
+      { name: "filename", type: "string", required: false, description: "File name with its extension, for example churn.joblib. Needed with file_base64 unless framework is set." },
+      { name: "framework", type: "string", required: false, description: "Read from the file extension when left out.", enum: ["sklearn", "xgboost", "onnx", "pytorch"] },
+      { name: "version", type: "string", required: false, description: "Version to register, for example 2.1.0. The next free version when left out." },
+      { name: "description", type: "string", required: false, description: "What the model predicts, shown on the ML Models page." },
+      { name: "feature_names", type: "array", required: false, description: "Feature order the model expects, so predictions can take rows by name.", items: { type: "string" } },
+      { name: "input_schema", type: "object", required: false, description: "JSON schema of the prediction input. Read from the model when left out." },
+      { name: "output_schema", type: "object", required: false, description: "JSON schema of the prediction output. Read from the model when left out." },
+      { name: "tags", type: "array", required: false, description: "Labels to find the model by.", items: { type: "string" } },
     ],
   },
   moderation_vet: {

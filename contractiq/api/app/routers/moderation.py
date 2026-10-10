@@ -27,7 +27,6 @@ import json
 import logging
 import os
 
-import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 
@@ -35,7 +34,6 @@ from app.models.contractiq_models import ContractIQUser
 from app.routers.auth import get_contractiq_user, tenant_id_for
 
 
-ABENIX_URL = os.environ.get("ABENIX_API_URL", "http://abenix-api:8000")
 API_KEY = os.environ.get("CONTRACTIQ_ABENIX_API_KEY", "")
 
 logger = logging.getLogger(__name__)
@@ -69,12 +67,11 @@ def _subject_header(user: ContractIQUser | None) -> dict[str, str]:
     return {"X-Abenix-Subject": json.dumps(payload)}
 
 
-def _headers(user: ContractIQUser | None = None) -> dict[str, str]:
-    h: dict[str, str] = {"Accept": "application/json"}
-    if API_KEY:
-        h["X-API-Key"] = API_KEY
-    h.update(_subject_header(user))
-    return h
+def _sdk(timeout: float):
+    """AbenixSDK client, moderation calls go through it like every other Abenix call."""
+    from app.routers.executions import _sdk as make
+
+    return make(timeout)
 
 
 @router.get("/policies")
@@ -89,10 +86,10 @@ async def list_policies(
     if not API_KEY:
         return JSONResponse({"data": [], "error": "CONTRACTIQ_ABENIX_API_KEY not configured"})
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            r = await client.get(
-                f"{ABENIX_URL}/api/moderation/policies",
-                headers=_headers(user),
+        async with _sdk(10.0) as forge:
+            r = await forge.http.get(
+                "/api/moderation/policies",
+                headers=_subject_header(user),
             )
             if r.status_code >= 400:
                 return JSONResponse({"data": [], "error": f"abenix returned {r.status_code}"})
@@ -115,10 +112,10 @@ async def create_policy(
     if not API_KEY:
         raise HTTPException(status_code=503, detail="CONTRACTIQ_ABENIX_API_KEY not configured")
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            r = await client.post(
-                f"{ABENIX_URL}/api/moderation/policies",
-                headers={**_headers(user), "Content-Type": "application/json"},
+        async with _sdk(15.0) as forge:
+            r = await forge.http.post(
+                "/api/moderation/policies",
+                headers=_subject_header(user),
                 json=body,
             )
             if r.status_code >= 500:
@@ -150,10 +147,10 @@ async def update_policy(
     if not API_KEY:
         raise HTTPException(status_code=503, detail="CONTRACTIQ_ABENIX_API_KEY not configured")
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            r = await client.patch(
-                f"{ABENIX_URL}/api/moderation/policies/{policy_id}",
-                headers={**_headers(user), "Content-Type": "application/json"},
+        async with _sdk(15.0) as forge:
+            r = await forge.http.patch(
+                f"/api/moderation/policies/{policy_id}",
+                headers=_subject_header(user),
                 json=body,
             )
             if r.status_code >= 500:
@@ -184,10 +181,10 @@ async def delete_policy(
     if not API_KEY:
         raise HTTPException(status_code=503, detail="CONTRACTIQ_ABENIX_API_KEY not configured")
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            r = await client.delete(
-                f"{ABENIX_URL}/api/moderation/policies/{policy_id}",
-                headers=_headers(user),
+        async with _sdk(15.0) as forge:
+            r = await forge.http.delete(
+                f"/api/moderation/policies/{policy_id}",
+                headers=_subject_header(user),
             )
             if r.status_code >= 500:
                 raise HTTPException(status_code=503, detail=f"moderation upstream {r.status_code}")
@@ -236,10 +233,10 @@ async def vet(
             "triggered_categories": [],
         })
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            r = await client.post(
-                f"{ABENIX_URL}/api/moderation/vet",
-                headers={**_headers(user), "Content-Type": "application/json"},
+        async with _sdk(15.0) as forge:
+            r = await forge.http.post(
+                "/api/moderation/vet",
+                headers=_subject_header(user),
                 json=body,
             )
             if r.status_code >= 500:
@@ -294,10 +291,10 @@ async def vet_or_block(
         text = text[:60000]
     payload = {"content": text, "strict": strict}
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            r = await client.post(
-                f"{ABENIX_URL}/api/moderation/vet",
-                headers={**_headers(user), "Content-Type": "application/json"},
+        async with _sdk(15.0) as forge:
+            r = await forge.http.post(
+                "/api/moderation/vet",
+                headers=_subject_header(user),
                 json=payload,
             )
             if r.status_code >= 400:

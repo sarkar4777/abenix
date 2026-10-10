@@ -8,13 +8,13 @@
 
 | Piece | What it is | Where |
 |---|---|---|
-| Risk tier | `low`, `medium`, `high` or `critical`, on agents, pipelines, tools, decisions, sources and code assets | The builder's tier picker, `model_config.risk_tier`, a tool's `risk_tier` class attribute |
+| Risk tier | `low`, `medium`, `high` or `critical`, on agents, pipelines, tools, decisions and sources | The builder's tier picker, `model_config.risk_tier`, a tool's `risk_tier` class attribute |
 | Tier policy | What a tier requires, per tenant. Defaults apply until an admin changes them | **Admin -> Risk & Controls**, `/api/governance/risk` |
 | Kill switch | Stops everything in a scope, or one target, until someone resumes it | **Admin -> Risk & Controls -> Kill switches**, `/api/governance/kill-switches` |
 | Capability | A permission such as `killswitch.manage`. Roles carry defaults | `/api/governance/capabilities` |
 | Permission set | A named bundle of capabilities assigned to people | **Admin -> Permissions**, `/api/governance/permission-sets` |
 
-Every change here is written to the audit log with the old and new value.
+Every change here is written to the audit log. Tier policy changes carry the old and new value.
 
 ---
 
@@ -40,9 +40,9 @@ A run starts at the higher of the agent's stored tier and the tier of the run th
 | `approval` | Waits on a human approval gate on **Approvals**. Approved, it goes ahead and the tier rises. Otherwise the tool answers with an error |
 | `block` | Is refused with a message telling the model the agent's tier is too low for the tool |
 
-The tier and the reasons it rose are kept on the execution. `GET /api/governance/runs/{execution_id}/provenance` returns them with the config hash, the snapshot of the prompt and `model_config` the run used, and which fields have changed on the agent since.
+The tier and the reasons it rose are kept on the execution. `GET /api/governance/runs/{execution_id}/provenance` (`runs.replay`) returns them with the config hash, the snapshot of the prompt and `model_config` the run used, and which fields have changed on the agent since.
 
-A tool declares its tier on the class (`risk_tier = "medium"`). `scripts/check-tool-config.py` fails on a tool that does not. **Admin -> Risk & Controls -> Tools** lists every tool with its tier.
+A tool declares its tier on the class (`risk_tier = "medium"`). `scripts/check-tool-config.py` fails on a tool that does not. **Admin -> Risk & Controls -> Tool tiers** lists every tool with its tier.
 
 ---
 
@@ -69,7 +69,7 @@ What each does:
 - `require_output_schema` refuses to set an agent active at that tier without an output schema.
 - `require_eval_pass` makes publishing wait on the agent's gating evaluation suites, see [10-evals](10-evals.md).
 
-Change a tier with the fields you want to override. Anything you leave out keeps its default:
+Change a tier by sending the fields you want to override. The body replaces that tier's stored overrides as a whole, so anything you leave out goes back to its default, including fields an earlier call changed:
 
 ```bash
 curl -s -X PUT "$API/api/governance/risk/high" \
@@ -77,7 +77,7 @@ curl -s -X PUT "$API/api/governance/risk/high" \
   -d '{"tool_call_action": "block", "allowed_models": ["claude-sonnet-4-5*"], "publish_approvals": {"min_approvers": 2}}'
 ```
 
-An unknown key or a bad value is refused with 400 naming it. `GET /api/governance/risk` returns each tier's guide text, default, overrides and the effective policy, plus every tool's tier. `DELETE /api/governance/risk/{tier}` goes back to the default. Reading needs `risk.view`, writing `risk.manage`. Runtime pods pick a change up within five seconds.
+An unknown key or a bad value is refused with 400 naming it. The policy also accepts an `autonomy` object, the thresholds for earned autonomy at that tier, see [02-runtime/21-earned-autonomy](../02-runtime/21-earned-autonomy.md). `GET /api/governance/risk` returns each tier's guide text, default, overrides and the effective policy, plus every tool's tier. `DELETE /api/governance/risk/{tier}` goes back to the default. Reading needs `risk.view`, writing `risk.manage`. Runtime pods pick a change up within five seconds.
 
 ---
 
@@ -93,6 +93,7 @@ An unknown key or a bad value is refused with 400 naming it. `GET /api/governanc
 | `trigger` | trigger id, or `*` | When the trigger fires |
 | `decision` | decision key, or `*` | Every evaluation, from the API, an agent or a pipeline |
 | `source` | source id, or `*` | Every check of a watched source |
+| `improvements` | always `*` | Proposing and proving agent improvements in the tenant |
 
 ```bash
 curl -s -X POST "$API/api/governance/kill-switches" \
@@ -125,6 +126,13 @@ Each role carries defaults. A permission set adds to them, it never takes away.
 | `events.manage` | | yes | yes |
 | `permissions.manage` | | | yes |
 | `runs.replay` | yes | yes | yes |
+| `autonomy.view`, `actions.review` | yes | yes | yes |
+| `autonomy.manage` | | yes | yes |
+| `autonomy.grant` | | | yes |
+| `improvements.view`, `improvements.propose` | | yes | yes |
+| `improvements.approve` | | | yes |
+| `feedback.give` | yes | yes | yes |
+| `moderation.review` | | | yes |
 
 Admins hold `*`. A grant of `evals.*` covers every `evals.` capability, and `approvals.sign` covers `approvals.sign:legal`.
 
@@ -141,7 +149,7 @@ curl -s -X POST "$API/api/governance/permission-sets/$SET/members" \
   -d '{"email": "ops@example.com"}'
 ```
 
-An unknown capability is refused with 400. `PATCH /api/governance/permission-sets/{id}` replaces name, description and capabilities. `DELETE /api/governance/permission-sets/{id}/members/{user_id}` removes a person. All of these need `permissions.manage`. Capabilities are cached per user for ten seconds, so a new grant works on the next request after that.
+An unknown capability is refused with 400. `PATCH /api/governance/permission-sets/{id}` replaces name, description and capabilities. `DELETE /api/governance/permission-sets/{id}` deletes a set. `DELETE /api/governance/permission-sets/{id}/members/{user_id}` removes a person. All of these need `permissions.manage`. Capabilities are cached per user for ten seconds, so a new grant works on the next request after that.
 
 A request without the capability gets 403 with `This needs the <capability> capability. An admin can grant it under Admin, Permissions.` `GET /api/governance/capabilities` returns the catalogue, the role defaults and the caller's own capabilities as `mine`. The SDKs read the same through `permissions()`, which calls `GET /api/me/permissions`.
 
@@ -151,7 +159,7 @@ A request without the capability gets 403 with `This needs the <capability> capa
 
 - `GET /api/governance/audit/verify` (`audit.verify`) walks the tenant's hash-chained activity log and reports whether it is intact. A nightly job does the same for every tenant.
 - `GET /api/governance/audit/export?since=2026-01-01&until=2026-02-01` (`audit.view`) streams the linked log as JSON lines with each row's hashes.
-- `POST /api/governance/runs/{execution_id}/replay` (`runs.replay`) runs a past agent execution again on its recorded input, with `{"mode": "pinned"}` for the configuration it ran with or `{"mode": "current"}` for the agent as it is now.
+- `POST /api/governance/runs/{execution_id}/replay` (`runs.replay`) runs a past agent execution again on its recorded input, with `{"mode": "pinned"}` for the configuration it ran with or `{"mode": "current"}` for the agent as it is now. An optional `model` runs it on another model.
 
 ---
 

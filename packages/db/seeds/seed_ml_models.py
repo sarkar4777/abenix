@@ -127,6 +127,15 @@ async def _ensure_for_tenant(
                 print(
                     f"  ~ Restored missing file for {model_name} v{version} ({tenant.slug})"
                 )
+            # explain uses training means as its baseline, older seeded rows lack them
+            means = (meta.get("training_metrics") or {}).get("feature_means")
+            tm = existing.training_metrics
+            tm = tm if isinstance(tm, dict) else {}
+            if means and "feature_means" not in tm and "oob" in (existing.tags or []):
+                existing.training_metrics = {**tm, "feature_means": means}
+                print(
+                    f"  ~ Added training means to {model_name} v{version} ({tenant.slug})"
+                )
             continue
 
         file_id = uuid.uuid4().hex[:12]

@@ -150,7 +150,7 @@ async def list_sessions(
     result = await db.execute(
         select(Execution)
         .where(Execution.agent_id == agent_id, Execution.user_id == user.id)
-        .order_by(Execution.created_at.desc())
+        .order_by(Execution.created_at.desc(), Execution.id)
         .limit(limit)
         .offset(offset)
     )

@@ -312,7 +312,7 @@ export default function DecisionWorkspace() {
           'Edit the draft under Rules or Table. Changes save as you type and are checked for gaps and overlaps.',
           'Use Try it to run facts through the rules and see which rule fired.',
           'Add golden tests, then propose the version for sign off and publish it.',
-          'Agents and apps call it by its key. Every answer is kept and can be replayed.',
+          'Agents and apps call it by its key. Answers given inside runs, and any you choose to record, are kept for replay.',
         ]}
         meta={
           <>

@@ -1,6 +1,6 @@
 # KEDA autoscaling
 
-> Each agent-runtime pool gets its own ScaledObject that scales on its queue backlog, with an optional latency trigger. Warm code runners get one ScaledObject each, scaling on runner load. Everything else uses plain HPAs.
+> Each agent-runtime pool gets its own ScaledObject that scales on its queue backlog, with an optional latency trigger. Warm code runners get one ScaledObject each, scaling on runner load. The self-improvement proof pool can get one on its proof queue. The subcharts carry plain CPU HPAs, which the local and Azure values turn off.
 
 ---
 
@@ -34,8 +34,10 @@ when the CRDs already exist.
 | `heavy-reasoning` | 0 | 4 | 2 | 3 |
 | `long-running` | 0 | 3 | 1 | 1 |
 
-`values-local.yaml` ships only `default`, min 1, max 2.
-`values-local-runtime.yaml` adds the other pools on minikube.
+`values-local.yaml` ships only `default`, min 1, max 2, with KEDA on.
+`values-local-runtime.yaml` adds `chat` and `heavy-reasoning` (max 2 each) and
+turns KEDA off, so under `deploy.sh local-runtime` every pool stays at its
+`min_replicas`.
 
 Agents pick a pool with `model_config.runtime_pool`. With
 `scaling.execRemote` on, an agent whose pool is `inline` still runs in the API
@@ -51,7 +53,7 @@ metadata:
 spec:
   scaleTargetRef:
     name: abenix-agent-runtime-default
-  minReplicaCount: 1            # pool min_replicas, default 1
+  minReplicaCount: 1            # pool min_replicas, default 1, 0 is kept as 0
   maxReplicaCount: 5            # pool max_replicas, default 10
   pollingInterval: 15
   cooldownPeriod: 300
@@ -72,9 +74,11 @@ spec:
       metadata:
         serverAddress: http://abenix-prometheus.abenix.svc.cluster.local:9090
         metricName: abenix_execution_p95_ms
-        query: histogram_quantile(0.95, sum by(le) (rate(abenix_execution_duration_seconds_bucket{pool="default"}[5m]))) * 1000
+        query: (histogram_quantile(0.95, sum by(le) (rate(abenix_execution_duration_seconds_bucket{pool="default"}[5m]))) * 1000) or vector(0)
         threshold: "90000"
 ```
+
+The pool consumer records `abenix_execution_duration_seconds{pool, status}` for every run it finishes, so the Prometheus trigger reads real data. An idle pool reads 0.
 
 Pools need `scaling.queueBackend: nats`. The chart refuses to render them with
 `celery`, since nothing consumes queued agent runs from Celery.
@@ -82,7 +86,7 @@ Pools need `scaling.queueBackend: nats`. The chart refuses to render them with
 Tunables that matter:
 
 - `keda_queue_trigger` per pool. Lower scales sooner. `long-running` uses 1 so a single queued job brings a pod up from zero.
-- `min_replicas`. 0 saves money and costs a cold start on the first run.
+- `min_replicas`. 0 saves money and costs a cold start on the first run. The chart reads the key with `hasKey`, so 0 is honoured. Without KEDA the Deployment keeps at least one replica.
 - `concurrency_per_replica` becomes `AGENT_CONCURRENCY`, the runs one pod takes at once.
 
 ---
@@ -107,11 +111,23 @@ old versions. Details in [02-runtime/16-warm-code-runners](../02-runtime/16-warm
 
 ---
 
+## Proof pool
+
+With `improvements.proofPool.enabled` and `improvements.proofPool.keda.enabled`
+the chart adds `<release>-improvements-proof`, a ScaledObject with one
+`prometheus` trigger on `max(abenix_improvement_proof_queue_depth)`, threshold
+`queueTrigger` (3), min 0, max 4, polling 15s, cooldown 300s. The Prometheus
+address defaults to the release's own. No shipped overlay turns it on.
+
+---
+
 ## Everything else
 
 The `api`, `web`, `worker` and `agent-runtime` subcharts each render a CPU HPA
-from their `autoscaling` values. The cognify worker gets one when
-`cognifyWorker.autoscaling.enabled` is true, off by default.
+when their `autoscaling.enabled` is true. That is the case in the base and
+production values, and off in the local and Azure values. The cognify worker
+gets one when `cognifyWorker.autoscaling.enabled` is true, off everywhere by
+default.
 
 ---
 
@@ -123,7 +139,9 @@ kubectl -n abenix get hpa          # KEDA manages one HPA per ScaledObject
 kubectl -n keda logs deploy/keda-operator --tail=50
 ```
 
-The `/admin/scaling` page shows pool state without kubectl.
+The `/admin/scaling` page shows pool state without kubectl. The
+[Cluster Health page](04-observability.md#cluster-health-page) lists every HPA
+and ScaledObject with its current, min and max replicas.
 
 ---
 

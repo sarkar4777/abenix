@@ -17,8 +17,8 @@ failure is the normal recovery path.
 | `deploy.sh local-runtime` | Same, but agents run in separate runtime pods instead of inside the API pod. Use this to reproduce production architecture. |
 | `deploy.sh cloud` | Deploys to whatever `kubectl` context is current. |
 | `deploy.sh build` | Builds the images only. No cluster changes. |
-| `deploy.sh reload <service>` | Rebuilds one service and restarts just its deployment. Accepts `api`, `web`, `worker`, `agent-runtime`, `edge-runtime`, `<app>-api` and `<app>-web` for the standalone apps, and `claimsiq`. The rollout drops that service's forward, run `forwards` after. |
-| `deploy.sh forwards` | Re-establishes every port forward and prints which ones answer. Forwards die whenever a pod restarts, so reach for this before assuming something is broken. Needs minikube running. |
+| `deploy.sh reload <service>` | Rebuilds one service and restarts just its deployment. Accepts `api`, `web`, `worker`, `agent-runtime`, `edge-runtime`, `<app>-api` and `<app>-web` for `contractiq`, `industrial-iot`, `resolveai`, `wingman`, `pharmavigil` and `mideasttourism`, and `claimsiq`. The rollout drops that service's forward, run `forwards` after. |
+| `deploy.sh forwards` | Re-establishes every port forward and prints which ones answer. Forwards die whenever a pod restarts, so run this before assuming something is broken. Needs minikube running. |
 | `deploy.sh observability` | Installs only the Prometheus and Grafana stack from `infra/observability/`. |
 | `deploy.sh status` | Pod and service health. |
 | `deploy.sh destroy` | Tears the deployment down. |
@@ -44,7 +44,7 @@ LLM and data provider keys (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_API_K
 ### `dev-local.sh` — no Kubernetes
 
 Runs `docker compose up -d` for the backing services in `docker-compose.yml`
-(Postgres, Redis, Neo4j, NATS, MinIO and the rest), then the API, web, the
+(Postgres, Redis, Neo4j, NATS, MinIO, Mosquitto, TimescaleDB and the edge runtimes), then the API, web, the
 Celery worker, the consumer and the selected standalone apps as local
 processes. `APPS` picks the apps, as for `deploy.sh`. Faster to iterate than
 the Helm path.
@@ -61,8 +61,9 @@ Before starting it runs `sync-sdks.sh --check` and refuses to go on when a vendo
 
 ### `dev-minikube.sh`
 
-Makes sure minikube is up, the pods are running and the port forwards are
-active. `--status` only reports what is running.
+For a minikube cluster that `deploy.sh local` already installed. Makes sure
+minikube is up, the pods are running and the port forwards are active, then
+starts the standalone apps. `--status` only reports what is running.
 
 ### `livekit-dev.sh`
 
@@ -88,6 +89,7 @@ Local LiveKit server for meeting work, from `scripts/livekit-dev.yaml`. Subcomma
 | `uat.sh` | The canonical browser UAT: sanity, deep and industrial specs in that order. Stops on the first failing spec. Needs forwards on 3000 and 8000. `BASE` and `API` override the URLs. |
 | `run-e2e.sh [--k8s] [--headed] [sanity\|deep\|industrial\|all] [extra args]` | Playwright UAT specs. Checks `API_URL` and `BASE_URL` answer first. Anything else on the line goes to Playwright. |
 | `edge-smoke.sh` | Edge runtime smoke test on minikube. Installs the chart, deploys a sample agent to the gateway and calls it. Needs `PLATFORM_URL` and `PLATFORM_TOKEN`. |
+| `build-edge-rust.sh` | Builds the Rust edge runtime in release mode and reports the binary size. |
 | `python scripts/test_all_agents.py` | Runs every OOB agent through the API on `localhost:8000` and reports which ones work. |
 
 Playwright specs can also be run directly:
@@ -128,6 +130,8 @@ All exit non-zero on a problem, so they fit CI or a pre-commit hook.
 | `python scripts/check-api-requirements.py` | Fails when `apps/api/requirements.txt` lacks a dependency `pyproject.toml` declares. |
 | `python scripts/check-dockerfile-hardening.py` | Asserts every shipped Dockerfile patches its base image. |
 | `python scripts/check-readme-images.py` | Every local image the README embeds must exist and be tracked by git. |
+| `python scripts/check-doc-links.py` | Every relative link and `#anchor` in the README, the top-level docs and `docs/` must resolve, and `docs/manifest.json` must match the files. |
+| `python scripts/check-docker-context.py` | Every `COPY` in every Dockerfile names a file git tracks, so a fresh clone builds. |
 | `node scripts/validate-mermaid.mjs` | Parses every Mermaid block under `docs/` with the real mermaid library. |
 | `sync-dev-docs.sh` | Copies `docs/` into `apps/web/public/dev-docs/` for the in-app viewer. Run it after editing docs. |
 

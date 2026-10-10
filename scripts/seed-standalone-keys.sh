@@ -207,14 +207,20 @@ main() {
     exit 1
   fi
 
+  local failed=()
   for spec in "${APPS[@]}"; do
     IFS='|' read -r app rest <<< "${spec}"
     if [ -n "${ONLY_APP}" ] && [ "${ONLY_APP}" != "${app}" ]; then
       continue
     fi
-    _seed_one "${spec}" || warn "${app}: seed failed (continuing)"
+    _seed_one "${spec}" || { warn "${app}: seed failed (continuing)"; failed+=("${app}"); }
   done
 
+  # the caller must hear about it, an app without a key 401s on every call
+  if [ "${#failed[@]}" -gt 0 ]; then
+    err "No working key for: ${failed[*]}"
+    exit 1
+  fi
   ok "Standalone key seeding complete"
 }
 

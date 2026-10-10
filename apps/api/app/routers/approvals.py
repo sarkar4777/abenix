@@ -123,6 +123,7 @@ async def _tier_floor(
         "capability": pol.get("capability") or "approvals.sign",
         "risk_tier": risk.normalize(tier),
         "escalate_after_hours": int(pol.get("escalate_after_hours") or 0),
+        "escalate_after_minutes": risk.escalate_minutes(pol),
     }
     return max(body.required_signoffs, floor), policy
 
@@ -143,10 +144,12 @@ async def escalate_overdue(db: AsyncSession) -> int:
         .scalars()
         .all()
     )
+    from engine.risk import escalate_minutes, wait_words
+
     sent = 0
     for a in rows:
-        hours = int((a.policy or {}).get("escalate_after_hours") or 0)
-        if hours <= 0 or a.created_at + timedelta(hours=hours) > now:
+        minutes = escalate_minutes(a.policy)
+        if minutes <= 0 or a.created_at + timedelta(minutes=minutes) > now:
             continue
         admins = (
             (
@@ -168,7 +171,7 @@ async def escalate_overdue(db: AsyncSession) -> int:
                 tenant_id=a.tenant_id,
                 user_id=uid,
                 type="system_alert",
-                title=f"Approval waiting over {hours}h: {a.title or 'untitled'}",
+                title=f"Approval waiting over {wait_words(minutes)}: {a.title or 'untitled'}",
                 message=f"{got} of {a.required_signoffs} sign-offs so far. It is {a.policy.get('risk_tier', 'tiered')} risk, so it needs someone to act.",
                 link="/approvals",
                 metadata={"approval_id": str(a.id)},
@@ -503,6 +506,8 @@ async def wait_for_approval(
                 return error("Approval not found", 404)
             if row.get("status") != "pending" or datetime.now(timezone.utc) >= deadline:
                 return success(row)
+            # hand the connection back while sleeping, a 120 s wait must not hold one of the pool
+            await db.close()
             await asyncio.sleep(1.0)
     approval_uuid = _parse_approval_id(approval_id)
     if approval_uuid is None:
@@ -529,6 +534,8 @@ async def wait_for_approval(
             return success(_serialize(a))
         if datetime.now(timezone.utc) >= deadline:
             return success(_serialize(a))
+        # closing returns the connection and drops the loaded row, so the next read sees the sign-off
+        await db.close()
         await asyncio.sleep(1.0)
 
 
@@ -821,8 +828,20 @@ async def _notify_pending(
             message=message,
             link="/approvals",
             metadata=metadata,
+            slack=False,
         )
     await db.commit()
+    # one post for the shared channel, not one per member
+    if targets:
+        from app.core.notifications import post_once_to_tenant_slack
+
+        await post_once_to_tenant_slack(
+            db,
+            approval.tenant_id,
+            title=f"Approval requested: {truncated_title}",
+            message=message,
+            link="/approvals",
+        )
     settings = await _tenant_settings(db, approval.tenant_id)
     await _post_webhook(
         settings, "approval_pending", _serialize(approval), approval.tenant_id

@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import {
   Archive, RefreshCw, Play, Download, CheckCircle2, XCircle,
-  Clock, Settings2, Save, Loader2,
+  Clock, Settings2, Save, Loader2, RotateCcw,
 } from 'lucide-react';
 import { apiFetch, API_URL } from '@/lib/api-client';
 import ConfirmModal from '@/components/ui/ConfirmModal';
@@ -53,6 +53,10 @@ interface ArchiveRun {
   oldest_row_at?: string;
   newest_row_at?: string;
   error_message?: string;
+  storage_key?: string | null;
+  restored_at?: string | null;
+  restored_rows?: number;
+  restore_error?: string | null;
 }
 
 interface RetentionPolicy {
@@ -87,6 +91,8 @@ function AdminArchivesPage() {
   const [triggering, setTriggering] = useState<string | null>(null);
   const [savingPolicy, setSavingPolicy] = useState<string | null>(null);
   const [confirmTable, setConfirmTable] = useState<string | null>(null);
+  const [confirmRestore, setConfirmRestore] = useState<ArchiveRun | null>(null);
+  const [restoring, setRestoring] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(null);
 
   const load = async () => {
@@ -133,6 +139,20 @@ function AdminArchivesPage() {
     await load();
     setSavingPolicy(null);
   };
+  const restoreRun = async (run: ArchiveRun) => {
+    setConfirmRestore(null);
+    setRestoring(run.id);
+    setNotice(null);
+    const r = await apiFetch<ArchiveRun>(`/api/admin/archives/${run.id}/restore`, { method: 'POST', throwOnError: false });
+    if (r.error) {
+      setNotice({ ok: false, text: `Could not restore the ${run.source_table} archive. ${r.error}` });
+    } else {
+      const n = r.data?.restored_rows ?? 0;
+      setNotice({ ok: !r.data?.restore_error, text: r.data?.restore_error ? `Restore finished with problems. ${r.data.restore_error}` : `Restored ${n.toLocaleString()} row${n === 1 ? '' : 's'} into ${run.source_table}.` });
+    }
+    await load();
+    setRestoring(null);
+  };
   const confirmPolicy = policies.find((p) => p.source_table === confirmTable);
 
   return (
@@ -148,7 +168,7 @@ function AdminArchivesPage() {
           'Every night at 02:00 UTC, rows older than the retention for their table are written to a dump file and removed from the live table.',
           'Set how many days each table keeps. Defaults are 30 days for invocations, 60 for executions and 90 for audit logs.',
           'Click a table under Manual trigger to archive it right now.',
-          'Each run shows under Recent runs, where you can download its dump file.',
+          'Each run shows under Recent runs, where you can download its dump file or put its rows back with Restore.',
         ]}
       />
 
@@ -205,6 +225,15 @@ function AdminArchivesPage() {
         variant="danger"
       />
 
+      <ConfirmModal
+        open={!!confirmRestore}
+        onClose={() => setConfirmRestore(null)}
+        onConfirm={() => confirmRestore && restoreRun(confirmRestore)}
+        title={`Restore ${confirmRestore?.rows_archived.toLocaleString() ?? ''} ${confirmRestore?.source_table ?? ''} rows?`}
+        description="The rows in this dump go back into the live table. Rows that are already there are left alone, so restoring twice is safe. The nightly job archives them again once they pass the retention, unless you raise it first."
+        confirmLabel="Restore"
+      />
+
       <section>
         <h2 className="text-sm font-semibold text-white mb-3 flex items-center gap-2">
           <Clock className="w-4 h-4" /> Recent runs
@@ -216,7 +245,7 @@ function AdminArchivesPage() {
             </div>
           )}
           {runs.map((r) => (
-            <RunRow key={r.id} run={r} />
+            <RunRow key={r.id} run={r} onRestore={() => setConfirmRestore(r)} restoring={restoring === r.id} />
           ))}
         </div>
       </section>
@@ -272,7 +301,7 @@ function PolicyRow({ policy, onSave, saving }: { policy: RetentionPolicy; onSave
   );
 }
 
-function RunRow({ run }: { run: ArchiveRun }) {
+function RunRow({ run, onRestore, restoring }: { run: ArchiveRun; onRestore: () => void; restoring: boolean }) {
   const [downloading, setDownloading] = useState(false);
   const [downloadErr, setDownloadErr] = useState<string | null>(null);
   const onDownload = async () => {
@@ -289,13 +318,13 @@ function RunRow({ run }: { run: ArchiveRun }) {
                 run.status === 'failed' ? 'text-rose-400' :
                 'text-amber-400';
   return (
-    <div className="px-4 py-3 border-b border-slate-800/40 text-[11px]">
-      <div className="flex items-center gap-3">
+    <div className="px-4 py-3 border-b border-slate-800/40 text-[11px]" data-testid="archive-run" data-table={run.source_table} data-id={run.id}>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <StatusIcon className={`w-4 h-4 ${color}`} />
         <span className="font-mono text-slate-300">{run.source_table}</span>
         <span className="text-slate-500">{fmtDate(run.started_at)}</span>
         {run.is_manual && <span className="text-[9px] uppercase tracking-wider text-cyan-400 bg-cyan-500/10 px-1.5 py-0.5 rounded">manual</span>}
-        <span className="ml-auto flex items-center gap-3">
+        <span className="ml-auto flex flex-wrap items-center gap-3">
           <span className="text-emerald-300 font-mono">{run.rows_archived.toLocaleString()} archived</span>
           <span className="text-rose-300 font-mono">{run.rows_deleted.toLocaleString()} deleted</span>
           <span className="text-slate-400 font-mono">{fmtBytes(run.file_size_bytes)}</span>
@@ -310,8 +339,28 @@ function RunRow({ run }: { run: ArchiveRun }) {
               {downloading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Download className="w-3 h-3" />} dump
             </button>
           )}
+          {run.status === 'completed' && run.rows_archived > 0 && run.storage_key && (
+            <button
+              type="button"
+              onClick={onRestore}
+              disabled={restoring}
+              className="text-amber-300 hover:underline flex items-center gap-1 disabled:opacity-50"
+              data-testid={`archive-restore-${run.id}`}
+              title="Put these rows back into the live table"
+            >
+              {restoring ? <Loader2 className="w-3 h-3 animate-spin" /> : <RotateCcw className="w-3 h-3" />} restore
+            </button>
+          )}
         </span>
       </div>
+      {run.restored_at && (
+        <p className="mt-1 ml-7 text-[10px] text-emerald-300" data-testid={`archive-restored-${run.id}`}>
+          Restored {(run.restored_rows || 0).toLocaleString()} row{run.restored_rows === 1 ? '' : 's'} on {fmtDate(run.restored_at)}
+        </p>
+      )}
+      {run.restore_error && (
+        <p className="mt-1 ml-7 text-[10px] text-rose-300">Restore problem: {run.restore_error}</p>
+      )}
       {downloadErr && (
         <p className="mt-1 ml-7 text-[10px] text-rose-300">{downloadErr}</p>
       )}

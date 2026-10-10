@@ -24,7 +24,7 @@ If none of those apply, run in the cloud. The edge adds real operational work.
 | Runtime | Source | Image | Notes |
 |---|---|---|---|
 | `edge-runtime` | [`apps/edge-runtime/runtime.py`](../../apps/edge-runtime/runtime.py) | Python | The reference. The only one with `EDGE_ALLOW_UNSIGNED` and `TENANT_ID` |
-| `edge-runtime-rust` | [`apps/edge-runtime-rust/`](../../apps/edge-runtime-rust/) | `rust:1.83-alpine` build, `alpine:3.20` runtime with `python3` for `code_executor` | Static musl binary for x86_64, ARM64 and ARMv7 |
+| `edge-runtime-rust` | [`apps/edge-runtime-rust/`](../../apps/edge-runtime-rust/) | `rust:1.90-alpine` build, `alpine:3.20` runtime with `python3` for `code_executor` | Static musl binary for x86_64, ARM64 and ARMv7 |
 | `edge-runtime-c` | [`apps/edge-runtime-c/`](../../apps/edge-runtime-c/) | alpine with libcurl, libmosquitto, openssl, json-c, libmicrohttpd and `python3`, about 60 MB | About 43 KB stripped binary. Reads `SIGNING_PUBKEY_PATH` only |
 
 All three register the same way, accept the same bundle and serve the same
@@ -38,9 +38,11 @@ HTTP routes on port 8080:
 | `/agents/{slug}/execute` | POST | Run the agent. Body `{"message": "...", "params": {}}` |
 
 Each chart (`infra/helm/edge-runtime`, `-rust`, `-c`) is a StatefulSet with a
-1Gi volume for `/var/edge/agents` and a pinned image tag, `1.1.0` today. The
-deploy scripts never rebuild these images. Set `EDGE_IMAGE_TAG` only after you
-pushed a new one.
+1Gi volume for `/var/edge/agents`, a Service on 8080 and a pinned image tag,
+`1.1.0` today. `deploy.sh` builds the image for the variant it installs and
+tags it with the git SHA. `deploy-azure.sh` never builds them and keeps the
+pinned tag unless `EDGE_IMAGE_TAG` is set, so push the image to ACR first. See
+[01-images](01-images.md#edge-runtime-images).
 
 ---
 
@@ -173,10 +175,12 @@ Dev is the one exception. With `ENVIRONMENT` set to `dev`, `development`, `local
 ### In a cluster
 
 `deploy.sh local` and `deploy-azure.sh deploy` install one gateway named
-`edge-cluster-default` (`EDGE_GATEWAY_ID`). `EDGE_RUNTIME_VARIANT=python|rust|c`
-picks the runtime, `EDGE_RUNTIME_ALL_VARIANTS=true` installs all three, and
-`EDGE_RUNTIME_ENABLED=false` skips it. On Azure the script mints the token,
-fetches the public key and points `mqtt_url` at `abenix-mosquitto`.
+`edge-cluster-default` (`EDGE_GATEWAY_ID`) as the release `abenix-edge`, with
+`abenix-edge-rust` and `abenix-edge-c` for the other variants and `-rust` or
+`-c` added to the gateway id. `EDGE_RUNTIME_VARIANT=python|rust|c` picks the
+runtime, `EDGE_RUNTIME_ALL_VARIANTS=true` installs all three, and
+`EDGE_RUNTIME_ENABLED=false` skips it. Both scripts mint a platform token, pass
+the signing public key and point `mqtt_url` at `abenix-mosquitto` on 1883.
 
 For a k3s box on site:
 

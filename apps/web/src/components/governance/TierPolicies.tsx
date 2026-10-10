@@ -9,7 +9,13 @@ import ConfirmModal from '@/components/ui/ConfirmModal';
 export type Tier = 'low' | 'medium' | 'high' | 'critical';
 
 export interface Policy {
-  publish_approvals: { min_approvers: number; exclude_author: boolean; capability: string; escalate_after_hours?: number };
+  publish_approvals: {
+    min_approvers: number;
+    exclude_author: boolean;
+    capability: string;
+    escalate_after_hours?: number;
+    escalate_after_minutes?: number;
+  };
   tool_call_action: 'allow' | 'approval' | 'block';
   allowed_models: string[];
   require_output_schema: boolean;
@@ -39,6 +45,23 @@ const ACTIONS: { value: Policy['tool_call_action']; label: string; help: string 
 ];
 
 const CAP_RE = /^approvals\.sign(:[a-z0-9_-]+)?$/;
+const ESCALATE_MAX_MINUTES = 720 * 60;
+
+type EscalateUnit = 'minutes' | 'hours';
+
+// minutes win over hours, the same rule the server uses
+function escalateUnit(pa: Policy['publish_approvals']): EscalateUnit {
+  const m = pa.escalate_after_minutes;
+  return m !== undefined && m > 0 && m % 60 !== 0 ? 'minutes' : 'hours';
+}
+
+function escalateValue(pa: Policy['publish_approvals'], unit: EscalateUnit): number {
+  const m = pa.escalate_after_minutes;
+  if (m !== undefined && Number.isNaN(m)) return NaN;
+  if (m !== undefined && m > 0) return unit === 'minutes' ? m : m / 60;
+  const h = pa.escalate_after_hours ?? 0;
+  return unit === 'minutes' ? h * 60 : h;
+}
 
 function sameJson(a: unknown, b: unknown) {
   return JSON.stringify(a) === JSON.stringify(b);
@@ -57,8 +80,13 @@ function problemsOf(p: Policy): Record<string, string> {
   const out: Record<string, string> = {};
   const n = p.publish_approvals.min_approvers;
   if (!Number.isInteger(n) || n < 0 || n > 10) out.min_approvers = 'Use a whole number from 0 to 10.';
-  const h = p.publish_approvals.escalate_after_hours ?? 0;
-  if (!Number.isInteger(h) || h < 0 || h > 720) out.escalate = 'Use a whole number of hours from 0 to 720.';
+  const m = p.publish_approvals.escalate_after_minutes;
+  if (m !== undefined) {
+    if (!Number.isInteger(m) || m < 0 || m > ESCALATE_MAX_MINUTES) out.escalate = `Use a whole number of minutes from 0 to ${ESCALATE_MAX_MINUTES}.`;
+  } else {
+    const h = p.publish_approvals.escalate_after_hours ?? 0;
+    if (!Number.isInteger(h) || h < 0 || h > 720) out.escalate = 'Use a whole number of hours from 0 to 720.';
+  }
   if (!CAP_RE.test(p.publish_approvals.capability)) {
     out.capability = 'Use approvals.sign, or approvals.sign:group such as approvals.sign:legal.';
   }
@@ -93,10 +121,27 @@ function TierCard({ row, canManage, onSaved }: { row: TierRow; canManage: boolea
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [confirmReset, setConfirmReset] = useState(false);
   const [modelDraft, setModelDraft] = useState('');
+  const [unit, setUnit] = useState<EscalateUnit>(() => escalateUnit(row.effective.publish_approvals));
   const models = useSelectableModels();
   const style = TIER_STYLE[row.tier];
 
-  useEffect(() => setEdit(row.effective), [row.effective]);
+  useEffect(() => {
+    setEdit(row.effective);
+    setUnit(escalateUnit(row.effective.publish_approvals));
+  }, [row.effective]);
+
+  function setEscalate(raw: string, u: EscalateUnit) {
+    const n = raw === '' ? NaN : Number(raw);
+    if (u === 'hours') setApprovals({ escalate_after_hours: n, escalate_after_minutes: undefined });
+    else setApprovals({ escalate_after_minutes: n, escalate_after_hours: 0 });
+  }
+
+  function switchUnit(u: EscalateUnit) {
+    const minutes = escalateValue(edit.publish_approvals, 'minutes');
+    setUnit(u);
+    if (!Number.isFinite(minutes)) return;
+    setEscalate(String(u === 'hours' ? Math.ceil(minutes / 60) : minutes), u);
+  }
 
   const dirty = !sameJson(edit, row.effective);
   const customised = Object.keys(row.overrides || {}).length > 0;
@@ -255,22 +300,36 @@ function TierCard({ row, canManage, onSaved }: { row: TierRow; canManage: boolea
 
         <Field
           label="Tell admins when an approval waits longer than"
-          help="Admins get one notification per approval left pending this long. 0 turns it off."
+          help="Admins get one notification per approval left pending this long, checked every minute. 0 turns it off. Applies to approvals created after you save."
           error={problems.escalate}
         >
           <div className="flex items-center gap-2">
             <input
               type="number"
               min={0}
-              max={720}
-              value={edit.publish_approvals.escalate_after_hours ?? 0}
-              onChange={(e) => setApprovals({ escalate_after_hours: e.target.value === '' ? NaN : Number(e.target.value) })}
+              max={unit === 'hours' ? 720 : ESCALATE_MAX_MINUTES}
+              value={(() => {
+                const v = escalateValue(edit.publish_approvals, unit);
+                return Number.isNaN(v) ? '' : v;
+              })()}
+              onChange={(e) => setEscalate(e.target.value, unit)}
               disabled={disabled}
               aria-invalid={!!problems.escalate}
-              className="w-20 bg-slate-950 border border-slate-700 rounded-md px-2 py-1.5 text-sm text-white disabled:opacity-60"
+              aria-label={`Escalate after, in ${unit}`}
+              className="w-24 bg-slate-950 border border-slate-700 rounded-md px-2 py-1.5 text-sm text-white disabled:opacity-60"
               data-testid={`tier-escalate-${row.tier}`}
             />
-            <span className="text-sm text-slate-400">hours</span>
+            <select
+              value={unit}
+              onChange={(e) => switchUnit(e.target.value as EscalateUnit)}
+              disabled={disabled}
+              aria-label="Escalation time unit"
+              className="bg-slate-950 border border-slate-700 rounded-md px-2 py-1.5 text-sm text-white disabled:opacity-60"
+              data-testid={`tier-escalate-unit-${row.tier}`}
+            >
+              <option value="minutes">minutes</option>
+              <option value="hours">hours</option>
+            </select>
           </div>
         </Field>
 

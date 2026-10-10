@@ -55,6 +55,9 @@ DISCOVERY_ROOTS = [
     REPO_ROOT / "examples" / "code-assets",
 ]
 
+# assets that were removed, never recreated, rows already seeded are left as they are
+RETIRED_ASSETS = {"shap_explainer"}
+
 # Heuristics for entrypoint + language detection. Mirrors the smaller
 # subset of code_analyzer.py that the API uses on upload — kept local so
 # the seed doesn't need a full analyzer import.
@@ -128,6 +131,8 @@ def _discover_assets() -> list[tuple[Path, dict]]:
                 continue
             if not manifest_dict.get("name"):
                 print(f"  ! Skipping {manifest} — no `name` field")
+                continue
+            if manifest_dict["name"] in RETIRED_ASSETS:
                 continue
             out.append((manifest.parent, manifest_dict))
     return out

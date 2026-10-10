@@ -87,6 +87,9 @@ jobs:
       # disk but untracked renders as a broken image there while looking fine
       # locally.
       - run: python scripts/check-readme-images.py
+      # A renamed doc or heading leaves links pointing nowhere, and the in-app
+      # viewer only shows docs the manifest lists.
+      - run: python scripts/check-doc-links.py
       # CI builds apps/*/Dockerfile but the cluster builds docker/Dockerfile.*,
       # so the CVE patches went to one set and the images actually serving
       # traffic kept every finding. Nothing compared them until this ran.
@@ -133,39 +136,56 @@ jobs:
         run: npm test
 
   e2e-smoke:
-    needs: [python-lint, python-test, web-lint-typecheck-build]
+    needs: [python-lint, web-lint-typecheck-build]
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     env:
       COREPACK_ENABLE_STRICT: "0"
-    # Quick browser-driven smoke against a docker-compose stack. Runs
-    # only the headline UAT files to keep CI under 8 min while still
-    # catching regressions in real user flows.
+      USE_K8S: "true"
+      BASE: http://localhost:3000
+      API: http://localhost:8000
+      STUB_LLM: "1"
+    # Real browser against a real API, web app, Postgres and Redis. Model calls
+    # go to the stub provider that scripts/ci-e2e-stack.sh switches on, so no
+    # secret is needed and the reply is known in advance.
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
       - uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: npm
       - run: npm install -g npm@10.8.2
       - run: npm ci --include=optional
-      - name: Boot stack (postgres + redis only — API + web run locally)
-        run: docker compose up -d postgres redis
-      - name: Wait for db ready
-        run: |
-          for i in $(seq 1 30); do
-            if docker compose exec -T postgres pg_isready -U abenix; then
-              echo "ready"; exit 0
-            fi
-            sleep 2
-          done
-          echo "postgres did not become ready" && exit 1
-      # NOTE: API + web boot is intentionally NOT in CI yet — full local
-      # boot needs ANTHROPIC_API_KEY and a populated tenant. The
-      # web-build job above already catches typecheck + bundle errors,
-      # and tests/unit covers the API primitives.
-      - name: Playwright install (browsers only)
+      - run: npm install --no-save --workspace=@abenix/web @next/swc-linux-x64-gnu
+      - run: pip install -r apps/api/requirements.txt -r apps/agent-runtime/requirements.txt -r apps/worker/requirements.txt
+      - name: Playwright browser
         run: npx playwright install --with-deps chromium
-      - run: docker compose down -v
+      - name: Boot the stack
+        run: bash scripts/ci-e2e-stack.sh up
+      - name: Sign in, dashboard, build an agent and chat with it
+        run: npx playwright test e2e/ci_smoke.spec.ts --project=chromium --workers=1 --retries=0 --reporter=list,github
+      - name: Lostness gate on a few routes
+        run: npx playwright test e2e/uat_lostness_gate.spec.ts --project=chromium --workers=1 --retries=0 --reporter=list,github
+        env:
+          LOSTNESS_ROLES: admin
+          LOSTNESS_ROUTES: /dashboard,/agents,/builder,/knowledge,/executions,/settings
+      - name: Stack logs
+        if: failure()
+        run: bash scripts/ci-e2e-stack.sh logs
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: e2e-smoke-results
+          path: |
+            e2e/test-results/
+            e2e/uat_lostness_gate/report.md
+            logs/ci-e2e/
+          retention-days: 7
+      - run: bash scripts/ci-e2e-stack.sh down
         if: always()
 
   build-images:

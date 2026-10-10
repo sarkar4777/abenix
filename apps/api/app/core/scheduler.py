@@ -34,6 +34,7 @@ HOLD_LOCK_KEY = 0x484F4C44  # "HOLD"
 RETAIN_LOCK_KEY = 0x52455441  # "RETA"
 IMPROVE_LOCK_KEY = 0x494D5050  # "IMPP"
 IMPROVE_WATCH_LOCK_KEY = 0x494D5057  # "IMPW"
+PRUNE_EVENTS_LOCK_KEY = 0x45565052  # "EVPR"
 
 
 def drift_scan_interval_seconds() -> int:
@@ -96,7 +97,11 @@ async def advisory_lock(key: int) -> AsyncIterator[bool]:
             )
             # this session sits idle on purpose while the guarded job runs
             await db.execute(text("SET LOCAL idle_in_transaction_session_timeout = 0"))
-            yield bool(r.scalar())
+            held = bool(r.scalar())
+            from app.core.job_runs import note_lock
+
+            note_lock(held)
+            yield held
 
 
 def due_trigger_claim_stmt(now: datetime):
@@ -131,7 +136,7 @@ def claim_trigger(trigger, now: datetime) -> None:
         trigger.is_active = False  # No cron = one-shot, disable
 
 
-async def _check_due_triggers() -> None:
+async def _check_due_triggers() -> dict[str, int] | None:
     """Master job: claim due scheduled triggers under row locks, then fire them."""
     import sys
     from pathlib import Path
@@ -154,14 +159,15 @@ async def _check_due_triggers() -> None:
                     claimed.append((str(trigger.id), str(trigger.agent_id)))
     except Exception as e:
         logger.error("Scheduler check failed: %s", e, exc_info=True)
-        return
+        return None
 
     if not claimed:
-        return
+        return {"fired": 0}
     logger.info("Claimed %d due scheduled triggers", len(claimed))
     await asyncio.gather(
         *(_run_trigger(tid, aid) for tid, aid in claimed), return_exceptions=True
     )
+    return {"fired": len(claimed)}
 
 
 async def _run_trigger(trigger_id: str, agent_id: str) -> None:
@@ -257,7 +263,7 @@ async def _run_trigger(trigger_id: str, agent_id: str) -> None:
             pass
 
 
-async def sweep_stale_executions() -> None:
+async def sweep_stale_executions() -> dict[str, int] | None:
     """Mark executions still in RUNNING past the max allowed window as FAILED."""
     import os
     import sys
@@ -279,7 +285,7 @@ async def sweep_stale_executions() -> None:
         async with advisory_lock(SWEEP_LOCK_KEY) as held:
             if not held:
                 logger.debug("sweep_stale_executions: another replica holds the lock")
-                return
+                return None
             async with async_session() as db:
                 # Find the stale rows first so we can notify the owning users.
                 r = await db.execute(
@@ -301,7 +307,7 @@ async def sweep_stale_executions() -> None:
                 )
                 found = r.all()
                 if not found:
-                    return
+                    return {"swept": 0}
                 # Runs parked on a HITL gate are alive, not stale
                 try:
                     from app.core.hitl import waiting_execution_ids
@@ -310,11 +316,11 @@ async def sweep_stale_executions() -> None:
                         [str(row[0]) for row in found]
                     )
                 except Exception as e:
-                    logger.warning("hitl waiting lookup failed, skipping sweep: %s", e)
-                    return
+                    logger.error("hitl waiting lookup failed, skipping sweep: %s", e)
+                    return {"swept": 0}
                 stale = [row for row in found if str(row[0]) not in waiting]
                 if not stale:
-                    return
+                    return {"swept": 0}
                 ids = [row[0] for row in stale]
                 logger.info(
                     "Sweeping %d stale executions (older than %d min)",
@@ -415,9 +421,11 @@ async def sweep_stale_executions() -> None:
 
     except Exception as e:
         logger.error("sweep_stale_executions failed: %s", e, exc_info=True)
+        return None
+    return {"swept": len(stale)}
 
 
-async def reconcile_active_executions_gauge() -> None:
+async def reconcile_active_executions_gauge() -> dict[str, int] | None:
     """Re-sync abenix_active_executions to the true RUNNING count per
     tenant. The gauge drifts whenever an inc/dec pair gets split across
     a crashed worker or a swallowed exception in the emit path. Run
@@ -460,11 +468,13 @@ async def reconcile_active_executions_gauge() -> None:
             logger.debug(
                 "reconcile_active_executions_gauge: synced %d tenants", len(counts)
             )
+        return {"tenants": len(all_tenants)}
     except Exception as e:
         logger.error("reconcile_active_executions_gauge failed: %s", e, exc_info=True)
+        return None
 
 
-async def reset_monthly_quotas():
+async def reset_monthly_quotas() -> dict[str, int] | None:
     """Reset all users' and API keys' monthly usage counters."""
     from app.core.deps import async_session
     from sqlalchemy import update
@@ -481,33 +491,48 @@ async def reset_monthly_quotas():
         async with advisory_lock(QUOTA_LOCK_KEY) as held:
             if not held:
                 logger.debug("reset_monthly_quotas: another replica holds the lock")
-                return
+                return None
             async with async_session() as db:
-                await db.execute(
+                users = await db.execute(
                     update(User).values(
                         tokens_used_this_month=0,
                         cost_used_this_month=0,
                         quota_reset_at=datetime.now(timezone.utc),
                     )
                 )
-                await db.execute(update(ApiKey).values(tokens_used=0, cost_used=0))
+                keys = await db.execute(
+                    update(ApiKey).values(tokens_used=0, cost_used=0)
+                )
                 await db.commit()
         logger.info("Monthly token quotas reset successfully")
+        return {
+            "users": int(getattr(users, "rowcount", 0) or 0),
+            "api_keys": int(getattr(keys, "rowcount", 0) or 0),
+        }
     except Exception as e:
         logger.error("Failed to reset monthly quotas: %s", e, exc_info=True)
+        return None
 
 
-async def ping_models() -> None:
+async def ping_models() -> dict | None:
     """Hourly availability probe across every active LLM model."""
     try:
         from app.services.model_availability import run_pings
 
-        await run_pings()
+        out = await run_pings() or {}
+        trans = out.get("transitions") or 0
+        return {
+            "checked": int(out.get("checked") or 0),
+            "transitions": (
+                len(trans) if isinstance(trans, (list, tuple)) else int(trans)
+            ),
+        }
     except Exception as exc:
         logger.exception("ping_models failed: %s", exc)
+        return None
 
 
-async def score_drift_backlog() -> None:
+async def score_drift_backlog() -> dict[str, int] | None:
     """Score finished executions the inline hooks missed, one replica at a time."""
     try:
         from app.core.deps import async_session
@@ -516,14 +541,42 @@ async def score_drift_backlog() -> None:
         async with advisory_lock(DRIFT_LOCK_KEY) as held:
             if not held:
                 logger.debug("score_drift_backlog: another replica holds the lock")
-                return
+                return None
             recorded = await scan_backlog(
                 async_session, interval_seconds=drift_scan_interval_seconds()
             )
         if recorded:
             logger.info("score_drift_backlog: recorded %d executions", recorded)
+        return {"scored": int(recorded or 0)}
     except Exception as e:
         logger.error("score_drift_backlog failed: %s", e, exc_info=True)
+        return None
+
+
+ANNOUNCE_LOCK_KEY = 0x414E4E43  # "ANNC"
+
+
+async def announce_finished_runs() -> dict[str, int] | None:
+    """Notify owners of runs a runtime pool finished, one replica at a time."""
+    try:
+        from app.core.deps import async_session
+        from app.services.run_announcer import announce_backlog
+
+        async with advisory_lock(ANNOUNCE_LOCK_KEY) as held:
+            if not held:
+                return None
+            sent = await announce_backlog(async_session)
+        return {"announced": int(sent or 0)}
+    except Exception as e:
+        logger.error("announce_finished_runs failed: %s", e, exc_info=True)
+        return None
+
+
+def _tracked(job_id: str, func):
+    """Record every run in Redis for the Background jobs page."""
+    from app.core.job_runs import tracked
+
+    return tracked(job_id, func)
 
 
 def start_scheduler() -> None:
@@ -531,9 +584,12 @@ def start_scheduler() -> None:
     scheduler = get_scheduler()
     if scheduler.running:
         return
+    from app.core.job_runs import install_capture
+
+    install_capture()
 
     scheduler.add_job(
-        _check_due_triggers,
+        _tracked("check_due_triggers", _check_due_triggers),
         trigger="interval",
         seconds=30,
         id="check_due_triggers",
@@ -542,7 +598,7 @@ def start_scheduler() -> None:
     )
 
     scheduler.add_job(
-        ping_models,
+        _tracked("ping_models", ping_models),
         trigger="interval",
         minutes=60,
         id="ping_models",
@@ -552,7 +608,7 @@ def start_scheduler() -> None:
     )
 
     scheduler.add_job(
-        sweep_stale_executions,
+        _tracked("sweep_stale_executions", sweep_stale_executions),
         trigger="interval",
         minutes=5,
         id="sweep_stale_executions",
@@ -561,7 +617,7 @@ def start_scheduler() -> None:
     )
 
     scheduler.add_job(
-        _run_eval_schedules,
+        _tracked("eval_schedules", _run_eval_schedules),
         trigger="interval",
         seconds=60,
         id="eval_schedules",
@@ -570,7 +626,9 @@ def start_scheduler() -> None:
     )
 
     scheduler.add_job(
-        reconcile_active_executions_gauge,
+        _tracked(
+            "reconcile_active_executions_gauge", reconcile_active_executions_gauge
+        ),
         trigger="interval",
         minutes=5,
         id="reconcile_active_executions_gauge",
@@ -579,7 +637,7 @@ def start_scheduler() -> None:
     )
 
     scheduler.add_job(
-        score_drift_backlog,
+        _tracked("score_drift_backlog", score_drift_backlog),
         trigger="interval",
         seconds=drift_scan_interval_seconds(),
         id="score_drift_backlog",
@@ -588,9 +646,18 @@ def start_scheduler() -> None:
         next_run_time=datetime.now(timezone.utc) + timedelta(seconds=120),
     )
 
+    scheduler.add_job(
+        _tracked("announce_finished_runs", announce_finished_runs),
+        trigger="interval",
+        seconds=15,
+        id="announce_finished_runs",
+        name="Tell owners about runs a runtime pool finished",
+        replace_existing=True,
+    )
+
     # Monthly token quota reset (runs on the 1st of each month at midnight UTC)
     scheduler.add_job(
-        reset_monthly_quotas,
+        _tracked("reset_monthly_quotas", reset_monthly_quotas),
         trigger="cron",
         day=1,
         hour=0,
@@ -601,7 +668,7 @@ def start_scheduler() -> None:
     )
 
     scheduler.add_job(
-        _link_audit_chain,
+        _tracked("link_audit_chain", _link_audit_chain),
         trigger="interval",
         seconds=30,
         id="link_audit_chain",
@@ -610,7 +677,7 @@ def start_scheduler() -> None:
     )
 
     scheduler.add_job(
-        _dispatch_events,
+        _tracked("dispatch_events", _dispatch_events),
         trigger="interval",
         seconds=2,
         id="dispatch_events",
@@ -621,7 +688,7 @@ def start_scheduler() -> None:
     )
 
     scheduler.add_job(
-        _watch_sources,
+        _tracked("watch_sources", _watch_sources),
         trigger="interval",
         seconds=30,
         id="watch_sources",
@@ -631,7 +698,7 @@ def start_scheduler() -> None:
     )
 
     scheduler.add_job(
-        _prune_events,
+        _tracked("prune_events", _prune_events),
         trigger="cron",
         hour=4,
         minute=5,
@@ -641,7 +708,7 @@ def start_scheduler() -> None:
     )
 
     scheduler.add_job(
-        _verify_audit_chain,
+        _tracked("verify_audit_chain", _verify_audit_chain),
         trigger="cron",
         hour=3,
         minute=15,
@@ -651,9 +718,9 @@ def start_scheduler() -> None:
     )
 
     scheduler.add_job(
-        _escalate_approvals,
+        _tracked("escalate_approvals", _escalate_approvals),
         trigger="interval",
-        minutes=15,
+        minutes=1,
         id="escalate_approvals",
         name="Escalate tiered approvals nobody has acted on",
         replace_existing=True,
@@ -662,7 +729,7 @@ def start_scheduler() -> None:
     )
 
     scheduler.add_job(
-        observe_actions,
+        _tracked("observe_actions", observe_actions),
         trigger="interval",
         seconds=30,
         id="observe_actions",
@@ -674,7 +741,7 @@ def start_scheduler() -> None:
     )
 
     scheduler.add_job(
-        _nightly_archive,
+        _tracked("nightly_archive", _nightly_archive),
         trigger="cron",
         hour=2,
         minute=0,
@@ -684,7 +751,7 @@ def start_scheduler() -> None:
     )
 
     scheduler.add_job(
-        enqueue_pinecone_vacuum,
+        _tracked("pinecone_vacuum", enqueue_pinecone_vacuum),
         trigger="cron",
         hour=2,
         minute=30,
@@ -694,7 +761,7 @@ def start_scheduler() -> None:
     )
 
     scheduler.add_job(
-        moderation_review_tick,
+        _tracked("moderation_review_tick", moderation_review_tick),
         trigger="interval",
         seconds=15,
         id="moderation_review_tick",
@@ -705,7 +772,7 @@ def start_scheduler() -> None:
     )
 
     scheduler.add_job(
-        moderation_retention,
+        _tracked("moderation_retention", moderation_retention),
         trigger="interval",
         minutes=60,
         id="moderation_retention",
@@ -715,7 +782,7 @@ def start_scheduler() -> None:
     )
 
     scheduler.add_job(
-        improvements_tick,
+        _tracked("improvements_tick", improvements_tick),
         trigger="interval",
         seconds=15,
         id="improvements_tick",
@@ -727,7 +794,7 @@ def start_scheduler() -> None:
     )
 
     scheduler.add_job(
-        improvements_watch,
+        _tracked("improvements_watch", improvements_watch),
         trigger="interval",
         minutes=5,
         id="improvements_watch",
@@ -739,7 +806,7 @@ def start_scheduler() -> None:
     )
 
     scheduler.add_job(
-        group_lessons,
+        _tracked("group_lessons", group_lessons),
         trigger="interval",
         minutes=2,
         id="group_lessons",
@@ -751,7 +818,7 @@ def start_scheduler() -> None:
     )
 
     scheduler.add_job(
-        lesson_retention,
+        _tracked("lesson_retention", lesson_retention),
         trigger="interval",
         minutes=60,
         id="lesson_retention",
@@ -767,89 +834,104 @@ def start_scheduler() -> None:
     logger.info("Cron trigger scheduler started (checking every 30 seconds)")
 
 
-async def _link_audit_chain() -> None:
+async def _link_audit_chain() -> dict[str, int]:
     from app.services.audit_chain import run_chainer
 
     # drain the backlog in one tick, the lock keeps it to one replica
+    linked = 0
     for _ in range(25):
-        if await run_chainer() == 0:
+        n = await run_chainer()
+        linked += n
+        if n == 0:
             break
+    return {"linked": linked}
 
 
-async def _dispatch_events() -> None:
+async def _dispatch_events() -> dict[str, int] | None:
     from app.services.events import dispatch_once
 
-    await dispatch_once()
+    return await dispatch_once()
 
 
-async def _watch_sources() -> None:
+async def _watch_sources() -> dict[str, int] | None:
     from app.services.source_watch import run_due
 
     try:
-        await run_due()
-    except Exception as e:  # noqa: BLE001
-        logger.warning("source watch failed: %s", e)
+        return {"checked": int(await run_due() or 0)}
+    except Exception:
+        logger.exception("source watch failed")
+        return None
 
 
-async def _prune_events() -> None:
+async def _prune_events() -> dict[str, int] | None:
     from app.services.events import prune
 
     try:
-        await prune()
-    except Exception as e:  # noqa: BLE001
-        logger.warning("event prune failed: %s", e)
+        async with advisory_lock(PRUNE_EVENTS_LOCK_KEY) as held:
+            if not held:
+                return None
+            return await prune()
+    except Exception:
+        logger.exception("event prune failed")
+        return None
 
 
-async def _run_eval_schedules() -> None:
+async def _run_eval_schedules() -> dict[str, int] | None:
     from app.services.eval_runner import EVAL_LOCK_KEY, scheduler_tick
 
     try:
         async with advisory_lock(EVAL_LOCK_KEY) as held:
             if held:
-                await scheduler_tick()
-    except Exception as e:  # noqa: BLE001
-        logger.warning("eval schedule tick failed: %s", e)
+                return await scheduler_tick()
+    except Exception:
+        logger.exception("eval schedule tick failed")
+    return None
 
 
-async def _verify_audit_chain() -> None:
+async def _verify_audit_chain() -> dict[str, int] | None:
     from app.services.audit_chain import run_nightly_verify
 
-    await run_nightly_verify()
+    return await run_nightly_verify()
 
 
-async def _escalate_approvals() -> None:
+async def _escalate_approvals() -> dict[str, int] | None:
     from app.core.deps import async_session
     from app.routers.approvals import escalate_overdue
 
     try:
         async with advisory_lock(ESCALATE_LOCK_KEY) as held:
             if not held:
-                return
+                return None
             async with async_session() as db:
                 n = await escalate_overdue(db)
             if n:
                 logger.info("escalated %d overdue approvals", n)
+            return {"escalated": n}
     except Exception:
         logger.exception("approval escalation failed")
+        return None
 
 
-async def observe_actions() -> None:
+async def observe_actions() -> dict | None:
     from app.core.deps import async_session
     from app.services.autonomy import observe_tick
 
     try:
         async with advisory_lock(ACTION_LOCK_KEY) as held:
             if not held:
-                return
+                return None
             async with async_session() as db:
                 out = await observe_tick(db)
             if out.get("settled"):
                 logger.info("observe_actions settled %d outcomes", out["settled"])
+            # grants are checked every tick, only settled outcomes are news
+            return {"settled": int(out.get("settled") or 0)}
     except Exception:
         logger.exception("observe_actions failed")
+        return None
 
 
-async def _nightly_archive() -> None:
+async def _nightly_archive() -> dict[str, int] | None:
     try:
         from app.services.archiver import run_all_archives
         from app.core.deps import async_session
@@ -857,13 +939,16 @@ async def _nightly_archive() -> None:
         async with advisory_lock(ARCHIVE_LOCK_KEY) as held:
             if not held:
                 logger.debug("nightly archive: another replica holds the lock")
-                return
-            await run_all_archives(async_session)
+                return None
+            runs = await run_all_archives(async_session)
+        rows = sum(int(getattr(r, "rows_archived", 0) or 0) for r in runs or [])
+        return {"rows": rows, "runs": len(runs or [])}
     except Exception as e:
         logger.exception("nightly archive failed: %s", e)
+        return None
 
 
-async def enqueue_pinecone_vacuum() -> None:
+async def enqueue_pinecone_vacuum() -> dict[str, bool] | None:
     """Hand the vacuum to the worker's documents queue, from one replica."""
     try:
         from app.workers.kb_reembed import enqueue_pinecone_vacuum as _enqueue
@@ -871,105 +956,118 @@ async def enqueue_pinecone_vacuum() -> None:
         async with advisory_lock(VACUUM_LOCK_KEY) as held:
             if not held:
                 logger.debug("pinecone vacuum: another replica holds the lock")
-                return
-            if await _enqueue():
+                return None
+            queued = bool(await _enqueue())
+            if queued:
                 logger.info("pinecone vacuum queued")
+            return {"queued": queued}
     except Exception as e:
         logger.exception("pinecone vacuum enqueue failed: %s", e)
+        return None
 
 
-async def moderation_review_tick() -> None:
+async def moderation_review_tick() -> dict[str, int] | None:
     from app.core.deps import async_session
     from app.services.moderation_review import announce_pending, expire_due
 
     try:
         async with advisory_lock(HOLD_LOCK_KEY) as held:
             if not held:
-                return
+                return None
             async with async_session() as db:
                 await announce_pending(db)
             async with async_session() as db:
                 n = await expire_due(db)
             if n:
                 logger.info("review time limit applied to %d held items", n)
+            return {"expired": int(n or 0)}
     except Exception:
         logger.exception("moderation review tick failed")
+        return None
 
 
-async def moderation_retention() -> None:
+async def moderation_retention() -> dict[str, int] | None:
     from app.core.deps import async_session
     from app.services.moderation_review import purge_retention
 
     try:
         async with advisory_lock(RETAIN_LOCK_KEY) as held:
             if not held:
-                return
+                return None
             async with async_session() as db:
                 out = await purge_retention(db)
             if any(out.values()):
                 logger.info("moderation retention purge: %s", out)
+            return out
     except Exception:
         logger.exception("moderation retention purge failed")
+        return None
 
 
-async def improvements_tick() -> None:
+async def improvements_tick() -> dict[str, int] | None:
     """Enqueue under IMPP on one replica. Draining claims rows, so every proof worker drains."""
     from app.services import improvements
 
     try:
         async with advisory_lock(IMPROVE_LOCK_KEY) as held:
             if held:
-                await improvements.propose_tick()
-                return
+                return await improvements.propose_tick()
         if improvements.drains_here():
-            await improvements.drain_once()
+            return {"drained": int(await improvements.drain_once() or 0)}
     except Exception:
         logger.exception("improvements tick failed")
+    return None
 
 
-async def improvements_watch() -> None:
+async def improvements_watch() -> dict[str, int] | None:
     from app.services import improvements
 
     try:
         async with advisory_lock(IMPROVE_WATCH_LOCK_KEY) as held:
             if not held:
-                return
+                return None
             out = await improvements.watch_tick()
             if out.get("rolled_back") or out.get("kept"):
                 logger.info("improvement watch: %s", out)
+            return out
     except Exception:
         logger.exception("improvements watch failed")
+        return None
 
 
-async def group_lessons() -> None:
+async def group_lessons() -> dict | None:
     from app.core.deps import async_session
     from app.services.lessons import CLUSTER_LOCK_KEY, run_tick
 
     try:
         async with advisory_lock(CLUSTER_LOCK_KEY) as held:
             if not held:
-                return
+                return None
             out = await run_tick(async_session)
             if out.get("lessons"):
                 logger.info("lessons grouped: %s", out)
+            return out
     except Exception:
         logger.exception("lesson grouping failed")
+        return None
 
 
-async def lesson_retention() -> None:
+async def lesson_retention() -> dict[str, int] | None:
     from app.core.deps import async_session
     from app.services.lessons import RETAIN_LOCK_KEY, purge_retention
 
     try:
         async with advisory_lock(RETAIN_LOCK_KEY) as held:
             if not held:
-                return
+                return None
             async with async_session() as db:
                 out = await purge_retention(db)
             if any(out.values()):
                 logger.info("lesson retention purge: %s", out)
+            return out
     except Exception:
         logger.exception("lesson retention purge failed")
+        return None
 
 
 def stop_scheduler() -> None:

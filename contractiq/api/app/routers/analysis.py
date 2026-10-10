@@ -466,7 +466,13 @@ async def cross_contract_chat(
             else:
                 # Reuse the most recent un-archived ContractIQ thread for
                 # this subject if one exists, otherwise create a new one.
-                threads = await forge.chat.list(app_slug="contractiq", agent_slug="contractiq-chat", limit=1)
+                # "New chat" in the UI asks for a fresh thread, reusing the
+                # last one there merged the new conversation into the old.
+                threads = (
+                    []
+                    if body.get("new_thread")
+                    else await forge.chat.list(app_slug="contractiq", agent_slug="contractiq-chat", limit=1)
+                )
                 if threads:
                     tid = threads[0]["id"]
                 else:

@@ -1,6 +1,6 @@
 # v2.0 enterprise knowledge stack
 
-Sixteen features landed in v2.0 that move KB / Atlas / PersonaKB from "demo-ready" to "Fortune-500-ready". This page is the developer reference for each.
+The v2.0 release added access control, versioning, model swaps, purge and audit features to the knowledge base (KB), Atlas and PersonaKB. This page is the developer reference for each one.
 
 ## At a glance
 
@@ -8,82 +8,53 @@ Sixteen features landed in v2.0 that move KB / Atlas / PersonaKB from "demo-read
 |---|---|---|
 | Document-level ACL | [`document_acl.py`](../../apps/agent-runtime/engine/knowledge/document_acl.py), [`document_access.py`](../../apps/api/app/services/document_access.py) | `GET/POST/DELETE /api/knowledge/{kb}/documents/{doc}/grants` |
 | Document versioning | [`knowledge_v2.py`](../../apps/api/app/routers/knowledge_v2.py) | `POST /api/knowledge/{kb}/documents/{doc}/replace` |
-| Incremental Cognify | [`cognify_task.py`](../../apps/worker/worker/tasks/cognify_task.py) + new `documents.cognified_at` | per-job mode `incremental`/`full`/`selective` |
+| Incremental Cognify | [`cognify_pipeline.py`](../../apps/agent-runtime/engine/knowledge/cognify_pipeline.py), [`cognify_task.py`](../../apps/worker/worker/tasks/cognify_task.py) | `POST /api/knowledge-engines/{kb}/cognify` |
 | Cognify config | [`knowledge_v2.py`](../../apps/api/app/routers/knowledge_v2.py) | `GET/PUT /api/knowledge/cognify-config` |
 | Cognify conflicts | [`CognifyConflict` model](../../packages/db/models/cognify_config.py) | `GET /api/knowledge/cognify-conflicts`, `POST /api/knowledge/cognify-conflicts/{id}/resolve` |
 | Embedding-model swap | [`knowledge_v2.py`](../../apps/api/app/routers/knowledge_v2.py) + [`kb_reembed`](../../apps/worker/worker/tasks/kb_reembed.py) worker | `GET/POST /api/knowledge/{kb}/reembed` |
 | GDPR cascade purge | [`gdpr_purge.py`](../../apps/api/app/services/gdpr_purge.py) | `POST /api/gdpr/users/{id}/purge`, `GET /api/gdpr/users/{id}/receipts` |
-| Persona encryption | [`crypto.py`](../../apps/api/app/core/crypto.py) | per-tenant DEK derived from cluster KEK |
+| Field encryption | [`crypto.py`](../../apps/api/app/core/crypto.py) | per-tenant DEK derived from cluster KEK |
 | Reranking + citations | [`reranker.py`](../../apps/agent-runtime/engine/knowledge/reranker.py) | `metadata.citation` on every chunk hit |
 | Pinecone vacuum | [`pinecone_vacuum.py`](../../apps/worker/worker/tasks/pinecone_vacuum.py) | queued daily at 02:30 UTC by the API scheduler |
 | Atlas as-of | [`atlas_tools.py`](../../apps/agent-runtime/engine/tools/atlas_tools.py), reads `atlas_snapshots` | `atlas_as_of` tool |
 | OCR pipeline | [`engine/knowledge/extractors/`](../../apps/agent-runtime/engine/knowledge/extractors/) | auto-fallback in document_processor |
-| Pagination cursors | every list endpoint gains `cursor` + `next_cursor` | uniform pattern |
-| Load-test baseline | extended [`scripts/load/baseline.js`](../../scripts/load/baseline.js) | `kb_ingest`, `vector_search`, `cognify_throughput` |
+| Conflict list cursor | [`knowledge_v2.py`](../../apps/api/app/routers/knowledge_v2.py) | `cursor` + `next_cursor` on `GET /api/knowledge/cognify-conflicts` |
 
 ## Document-level ACL
 
 `collection_grants` decide who can read a collection. `document_grants(document_id, subject_type, subject_id, permission, expires_at)` narrow one document inside it. The rule lives in [`document_acl.py`](../../apps/agent-runtime/engine/knowledge/document_acl.py), so the API and the runtime decide the same way.
 
-- A document with no live grants is visible to everyone who can read the collection.
-- The first grant restricts it. From then on only its grantees see it, plus tenant admins, the collection creator and users holding WRITE or ADMIN on the collection.
-- A grantee is a user or an agent (`subject_type` is `user` or `agent`). There are no team or role subjects. An expired grant no longer counts.
+- A document with no grants is visible to everyone who can read the collection.
+- The first grant restricts it. From then on only holders of a live grant see it, plus tenant admins, the collection creator and users holding WRITE or ADMIN on the collection.
+- A grantee is a user or an agent (`subject_type` is `user` or `agent`). There are no team or role subjects. An expired grant no longer counts, and the document stays restricted, so a lapsed grant never opens it to the whole collection.
+- Collection grants for users take an optional `expires_at` too, and an expired one no longer grants read or write.
 - Search drops restricted documents before ranking, in the vector, Pinecone and graph paths, so the top-K is drawn only from what the caller may read. The search response reports `hidden_documents`, and the search cache is keyed by the hidden set.
 - `GET /api/knowledge-bases/{kb}/documents` leaves restricted documents out and returns `meta.hidden` with how many.
 - Only collection editors can add or remove grants. Anyone else gets 403 "Only people who can edit this collection can share documents".
 
 ## Document versioning
 
-Replace a contract amendment by `POST /api/knowledge/{kb}/documents/{doc}/replace`. The old row is marked `is_current=false, superseded_by=<new_id>`. Search defaults to `is_current=true`. Pass `?include_superseded=true` to query history. Cognify only processes current versions, so superseded contracts stop influencing the graph the moment they're replaced.
+`POST /api/knowledge/{kb}/documents/{doc}/replace` records a new version of a document. Upload the amended file to the same collection first, then call replace with it:
 
-### How queries resolve after a replace
-
-Three paths fan out from a single `replace` call. All happen automatically — no agent or caller change required.
-
-**KB vector search.** [`hybrid_search.py`](../../apps/agent-runtime/engine/knowledge/hybrid_search.py) filters by `documents.is_current = true` before similarity scoring, so the new version's chunks are the only candidates returned. The old chunks remain in Pinecone for auditability — pass `include_superseded=true` to surface them — but the default agent retrieval path never sees them.
-
-**Atlas graph queries.** A replace does not touch the Atlas graph. To see the graph as it stood before a change, agents use `atlas_as_of`, which reads saved snapshots, see [Atlas as-of](#atlas-as-of).
-
-**Cognify.** Incremental jobs only fetch documents where `is_current = true AND (cognified_at IS NULL OR updated_at > cognified_at)`. The replaced document immediately appears in the next job's frontier, and the superseded document is excluded. Entity resolution still MERGEs against existing nodes so the new doc enriches the graph without duplicating identities.
-
-**The agent's view, end-to-end:**
-
-```
-agent.execute("Summarize the latest version of contract X")
-  ↓
-  knowledge_search(query="contract X", kb_id=...)
-  ↓
-  hybrid_search filters is_current=true → returns chunks from doc v2 only
-  ↓
-  agent sees citations to "contract.pdf · v2 · page 42 · chunk 3"
-  ↓
-  same agent run sees v2 chunks only
+```json
+{"new_filename": "contract-v2.pdf", "new_storage_url": "...", "new_file_type": "pdf", "new_file_size": 48213}
 ```
 
-**Auditor view** (same agent, different query):
+The call checks the collection is in the caller's tenant and that they can edit it (404 or 403), and that the new file sits under this tenant's and collection's storage prefix (400). It adds a new `documents` row whose `parent_document_id` points at the first version, with `version_number` one higher, marks the old row `is_current=false, superseded_by=<new_id>`, queues the new version for processing and answers 201 with the new id. Replacing a row that is already superseded is 400. The action is audited as `document.replaced`.
 
-```
-agent.execute("Show me the obligation concepts as of 2025-01-15")
-  ↓
-  atlas_as_of(as_of="2025-01-15", label_like="obligation")
-  ↓
-  newest snapshot saved at or before that date, or the live graph if nothing changed since
-  ↓
-  agent sees the obligation nodes and their edges as they stood then
-```
+Search and Cognify use the current version only, so agents and callers need no change. Hybrid search drops superseded rows the same way it drops restricted ones, before ranking, and Cognify skips them. The document list shows the current version only. The old row stays as history, and editors and admins read it with `GET /api/knowledge/{kb}/documents/{doc}/versions` or `GET /api/knowledge-bases/{kb}/documents?include_history=true`.
 
-No customer code changes when an upload is replaced. The query layer auto-resolves to the right state.
+Source Watch uses the same columns when it files a changed page into a collection. See [Source Watch](17-source-watch.md).
+
+To see the Atlas graph as it stood before a change, agents use `atlas_as_of`, which reads saved snapshots. See [Atlas as-of](#atlas-as-of).
 
 ## Incremental Cognify
 
-`cognify_task.run(mode='incremental')` only re-processes docs where `cognified_at IS NULL OR updated_at > cognified_at`. For a 10k-doc KB adding 100 new docs daily, this drops the cost from $99k/month to $999/month at typical extraction rates.
+`POST /api/knowledge-engines/{kb}/cognify` queues a job on the worker's `cognify` queue. It takes every current `ready` document in the collection, or only the ones listed in `doc_ids`, plus optional `model`, `chunk_size` and `chunk_overlap`.
 
-Three modes:
-- `incremental` (default) — new + updated docs
-- `full` — every doc (use when ontology changes)
-- `selective` — explicit `document_ids: [...]` (manual fix)
+Jobs are incremental. If none of the chosen documents was created after the collection's `last_cognified_at`, the pipeline returns without calling a model. The worker then stores the job as `failed`, since it maps every result other than `complete` to `failed`. Otherwise every chosen document is processed. The `documents.cognified_at` and `last_cognify_job_id` columns exist but nothing writes them yet.
 
-Per-tenant `max_parallel_docs` config controls in-job parallelism via `asyncio.gather + Semaphore`.
+Within a job, documents are extracted in parallel up to the tenant's `max_parallel_docs`, through an `asyncio.Semaphore`.
 
 ## Cognify config + conflict detection
 
@@ -95,6 +66,8 @@ Per-tenant row in `cognify_configs`, edited at `/settings/cognify`. The pipeline
 | `conflict_action` | `flag` | Applies when sources disagree on an entity's type. See below |
 | `max_parallel_docs` | 8 | Documents processed at once within a job |
 | `daily_budget_usd` | none | Once the tenant's Cognify spend for the UTC day reaches it, the job processes no more documents and says how many it skipped |
+
+A budget of 0 stops every new job straight away with a message, which pauses Cognify until it is raised. A job no worker picks up within 15 minutes, or that runs for more than 6 hours, is closed as failed the next time its jobs are listed, so it no longer blocks Run Cognify.
 
 When two sources give one entity different types, `conflict_action` decides.
 
@@ -128,7 +101,7 @@ The KB engine page (`/knowledge/{id}/engine`) has an **Embedding model** panel s
 
 ## GDPR cascade
 
-`POST /api/gdpr/users/{user_id}/purge` runs the five-store cascade. It can only target a user in the caller's own tenant, anyone else is 404.
+`POST /api/gdpr/users/{user_id}/purge` runs the five-store cascade. Admins can purge anyone in their own tenant and other users can purge only themselves (403 otherwise). A user outside the caller's tenant is 404.
 
 | Store | What is purged |
 |---|---|
@@ -140,11 +113,13 @@ The KB engine page (`/knowledge/{id}/engine`) has an **Embedding model** panel s
 
 Every store-level attempt writes a `gdpr_purge_log` row, with how many rows, vectors, files or records it really removed in `affected_count`. `GET /api/gdpr/users/{user_id}/receipts` returns the audit trail, with that count as `affected`. `/settings/gdpr` shows it in the **Removed** column.
 
-## Persona encryption
+## Field encryption
 
-At rest, sensitive PersonaItem and AgentMemory fields can be wrapped with AES-256-GCM. The cluster KEK is held in `ABENIX_DATA_KEY_KEK_BASE64` (Azure Key Vault / AWS KMS / Vault). Per-tenant DEK is derived deterministically as `HMAC-SHA256(KEK, tenant_id)` so all pods agree without storing per-tenant key rows.
+[`crypto.py`](../../apps/api/app/core/crypto.py) wraps a value with AES-256-GCM and stores it as `v1:<base64>`. The cluster KEK is a 32-byte key, base64 encoded, in `ABENIX_DATA_KEY_KEK_BASE64`. Keep it in a secret manager. The per-tenant DEK is `HMAC-SHA256(KEK, tenant_id)`, so every pod derives the same key and no key rows are stored.
 
-Missing KEK env → encryption is a no-op (plaintext) and a warning logs once. Production deployments MUST set it.
+It is used today for the tenant Slack webhook URL, the approval webhook secret, MCP connection secrets, tool credentials and held moderation text. PersonaItem and AgentMemory have `encrypted` and `key_version` columns, but nothing encrypts their content yet.
+
+With no KEK set, or one that does not decode to 32 bytes, `encrypt` returns the plaintext unchanged. Set the KEK in production.
 
 ## Reranking + citation anchors
 
@@ -154,7 +129,7 @@ Missing KEK env → encryption is a no-op (plaintext) and a warning logs once. P
 - The Claude Haiku scorer runs only with `RERANKER_PROVIDER=llm`, since it adds a model call to every search.
 - Otherwise results keep their retrieval order. `RERANKER_PROVIDER=none` turns reranking off.
 
-Every chunk hit carries `metadata.citation` with `document_id`, `page`, `chunk_index`, `char_offset_start`, `char_offset_end`, `document_name` and an anchor, so agents can cite `contract.pdf · page 42 · chunk 3`.
+Every chunk hit carries `metadata.citation` with `document_id`, `document_name`, `page`, `chunk_index`, `char_offset_start`, `char_offset_end` and `anchor_url`, a label such as `contract.pdf · page 42 · chunk 3` that agents can cite.
 
 ## Pinecone vacuum
 
@@ -196,29 +171,20 @@ extract_document(path, file_type) → (blocks, method, quality_score)
 
 Ingest records `documents.extraction_method` and `extraction_quality`. Blocks carry page numbers, so each chunk stores its `page` and citations can point at it. Vision OCR needs PyMuPDF and `ANTHROPIC_API_KEY` on the worker. Without them a scanned PDF yields little or no text. Uploads are still limited to PDF, DOCX, TXT, CSV, MD and JSON.
 
-## Pagination cursors
+## Conflict list cursor
 
-Replaced hardcoded `.limit(N)` on persona items (was 500), cognify jobs (was 20/10), and conflicts (new). All list endpoints now accept `?cursor=<id>&limit=<N>` and return `next_cursor` for stable forward iteration.
-
-## Load test baseline
-
-Three new k6 scenarios in [`scripts/load/baseline.js`](../../scripts/load/baseline.js):
-- `kb_ingest` — 1000 small docs uploaded in parallel, p99 ingest-to-queryable
-- `vector_search` — 10k queries against 1M chunks, p99 < 200ms target
-- `cognify_throughput` — 1000 docs through cognify, docs/minute
-
-A customer can validate the platform handles their workload before signing.
+`GET /api/knowledge/cognify-conflicts` takes `status` (default `open`), `limit` (default 50, at most 200) and `cursor`, and returns `items` plus `next_cursor`. Pass `next_cursor` back as `cursor` for the next page. Other list endpoints in this stack keep fixed limits. The cognify job list returns the latest 20.
 
 ## Migration
 
-Single migration `b8c9d0e1f2g3_v2_knowledge_atlas_persona.py`:
+One migration, `b8c9d0e1f2g3_v2_knowledge_atlas_persona.py`, adds:
 - documents: parent_document_id, version_number, is_current, superseded_by, cognified_at, last_cognify_job_id, extraction_method, extraction_quality
 - atlas_nodes/edges: valid_from, valid_to, recorded_at, source_anchors
 - persona_items: deleted_at, deleted_by, encrypted, key_version
 - agent_memories: deleted_at, deleted_by
 - new tables: document_grants, cognify_configs, cognify_conflicts, gdpr_purge_log
 
-Backwards-compatible: every new column nullable or server-defaulted. No data movement, and the migration is idempotent.
+Every new column is nullable or has a server default, so existing rows need no data move.
 
 ## Source map
 

@@ -28,11 +28,12 @@ A chart value wins over the code default.
 | `NATS_PASSWORD` | none | api, agent-runtime, code runner gateway, NATS pod | Chart generates a 32 character value on first install and keeps it on upgrade. `secrets.natsPassword` overrides it |
 | `NATS_SYS_PASSWORD` | none | NATS pod config only | Generated and kept the same way. `secrets.natsSysPassword` overrides it |
 | `LOG_LEVEL` | `INFO` | api, agent-runtime, code runner | Chart from `logLevel`, default `info` |
-| `DEBUG` | `false` | api | `true` allows the default `SECRET_KEY`, mints throwaway JWT keys in process, logs as console text instead of JSON, and allows dev edge keys when `ENVIRONMENT` is unset. Chart sets `false` only when `environment` is `production` |
+| `DEBUG` | `false` | api | `true` allows the default `SECRET_KEY`, mints throwaway JWT keys in process, logs as console text instead of JSON, and allows dev edge keys when `ENVIRONMENT` is unset. Chart sets `false` when `environment` is `production`, `true` otherwise |
 | `ENVIRONMENT` | empty | api, agent-runtime tracing | `local`, `dev` or `development` raises the rate limits. `dev`, `development`, `local`, `test` or `testing` lets the API mint a dev edge signing key. Also the Sentry environment and the trace `deployment.environment`. Chart from `environment`, default `production` |
 | `PGSSLMODE` | unset | api | `disable` turns asyncpg SSL off. Anything else tries SSL without verifying the certificate. Chart sets `disable` |
 | `DB_IDLE_TXN_TIMEOUT_MS` | `300000` | api, agent-runtime consumer, decision and source engines | Postgres `idle_in_transaction_session_timeout` for each connection |
-| `ABENIX_DATA_KEY_KEK_BASE64` | none | api, agent-runtime | 32 bytes, base64. Encrypts tool credentials saved from Admin -> Tool Configuration, tenant Slack webhooks, approval webhook secrets and MCP connection secrets with AES-256-GCM. Unset means those values are stored as entered, with no log line. A value that is not 32 bytes logs `invalid ABENIX_DATA_KEY_KEK_BASE64` and also stores plaintext. Chart from `secrets.dataKeyKekBase64`. Setup: [06-encryption-setup](../08-howto/06-encryption-setup.md) |
+| `ABENIX_DATA_KEY_KEK_BASE64` | none | api, agent-runtime | 32 bytes, base64. Encrypts tool credentials saved from Admin -> Tool Configuration, tenant Slack webhooks, approval webhook secrets and MCP connection secrets with AES-256-GCM. Unset means those values are stored as entered. The API logs a warning at startup, the Tool Configuration and Connectors pages show a banner, and with `ENVIRONMENT=production` the API refuses to start unless `ABENIX_ALLOW_PLAINTEXT_SECRETS=true`. A value that is not 32 bytes logs `invalid ABENIX_DATA_KEY_KEK_BASE64` and also stores plaintext. Chart from `secrets.dataKeyKekBase64`. Setup: [06-encryption-setup](../08-howto/06-encryption-setup.md) |
+| `ABENIX_ALLOW_PLAINTEXT_SECRETS` | `false` | api | `true` lets the API start with `ENVIRONMENT=production` and no valid KEK. Secrets are then stored as entered and the warning stays |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | none | api, agent-runtime | OTLP gRPC endpoint. Unset means no trace export. The runtime pool Deployments set `http://<release>-tempo.<ns>.svc.cluster.local:4317` |
 | `OTEL_TEMPO_ENDPOINT` | none | api, agent-runtime | Fallback for the endpoint above |
 | `OTEL_SERVICE_NAME` | `abenix-api` or `agent-runtime-<pool>` | api, agent-runtime | Trace `service.name` |
@@ -60,7 +61,7 @@ also from a `.env` at the repo root when one exists.
 |---|---|---|
 | `APP_NAME` | `Abenix API` | |
 | `SECRET_KEY` | `change-me-in-production` | The API refuses to start with the default unless `DEBUG=true`. The agent-runtime also signs HS* tokens with it. Chart from `secrets.jwtSecret` |
-| `JWT_PRIVATE_KEY` / `JWT_PUBLIC_KEY` | empty | RSA PEM pair for access tokens. Required unless `DEBUG=true`. `deploy-azure.sh` generates a pair into `abenix-secrets` when missing |
+| `JWT_PRIVATE_KEY` / `JWT_PUBLIC_KEY` | empty | RSA PEM pair for access tokens, also used by the agent runtime for sub-agent calls and fetch tokens. Required unless `DEBUG=true`. See [06-signing-keys](06-signing-keys.md). `deploy.sh local` and `deploy-azure.sh` generate a pair into `abenix-secrets` when missing |
 | `JWT_ALGORITHM` | `RS256` | Also read by the agent-runtime when it mints short-lived tokens |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | `15` | |
 | `REFRESH_TOKEN_EXPIRE_DAYS` | `7` | |
@@ -69,8 +70,9 @@ also from a `.env` at the repo root when one exists.
 | `OTEL_ENABLED` / `OTEL_EXPORTER` / `OTEL_ENDPOINT` | `false` / `stdout` / `http://localhost:4317` | FastAPI auto-instrumentation in `app/core/telemetry.py` |
 | `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `GOOGLE_API_KEY` | empty | A warning logs when all three are empty |
 | `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` / `STRIPE_CONNECT_CLIENT_ID` | empty | Billing |
-| `MARKETPLACE_ENABLED` | `true` | Default for the marketplace switch. An admin value on Admin, Marketplace & Billing wins. Chart from `features.marketplace` |
-| `MONETIZATION_ENABLED` | `false` | Default for the monetization switch. An admin value wins. Chart from `features.monetization` |
+| `MARKETPLACE_ENABLED` | `true` | Default for the marketplace switch. A platform operator's value on Admin, Marketplace & Billing wins. Chart from `features.marketplace` |
+| `ABENIX_PLATFORM_OPERATORS` | empty | Comma separated admin emails allowed to change the marketplace and monetization switches. Empty means the admins of the platform tenant, the one holding `system@abenix.dev` |
+| `MONETIZATION_ENABLED` | `false` | Default for the monetization switch. A platform operator's value wins. Chart from `features.monetization` |
 | `STRIPE_PRO_PRICE_ID` / `STRIPE_BUSINESS_PRICE_ID` | empty | Stripe price ids for the Pro and Business plans, read in `app/core/stripe.py` |
 | `SCALING_EXEC_REMOTE` | `false` | `true` queues executions whose agent pool is not `inline` instead of running them in the API. Chart from `scaling.execRemote` |
 | `QUEUE_BACKEND` | `celery` | See above |
@@ -112,11 +114,15 @@ Request bodies are capped at 10 MB and uploads at 50 MB in
 |---|---|---|
 | `GOOGLE_OIDC_CLIENT_ID` / `GOOGLE_OIDC_CLIENT_SECRET` | none | Google sign-in. Both needed |
 | `GITHUB_OAUTH_CLIENT_ID` / `GITHUB_OAUTH_CLIENT_SECRET` | none | GitHub sign-in |
-| `MICROSOFT_OIDC_CLIENT_ID` / `MICROSOFT_OIDC_CLIENT_SECRET` / `MICROSOFT_OIDC_TENANT` | none | Microsoft sign-in |
+| `MICROSOFT_OIDC_CLIENT_ID` / `MICROSOFT_OIDC_CLIENT_SECRET` | none | Microsoft sign-in. Both needed |
+| `MICROSOFT_OIDC_TENANT` | `common` | Entra tenant id or domain. `common` lets any Microsoft account sign in |
 | `PUBLIC_API_BASE_URL` | `http://localhost:8000` | Base of the OIDC callback URL |
-| `WEB_BASE_URL` | `http://localhost:3000` | Where the browser lands after sign-in. Also used for invite links |
+| `WEB_BASE_URL` | `http://localhost:3000` | Where the browser lands after sign-in. Also used for invite links. Falls back to `FRONTEND_URL` |
+
+On Kubernetes the provider ids, secrets and tenant come from `secrets.sso.*` in the Helm values (`googleClientId`, `googleClientSecret`, `githubClientId`, `githubClientSecret`, `microsoftClientId`, `microsoftClientSecret`, `microsoftTenant`). `deploy.sh` and `deploy-azure.sh` set them from the variables above when they are in the environment. `PUBLIC_API_BASE_URL` comes from `publicApiUrl` and `FRONTEND_URL` from `frontendUrl`.
 | `JWT_SECRET_KEY` | `dev-secret-do-not-use-in-prod` | Signs the OIDC `state` parameter. Set it in production |
 
+A provider with only one of its two values set is left off the sign-in page and its start URL answers 503.
 Details in [05-sso](05-sso.md).
 
 ### Storage and files
@@ -137,6 +143,7 @@ Details in [05-sso](05-sso.md).
 | `ML_MODELS_DIR` | `/tmp/ml-models` | Chart `/data/ml-models` |
 | `ML_MODEL_MAX_K8S_PER_TENANT` | `10` | Concurrent on-cluster model deployments per tenant |
 | `ML_MODEL_SERVING_IMAGE` | `localhost:5000/abenix/model-serving:latest` | Image for model-serving pods. Chart from `mlModels.servingImage` |
+| `TRAJECTORY_DIR` / `WINGMAN_TRAJECTORY_DIR` | `/data/trajectories` / `/data/wingman-trajectories` | Folders the GDPR purge clears of a subject's trajectories |
 | `ARCHIVE_ROOT` | `/data/archives` | Legacy archive layout, still read for old downloads |
 | `ARCHIVE_LOCAL_ROOT` | parent of `ARCHIVE_ROOT` | Local object root for archive dumps |
 | `ARCHIVE_MAX_ROWS_PER_RUN` | `200000` | Rows one archive run moves |
@@ -167,10 +174,13 @@ Tenants can override the three `SANDBOXED_JOB_*` switches from
 | `ALERT_WEBHOOK_TOKEN` | empty | Bearer token Alertmanager presents on `POST /api/admin/alerts/webhook`. Unset means the webhook answers 503. Chart generates one and keeps it |
 | `PLATFORM_ALERT_DEDUPE_MINUTES` | `30` | Same fingerprint is not re-notified inside this window. Chart from `alerting.dedupeMinutes` |
 | `ABENIX_SLACK_WEBHOOK_URL` | empty | Operator Slack channel for platform alerts, in addition to per-tenant hooks |
-| `SMTP_HOST` | empty | Outbound email for notifications. Empty disables email |
-| `SMTP_PORT` | `587` | STARTTLS |
-| `SMTP_USER` / `SMTP_PASS` | none | |
+| `SMTP_HOST` | empty | Outbound email for notifications, password resets and invites. Empty disables email. Helm `smtp.host` |
+| `SMTP_PORT` | `587` | 465 means implicit TLS |
+| `SMTP_STARTTLS` | `auto` | `auto` uses STARTTLS when offered, `true` requires it, `false` never tries |
+| `SMTP_USER` / `SMTP_PASS` | none | Helm `secrets.smtpUser` / `secrets.smtpPassword` |
 | `SMTP_FROM` | `no-reply@abenix.dev` | |
+| `OIDC_INTERNAL_URL_MAP` | empty | Dev only, `public=internal` pairs so a localhost SSO issuer is reached by service name. Set by `devCatchers.enabled` |
+| `PUBLIC_API_BASE_URL` | `http://localhost:8000` | Where SSO providers send the browser back. Helm `publicApiUrl` |
 | `STALE_EXECUTION_MAX_MINUTES` | `10` | A run still `running` after this long is marked failed by the sweeper, which runs every 5 minutes. Runs with a live queue lease are skipped |
 | `DRIFT_DETECTION_ENABLED` | `true` | Platform default for drift scoring. An agent's `model_config.drift_detection` and the tenant toggle win |
 | `DRIFT_SCAN_INTERVAL_SECONDS` | `300` | Floor 30 |
@@ -178,8 +188,9 @@ Tenants can override the three `SANDBOXED_JOB_*` switches from
 | `DRIFT_RECORDED_TTL_SECONDS` | `86400` | How long an execution stays marked as scored |
 
 The chart also writes `PLATFORM_ALERTS_ENABLED`, `DATABASE_HOST`,
-`DATABASE_PORT` and `DATABASE_NAME` into `abenix-config`. No platform code reads
-them.
+`DATABASE_PORT` and `DATABASE_NAME` into `abenix-config`, and
+`EDGE_SIGNING_PUBKEY_PEM` and `CONTRACTIQ_JWT_SECRET` into `abenix-secrets`.
+No platform code reads them. ContractIQ reads its own copy of the JWT secret.
 
 ### MCP servers
 
@@ -278,8 +289,8 @@ Read by the agent-runtime engine, which also runs inside the API.
 | `DECISION_CACHE_SIZE` | `512` | Compiled decisions kept in memory, least recently used dropped first |
 | `DECISION_RESOLVE_TTL` | `30` | Seconds a resolved decision version is reused. A publish clears it sooner through the `abenix:decisions:changed` Redis channel |
 
-Governance, approval escalation and tool configuration read no variables of
-their own. They use the database, Redis and the settings tables.
+Governance, approval escalation, tool configuration, earned autonomy, the
+inbox and lessons read no variables of their own. They use the database, Redis and the settings tables.
 
 ### Meetings and persona
 
@@ -314,9 +325,9 @@ Also read by the API in embedded mode, since it imports the same engine.
 | `RUNTIME_MODE` | `embedded` | `embedded` runs agents in the API process, `remote` hands them to the runtime. Chart from `runtimeMode`. The pool Deployments set `remote` |
 | `RUNTIME_URL` | `http://abenix-agent-runtime:8001` | Runtime the API calls in remote mode. Chart sets it from the release name |
 | `RUNTIME_TIMEOUT` | `300` | Seconds the API waits on a remote run |
-| `RUNTIME_POOL` | `default` | Pool a consumer drains. Set per pool Deployment |
+| `RUNTIME_POOL` | `default` | Pool a consumer drains. Set per pool Deployment. Pools, their replica bounds and KEDA scaling come from `scaling.*` in the Helm values, not from variables. See [08-queue-scaling](../02-runtime/08-queue-scaling.md) |
 | `AGENT_CONCURRENCY` | `8` | Runs one consumer handles at once. Pool Deployments set it from `concurrency_per_replica`, default 3. `CONSUMER_MAX_CONCURRENCY` is the older name |
-| `HEALTH_PORT` | `8001` | Consumer health and `/metrics` port |
+| `HEALTH_PORT` | `8001` | Consumer health and `/metrics` port. `dev-local.sh` runs its consumer on `CONSUMER_HEALTH_PORT`, default 8020, clear of the app ports 8000 to 8008 |
 | `CONSUMER_LEASE_SECONDS` | `25` | Length of a run's lease on its execution row. Renewed every third of that while the run lives. Floor 6 |
 | `CONSUMER_MAX_ATTEMPTS` | `3` | Pickups of one run before it is failed with `STALE_SWEEP` instead of rerun |
 | `CONSUMER_DB_POOL_SIZE` / `CONSUMER_DB_MAX_OVERFLOW` | `10` / `5` | Consumer database engine |
@@ -363,7 +374,7 @@ Also read by the API in embedded mode, since it imports the same engine.
 | `KAFKA_BOOTSTRAP_SERVERS` | empty | `event_stream` answers "not configured" without it |
 | `TENANT_ID` | `default` | Fallback tenant for `subscribed_feed` and `windowed_state` |
 | `POSTGRES_HOST` / `POSTGRES_PORT` / `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | `localhost` / `5432` / `abenix` / `abenix` / `abenix` | `schema_portfolio_tool` when it has no database URL |
-| `INTERNAL_API_URL` | `API_BASE_URL`, then `ABENIX_API_URL`, then `http://localhost:8000` | API base for `approval_gate` |
+| `INTERNAL_API_URL` | `ABENIX_INTERNAL_URL`, then `API_BASE_URL`, then `ABENIX_API_URL`, then `http://$ABENIX_API_SERVICE_HOST:$ABENIX_API_SERVICE_PORT`, then `http://localhost:8000` | API base for `approval_gate`. Chart sets `http://<release>-api:8000`. Kubernetes injects the two service variables when the release is named `abenix` |
 | `INTERNAL_API_TOKEN` | empty | Bearer for `approval_gate` and `invoke_agent` |
 | `ABENIX_API_URL` / `ABENIX_INTERNAL_URL` | `http://abenix-api:8000` | API base for `invoke_agent` and `ml_model` |
 | `ABENIX_INTERNAL_API_KEY` / `PLATFORM_API_KEY` | empty | Further fallbacks for the `invoke_agent` key, after `ABENIX_PLATFORM_API_KEY` and `INTERNAL_API_TOKEN` |
@@ -376,7 +387,7 @@ Also read by the API in embedded mode, since it imports the same engine.
 | `OPENAI_API_KEY` | GPT models, OpenAI embeddings, moderation | |
 | `GOOGLE_API_KEY` | Gemini models | `GEMINI_API_KEY` is accepted too |
 | `AZURE_OPENAI_API_KEY` / `AZURE_OPENAI_API_BASE` / `AZURE_OPENAI_API_VERSION` | Azure OpenAI models and embeddings | Version default `2024-10-01-preview` |
-| `CLAUDE_SUBSCRIPTION_TOKEN` | A Claude Pro or Max subscription instead of per-call API billing | `ANTHROPIC_AUTH_TOKEN` is accepted too. Mint with `claude setup-token`, or let `scripts/sync-claude-subscription.sh` copy the one Claude Code already holds. A value stored in Admin -> LLM Settings takes precedence over this variable. The token rotates, see [02-runtime/00-agent-execution](../02-runtime/00-agent-execution.md#claude-subscription-mode). |
+| `CLAUDE_SUBSCRIPTION_TOKEN` | A Claude Pro or Max subscription instead of per-call API billing | `ANTHROPIC_AUTH_TOKEN` is accepted too. Mint with `claude setup-token`, or let `scripts/sync-claude-subscription.sh` copy the one Claude Code already holds. A value stored in Admin -> Model Selection takes precedence over this variable. Placeholders such as `dev` or `changeme` are ignored. The token rotates, see [02-runtime/00-agent-execution](../02-runtime/00-agent-execution.md#claude-subscription-mode). |
 | `COHERE_API_KEY` | Cohere reranking | |
 | `RERANKER_PROVIDER` | | `cohere`, `llm` or `none`. Unset picks Cohere when its key exists, else no reranking. The Haiku scorer runs only with `llm` |
 
@@ -475,6 +486,8 @@ A tool listed under *Required by* returns a standard "not configured" answer wit
 | `ZOOM_SDK_KEY` | Zoom | `meeting_join` | nobody, optional |
 | `ZOOM_SDK_SECRET` | Zoom | `meeting_join` | nobody, optional |
 
+`pep_screening` also reads `CONGRESS_GOV_API_KEY` for its US Congress roster. It is not declared, so the admin screen does not list it and the environment is the only way to set it.
+
 `ABENIX_DATA_KEY_KEK_BASE64` encrypts values saved from the admin screen. The chart sets it from `secrets.dataKeyKekBase64`.
 
 The older `GET /api/integrations/status` probe also checks `SENTRY_DSN`,
@@ -544,6 +557,7 @@ pods it creates, so you only touch them when running the image by hand.
 | `CODERUN_MAX_FILE_MB` | `256` | exec | Largest file a run may write |
 | `CODERUN_PATH` | the image `PATH` | exec | |
 | `CODERUN_FETCH_URL` / `CODERUN_BUILD_CMD` / `CODERUN_BUILD_ROOT` / `CODERUN_BUILD_TIMEOUT` / `CODERUN_MAX_ZIP_MB` | none / `true` / `/tmp` / `900` / `200` | init | Archive fetch and build step |
+| `CODERUN_FETCH_TOKEN` | none | init | Bearer for the archive fetch, from the `<runner>-fetch` Secret. Removed from the environment once read |
 
 ---
 
@@ -559,6 +573,7 @@ pods it creates, so you only touch them when running the image by hand.
 | `CELERY_VISIBILITY_TIMEOUT` | `21600` | Redis broker visibility timeout in seconds |
 | `CELERY_RESULT_EXPIRES` | `86400` | |
 | `CELERY_TASK_SOFT_TIME_LIMIT` / `CELERY_TASK_TIME_LIMIT` | `1500` / `1800` | |
+| `KB_REEMBED_SOFT_LIMIT` / `KB_REEMBED_TIME_LIMIT` | `20700` / `21600` | Time limits in seconds for the knowledge base re-embed task |
 
 `docker/Dockerfile.worker`, the image the cluster runs, starts Celery with
 `--concurrency=2 -Q documents,cognify,agents` written into its `CMD`. The CI
@@ -638,7 +653,8 @@ Read by `apps/edge-runtime/runtime.py`, `apps/edge-runtime-rust` and
 | `PORT` | `8080` | |
 
 On the API side, `EDGE_SIGNING_KEY_PEM`, `EDGE_SIGNING_KEY_PATH`,
-`EDGE_SIGNING_KEY_DIR` and `EDGE_ALLOW_UNSIGNED` control bundle signing. See
+`EDGE_SIGNING_KEY_DIR` and `EDGE_ALLOW_UNSIGNED` control bundle signing. The
+chart sets `EDGE_ALLOW_UNSIGNED` from `edge.allowUnsigned`, default `false`. See
 [06-deployment/05-edge-runtime](../06-deployment/05-edge-runtime.md).
 
 ---

@@ -2,9 +2,11 @@
 
 Sources: [`packages/db/models/governance.py`](../../packages/db/models/governance.py), [`approval.py`](../../packages/db/models/approval.py), [`activity_log.py`](../../packages/db/models/activity_log.py), [`decision.py`](../../packages/db/models/decision.py)
 
-Migrations: [`c1d2e3f4a5b6_governance_core`](../../packages/db/alembic/versions/c1d2e3f4a5b6_governance_core.py), [`30c306d107f4_decision_service`](../../packages/db/alembic/versions/30c306d107f4_decision_service.py), [`20a44346bdda_approval_returns_escalation`](../../packages/db/alembic/versions/20a44346bdda_approval_returns_escalation.py)
+Migrations: [`c1d2e3f4a5b6_governance_core`](../../packages/db/alembic/versions/c1d2e3f4a5b6_governance_core.py), [`z6a7b8c9d0e1_approvals_idempotency_and_kind`](../../packages/db/alembic/versions/z6a7b8c9d0e1_approvals_idempotency_and_kind.py), [`30c306d107f4_decision_service`](../../packages/db/alembic/versions/30c306d107f4_decision_service.py), [`20a44346bdda_approval_returns_escalation`](../../packages/db/alembic/versions/20a44346bdda_approval_returns_escalation.py)
 
-The behaviour behind these tables is in [01-architecture/07-governance](../01-architecture/07-governance.md) and [08-howto/09-decisions](../08-howto/09-decisions.md). This page is the schema.
+The behaviour behind these tables is in [01-architecture/07-governance](../01-architecture/07-governance.md), [02-runtime/20-decision-service](../02-runtime/20-decision-service.md) and [08-howto/09-decisions](../08-howto/09-decisions.md). This page is the schema.
+
+`governance.py` also defines `execution_config_snapshots`, covered in [02-executions](02-executions.md), and `event_outbox`, covered in [06-evals-sources-events](06-evals-sources-events.md#event_outbox).
 
 ```mermaid
 erDiagram
@@ -42,13 +44,16 @@ erDiagram
 
 | Column | Notes |
 |---|---|
+| `id` / `tenant_id` | |
 | `permission_set_id` | `ON DELETE CASCADE`. |
 | `user_id` | `ON DELETE CASCADE`. |
-| `created_by` / `created_at` | Who granted it and when. |
+| `created_by` / `created_at` | Who granted it and when. `created_by` is `ON DELETE SET NULL`. |
 
-Unique on `(permission_set_id, user_id)`. Index `ix_permission_assignment_user` on `(tenant_id, user_id)`.
+Unique on `(permission_set_id, user_id)` (`uq_permission_assignment`). Index `ix_permission_assignment_user` on `(tenant_id, user_id)`.
 
-A user's effective capabilities are the role defaults in `ROLE_DEFAULTS` ([`app/core/capabilities.py`](../../apps/api/app/core/capabilities.py)) plus every key from every set assigned to them. The catalogue is `decisions.view`, `decisions.evaluate`, `decisions.author`, `decisions.review`, `decisions.publish`, `approvals.sign`, `risk.view`, `risk.manage`, `killswitch.manage`, `audit.verify`, `sources.manage`, `evals.manage`, `evals.run`, `events.manage`, `permissions.manage`, `runs.replay`. A suffix such as `approvals.sign:legal` narrows `approvals.sign` to gates that ask for that group.
+A user's effective capabilities are the role defaults in `ROLE_DEFAULTS` ([`app/core/capabilities.py`](../../apps/api/app/core/capabilities.py)) plus every key from every set assigned to them, cached per user for 10 seconds. Roles are `admin`, `creator` and `user` (`UserRole` in [`user.py`](../../packages/db/models/user.py)). `admin` gets `*`, which holds every capability.
+
+The catalogue (`CATALOG`) is `decisions.view`, `decisions.evaluate`, `decisions.author`, `decisions.review`, `decisions.publish`, `approvals.sign`, `risk.view`, `risk.manage`, `killswitch.manage`, `audit.view`, `audit.verify`, `sources.manage`, `evals.manage`, `evals.run`, `events.manage`, `permissions.manage`, `autonomy.view`, `autonomy.manage`, `autonomy.grant`, `actions.review`, `moderation.review`, `improvements.view`, `improvements.propose`, `improvements.approve`, `feedback.give`, `runs.replay`. A suffix such as `approvals.sign:legal` narrows `approvals.sign` to gates that ask for that group. A set may also hold a group wildcard such as `decisions.*`.
 
 ---
 
@@ -60,7 +65,7 @@ A user's effective capabilities are the role defaults in `ROLE_DEFAULTS` ([`app/
 |---|---|---|
 | `tier` | varchar(16) | `low`, `medium`, `high` or `critical`. Unique per tenant (`uq_risk_policy_tier`). |
 | `policy` | jsonb | Overrides merged over the default for that tier. |
-| `updated_by` / `updated_at` | | |
+| `updated_by` / `updated_at` | uuid / timestamptz | `updated_by` is `ON DELETE SET NULL`. |
 
 No row means the tenant uses the defaults in [`engine/risk.py`](../../apps/agent-runtime/engine/risk.py). The policy keys:
 
@@ -86,13 +91,13 @@ No row means the tenant uses the defaults in [`engine/risk.py`](../../apps/agent
 | Column | Type | Notes |
 |---|---|---|
 | `tenant_id` | uuid | Nullable. NULL stops the thing for every tenant. `ON DELETE CASCADE`. |
-| `scope` | varchar(32) | `all`, `agent`, `pipeline`, `tool`, `model`, `trigger`, `decision`, `source`. |
-| `target` | varchar(255) | An id, slug or name within the scope, or `*` for the whole scope. Always `*` when scope is `all`. |
-| `active` | bool | Cleared switches stay as rows with `active = false`. |
+| `scope` | varchar(32) | `all`, `agent`, `pipeline`, `tool`, `model`, `trigger`, `decision`, `source`, `improvements`. |
+| `target` | varchar(255) | An id, slug or name within the scope, or `*` for the whole scope. Always `*` when scope is `all` or `improvements`. |
+| `active` | bool | Default true. Cleared switches stay as rows with `active = false`. |
 | `reason` | text | Shown to whoever hits the switch. |
 | `set_by` / `set_at` / `cleared_by` / `cleared_at` | | Who stopped it and who resumed it. |
 
-Index `ix_kill_switch_lookup` on `(tenant_id, scope, target, active)`. The runtime checks `(all, *)`, then `(scope, *)`, then `(scope, target)` against an in-memory snapshot refreshed every 5 seconds ([`engine/governance.py`](../../apps/agent-runtime/engine/governance.py)). Setting and clearing a switch emit `kill_switch.set` and `kill_switch.cleared`.
+Index `ix_kill_switch_lookup` on `(tenant_id, scope, target, active)`. The runtime checks `(all, *)`, then `(scope, *)`, then `(scope, target)`, first for the tenant and then for platform switches with no tenant. It reads an in-memory snapshot refreshed every 5 seconds ([`engine/governance.py`](../../apps/agent-runtime/engine/governance.py)). Setting and clearing a switch emit `kill_switch.set` and `kill_switch.cleared`.
 
 ---
 
@@ -106,16 +111,16 @@ Index `ix_kill_switch_lookup` on `(tenant_id, scope, target, active)`. The runti
 | `prev_hash` | varchar(64) | `row_hash` of the previous row in the same tenant's chain. |
 | `row_hash` | varchar(64) | SHA-256 of `prev_hash | canonical JSON` of id, tenant, `pii_digest`, action, details, created_at, `audit_seq`. NULL until chained. |
 | `chain_pos` | bigint | Position in the tenant's chain, starting at 1. |
-| `pii_salt` | varchar(32) | Random salt per row. |
+| `pii_salt` | varchar(32) | Random salt per row, set by the chainer. |
 | `pii_digest` | varchar(64) | SHA-256 of `salt | user_id | ip | user_agent`. |
 
 How it works:
 
 - Inserts never compute hashes. The chainer ([`app/services/audit_chain.py`](../../apps/api/app/services/audit_chain.py)) runs on a schedule under advisory lock `0x41554449`, picks rows older than 15 seconds with `row_hash IS NULL` in `audit_seq` order, and links them per tenant. Partial index `ix_activity_logs_unchained` keeps that cheap.
-- The `activity_logs_immutable` trigger refuses every DELETE and every UPDATE, except the one update that fills the hash columns on an unchained row without touching anything else. Setting `abenix.audit_maintenance = 'on'` for the transaction lifts the guard. Archiving and GDPR erasure use it.
+- The `activity_logs_immutable` trigger refuses every DELETE and every UPDATE, except the one update that fills the hash columns on an unchained row without changing any base column. Setting `abenix.audit_maintenance = 'on'` for the transaction lifts the guard. Archiving and GDPR erasure use it.
 - The hash covers `pii_digest`, not the raw actor fields. GDPR erasure sets `user_id` to the nil UUID and clears `ip_address`, `user_agent` and `pii_salt`, and the chain still verifies.
 - Archiving removes only a contiguous chained prefix and writes an `audit.pruned` row recording the last hash and position, so verification starts after it.
-- Indexes `ix_activity_logs_tenant_seq` and `ix_activity_logs_tenant_chain` serve verification. `GET /api/governance/audit/verify` needs `audit.verify`, and a nightly scheduler job checks every tenant.
+- Indexes `ix_activity_logs_tenant_seq` and `ix_activity_logs_tenant_chain` serve verification. `GET /api/governance/audit/verify` needs `audit.verify`, and the `verify_audit_chain` scheduler job checks every tenant nightly.
 
 ---
 
@@ -125,17 +130,17 @@ How it works:
 
 | Column | Type | Notes |
 |---|---|---|
-| `agent_id` / `agent_execution_id` | uuid | The agent and the paused run, when there is one. A decision publish gate has neither. |
+| `agent_id` / `agent_execution_id` | uuid | Nullable, indexed foreign keys to `agents` and `executions`. The agent and the paused run, when there is one. A decision publish gate has neither. |
 | `title` / `payload` | text / jsonb | What is being approved. Decision gates put `kind`, `decision_key`, `version`, `risk_tier` and a link in `payload`. |
-| `required_signoffs` | int | Raised to the tier's `min_approvers` when the run or request carries a tier above low. |
+| `required_signoffs` | int | Default 1. Raised to the tier's `min_approvers` when the run or request carries a tier above low. |
 | `signoffs` | jsonb | List of `{user_id, user_email, decision, reason, at, self_approved, client_token?}`. `decision` is `approve`, `deny` or `return`. |
-| `status` | enum `approval_status` | `pending`, `approved`, `denied`, `expired`, `returned`. `returned` added by `20a44346bdda`. |
+| `status` | enum `approval_status` | `pending`, `approved`, `denied`, `expired`, `returned`. Indexed. `returned` added by `20a44346bdda`. |
 | `requested_by` / `expires_at` / `decided_at` | | |
-| `client_token` / `gate_kind` | varchar(120) | Idempotency token and gate type, added by `z6a7b8c9d0e1`. `gate_kind` is indexed. |
+| `client_token` / `gate_kind` | varchar(120) | Idempotency token and gate type, added by `z6a7b8c9d0e1`. Partial unique index `uq_approvals_tenant_client_token` on `(tenant_id, client_token)` where not NULL. Index `ix_approvals_tenant_kind` on `(tenant_id, gate_kind)`. |
 | `policy` | jsonb | Separation of duties, added by `30c306d107f4`. `{exclude_requester, capability, risk_tier, escalate_after_hours}`. |
 | `escalated_at` | timestamptz | Added by `20a44346bdda`. Set once when admins are notified about an overdue tiered approval. |
 
-Status is recomputed from `signoffs` on every sign-off. Any `deny` wins, then any `return`, then enough `approve` rows, then expiry. A return sends a decision version back to `draft` with the reviewer's note in `decision_versions.validation.returned`. Escalation runs from the scheduler: a pending row with a `policy`, no `escalated_at`, and `created_at + escalate_after_hours` in the past gets one notification per active tenant admin.
+Status is recomputed from `signoffs` on every sign-off. Any `deny` wins, then any `return`, then enough `approve` rows, then expiry. A return needs a reason. It sends a decision version back to `draft` with the reviewer's note in `decision_versions.validation.returned`. Escalation runs from the `escalate_approvals` scheduler job. A pending row with a `policy`, no `escalated_at`, and `created_at + escalate_after_hours` in the past gets one notification per active tenant admin.
 
 ---
 
@@ -177,7 +182,13 @@ Immutable once proposed. A correction is a new version.
 | `lock_version` | int | Optimistic lock for draft saves, sent as an ETag. |
 | `author_id` / `editing_by` / `proposed_by` / `proposed_at` / `published_by` | | `editing_by` is presence for the draft editor. |
 
-Lifecycle. `POST /api/decisions/{key}/check` validates a draft document without saving. `.../versions/{n}/propose` validates the version, moves it to `proposed` and opens a `decision_publish` approval when the tier needs approvers, or goes straight to `approved` when it needs none. `.../versions/{n}/publish` requires `approved`, marks overlapping live versions `superseded` or closes their `valid_to` (with a `valid_to_history` entry), then sets `published`. `.../retire` ends a published version.
+Lifecycle, under `/api/decisions/{key}`:
+
+- `POST .../check` validates a draft document without saving.
+- `POST .../versions/{n}/propose` needs a `draft`. It validates the version, moves it to `proposed` and opens a `decision_publish` approval when the tier needs approvers, or goes straight to `approved` when it needs none.
+- `POST .../versions/{n}/withdraw` moves a `proposed`, `approved` or `rejected` version back to `draft`.
+- `POST .../versions/{n}/publish` requires `approved`. It marks overlapping live versions `superseded` or closes their `valid_to` (with a `valid_to_history` entry), then sets `published`.
+- `POST .../versions/{n}/retire` ends a published version.
 
 Picking a version for an evaluation at `as_of`, as known at `known_at`: published on or before `known_at`, not superseded by then, `valid_from <= as_of`, and `as_of` before `valid_to` as it was recorded at `known_at`. The most recently published match wins.
 
@@ -188,7 +199,7 @@ Golden cases. These facts must give this result.
 | Column | Notes |
 |---|---|
 | `model_id` | `ON DELETE CASCADE`, indexed. |
-| `name` | |
+| `name` / `created_by` | |
 | `facts` | jsonb input. |
 | `expected_outcome` | Default `decided`. Can be `no_match`, `missing_facts` or `invalid_facts`. |
 | `expected` | jsonb expected result, compared when the outcome is `decided`. |
@@ -200,10 +211,10 @@ Proposing runs every test along with regression and overlap checks. A failing te
 
 | Table | Columns | Notes |
 |---|---|---|
-| `reference_sets` | `key` (unique per tenant), `name`, `description`, `version`, `values`, `content_hash`, `updated_by` | The current list, for example product codes or country lists. |
-| `reference_set_versions` | `set_id`, `version`, `values`, `content_hash`, `created_by`, `created_at` | Every version. Unique on `(set_id, version)`. |
+| `reference_sets` | `key` (unique per tenant, `uq_reference_set_key`), `name`, `description`, `version`, `values`, `content_hash`, `updated_by` | The current list, for example product codes or country lists. |
+| `reference_set_versions` | `set_id`, `version`, `values`, `content_hash`, `created_by`, `created_at` | Every version. `set_id` is `ON DELETE CASCADE`. Unique on `(set_id, version)` (`uq_reference_set_version`). No `tenant_id` column. |
 
-A rule that uses a set gets its values compiled in. Editing the set later does not change a published decision until a new version is compiled and published.
+Reference set routes are under `/api/decision-reference-sets`. A rule that uses a set gets its values compiled in. Editing the set later does not change a published decision until a new version is compiled and published.
 
 ### `decision_evaluations`
 
@@ -213,14 +224,14 @@ Persisted, reproducible evaluations. Written when the caller passes `persist` or
 |---|---|---|
 | `id` | bigint | Identity. |
 | `public_id` | uuid | Unique. What the API returns as `evaluation_id`. |
-| `tenant_id` / `model_id` / `version_id` | uuid | No foreign keys, the row outlives an archived model. |
+| `tenant_id` / `model_id` / `version_id` | uuid | No foreign keys, the row outlives an archived model. `tenant_id` is indexed. |
 | `content_hash` | varchar(64) | The exact rules that ran. |
 | `outcome` | varchar(32) | `decided`, `no_match`, `missing_facts`, `invalid_facts`. |
 | `facts` / `result` / `applied_rules` | jsonb | Input, output and which rules fired. |
 | `trace_hash` | varchar(64) | SHA-256 of canonical JSON of facts, `content_hash`, result and applied rules. Two evaluations with the same trace hash made the same decision for the same reason. |
-| `as_of` / `known_at` | | The valid time and recorded time the version was picked for. |
+| `as_of` / `known_at` | varchar(32) / timestamptz | The valid time and recorded time the version was picked for. |
 | `idempotency_key` | varchar(200) | Partial unique index `uq_decision_eval_idem` on `(tenant_id, idempotency_key)` where not NULL. |
-| `caller` | jsonb | Who called. From an agent or pipeline it is `{execution_id, agent, user_id, tool, source}`. |
+| `caller` | jsonb | Who called. From an agent or pipeline it is `{execution_id, agent, user_id, tool, source}`, from the API `{user_id, email}`. |
 | `created_at` | timestamptz | Index `ix_decision_eval_model_time` on `(tenant_id, model_id, created_at)`. |
 
 Decision lifecycle events are `decision.proposed`, `decision.published` and `decision.retired`. See [06-evals-sources-events](06-evals-sources-events.md).
@@ -229,6 +240,6 @@ Decision lifecycle events are `decision.proposed`, `decision.published` and `dec
 
 ## See also
 
-- [02-executions](02-executions.md) — run provenance and `execution_config_snapshots`
-- [06-evals-sources-events](06-evals-sources-events.md) — the eval gate behind `require_eval_pass`
-- [01-architecture/07-governance](../01-architecture/07-governance.md) — how the controls fit together
+- [02-executions](02-executions.md), run provenance and `execution_config_snapshots`
+- [06-evals-sources-events](06-evals-sources-events.md), the eval gate behind `require_eval_pass`
+- [01-architecture/07-governance](../01-architecture/07-governance.md), how the controls fit together

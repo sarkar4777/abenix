@@ -41,7 +41,14 @@
     "mae_gwh": 0.8577076123727373,
     "rmse_gwh": 1.1124921678304736,
     "n_train": 1551,
-    "n_test": 274
+    "n_test": 274,
+    "feature_means": {
+      "front_winter_spread": 6.098592413798653,
+      "days_to_withdrawal": 135.66121180958223,
+      "inj_capacity_left": 0.5894324170396367,
+      "linepack": 0.8505083948739499,
+      "ttf_the_basis": 0.17108882131624775
+    }
   },
   "tags": [
     "contractiq",

@@ -21,6 +21,10 @@ AUTH_PATHS = frozenset(
         "/api/auth/register",
         "/api/auth/refresh",
         "/api/auth/accept-invite",
+        "/api/auth/login/2fa",
+        "/api/auth/forgot-password",
+        "/api/auth/reset-password",
+        "/api/auth/sso/discover",
     }
 )
 

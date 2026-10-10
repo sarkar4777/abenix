@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timezone
 from typing import Any, Iterable
 
 from sqlalchemy import or_, select
@@ -89,6 +90,37 @@ def sees_other_users_resources(user: User) -> bool:
     return bool(features_for(user).get("see_other_users_resources"))
 
 
+def parse_share_expiry(raw: Any) -> tuple[datetime | None, str | None]:
+    """Read an optional expires_at from a share request. Must be in the future."""
+    if raw in (None, ""):
+        return None, None
+    if isinstance(raw, datetime):
+        exp = raw
+    else:
+        try:
+            exp = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+        except ValueError:
+            return None, "expires_at must be an ISO 8601 date-time"
+    if exp.tzinfo is None:
+        exp = exp.replace(tzinfo=timezone.utc)
+    if exp <= datetime.now(timezone.utc):
+        return None, "expires_at must be in the future"
+    return exp, None
+
+
+def share_expiry_fields(expires_at: datetime | None) -> dict[str, Any]:
+    expired = False
+    if expires_at is not None:
+        exp = (
+            expires_at if expires_at.tzinfo else expires_at.replace(tzinfo=timezone.utc)
+        )
+        expired = exp <= datetime.now(timezone.utc)
+    return {
+        "expires_at": expires_at.isoformat() if expires_at else None,
+        "expired": expired,
+    }
+
+
 async def accessible_resource_ids(
     db: AsyncSession,
     user: User,
@@ -110,6 +142,7 @@ async def accessible_resource_ids(
             ResourceShare.shared_with_user_id == user.id,
             ResourceShare.resource_type == kind,
             ResourceShare.permission.in_(allowed_perms),
+            ResourceShare.live(),
         )
     )
     return {row[0] for row in q.all()}

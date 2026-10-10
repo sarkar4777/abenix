@@ -1500,12 +1500,12 @@ export const PAGE_EXPLANATIONS: Record<string, PageExplanation> = {
       {
         title: 'Run Explain button',
         what_it_shows:
-          'Triggers a POST to /api/contractiq/workbench/explain with the model name and the current feature values. The API runs the model, computes SHAP attributions, returns prediction + per-feature contributions.',
+          'Triggers a POST to /api/contractiq/workbench/explain with the model name and the current feature values. The API calls Abenix through the SDK (ml_models.explain), which runs the model and returns the prediction plus per-feature contributions.',
         agent_slug: undefined,
-        tools_used: ['ml_model_tool'],
+        tools_used: [],
         data_quality: 'real-fetched',
         layman_note:
-          'No LLM agent is in the loop. This is a pure ML model invocation. The SHAP attribution is a model-explainability technique — not a forecast and not an LLM judgement.',
+          'No LLM agent is in the loop. This is a pure ML model invocation. The attribution is a model-explainability technique, not a forecast and not an LLM judgement.',
       },
       {
         title: 'Prediction value',
@@ -1518,11 +1518,11 @@ export const PAGE_EXPLANATIONS: Record<string, PageExplanation> = {
           'This is the model\'s output for these specific inputs. Change a feature and re-run to see how it moves.',
       },
       {
-        title: 'Feature attributions (SHAP)',
+        title: 'Feature contributions',
         what_it_shows:
-          'A bar list of every input feature with its SHAP value — the directional contribution to the prediction. Positive bars pushed the prediction up. Negative bars pushed it down. The magnitude is the size of the push.',
+          'A waterfall that starts at the model output for the baseline inputs (the training averages when the model has them) and adds one feature at a time until it reaches the prediction. Positive bars pushed the prediction up. Negative bars pushed it down. Linear models get exact coefficient times distance from baseline, the rest get Shapley values.',
         agent_slug: undefined,
-        tools_used: ['ml_model_tool'],
+        tools_used: [],
         data_quality: 'real-fetched',
         layman_note:
           'SHAP comes from cooperative game theory. It distributes the prediction among the input features so the contributions add up to the difference between the model\'s output and its baseline. It is a model-explainability tool, not a causal claim about the world.',
@@ -1539,19 +1539,19 @@ export const PAGE_EXPLANATIONS: Record<string, PageExplanation> = {
         step: 2,
         label: 'POST /api/contractiq/workbench/explain',
         detail:
-          'The browser sends the model name and the current feature values. The API loads the trained model, runs prediction, then runs the SHAP explainer.',
+          'The browser sends the model name and the current feature values. The ContractIQ API passes them to Abenix with the SDK call ml_models.explain.',
       },
       {
         step: 3,
-        label: 'Server runs model + SHAP',
+        label: 'Abenix runs the model and attributes it',
         detail:
-          'This is a synchronous numpy/scikit-learn call. No agent loop, no LLM call, no streaming. Typical response time is well under a second.',
+          'Abenix uses the model it already has loaded, scores the row and its baseline, and splits the gap between them across the features. No agent loop, no LLM call, no streaming. Typical response time is well under a second.',
       },
       {
         step: 4,
         label: 'UI renders prediction + attribution bars',
         detail:
-          'Prediction is rendered as a single number. SHAP contributions are rendered as a horizontal bar list, ordered by absolute magnitude.',
+          'Prediction is rendered as a single number. Contributions are rendered as a waterfall from the baseline value to the prediction, ordered by absolute size.',
       },
     ],
     glossary: [

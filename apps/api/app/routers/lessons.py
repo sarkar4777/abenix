@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Awaitable, Callable
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -215,3 +215,90 @@ async def set_gate(
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
     return await _run(lambda: svc.set_gate(db, user, agent_id, body.gating))
+
+
+def _lesson_retention_payload(settings: dict | None, can_edit: bool) -> dict:
+    raw = dict((settings or {}).get("improvements") or {})
+    return {
+        "retention_days": svc.retention_days(settings),
+        "default_days": svc.RETENTION_DEFAULT,
+        "min_days": svc.RETENTION_LIMITS[0],
+        "max_days": svc.RETENTION_LIMITS[1],
+        "updated_at": raw.get("retention_updated_at"),
+        "updated_by_name": raw.get("retention_updated_by_name"),
+        "can_edit": can_edit,
+    }
+
+
+@router.get("/retention")
+async def get_lesson_retention(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    from sqlalchemy import select
+
+    from models.tenant import Tenant
+    from models.user import UserRole
+
+    settings = (
+        await db.execute(select(Tenant.settings).where(Tenant.id == user.tenant_id))
+    ).scalar()
+    return success(_lesson_retention_payload(settings, user.role == UserRole.ADMIN))
+
+
+@router.put("/retention")
+async def put_lesson_retention(
+    body: dict,
+    request: Request,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    from datetime import datetime, timezone
+
+    from sqlalchemy import select
+
+    from app.core.audit import log_action
+    from models.tenant import Tenant
+    from models.user import UserRole
+
+    if user.role != UserRole.ADMIN:
+        return error("Only tenant admins can change how long lessons are kept.", 403)
+    lo, hi = svc.RETENTION_LIMITS
+    raw = (body or {}).get("retention_days")
+    try:
+        days = int(raw)
+        if isinstance(raw, bool) or float(raw) != days:
+            raise ValueError
+    except (TypeError, ValueError):
+        return error(
+            "Retention needs a whole number of days.", 422, "INVALID_RETENTION"
+        )
+    if not lo <= days <= hi:
+        return error(
+            f"Retention must be between {lo} and {hi} days.", 422, "INVALID_RETENTION"
+        )
+    tenant = (
+        await db.execute(select(Tenant).where(Tenant.id == user.tenant_id))
+    ).scalar_one()
+    settings = dict(tenant.settings or {})
+    before = svc.retention_days(settings)
+    imp = dict(settings.get("improvements") or {})
+    imp["retention_days"] = days
+    imp["retention_updated_at"] = datetime.now(timezone.utc).isoformat()
+    imp["retention_updated_by_name"] = user.full_name or user.email
+    settings["improvements"] = imp
+    tenant.settings = settings
+    await log_action(
+        db,
+        user.tenant_id,
+        user.id,
+        action="lesson_retention_updated",
+        details={"retention_days": days},
+        request=request,
+        resource_type="tenant",
+        resource_id=str(user.tenant_id),
+        old_value={"retention_days": before},
+        new_value={"retention_days": days},
+    )
+    await db.commit()
+    return success(_lesson_retention_payload(settings, True))

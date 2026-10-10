@@ -82,10 +82,16 @@ async def _hold_to_schema(
         return output, []
     from engine.post_process import post_process, schema_violations
 
-    _, warns = post_process(output, schema)
+    def _clean(normalized: Any, raw: str) -> str:
+        # the next step gets the JSON itself, not the prose and fences around it
+        if isinstance(normalized, (dict, list)):
+            return json.dumps(normalized, default=str)
+        return raw
+
+    normalized, warns = post_process(output, schema)
     bad = schema_violations(warns)
     if not bad:
-        return output, []
+        return _clean(normalized, output), []
     note = (
         "Your answer does not match the required output format:\n- "
         + "\n- ".join(bad[:15])
@@ -109,10 +115,10 @@ async def _hold_to_schema(
         fixed = getattr(resp, "content", "") or ""
     except Exception:  # noqa: BLE001
         return output, bad
-    _, warns2 = post_process(fixed, schema)
+    normalized2, warns2 = post_process(fixed, schema)
     bad2 = schema_violations(warns2)
     if fixed and len(bad2) < len(bad):
-        return fixed, bad2
+        return _clean(normalized2, fixed), bad2
     return output, bad
 
 

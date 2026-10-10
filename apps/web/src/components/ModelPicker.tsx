@@ -125,7 +125,8 @@ export function ModelPicker({
       const p = normalizeProvider(m);
       // Hide models whose provider isn't configured (unless includeUnavailable).
       const provOk = prov[p]?.configured !== false; // unknown providers default to allowed
-      if (!includeUnavailable && !provOk) continue;
+      // a subscription-served model runs even when its own provider has no key
+      if (!includeUnavailable && !provOk && !m.subscription_served) continue;
       // Capability filter (e.g. 'tools', 'vision').
       if (capabilities && capabilities.length) {
         const caps = m.capabilities || {};
@@ -261,6 +262,10 @@ export function ModelPicker({
           {loading && <option value={value || ''}>Loading models…</option>}
           {!loading && flatAvailable.length === 0 && (
             <option value="">No models match the requested capabilities</option>
+          )}
+          {/* without this the browser shows the first option, not the saved model */}
+          {!loading && value && flatAvailable.length > 0 && !flatAvailable.some((m) => m.value === value) && (
+            <option value={value}>{value} (not available)</option>
           )}
           {!loading && onlyOne && onlyProv &&
             (groups.get(onlyProv) || []).map(renderOption)}

@@ -17,6 +17,7 @@
  */
 import { test, expect, type Page, type Browser } from '@playwright/test';
 import * as fs from 'fs';
+import { revealSidebarLink, setSidebarMode, sidebarToggle } from './helpers/sidebar';
 import * as path from 'path';
 
 const BASE = process.env.BASE || 'http://localhost:3100';
@@ -48,51 +49,11 @@ async function go(page: Page, route: string) {
   await page.waitForLoadState('networkidle', { timeout: 15_000 }).catch(() => {});
 }
 
-function sidebarToggle(page: Page) {
-  return page.getByTestId('sidebar-mode-toggle').first();
-}
-
-// switch the sidebar mode with its own button and wait for the choice to be saved
-async function setSidebarMode(page: Page, mode: 'all' | 'essentials') {
-  const toggle = sidebarToggle(page);
-  await expect(toggle).toBeVisible({ timeout: 20_000 });
-  if ((await toggle.getAttribute('data-mode')) !== mode) {
-    await expect(toggle).toHaveText(mode === 'all' ? 'Show all tools' : 'Show essentials only');
-    const saved = page.waitForResponse((r) => r.url().includes('/api/me/ui-prefs') && r.request().method() === 'PUT');
-    await toggle.click();
-    expect((await saved).ok(), 'sidebar choice saved').toBe(true);
-  }
-  await expect(toggle).toHaveAttribute('data-mode', mode);
-  await expect(page.getByTestId(mode === 'all' ? 'sidebar-all' : 'sidebar-essentials').first()).toBeVisible();
-}
-
-// Essentials keeps a short list, a person opens Admin or Show all tools to reach the rest
-async function revealSidebarLink(page: Page, href: string) {
-  const link = page.locator(`aside a[href="${href}"]`).first();
-  await expect(sidebarToggle(page)).toBeVisible({ timeout: 20_000 });
-  await link.waitFor({ state: 'attached', timeout: 3_000 }).catch(() => {});
-  const admin = page.getByTestId('sidebar-admin-toggle').first();
-  if (!(await link.count()) && href.startsWith('/admin/') && (await admin.count()) && (await admin.getAttribute('aria-expanded')) === 'false') {
-    await admin.click();
-    await link.waitFor({ state: 'attached', timeout: 3_000 }).catch(() => {});
-  }
-  if (!(await link.count())) await setSidebarMode(page, 'all');
-  await expect(link, `sidebar link to ${href}`).toBeAttached({ timeout: 20_000 });
-  // its group may be folded away, open the group it sits in
-  const folded = await link.evaluate((el) => !!el.closest('[class*="max-h-0"]')).catch(() => false);
-  if (folded) {
-    const group = link.locator('xpath=ancestor::div[.//button[@aria-expanded]][1]').locator('button[aria-expanded="false"]').first();
-    if (await group.count()) await group.click();
-  }
-  return link;
-}
-
 // open a page the way a person does, from its sidebar link
 async function nav(page: Page, href: string) {
   if (!page.url().startsWith(BASE) || page.url().includes('/auth')) await go(page, '/dashboard');
-  const link = await revealSidebarLink(page, href);
-  await link.scrollIntoViewIfNeeded();
-  await link.click();
+  // click scrolls the link into view itself and retries if the sidebar re-renders under it
+  await (await revealSidebarLink(page, href)).click();
   await page.waitForURL((u) => u.pathname.startsWith(href), { timeout: 20_000 });
   await page.waitForLoadState('networkidle', { timeout: 15_000 }).catch(() => {});
 }
@@ -243,7 +204,13 @@ test('Executions: filter, search, open a run, replay it while Live Debug watches
   await expect(search).toHaveValue(needle);
   await expect(list).toHaveAttribute('aria-busy', 'false', { timeout: 20_000 });
   await expect(rows.first()).toBeVisible({ timeout: 20_000 });
-  for (const t of await rows.allInnerTexts()) expect(t.toLowerCase()).toContain(needle.slice(0, 10).toLowerCase());
+  // rows summarise the input, so check them against what the server matched rather than the raw text
+  const hits = await api(page, 'GET', `/api/executions?search=${encodeURIComponent(needle)}&limit=100`);
+  const hitIds = new Set(((hits.json?.data || []) as any[]).map((e) => String(e.id)));
+  expect(hitIds.has(String(ex.id)), 'the picked run matches its own input').toBe(true);
+  const shown = await list.locator('a[href^="/executions/"]').evaluateAll((els) => els.map((e) => (e.getAttribute('href') || '').split('/')[2]));
+  expect(shown.length).toBeGreaterThan(0);
+  for (const id of shown) expect(hitIds, `row ${id} is a search hit`).toContain(id);
 
   // a search with no hits says so and offers a way back
   await search.fill(`zz-no-such-run-${RUN}`);

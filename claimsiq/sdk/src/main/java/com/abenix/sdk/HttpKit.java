@@ -53,10 +53,51 @@ final class HttpKit {
     }
 
     JsonNode getJson(String path, Map<String, Object> params, ActingSubject subject) {
+        return getJson(path, params, subject, timeout);
+    }
+
+    JsonNode getJson(String path, Map<String, Object> params, ActingSubject subject, Duration requestTimeout) {
         String qs = encodeParams(params);
         URI uri = URI.create(baseUrl + path + (qs.isEmpty() ? "" : (path.contains("?") ? "&" : "?") + qs));
-        HttpRequest req = authed(HttpRequest.newBuilder(uri).GET(), subject).build();
+        HttpRequest req = authed(HttpRequest.newBuilder(uri).GET(), subject).timeout(requestTimeout).build();
         return send(req);
+    }
+
+    /**
+     * Repeats a server long-poll until {@code done} or the timeout. The call gets the seconds for this
+     * round. A busy answer (429, 502, 503, 504) or a dropped connection is retried, anything else throws.
+     */
+    static <T> T longPoll(int timeoutSeconds, java.util.function.IntFunction<T> call, java.util.function.Predicate<T> done) {
+        long deadline = System.nanoTime() + Math.max(1, timeoutSeconds) * 1_000_000_000L;
+        T last = null;
+        while (true) {
+            long leftMs = (deadline - System.nanoTime()) / 1_000_000L;
+            if (leftMs <= 0) return last;
+            int chunk = (int) Math.max(1, Math.min(120, leftMs / 1000));
+            try {
+                last = call.apply(chunk);
+                if (last != null && done.test(last)) return last;
+            } catch (AbenixException e) {
+                if (!retryable(e)) throw e;
+                pause(Math.min(2000, leftMs));
+            }
+        }
+    }
+
+    private static boolean retryable(AbenixException e) {
+        int s = e.status();
+        if (s == 429 || s == 502 || s == 503 || s == 504) return true;
+        Throwable c = e.getCause();
+        return s == 0 && c instanceof IOException && !(c instanceof com.fasterxml.jackson.core.JsonProcessingException);
+    }
+
+    private static void pause(long ms) {
+        try {
+            Thread.sleep(ms);
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+            throw new AbenixException("wait interrupted", ie);
+        }
     }
 
     JsonNode postJson(String path, Object body, ActingSubject subject) {
@@ -85,17 +126,55 @@ final class HttpKit {
         return root != null && root.has("data") ? root.get("data") : root;
     }
 
+    /** A multipart/form-data upload of one file under the field name {@code file}. */
+    JsonNode postFile(String path, String filename, byte[] content, String contentType, ActingSubject subject) {
+        String boundary = "abenix-" + java.util.UUID.randomUUID();
+        String safe = filename.replace("\"", "");
+        byte[] head = ("--" + boundary + "\r\n"
+            + "Content-Disposition: form-data; name=\"file\"; filename=\"" + safe + "\"\r\n"
+            + "Content-Type: " + (contentType == null ? "application/octet-stream" : contentType) + "\r\n\r\n")
+            .getBytes(StandardCharsets.UTF_8);
+        byte[] tail = ("\r\n--" + boundary + "--\r\n").getBytes(StandardCharsets.UTF_8);
+        byte[] body = new byte[head.length + content.length + tail.length];
+        System.arraycopy(head, 0, body, 0, head.length);
+        System.arraycopy(content, 0, body, head.length, content.length);
+        System.arraycopy(tail, 0, body, head.length + content.length, tail.length);
+        HttpRequest req = authed(HttpRequest.newBuilder(URI.create(baseUrl + path))
+            .header("Content-Type", "multipart/form-data; boundary=" + boundary)
+            .POST(HttpRequest.BodyPublishers.ofByteArray(body)), subject).build();
+        return send(req);
+    }
+
     private JsonNode send(HttpRequest req) {
         try {
             HttpResponse<String> resp = http.send(req, HttpResponse.BodyHandlers.ofString());
             if (resp.statusCode() >= 400) {
-                throw new AbenixException(req.method() + " " + req.uri().getPath()
-                    + " HTTP " + resp.statusCode() + " — " + truncate(resp.body(), 400));
+                throw error(req.method() + " " + req.uri().getPath(), resp.statusCode(), resp.body());
             }
             return JSON.readTree(resp.body() == null || resp.body().isBlank() ? "{}" : resp.body());
         } catch (IOException | InterruptedException e) {
             throw new AbenixException(req.method() + " " + req.uri().getPath() + " failed: " + e.getMessage(), e);
         }
+    }
+
+    /** The platform's error envelope as an exception carrying status and error_code. */
+    static AbenixException error(String what, int status, String body) {
+        String code = null;
+        String message = null;
+        try {
+            JsonNode root = JSON.readTree(body == null || body.isBlank() ? "{}" : body);
+            JsonNode err = root.has("error") ? root.get("error") : root.get("detail");
+            if (err != null && err.isObject()) {
+                code = err.hasNonNull("error_code") ? err.get("error_code").asText() : null;
+                message = err.hasNonNull("message") ? err.get("message").asText() : null;
+            } else if (err != null && err.isTextual()) {
+                message = err.asText();
+            }
+        } catch (IOException ignored) {
+            // not JSON, keep the raw body in the message
+        }
+        String detail = message != null ? message : truncate(body, 400);
+        return new AbenixException(what + " HTTP " + status + " — " + detail, status, code);
     }
 
     static String encode(Object o) {

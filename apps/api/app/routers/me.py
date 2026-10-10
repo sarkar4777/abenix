@@ -14,6 +14,8 @@ from app.core.deps import get_current_user, get_db
 from app.core.permissions import (
     features_for,
     is_admin,
+    parse_share_expiry,
+    share_expiry_fields,
 )
 from app.core.responses import error, success
 from models.resource_share import ResourceShare, SharePermission
@@ -60,6 +62,17 @@ async def my_permissions(
             "capabilities": sorted(await capabilities_for(db, user)),
         }
     )
+
+
+@router.get("/role-matrix")
+async def role_matrix(user: User = Depends(get_current_user)) -> JSONResponse:
+    """What each role can do, from the same table the server enforces."""
+    from types import SimpleNamespace
+
+    roles = {
+        r: features_for(SimpleNamespace(role=r)) for r in ("admin", "creator", "user")
+    }
+    return success({"roles": roles})
 
 
 _SHAREABLE_KINDS = {
@@ -113,6 +126,10 @@ async def create_share(
             400,
         )
 
+    expires_at, exp_err = parse_share_expiry(body.get("expires_at"))
+    if exp_err:
+        return error(exp_err, 400)
+
     # Verify the caller owns the resource (or is admin). We do this by
     # looking up the resource via the same query helpers list endpoints
     # use — keeps semantics consistent.
@@ -144,6 +161,7 @@ async def create_share(
     existing = existing_q.scalar_one_or_none()
     if existing:
         existing.permission = perm
+        existing.expires_at = expires_at
         await db.commit()
         await db.refresh(existing)
         return success(_serialize_share(existing))
@@ -156,6 +174,7 @@ async def create_share(
         shared_with_email=email,
         permission=perm,
         shared_by=user.id,
+        expires_at=expires_at,
     )
     db.add(share)
     await db.commit()
@@ -259,7 +278,7 @@ async def list_shares_received(
     UI panel and the sidebar's recent-shares list."""
     q = await db.execute(
         select(ResourceShare)
-        .where(ResourceShare.shared_with_user_id == user.id)
+        .where(ResourceShare.shared_with_user_id == user.id, ResourceShare.live())
         .order_by(desc(ResourceShare.created_at))
     )
     return success([_serialize_share(s) for s in q.scalars().all()])
@@ -296,7 +315,7 @@ def _serialize_share(s: ResourceShare) -> dict[str, Any]:
         "permission": pg_to_api.get(raw, raw.lower()),
         "shared_by": str(s.shared_by),
         "created_at": s.created_at.isoformat() if s.created_at else None,
-        "expires_at": s.expires_at.isoformat() if s.expires_at else None,
+        **share_expiry_fields(getattr(s, "expires_at", None)),
     }
 
 

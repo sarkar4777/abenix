@@ -55,7 +55,10 @@ function sidebarRoutes(): string[] {
   }
   return out;
 }
-const ROUTES = sidebarRoutes();
+// LOSTNESS_ROUTES and LOSTNESS_ROLES narrow a run, CI uses them for a quick pass
+const ALL_ROUTES = sidebarRoutes();
+const ROUTES = process.env.LOSTNESS_ROUTES ? process.env.LOSTNESS_ROUTES.split(',').map((r) => r.trim()).filter(Boolean) : ALL_ROUTES;
+const ROLES = (process.env.LOSTNESS_ROLES ? process.env.LOSTNESS_ROLES.split(',').map((r) => r.trim()) : ['admin', 'creator', 'member', 'viewer']) as Role[];
 
 const RAW_CODE = /\b[A-Z]+(?:_[A-Z]+)*_(?:ERROR|FAILED|TIMEOUT|EXCEEDED|DENIED|NOT_FOUND|NOT_ALLOWED|INVALID|FORBIDDEN|VIOLATION|BLOCKED)\b/;
 const RAW_ERROR: Array<{ re: RegExp; what: string; outsideCode?: boolean }> = [
@@ -250,7 +253,7 @@ test.beforeAll(async ({ browser }) => {
   const page = await ctx.newPage();
   page.on('dialog', (d) => d.accept());
   await signIn(page, ADMIN);
-  for (const role of ['creator', 'member', 'viewer'] as const) await invite(page, browser, people[role]);
+  for (const role of ROLES) if (role !== 'admin') await invite(page, browser, people[role]);
   await ctx.close();
 });
 
@@ -273,7 +276,7 @@ test.afterAll(async ({ playwright }) => {
 });
 
 for (const viewport of VIEWPORTS) {
-  for (const role of ['admin', 'creator', 'member', 'viewer'] as const) {
+  for (const role of ROLES) {
     test(`every sidebar page is clear for the ${role} at ${viewport.width} px`, async ({ browser }) => {
       test.setTimeout(Math.max(10, ROUTES.length) * 45_000);
       const ctx = await browser.newContext({ viewport });
@@ -290,7 +293,8 @@ for (const viewport of VIEWPORTS) {
 }
 
 test('lostness report', async () => {
-  expect(ROUTES.length, 'routes read from Sidebar.tsx').toBeGreaterThan(20);
+  expect(ALL_ROUTES.length, 'routes read from Sidebar.tsx').toBeGreaterThan(20);
+  for (const r of ROUTES) expect(ALL_ROUTES, `${r} is a sidebar route`).toContain(r);
   fs.mkdirSync(OUT, { recursive: true });
   const rows = failures.map((f) => `| ${f.route} | ${f.role} | ${f.width} | ${f.problem.replace(/\|/g, '/')} |`);
   const md = [

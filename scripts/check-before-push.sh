@@ -126,24 +126,11 @@ run_web() {
 
   # The in-app developer guide serves a copy of docs/ from public/, and nothing
   # kept the two in step — the mirror had fallen six files behind. Sync, then
-  # check the manifest that drives the nav resolves both ways.
+  # check every link and the manifest that drives the nav.
   if [ -f scripts/sync-dev-docs.sh ]; then
-    say "Docs: in-app mirror + nav manifest"
+    say "Docs: in-app mirror, links + nav manifest"
     bash scripts/sync-dev-docs.sh >/dev/null
-    python - <<'PY'
-import json, pathlib, sys
-man = json.loads(pathlib.Path("docs/manifest.json").read_text(encoding="utf-8"))
-listed = {d["slug"] for s in man["sections"] for d in s["docs"]}
-on_disk = {str(p.relative_to("docs")).replace("\\", "/")[:-3]
-           for p in pathlib.Path("docs").rglob("*.md")} - {"TRAJECTORY_MEMORY"}
-ghosts = sorted(s for s in listed if not (pathlib.Path("docs") / f"{s}.md").exists())
-orphans = sorted(d for d in on_disk - listed if not d.startswith("screenshots/"))
-for g in ghosts:
-    print(f"  nav entry has no file: {g}")
-for o in orphans:
-    print(f"  doc missing from nav : {o}")
-sys.exit(1 if ghosts or orphans else 0)
-PY
+    python scripts/check-doc-links.py
     ok "dev-docs in sync"
   fi
 }

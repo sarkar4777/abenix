@@ -1,6 +1,10 @@
 package com.abenix.sdk;
 
+import com.fasterxml.jackson.core.JsonParser;
+import com.fasterxml.jackson.databind.DeserializationContext;
+import com.fasterxml.jackson.databind.JsonDeserializer;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.module.SimpleModule;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -45,7 +49,17 @@ final class SseWatchStream implements WatchStream {
         this.http = http;
         this.uri = uri;
         this.headers = headers;
-        this.json = json;
+        // snapshots carry ISO times with an offset, plain Jackson cannot read
+        // them into Instant and every snapshot was dropped as a bad payload
+        this.json = json.copy().registerModule(new SimpleModule().addDeserializer(
+            java.time.Instant.class, new JsonDeserializer<java.time.Instant>() {
+                @Override
+                public java.time.Instant deserialize(JsonParser p, DeserializationContext c) throws java.io.IOException {
+                    String v = p.getValueAsString();
+                    if (v == null || v.isBlank()) return null;
+                    return java.time.OffsetDateTime.parse(v).toInstant();
+                }
+            }));
     }
 
     @Override
@@ -168,6 +182,16 @@ final class SseWatchStream implements WatchStream {
     }
 
     private void dispatch(String event, String data) {
+        // only snapshot events carry a DAG, end closes the stream and error fails it
+        if ("end".equals(event)) {
+            close();
+            return;
+        }
+        if ("error".equals(event)) {
+            fireError(new AbenixException("watch stream error: " + data));
+            return;
+        }
+        if (event != null && !"snapshot".equals(event)) return;
         try {
             DagSnapshot snap = json.readValue(data, DagSnapshot.class);
             latest = snap;

@@ -29,6 +29,11 @@ kubectl exec -n abenix abenix-redis-master-0 -- redis-cli ping
 kubectl get events -n abenix --sort-by='.lastTimestamp' | tail -30
 ```
 
+Pod names here assume the local and Azure values, where Postgres runs with
+`architecture: standalone` as `abenix-postgresql-0`. With
+`architecture: replication` (base and production values) the primary is
+`abenix-postgresql-primary-0`.
+
 ## Common scenarios
 
 ### A pod is `CrashLoopBackOff`
@@ -122,11 +127,11 @@ runs one again from its captured input. The `/admin/dlq` page does the same.
 
 With the NATS backend every pool has a JetStream consumer
 `abenix-<pool>-consumer` on the `agents` stream. Pending counts are on the NATS
-monitor port:
+monitor port, 8222. Read it from inside the API pod, so no extra forward is
+needed:
 
 ```bash
-kubectl -n abenix port-forward svc/abenix-nats 8222:8222 &
-curl -s 'http://localhost:8222/jsz?consumers=true' | grep -E '"name"|num_pending'
+kubectl exec -n abenix deploy/abenix-api -c api -- python3 -c   "import urllib.request; print(urllib.request.urlopen('http://abenix-nats:8222/jsz?consumers=true').read().decode())"   | grep -E '"name"|num_pending'
 ```
 
 `num_ack_pending` counts runs in flight. A message stays unacked until its run ends.

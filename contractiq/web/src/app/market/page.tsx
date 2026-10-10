@@ -26,7 +26,8 @@ const CustomTooltip = ({ active, payload, label }: any) => {
   </div>);
 };
 
-function formatCurrency(v: number): string {
+function formatCurrency(v: number | null | undefined): string {
+  if (v == null || Number.isNaN(v)) return '—';
   if (Math.abs(v) >= 1e9) return `$${(v / 1e9).toFixed(1)}B`;
   if (Math.abs(v) >= 1e6) return `$${(v / 1e6).toFixed(1)}M`;
   if (Math.abs(v) >= 1e3) return `$${(v / 1e3).toFixed(0)}K`;
@@ -50,8 +51,8 @@ interface MarketData {
   exposure: {
     contracts: {
       id: string; title: string; contract_type: string;
-      contract_price: number | null; spot_price: number;
-      pnl_per_mwh: number; annual_pnl: number; mark_to_market: number;
+      contract_price: number | null; spot_price: number | null;
+      pnl_per_mwh: number | null; annual_pnl: number | null; mark_to_market: number | null;
       capacity_mw: number; remaining_years: number;
       risk_score: number | null; direction: string;
     }[];
@@ -129,14 +130,14 @@ export default function MarketPage() {
 
   // Chart data
   const pnlData = contracts
-    .filter(c => c.contract_price != null)
-    .sort((a, b) => b.annual_pnl - a.annual_pnl)
-    .map(c => ({ name: c.title.length > 18 ? c.title.slice(0, 18) + '...' : c.title, pnl: c.annual_pnl, mtm: c.mark_to_market }));
+    .filter(c => c.contract_price != null && c.annual_pnl != null)
+    .sort((a, b) => (b.annual_pnl ?? 0) - (a.annual_pnl ?? 0))
+    .map(c => ({ name: c.title.length > 18 ? c.title.slice(0, 18) + '...' : c.title, pnl: c.annual_pnl ?? 0, mtm: c.mark_to_market ?? 0 }));
 
   const mtmData = contracts
-    .filter(c => c.mark_to_market !== 0)
-    .sort((a, b) => Math.abs(b.mark_to_market) - Math.abs(a.mark_to_market))
-    .map(c => ({ name: c.title.length > 18 ? c.title.slice(0, 18) + '...' : c.title, mtm: c.mark_to_market }));
+    .filter(c => c.mark_to_market != null && c.mark_to_market !== 0)
+    .sort((a, b) => Math.abs(b.mark_to_market ?? 0) - Math.abs(a.mark_to_market ?? 0))
+    .map(c => ({ name: c.title.length > 18 ? c.title.slice(0, 18) + '...' : c.title, mtm: c.mark_to_market ?? 0 }));
 
   return (
     <div className="p-6">
@@ -352,10 +353,10 @@ export default function MarketPage() {
                       <td className="py-2.5 px-4 text-white">{c.title}</td>
                       <td className="py-2.5 px-4"><span className={`px-1.5 py-0.5 rounded text-[10px] ${c.contract_type === 'ppa' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-amber-500/10 text-amber-400'}`}>{c.contract_type?.toUpperCase()}</span></td>
                       <td className="py-2.5 px-4 text-right text-slate-300 font-mono">{c.contract_price != null ? `$${c.contract_price.toFixed(2)}` : '—'}</td>
-                      <td className="py-2.5 px-4 text-right text-slate-300 font-mono">${c.spot_price.toFixed(2)}</td>
-                      <td className={`py-2.5 px-4 text-right font-mono ${c.pnl_per_mwh >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>{c.pnl_per_mwh >= 0 ? '+' : ''}{c.pnl_per_mwh.toFixed(2)}</td>
-                      <td className={`py-2.5 px-4 text-right font-mono ${c.annual_pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>{formatCurrency(c.annual_pnl)}</td>
-                      <td className={`py-2.5 px-4 text-right font-mono ${c.mark_to_market >= 0 ? 'text-cyan-400' : 'text-amber-400'}`}>{formatCurrency(c.mark_to_market)}</td>
+                      <td className="py-2.5 px-4 text-right text-slate-300 font-mono">{c.spot_price != null ? `$${c.spot_price.toFixed(2)}` : '—'}</td>
+                      <td className={`py-2.5 px-4 text-right font-mono ${(c.pnl_per_mwh ?? 0) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>{c.pnl_per_mwh == null ? '—' : `${c.pnl_per_mwh >= 0 ? '+' : ''}${c.pnl_per_mwh.toFixed(2)}`}</td>
+                      <td className={`py-2.5 px-4 text-right font-mono ${(c.annual_pnl ?? 0) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>{formatCurrency(c.annual_pnl)}</td>
+                      <td className={`py-2.5 px-4 text-right font-mono ${(c.mark_to_market ?? 0) >= 0 ? 'text-cyan-400' : 'text-amber-400'}`}>{formatCurrency(c.mark_to_market)}</td>
                       <td className="py-2.5 px-4 text-center">
                         {c.direction === 'in_money' ? <span className="text-emerald-400 flex items-center justify-center gap-0.5"><TrendingUp className="w-3 h-3" /> ITM</span> :
                          c.direction === 'out_of_money' ? <span className="text-red-400 flex items-center justify-center gap-0.5"><TrendingDown className="w-3 h-3" /> OTM</span> :

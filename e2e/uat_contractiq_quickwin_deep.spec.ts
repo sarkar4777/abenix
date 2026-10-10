@@ -2,8 +2,8 @@ import { test, expect, type Page } from '@playwright/test';
 import * as fs from 'fs';
 import * as path from 'path';
 
-const BASE = process.env.BASE || 'http://localhost:3001';
-const API  = process.env.API  || 'http://localhost:8001';
+const BASE = process.env.CIQ_BASE || 'http://localhost:3001';
+const API  = process.env.CIQ_API  || 'http://localhost:8001';
 const EMAIL = process.env.CIQ_EMAIL || 'test@contractiq.com';
 const PASSWORD = process.env.CIQ_PASSWORD || 'TestPass123!';
 const CONTRACTS_DIR = path.resolve(__dirname, '..', 'contractiq', 'test-contracts');

@@ -8,8 +8,10 @@ import logging
 import os
 import re
 import sys
+import threading
 import time
 import uuid
+from collections import OrderedDict
 from pathlib import Path
 from typing import Any
 
@@ -517,6 +519,26 @@ async def _register_model(
     return model, reason, None
 
 
+async def _model_access_error(
+    db: AsyncSession, model: MLModel, user: User, need: str
+) -> JSONResponse | None:
+    """404 when the caller cannot see the model, 403 when they cannot change it."""
+    from app.core.permissions import accessible_resource_ids, is_admin
+    from models.resource_share import SharePermission
+
+    if is_admin(user) or model.created_by in (None, user.id):
+        return None
+    if model.id not in await accessible_resource_ids(db, user, kind="ml_model"):
+        return error("Model not found", 404)
+    if need == "view":
+        return None
+    if need == "edit" and model.id in await accessible_resource_ids(
+        db, user, kind="ml_model", minimum_permission=SharePermission.EDIT
+    ):
+        return None
+    return error("Only the model owner, an editor or an admin can do that", 403)
+
+
 @router.post("")
 async def upload_model(
     file: UploadFile = File(...),
@@ -721,6 +743,9 @@ async def get_model(
     model = result.scalar_one_or_none()
     if not model:
         return error("Model not found", 404)
+    denied = await _model_access_error(db, model, user, "view")
+    if denied is not None:
+        return denied
     return success(await _serialize_with_deployments(model, db))
 
 
@@ -741,6 +766,9 @@ async def update_model_metadata(
     model = result.scalar_one_or_none()
     if not model:
         return error("Model not found", 404)
+    denied = await _model_access_error(db, model, user, "edit")
+    if denied is not None:
+        return denied
     if "description" in body:
         model.description = (body.get("description") or "")[:2000]
     if "input_schema" in body:
@@ -779,6 +807,9 @@ async def delete_model(
     model = result.scalar_one_or_none()
     if not model:
         return error("Model not found", 404)
+    denied = await _model_access_error(db, model, user, "delete")
+    if denied is not None:
+        return denied
 
     # the file and its durable copy
     from app.core.artifact_store import remove
@@ -816,6 +847,9 @@ async def deploy_model(
     model = result.scalar_one_or_none()
     if not model:
         return error("Model not found", 404)
+    denied = await _model_access_error(db, model, user, "edit")
+    if denied is not None:
+        return denied
     if model.status != MLModelStatus.READY:
         return error(
             "This model failed validation, so it cannot be deployed. "
@@ -1176,6 +1210,7 @@ async def _record_invocation(
     duration_ms: int,
     error_message: str | None,
     source: str | None,
+    operation: str = "predict",
 ) -> None:
     # never let bookkeeping fail a prediction
     try:
@@ -1184,7 +1219,7 @@ async def _record_invocation(
             MLModelInvocation(
                 tenant_id=model.tenant_id,
                 ml_model_id=model.id,
-                operation="predict",
+                operation=operation,
                 input_payload={"input_data": input_data},
                 output=output if isinstance(output, dict) else None,
                 predicted_class=cls,
@@ -1203,6 +1238,57 @@ async def _record_invocation(
             await db.rollback()
         except Exception:
             pass
+
+
+_SERVING_CLIENT: Any = None
+_BACKGROUND: set[asyncio.Task] = set()
+
+
+def _serving_client() -> Any:
+    global _SERVING_CLIENT
+    if _SERVING_CLIENT is None:
+        import httpx
+
+        _SERVING_CLIENT = httpx.AsyncClient(timeout=30.0)
+    return _SERVING_CLIENT
+
+
+def _log_in_background(
+    model: MLModel,
+    input_data: Any,
+    output: Any,
+    latency_ms: int,
+    source: str,
+    operation: str = "predict",
+) -> None:
+    from app.core.deps import async_session
+
+    async def _write() -> None:
+        async with async_session() as session:
+            await _record_invocation(
+                session,
+                model,
+                input_data=input_data,
+                output=output,
+                duration_ms=latency_ms,
+                error_message=None,
+                source=source,
+                operation=operation,
+            )
+
+    task = asyncio.create_task(_write())
+    _BACKGROUND.add(task)
+    task.add_done_callback(_BACKGROUND.discard)
+
+
+def _missing_input(model: MLModel) -> JSONResponse:
+    names = _feature_names(model)
+    hint = f" with {len(names)} values: {', '.join(names)}" if names else ""
+    return error(
+        'input_data is required, for example {"features": [...]}' + hint + ".",
+        422,
+        error_code="INVALID_INPUT",
+    )
 
 
 @router.post("/{model_id}/predict")
@@ -1225,6 +1311,9 @@ async def predict(
     model = result.scalar_one_or_none()
     if not model:
         return error("Model not found", 404)
+    denied = await _model_access_error(db, model, user, "view")
+    if denied:
+        return denied
     if model.status != MLModelStatus.READY:
         return error(
             _status_message(model) or "This model is not ready.",
@@ -1234,13 +1323,7 @@ async def predict(
 
     input_data = body.get("input_data")
     if input_data is None or input_data == [] or input_data == {}:
-        names = _feature_names(model)
-        hint = f" with {len(names)} values: {', '.join(names)}" if names else ""
-        return error(
-            'input_data is required, for example {"features": [...]}' + hint + ".",
-            422,
-            error_code="INVALID_INPUT",
-        )
+        return _missing_input(model)
 
     dep_result = await db.execute(
         select(MLModelDeployment)
@@ -1259,17 +1342,14 @@ async def predict(
 
     if k8s_dep and k8s_dep.endpoint_url:
         try:
-            import httpx
-
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                resp = await client.post(
-                    k8s_dep.endpoint_url, json={"input_data": input_data}
-                )
-                resp.raise_for_status()
-                resp_data = resp.json()
-                if resp_data.get("predictions") is not None:
-                    output = resp_data
-                    source = "k8s"
+            resp = await _serving_client().post(
+                k8s_dep.endpoint_url, json={"input_data": input_data}
+            )
+            resp.raise_for_status()
+            resp_data = resp.json()
+            if resp_data.get("predictions") is not None:
+                output = resp_data
+                source = "k8s"
         except Exception as e:
             logger.warning("K8s prediction failed, falling back to local: %s", e)
 
@@ -1305,15 +1385,8 @@ async def predict(
             return error(msg, 500, error_code="PREDICTION_FAILED")
 
     latency_ms = int((time.monotonic() - start) * 1000)
-    await _record_invocation(
-        db,
-        model,
-        input_data=input_data,
-        output=output,
-        duration_ms=latency_ms,
-        error_message=None,
-        source=source,
-    )
+    # the caller gets its answer without waiting for the log row
+    _log_in_background(model, input_data, output, latency_ms, source)
     extra = (
         {k: v for k, v in output.items() if k != "predictions"}
         if isinstance(output, dict)
@@ -1334,6 +1407,30 @@ async def predict(
     )
 
 
+_MODEL_CACHE: "OrderedDict[tuple[str, float], Any]" = OrderedDict()
+_MODEL_CACHE_MAX = int(os.environ.get("ML_MODEL_CACHE_SIZE", "32"))
+_MODEL_CACHE_LOCK = threading.Lock()
+
+
+def _cached(file_uri: str, loader: Any) -> Any:
+    """A loaded model kept per file and modification time, so a predict does not reload it."""
+    try:
+        key = (file_uri, os.path.getmtime(file_uri))
+    except OSError:
+        return loader(file_uri)
+    with _MODEL_CACHE_LOCK:
+        if key in _MODEL_CACHE:
+            _MODEL_CACHE.move_to_end(key)
+            return _MODEL_CACHE[key]
+    obj = loader(file_uri)
+    with _MODEL_CACHE_LOCK:
+        _MODEL_CACHE[key] = obj
+        _MODEL_CACHE.move_to_end(key)
+        while len(_MODEL_CACHE) > _MODEL_CACHE_MAX:
+            _MODEL_CACHE.popitem(last=False)
+    return obj
+
+
 def _predict_sync(
     file_uri: str, framework: MLModelFramework, input_data: Any, names: list[str]
 ) -> dict:
@@ -1345,7 +1442,7 @@ def _predict_sync(
     if framework in (MLModelFramework.SKLEARN, MLModelFramework.XGBOOST):
         import joblib
 
-        model = joblib.load(file_uri)
+        model = _cached(file_uri, joblib.load)
         expected = getattr(model, "n_features_in_", None)
         if sent is not None and expected is not None and int(expected) != sent:
             names = names or [str(f) for f in getattr(model, "feature_names_in_", [])]
@@ -1368,7 +1465,7 @@ def _predict_sync(
     if framework == MLModelFramework.ONNX:
         import onnxruntime as ort
 
-        sess = ort.InferenceSession(file_uri)
+        sess = _cached(file_uri, ort.InferenceSession)
         first = sess.get_inputs()[0]
         shape = first.shape
         if (
@@ -1390,7 +1487,10 @@ def _predict_sync(
     if framework == MLModelFramework.PYTORCH:
         import torch
 
-        model = torch.load(file_uri, map_location="cpu", weights_only=False)
+        model = _cached(
+            file_uri,
+            lambda f: torch.load(f, map_location="cpu", weights_only=False),
+        )
         model.eval()
         with torch.no_grad():
             try:
@@ -1417,6 +1517,318 @@ async def _local_predict(
     )
 
 
+def _explain_names(model: MLModel, input_data: Any) -> list[str]:
+    names = _feature_names(model)
+    if names:
+        return names
+    schema = model.input_schema if isinstance(model.input_schema, dict) else {}
+    props = schema.get("properties")
+    if isinstance(props, dict) and props and "input_data" not in props:
+        return [str(k) for k in props]
+    if isinstance(input_data, str):
+        try:
+            input_data = json.loads(input_data)
+        except ValueError:
+            return []
+    if isinstance(input_data, dict) and "features" not in input_data:
+        return [str(k) for k in input_data]
+    return []
+
+
+def _first_float_output(outputs: list) -> Any:
+    import numpy as np
+
+    arrays = [o for o in outputs if isinstance(o, np.ndarray)]
+    for o in arrays:
+        if np.issubdtype(o.dtype, np.floating):
+            return o
+    if arrays and np.issubdtype(arrays[0].dtype, np.number):
+        return arrays[0]
+    raise PredictInputError("This model returns no numeric output to explain.")
+
+
+def _load_for_explain(file_uri: str, framework: MLModelFramework) -> Any:
+    if framework in (MLModelFramework.SKLEARN, MLModelFramework.XGBOOST):
+        import joblib
+
+        return _cached(file_uri, joblib.load)
+    if framework == MLModelFramework.ONNX:
+        import onnxruntime as ort
+
+        return _cached(file_uri, ort.InferenceSession)
+    if framework == MLModelFramework.PYTORCH:
+        import torch
+
+        return _cached(
+            file_uri,
+            lambda f: torch.load(f, map_location="cpu", weights_only=False),
+        )
+    raise ValueError(UNRUNNABLE.get(framework, f"Unsupported framework: {framework}"))
+
+
+def _raw_outputs(loaded: Any, framework: MLModelFramework) -> Any:
+    """Rows in, a 2-D float array out, for ONNX and PyTorch models."""
+    import numpy as np
+
+    if framework == MLModelFramework.ONNX:
+        name = loaded.get_inputs()[0].name
+
+        def run(Z: Any) -> Any:
+            Z = np.asarray(Z, dtype=np.float32)
+            try:
+                out = _first_float_output(loaded.run(None, {name: Z}))
+            except PredictInputError:
+                raise
+            except Exception:
+                # some exports fix the batch size at one
+                out = np.vstack(
+                    [
+                        np.asarray(
+                            _first_float_output(loaded.run(None, {name: z[None]}))
+                        ).reshape(1, -1)
+                        for z in Z
+                    ]
+                )
+            return np.asarray(out, dtype=float).reshape(len(Z), -1)
+
+        return run
+
+    import torch
+
+    loaded.eval()
+
+    def run_torch(Z: Any) -> Any:
+        with torch.no_grad():
+            out = loaded(torch.FloatTensor(np.asarray(Z)))
+        return np.asarray(out.numpy(), dtype=float).reshape(len(Z), -1)
+
+    return run_torch
+
+
+def _scorer(
+    loaded: Any, framework: MLModelFramework, x: Any, names: list[str]
+) -> tuple[Any, str, dict, Any, bool]:
+    """The score being explained, its label, the plain prediction, linear coefs, shap allowed."""
+    import numpy as np
+
+    from app.core import ml_explain
+
+    one = x.reshape(1, -1)
+    n = x.size
+
+    if framework in (MLModelFramework.SKLEARN, MLModelFramework.XGBOOST):
+        expected = getattr(loaded, "n_features_in_", None)
+        if expected is not None and int(expected) != n:
+            raise PredictInputError(_feature_count_message(int(expected), n, names))
+        try:
+            raw = loaded.predict(one)
+        except ValueError as e:
+            raise PredictInputError(f"The model rejected this input: {e}")
+        extra: dict[str, Any] = {"predictions": np.asarray(raw).tolist()}
+        if hasattr(loaded, "predict_proba"):
+            proba = np.asarray(loaded.predict_proba(one), dtype=float)[0]
+            k = int(np.argmax(proba))
+            classes = [str(c) for c in getattr(loaded, "classes_", range(proba.size))]
+            extra.update(
+                probabilities=[proba.tolist()],
+                classes=classes,
+                predicted_class=str(np.asarray(raw).reshape(-1)[0]),
+            )
+            return (
+                lambda Z: np.asarray(loaded.predict_proba(Z), dtype=float)[:, k],
+                f"probability of {classes[k]}",
+                extra,
+                None,
+                False,
+            )
+        if hasattr(loaded, "score_samples") and hasattr(loaded, "decision_function"):
+            return (
+                lambda Z: np.asarray(loaded.decision_function(Z), dtype=float).reshape(
+                    -1
+                ),
+                "anomaly score, below 0 is an outlier",
+                extra,
+                None,
+                False,
+            )
+        try:
+            float(np.asarray(raw).reshape(-1)[0])
+        except (TypeError, ValueError):
+            raise PredictInputError(
+                "This model returns labels with no score behind them, so there is nothing numeric to explain."
+            )
+        return (
+            lambda Z: np.asarray(loaded.predict(Z), dtype=float).reshape(len(Z), -1)[
+                :, 0
+            ],
+            "prediction",
+            extra,
+            ml_explain.linear_coefs(loaded, n),
+            True,
+        )
+
+    if framework == MLModelFramework.ONNX:
+        shape = loaded.get_inputs()[0].shape
+        if (
+            isinstance(shape, list)
+            and len(shape) == 2
+            and isinstance(shape[1], int)
+            and shape[1] != n
+        ):
+            raise PredictInputError(_feature_count_message(shape[1], n, names))
+    run = _raw_outputs(loaded, framework)
+    try:
+        first = run(one)
+    except PredictInputError:
+        raise
+    except Exception as e:
+        raise PredictInputError(f"The model rejected this input: {e}")
+    extra = {"predictions": first.tolist()}
+    if first.shape[1] == 1:
+        return (lambda Z: run(Z)[:, 0], "prediction", extra, None, False)
+    k = int(np.argmax(first[0]))
+    return (lambda Z: run(Z)[:, k], f"output {k}", extra, None, False)
+
+
+def _explain_sync(
+    file_uri: str,
+    framework: MLModelFramework,
+    input_data: Any,
+    names: list[str],
+    baseline: Any,
+    input_schema: Any,
+    training_metrics: Any,
+) -> dict:
+    from app.core import ml_explain
+
+    loaded = _load_for_explain(file_uri, framework)
+    if not names:
+        names = [str(f) for f in getattr(loaded, "feature_names_in_", [])]
+    X = _to_matrix(input_data, names)
+    if isinstance(X, list):
+        raise PredictInputError(
+            "Explain needs numeric features, this model takes text so there are no per-feature values to attribute."
+        )
+    if X.shape[0] != 1:
+        raise PredictInputError(
+            f"Explain takes one row at a time, you sent {X.shape[0]}."
+        )
+    x = X[0]
+    n = x.size
+    score, target, extra, coefs, allow_shap = _scorer(loaded, framework, x, names)
+    if len(names) != n:
+        names = [f"x{i}" for i in range(n)]
+    b, source = ml_explain.resolve_baseline(
+        baseline,
+        names,
+        n,
+        [
+            (
+                "training_means",
+                ml_explain.stored_means(input_schema, training_metrics, names, n),
+            ),
+            ("training_means_from_model", ml_explain.scaler_means(loaded, n)),
+        ],
+    )
+    phi, fx, fb, method = ml_explain.attribute(
+        score, x, b, model=loaded, coefs=coefs, allow_shap=allow_shap
+    )
+    out = ml_explain.report(names, x, b, phi, fx, fb, method, source, target)
+    return {**extra, **out}
+
+
+@router.post("/{model_id}/explain")
+async def explain(
+    model_id: uuid.UUID,
+    body: dict,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """Per-feature contributions for one prediction and the waterfall from baseline to it."""
+    from app.core.artifact_store import ensure_local
+    from app.core.ml_explain import ExplainInputError
+
+    start = time.monotonic()
+    result = await db.execute(
+        select(MLModel).where(
+            MLModel.id == model_id,
+            MLModel.tenant_id == user.tenant_id,
+            MLModel.status != MLModelStatus.DELETED,
+        )
+    )
+    model = result.scalar_one_or_none()
+    if not model:
+        return error("Model not found", 404)
+    denied = await _model_access_error(db, model, user, "view")
+    if denied:
+        return denied
+    if model.status != MLModelStatus.READY:
+        return error(
+            _status_message(model) or "This model is not ready.",
+            409,
+            error_code="MODEL_NOT_READY",
+        )
+
+    input_data = body.get("input_data")
+    if input_data is None or input_data == [] or input_data == {}:
+        return _missing_input(model)
+    baseline = body.get("baseline")
+    if baseline is not None and not isinstance(baseline, (dict, list)):
+        return error(
+            "baseline must be an object of feature values or a list of numbers.",
+            422,
+            error_code="INVALID_INPUT",
+        )
+
+    async def _failed(msg: str) -> None:
+        await _record_invocation(
+            db,
+            model,
+            input_data=input_data,
+            output=None,
+            duration_ms=int((time.monotonic() - start) * 1000),
+            error_message=msg,
+            source="local",
+            operation="explain",
+        )
+
+    try:
+        await ensure_local(Path(model.file_uri))
+        output = await asyncio.to_thread(
+            _explain_sync,
+            model.file_uri,
+            model.framework,
+            input_data,
+            _explain_names(model, input_data),
+            baseline,
+            model.input_schema,
+            model.training_metrics,
+        )
+    except (PredictInputError, ExplainInputError) as e:
+        await _failed(str(e))
+        return error(str(e), 422, error_code="INVALID_INPUT")
+    except Exception as e:
+        logger.warning("explain failed: %s", e)
+        msg = f"Explain failed: {e}"
+        await _failed(msg)
+        return error(msg, 500, error_code="EXPLAIN_FAILED")
+
+    latency_ms = int((time.monotonic() - start) * 1000)
+    _log_in_background(
+        model, input_data, output, latency_ms, "local", operation="explain"
+    )
+    return success(
+        {
+            **output,
+            "model_name": model.name,
+            "model_version": model.version,
+            "framework": model.framework.value,
+            "source": "local",
+            "latency_ms": latency_ms,
+        }
+    )
+
+
 @router.delete("/{model_id}/undeploy")
 async def undeploy_model(
     model_id: uuid.UUID,
@@ -1433,6 +1845,9 @@ async def undeploy_model(
     model = result.scalar_one_or_none()
     if not model:
         return error("Model not found", 404)
+    denied = await _model_access_error(db, model, user, "edit")
+    if denied is not None:
+        return denied
 
     # Find active deployments
     deps_result = await db.execute(
@@ -1585,6 +2000,9 @@ async def activate_version(
     model = result.scalar_one_or_none()
     if not model:
         return error("Model not found", 404)
+    denied = await _model_access_error(db, model, user, "edit")
+    if denied is not None:
+        return denied
     if model.status != MLModelStatus.READY:
         return error(
             "Only a model that loaded cleanly can be made active. "
@@ -1629,6 +2047,9 @@ async def deactivate_version(
     model = result.scalar_one_or_none()
     if not model:
         return error("Model not found", 404)
+    denied = await _model_access_error(db, model, user, "edit")
+    if denied is not None:
+        return denied
     model.is_active = False
     await db.commit()
     await db.refresh(model)

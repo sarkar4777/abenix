@@ -35,6 +35,7 @@ export default function ApprovalsPage() {
   const [acting, setActing] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const load = async (f: string) => {
     setLoading(true);
@@ -51,14 +52,21 @@ export default function ApprovalsPage() {
 
   const decide = async (id: string, action: 'approve' | 'deny') => {
     setActing(id);
+    setError(null);
     try {
-      await fetch(`/api/wingman/approvals/${id}/${action}`, {
+      const r = await fetch(`/api/wingman/approvals/${id}/${action}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ reason: action === 'approve' ? 'desk-approved' : 'desk-denied' }),
       });
+      if (!r.ok) {
+        const j = await r.json().catch(() => null);
+        setError(`Could not ${action}: ${typeof j?.detail === 'string' ? j.detail : `HTTP ${r.status}`}`);
+      }
       await load(filter);
-    } catch { /* keep list as-is */ }
+    } catch {
+      setError(`Could not ${action}, Wingman is not reachable. Nothing was recorded.`);
+    }
     setActing(null);
   };
 
@@ -80,13 +88,16 @@ export default function ApprovalsPage() {
     setBulkBusy(true);
     const ids = Array.from(selected);
     // Fire all in parallel; the SDK takes one decision per gate.
-    await Promise.all(ids.map((id) =>
+    setError(null);
+    const results = await Promise.all(ids.map((id) =>
       fetch(`/api/wingman/approvals/${id}/${action}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ reason: action === 'approve' ? 'desk-bulk-approved' : 'desk-bulk-denied' }),
-      }).catch(() => null),
+      }).then((r) => r.ok).catch(() => false),
     ));
+    const failed = results.filter((ok) => !ok).length;
+    if (failed) setError(`${failed} of ${ids.length} could not be ${action === 'approve' ? 'approved' : 'denied'}, they are still in the list.`);
     setBulkBusy(false);
     await load(filter);
   };
@@ -123,6 +134,13 @@ export default function ApprovalsPage() {
           </button>
         ))}
       </div>
+
+      {error && (
+        <div role="alert" data-testid="approvals-error"
+          className="mb-4 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-200">
+          {error}
+        </div>
+      )}
 
       {loading && (
         <div className="border border-slate-800 rounded-xl p-6 text-center text-[12px] text-slate-500">

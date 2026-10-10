@@ -73,7 +73,7 @@ The schema is `AgentSeedSchema` in `packages/db/seeds/agent_seed_schema.py`. Onl
 | Field | Required | Purpose |
 |---|---|---|
 | `name` | yes | Display name in `/agents` |
-| `slug` | yes | Lowercase letters, digits, `-` and `_`. Stable identifier used by SDK callers, the seeder and the lint |
+| `slug` | yes | Lowercase letters, digits, `-` and `_`, starting with a letter or digit. Stable identifier used by SDK callers, the seeder and the lint |
 | `description` | no | Subtitle in the UI |
 | `agent_type` | no | `oob` (default), `custom` or `vertical` |
 | `category` | no | Groups the `/agents` catalogue |
@@ -92,7 +92,7 @@ The schema is `AgentSeedSchema` in `packages/db/seeds/agent_seed_schema.py`. Onl
 | `input_variables` | no | Inputs the agent expects. The chat page and the SDK playground build their forms from them |
 | `example_prompts` | no | Shown on the agent page |
 | `requires_credentials` | no | Keys the agent's tools cannot run without. The lint fails when a tool with a required key is used and the key is missing here |
-| `runtime_pool` | no | `default`, `chat`, `heavy-reasoning`, `long-running` or `inline` (runs on the API pod). Default `default`, or `inline` when the slug contains `chat` |
+| `runtime_pool` | no | `default`, `chat`, `heavy-reasoning`, `long-running` or `inline` (runs on the API pod). Default `default`, or `inline` when the slug contains `chat`. `deploy.sh local` runs only the `default` pool, `deploy.sh local-runtime` adds `chat` and `heavy-reasoning`, and AKS runs all four |
 | `min_replicas`, `max_replicas`, `concurrency_per_replica`, `rate_limit_qps`, `daily_budget_usd` | no | Per-agent scaling, surfaced at `/admin/scaling`. `daily_budget_usd` caps one tenant's spend on the agent per UTC day, see [Spend caps](../02-runtime/00-agent-execution.md#spend-caps) |
 
 `input_variables`, `example_prompts`, `tool_config`, `output_schema` and `max_tokens` can sit at the top level, where the seeder copies them into `model_config`, or inside `model_config` directly.
@@ -103,17 +103,13 @@ The schema is `AgentSeedSchema` in `packages/db/seeds/agent_seed_schema.py`. Onl
 python scripts/lint-agent-seeds.py
 ```
 
-It validates every YAML against the schema, fails an agent that lists `knowledge_search` without a knowledge base granting it a collection in `packages/db/seeds/kb/`, and fails one that uses a tool with a required key not listed in `requires_credentials`. CI and `check-before-push.sh` run it, and `deploy-azure.sh` refuses to seed when it fails.
+It validates every YAML against the schema, fails an agent that lists `knowledge_search` without a knowledge base granting it a collection in `packages/db/seeds/kb/`, and fails one that uses a tool with a required key not listed in `requires_credentials`. It also checks the agent YAMLs of any use-case app that ships `<app>/seeds/manifest.yaml`. CI and `check-before-push.sh` run it, and `deploy-azure.sh` refuses to seed when it fails.
 
 ### Seed it
 
-`scripts/dev-local.sh` runs the seeders from the working tree on every start. On a cluster the seeds are baked into the API image, so rebuild first (`bash scripts/deploy.sh local`), then:
+`bash scripts/dev-local.sh` runs the seeders from the working tree on every start. It does not stop when a seed fails, so run the lint first. On a cluster the seeds are baked into the API image, so run `bash scripts/deploy.sh local` (or `bash scripts/deploy-azure.sh redeploy` on AKS). It rebuilds the changed images and runs every seed again.
 
-```bash
-kubectl -n abenix exec deploy/abenix-api -c api -- python /app/packages/db/seeds/seed_agents.py
-```
-
-The seeder:
+The seeder, `packages/db/seeds/seed_agents.py`:
 
 1. Reads every `*.yaml` in `packages/db/seeds/agents/`.
 2. Validates them all first. If any fails it prints every failure, writes nothing, and exits non-zero.
@@ -131,7 +127,7 @@ or `Updating:` when the slug exists. The deploy scripts then print which seeded 
 ### Test
 
 1. Visit `/agents`, your agent is listed.
-2. Open it and send one of your `example_prompts`.
+2. Press **Chat** on its card and send one of your `example_prompts`.
 3. Open the run. The Flight Recorder at `/executions/<id>` shows each tool call and the final output.
 
 To keep a good answer as a regression check, save that run as an evaluation case, see [10-evals](10-evals.md).

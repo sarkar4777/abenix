@@ -1,6 +1,6 @@
 # Platform settings
 
-Runtime knobs an admin changes from **Admin -> Model Selection** and **Admin -> Tool Configuration** without a redeploy.
+Runtime knobs an admin changes from **Admin -> Model Selection** (`/admin/llm-settings`), **Admin -> Tool Configuration** (`/admin/tool-config`) and **Admin -> Marketplace & Billing** (`/admin/marketplace`) without a redeploy.
 They live in the `platform_settings` table, are declared in
 [`apps/api/app/core/platform_settings.py`](../../apps/api/app/core/platform_settings.py),
 and are read through `get_setting()` or `get_int_setting()`.
@@ -11,7 +11,8 @@ key that has never been written falls back to the default declared in
 `DEFAULTS`, which is what the UI shows as "Platform default".
 
 There are 16 keys in `DEFAULTS`, listed below. `PATCH /api/admin/settings/{key}`
-refuses any key that is not one of them.
+refuses any key that is not one of them. Two more keys hold the
+[product switches](#product-switches) and have their own endpoint.
 
 ---
 
@@ -22,9 +23,9 @@ refuses any key that is not one of them.
 | `model` (default) | Model picker | Must be in the model catalogue |
 | `int` | Number input with the declared bounds | Must be a whole number inside `min`/`max` |
 
-Validation happens on the API, not only in the browser, because these values are
-read on the execution hot path and a bad one would otherwise surface as a
-failed run rather than a rejected save.
+Validation happens on the API, not only in the browser. These values are read
+on the execution path, and a bad one would otherwise show up as a failed run
+rather than a rejected save.
 
 ---
 
@@ -47,8 +48,7 @@ stored value or the `DEFAULTS` entry wins over them.
 
 **Sizing the pipeline budget.** Count the LLM nodes and allow roughly 20 to 40
 seconds each, more if a node does web research or multimodal work. OracleNet's
-deep mode sets its own 600 in code because seven research agents genuinely need
-it. If runs are being cut off, the execution row names which nodes ran out of
+deep mode sets its own 600 in code because its seven research agents need it. If runs are being cut off, the execution row names which nodes ran out of
 time in `error_message`.
 
 ### Clients that wait on a run
@@ -75,20 +75,22 @@ the run out first and reports which nodes ran over.
 One setting per surface, so a cheaper model can be used for the high-volume
 paths without touching the ones that need the strongest reasoning.
 
-| Key | Used by |
-|---|---|
-| `ai_builder.model` | Generating agents and pipelines from a description |
-| `ai_builder.critic.model` | The builder's critic and adversarial-safety gates |
-| `ai_builder.validation.model` | Tier-3 pipeline critique behind AI Validate |
-| `moderation.model` | The moderation gate's provider model |
-| `knowledge_engine.summarizer.model` | Cognify document summarisation |
-| `sdk_playground.default.model` | Pre-selected model in the SDK Playground |
-| `triggers.default.model` | Cron-triggered agent runs |
-| `pipeline_surgeon.model` | Pipeline Surgeon's diagnose and patch |
-| `workflow_shell.model` | The workflow shell REPL |
+| Key | Default | Used by |
+|---|---|---|
+| `ai_builder.model` | `claude-sonnet-4-5-20250929` | Generating agents and pipelines from a description |
+| `ai_builder.critic.model` | `claude-sonnet-4-5-20250929` | The builder's critic and adversarial-safety gates |
+| `ai_builder.validation.model` | `azure-gpt-4o` | Tier-3 pipeline critique behind AI Validate |
+| `moderation.model` | `claude-sonnet-4-5-20250929` | The moderation gate's provider model |
+| `knowledge_engine.summarizer.model` | `gemini-2.0-flash` | Cognify document summarisation |
+| `sdk_playground.default.model` | `claude-sonnet-4-5-20250929` | Pre-selected model in the SDK Playground |
+| `triggers.default.model` | `gemini-2.0-flash` | Cron-triggered agent runs |
+| `pipeline_surgeon.model` | `claude-sonnet-4-5-20250929` | Pipeline Surgeon's diagnose and patch |
+| `workflow_shell.model` | `claude-sonnet-4-5-20250929` | The workflow shell REPL |
 
-Under an exclusive Claude subscription these are all overridden at request time,
-see below.
+Every `*.model` value must be an id from the model catalogue (`GET /api/admin/settings/models`).
+
+Under an exclusive Claude subscription these are all overridden at request time.
+See below.
 
 ---
 
@@ -96,14 +98,21 @@ see below.
 
 | Key | Default | Notes |
 |---|---|---|
-| `llm.subscription.enabled` | `false` | Turns subscription mode on. Refuses to enable without a stored token. |
+| `llm.subscription.enabled` | `false` | Turns subscription mode on. The API refuses to enable it without a stored or environment token. |
 | `llm.subscription.token` | empty | Secret. Masked in every response and never returned to the browser. |
 | `llm.subscription.default_model` | `claude-haiku-4-5` | The model the subscription serves. Haiku by default for rate-limit headroom, because exclusive mode pins every request and one pipeline can fan out to a dozen sub-agents. |
 | `llm.subscription.exclusive` | `true` | Pins every request to `default_model`, including ones that already name a Claude model. |
 
+The token can also come from `CLAUDE_SUBSCRIPTION_TOKEN` or `ANTHROPIC_AUTH_TOKEN` in the environment. A stored token wins.
+
+The runtime, the admin screen and the model pickers all resolve these rows through `subscription_state()` in `engine/claude_subscription.py`, so they agree:
+
+- If `llm.subscription.enabled` was never saved, a real token in the environment turns subscription mode on, and the screen shows it as on.
+- If `llm.subscription.default_model` was never saved, everything uses `DEFAULT_SUBSCRIPTION_MODEL`, which is `claude-haiku-4-5`.
+
 The token rotates. When agent runs start failing with
 `OAuth access token has been revoked`, run
-`bash scripts/sync-claude-subscription.sh` rather than debugging the platform,
+`bash scripts/sync-claude-subscription.sh` before debugging anything else,
 and confirm with `POST /api/admin/settings/subscription/verify`.
 
 ---
@@ -136,16 +145,41 @@ How a tool declares a key, and how the screen is generated from that: [08-howto/
 | `PATCH` | `/api/admin/settings/{key}` | admin | Body `{"value": "..."}`. Model keys must be in the catalogue, int keys inside their bounds. Enabling subscription mode needs a stored or environment token |
 | `POST` | `/api/admin/settings/reset` | admin | Clears the stored values of the settings on this page, nothing else |
 | `GET` | `/api/admin/settings/models` | admin | The model catalogue the pickers offer |
-| `GET` | `/api/admin/settings/models/public` | signed in | Same catalogue for non-admin pickers |
+| `GET` | `/api/admin/settings/models/public` | signed in | Same catalogue for non-admin pickers. Both take `?capability=` to filter |
 | `GET` | `/api/admin/settings/subscription` | admin | Subscription state, token masked |
 | `POST` | `/api/admin/settings/subscription/verify` | admin | Makes one call with the token and reports the result |
 | `GET` | `/api/settings/builder_model` | signed in | Current `ai_builder.validation.model` |
 | `PUT` | `/api/settings/builder_model` | admin | Writes `ai_builder.validation.model` |
 | `GET` | `/api/settings/limits` | signed in | The three execution budgets, see above |
+| `GET` | `/api/platform/features` | anyone | The two product switches, see below |
+| `PUT` | `/api/admin/platform-features` | admin | Body `{"marketplace": true, "monetization": false}`, either or both |
 
-The model picker's provider check also reads rows named
-`provider.<name>.api_key` or in category `secrets`. Nothing in the platform
-writes such rows today, so in practice that check sees only the environment.
+The model picker's provider check (`GET /api/llm/available-providers`) counts a
+provider as usable when its key is in the environment or saved under Tool
+Configuration as `tool.credential.<ENV_NAME>`. It also reads rows named
+`provider.<name>.api_key` or in category `secrets`, which nothing in the
+platform writes today.
+
+---
+
+## Product switches
+
+Two platform-wide booleans, declared in
+[`apps/api/app/core/platform_features.py`](../../apps/api/app/core/platform_features.py)
+and changed on **Admin -> Marketplace & Billing**.
+
+| Key | Env default | Built-in default | When off |
+|---|---|---|---|
+| `features.marketplace.enabled` | `MARKETPLACE_ENABLED` | `true` | Marketplace routes answer 404 with `error_code: MARKETPLACE_OFF` |
+| `features.monetization.enabled` | `MONETIZATION_ENABLED` | `false` | Billing and paid creator routes answer 404 with `error_code: MONETIZATION_OFF` |
+
+The env vars come from `features.marketplace` and `features.monetization` in the
+Helm values, rendered into the `abenix-config` ConfigMap. A value saved by an
+admin wins over the env default. `GET /api/platform/features` returns each
+switch, its env default and whether the current value came from `default` or
+`admin`. The switches are read from the database on each request, with no cache,
+so a change applies at once on every pod. Each change is audited as
+`platform.features_changed`. `POST /api/admin/settings/reset` does not touch them.
 
 ---
 

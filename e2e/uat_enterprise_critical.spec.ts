@@ -116,20 +116,20 @@ test.describe('Enterprise critical UAT', () => {
     for (const p of routes) await gotoOk(page, p);
   });
 
-  test('/tools — 101 tools rendered', async ({ page }) => {
+  test('/tools — every tool the API registers has a row', async ({ page }) => {
+    const r = await page.request.get(`${API}/api/tools`, { headers: { Authorization: `Bearer ${await platformToken()}` } });
+    const d = (await r.json()).data;
+    const tools: Array<{ id: string }> = Array.isArray(d) ? d : d.tools;
+    expect(tools.length, 'tools registered').toBeGreaterThan(50);
     await gotoOk(page, '/tools');
     await expect(page.getByRole('heading', { name: /Tools catalogue/i })).toBeVisible({ timeout: 10_000 });
-    await page.waitForTimeout(2500);
-    const monoCount = await page.locator('.font-mono').count();
-    expect(monoCount, 'tool count').toBeGreaterThan(50);
+    await expect(page.locator('[data-testid^="tool-row-"]')).toHaveCount(tools.length, { timeout: 15_000 });
   });
 
-  test('/ml-models — 21 models incl. 5 new contractiq ones', async ({ page }) => {
+  test('/ml-models — the five ContractIQ models are listed', async ({ page }) => {
     await gotoOk(page, '/ml-models');
-    await page.waitForTimeout(2500);
-    const body = (await page.locator('body').innerText()).toLowerCase();
     for (const m of ['offtake_residential', 'offtake_industrial', 'price_fairvalue_gas_hubs', 'price_fairvalue_power_hubs', 'contractiq-counterparty-default']) {
-      expect(body.includes(m.toLowerCase()), `expected '${m}'`).toBeTruthy();
+      await expect(page.getByText(m, { exact: false }).first(), `expected '${m}'`).toBeVisible({ timeout: 15_000 });
     }
   });
 
@@ -288,11 +288,13 @@ test.describe('Enterprise critical UAT', () => {
     const keyRes = await fetch(`${API}/api/api-keys`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tok}` },
-      body: JSON.stringify({ name: `UAT SDK ${RUN}`, scopes: ['agents:execute', 'agents:read', 'executions:read'] }),
+      body: JSON.stringify({ name: `UAT SDK ${RUN}` }),
     });
     const keyJ = await keyRes.json();
-    const apiKey: string = keyJ.data?.raw_key || keyJ.data?.key || keyJ.data?.api_key || '';
-    expect(apiKey, 'api-key created').toBeTruthy();
+    const apiKey: string = keyJ.data?.raw_key || '';
+    expect(apiKey, `api-key created: ${JSON.stringify(keyJ.error)}`).toBeTruthy();
+    const keyId: string = keyJ.data.id;
+    try {
 
     const agentId = await findAgentIdByName(SIMPLE_NAME);
     expect(agentId, 'agent created earlier').toBeTruthy();
@@ -324,6 +326,9 @@ test.describe('Enterprise critical UAT', () => {
       }
     }
     expect(output.toLowerCase()).toContain('pong');
+    } finally {
+      await fetch(`${API}/api/api-keys/${keyId}`, { method: 'DELETE', headers: { Authorization: `Bearer ${tok}` } });
+    }
   });
 
   test('/builder complex — research agent (6 tools)', async ({ page }) => {

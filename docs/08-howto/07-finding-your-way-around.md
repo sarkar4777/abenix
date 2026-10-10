@@ -2,7 +2,8 @@
 
 A map of the repository for someone who has just cloned it. The other how-to
 pages tell you how to add a thing. This one tells you where that thing lives
-and which of its neighbours will notice.
+and which of its neighbours will notice. For what the product parts are, read
+[How Abenix fits together](../00-how-abenix-fits-together.md) first.
 
 ---
 
@@ -76,6 +77,10 @@ capability goes in `apps/api/app/core/capabilities.py`. See [Add a new UI page](
 and the [page catalogue](../05-ui/03-page-catalogue.md) for what already exists.
 
 **Anything about how a pod is deployed.** `infra/helm/abenix/`.
+
+**Words a user reads.** The page's own `PageHeader` purpose and steps, a topic in `apps/web/src/app/(app)/help/page.tsx`, and the plain glossary in [How Abenix fits together](../00-how-abenix-fits-together.md).
+
+**A developer doc.** A file under `docs/`, an entry in `docs/manifest.json`, then `bash scripts/sync-dev-docs.sh` to refresh the in-app copy. `python scripts/check-doc-links.py` fails CI on a broken link or a doc missing from the manifest.
 
 ---
 

@@ -25,6 +25,12 @@ _RULES: list[tuple[str, str]] = [
         r"unknown\s+model|unrecognised\s+model|unrecognized\s+model",
         "CONFIG_UNKNOWN_MODEL",
     ),
+    # Our own limits come before the provider rule, whose bare "rate limit" also matches them
+    (
+        r"\brate_limited\b|by its rate limit|rate.?limit\s*\(per-|rate.?limit.*\buser\b"
+        r"|too\s*many\s*requests\s*from|over its limits",
+        "RATE_LIMITED",
+    ),
     # LLM provider errors
     (r"rate.?limit|429|too\s*many", "LLM_RATE_LIMIT"),
     (
@@ -51,7 +57,6 @@ _RULES: list[tuple[str, str]] = [
     (r"toolerror|tool.*error|tool.*exception", "TOOL_ERROR"),
     # Budget / quota
     (r"budget|quota|insufficient.*credit|spending\s+limit", "BUDGET_EXCEEDED"),
-    (r"rate.?limit.*user|too.*many.*requests", "RATE_LIMITED"),
     # Infra
     (r"connection\s*(refused|reset)|broken.*pipe|server\s*disconnect", "INFRA_CRASH"),
     # a rejected LLM credential is a configuration problem, not a cluster one

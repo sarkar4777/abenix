@@ -45,6 +45,7 @@ export const FALLBACK_MODELS: ModelOption[] = [
 
 let _cache: ModelOption[] | null = null;
 let _subCache: SubscriptionState | null = null;
+let _defaultCache: string | null = null;
 let _cacheAt = 0;
 const TTL_MS = 60_000;
 let _inflight: Promise<ModelOption[]> | null = null;
@@ -64,6 +65,7 @@ async function fetchModels(): Promise<ModelOption[]> {
       const models = (body?.data?.models || body?.models) as ModelOption[];
       if (!Array.isArray(models) || models.length === 0) throw new Error('empty model list');
       _subCache = (body?.data?.subscription || body?.subscription) ?? null;
+      _defaultCache = (body?.data?.default_model || body?.default_model) ?? null;
       _cache = models;
       _cacheAt = now;
       return models;
@@ -74,6 +76,12 @@ async function fetchModels(): Promise<ModelOption[]> {
     }
   })();
   return _inflight;
+}
+
+/** The model a new agent starts on, picked by the API from the live catalogue. */
+export async function fetchDefaultModel(): Promise<string | null> {
+  await fetchModels();
+  return _defaultCache;
 }
 
 export function useModels(): {

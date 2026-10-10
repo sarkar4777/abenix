@@ -1,32 +1,32 @@
 # Local development setup
 
-> From `git clone` to a running cluster on your laptop in ~10 minutes.
+> From `git clone` to a running platform on your laptop. Path B (processes on your machine) is up in about ten minutes once dependencies are installed. Path A (full minikube cluster) takes 30 to 40 minutes on a cold machine.
 
 ---
 
 ## Prerequisites
 
-| Tool | Min version | Why |
+| Tool | Version | Needed for |
 |---|---|---|
-| Docker Desktop | 24.x | Container runtime |
-| Node.js | 20.x | Next.js web build |
-| Python | 3.12 | Backend services |
-| kubectl | 1.27 | k8s CLI |
-| Helm | 3.13 | chart installs |
-| minikube **or** k3d | latest | local k8s |
-| jq | latest | scripts |
+| Docker Desktop | 24 or later | Both paths. Path A runs minikube on the Docker driver, path B runs the data stores in docker compose |
+| Node.js | 20 or later (`engines` in `package.json`, CI uses 20) | Web app and the Node use-case apps |
+| Python | 3.12 (the images and CI use 3.12, `dev-local.sh` also accepts 3.13) | API, runtime, worker, seeds and lints |
+| kubectl | recent | Path A |
+| Helm | 3.x | Path A |
+| minikube | recent | Path A. `deploy.sh local` sizes it for the apps you pick, 8 GB for the core platform up to 13.25 GB for everything. Docker needs about 1 GB more, see [06-deployment/09-local-sizing](../06-deployment/09-local-sizing.md) |
+| Java | 21 | Only for the ClaimsIQ use-case app on path B |
+
+`deploy.sh` checks for `kubectl`, `helm`, `docker` and `minikube` before it does anything.
 
 macOS:
 ```bash
-brew install docker node@20 python@3.12 kubectl helm minikube jq
+brew install node@20 python@3.12 kubectl helm minikube
 ```
+Install Docker Desktop from docker.com.
 
-Linux:
-```bash
-# Use your distro's package manager + the official installers for kubectl/helm/minikube
-```
+Linux: use your distro's package manager plus the official installers for Docker, kubectl, Helm and minikube.
 
-Windows: WSL2 + Docker Desktop + the Linux toolchain inside WSL.
+Windows: run the scripts from Git Bash or WSL2, with Docker Desktop. `dev-local.sh` detects Git Bash and uses `netstat` and `taskkill` for its port checks.
 
 ---
 
@@ -35,10 +35,10 @@ Windows: WSL2 + Docker Desktop + the Linux toolchain inside WSL.
 | Path | Script | What runs where | Use it for |
 |---|---|---|---|
 | A | `bash scripts/deploy.sh local` | Everything in minikube, same chart as AKS | Anything that touches deployment, scaling or the cluster |
-| B | `bash scripts/dev-local.sh` | Data stores in docker compose, API, web, Celery and the NATS consumer as local processes with reload | Fast backend and UI iteration |
+| B | `bash scripts/dev-local.sh` | Data stores in docker compose. API, web, Celery and the NATS consumer as local processes with reload. The consumer's health port is 8020 (`CONSUMER_HEALTH_PORT`). A seed that fails prints its last lines, keeps its output in `.local-logs/seed-<name>.log` and is listed at the end of the seed step | Fast backend and UI iteration |
 | C | `npm run dev` in `apps/web` | Only the web dev server, against an API you already have | UI-only work |
 
-### Path A — full local k8s
+### Path A: full local k8s
 
 ```bash
 git clone https://github.com/sarkar4777/abenix.git
@@ -47,10 +47,22 @@ cp .env.example .env             # fill in at least one LLM credential
 bash scripts/deploy.sh local
 ```
 
-This creates the minikube cluster, builds every image into minikube's Docker
-daemon, installs the Helm chart plus the standalone apps, runs migrations and
-seeds, then starts port forwards. Budget 30 to 40 minutes on a cold machine.
-Most of that is image builds.
+This starts minikube if it is not running, builds every image into minikube's
+Docker daemon, installs the Helm chart plus the use-case apps you picked, runs
+migrations and seeds, then starts port forwards. Most of the time goes on image
+builds. Later runs reuse the cluster and only rebuild what changed.
+
+`bash scripts/deploy.sh` with no argument prints every subcommand. The ones you
+will use most:
+
+| Command | What it does |
+|---|---|
+| `deploy.sh local` | Install or upgrade on minikube |
+| `deploy.sh local-runtime` | Same, with the `default`, `chat` and `heavy-reasoning` runtime pools |
+| `deploy.sh status` | Pod and service health |
+| `deploy.sh reload <svc>` | Rebuild one service, for example `api` or `web`, and restart it |
+| `deploy.sh forwards` | Put the port forwards back and print which ones answer |
+| `deploy.sh destroy` | Tear the release down |
 
 ### Choosing which use-case apps to start
 
@@ -80,8 +92,8 @@ slow. Seven ship in the repo and you rarely need all of them.
 | Two of them | `pharmavigil,claimsiq` or `7,5` |
 
 The prompt times out after 20 seconds and starts everything, so an unattended
-run never wedges on a question nobody is there to answer. A pipe or a CI job
-is not a terminal, so it skips the prompt entirely and starts them all.
+run never waits on a question nobody is there to answer. A pipe or a CI job is
+not a terminal, so it skips the prompt and starts them all.
 
 **Scripting it.** `APPS` in the environment wins over the prompt and never
 asks, which is what you want in CI or a Makefile:
@@ -94,17 +106,17 @@ APP_SELECT_TIMEOUT=60 bash scripts/dev-local.sh        # longer to decide
 ```
 
 `APPS` means the same thing on both `dev-local.sh` and `deploy.sh local`. An
-unrecognised name is reported and skipped rather than silently ignored.
+unknown name is reported and skipped.
 
 The registry lives in [`scripts/lib/select-apps.sh`](../../scripts/lib/select-apps.sh).
-Adding an app is one line there — both startup paths and the summary banner
+Adding an app is one line there. Both startup paths and the summary banner
 read from it. `bash scripts/lib/test-select-apps.sh` covers the parsing, the
 precedence rules and the prompt in about a second, with no cluster.
 
 **No API key?** If you have a Claude Pro or Max subscription and are signed in
 with Claude Code on this machine, run `bash scripts/sync-claude-subscription.sh`
 instead of filling in a key. Every feature then routes through the subscription
-and records tokens at zero cost. The credential rotates, so re-run the script
+and records tokens at zero cost. The credential rotates, so run the script again
 when agent runs start failing with `OAuth access token has been revoked`.
 
 Ingress is off for local deploys (`ingress.enabled: false` in
@@ -122,46 +134,67 @@ hostnames. Nothing needs to go in `/etc/hosts`.
 | ClaimsIQ | http://localhost:3005 |
 | Wingman | http://localhost:3006 |
 | PharmaVigil | http://localhost:3007 |
-| Grafana | http://localhost:3030 (`admin` / `abenix-admin`) |
+| Grafana | http://localhost:3030 (`admin` and the password in secret `abenix-grafana-admin`, `abenix-admin` unless `GRAFANA_ADMIN_PASSWORD` was set when it was created) |
 | Prometheus | http://localhost:9090 |
 
-Sign in as `admin@abenix.dev` / `Admin123456`.
+`deploy.sh local` installs Grafana and Prometheus by default.
+`OBSERVABILITY=false` skips them and saves about 600 MB of memory.
+
+### Default logins
+
+`packages/db/seeds/seed_users.py` creates two accounts on every deploy and on
+every `dev-local.sh` start:
+
+| Email | Password | Role |
+|---|---|---|
+| `admin@abenix.dev` | `Admin123456` | admin |
+| `demo@abenix.dev` | `Demo123456` | user |
+
+Change them before anyone else can reach the instance.
 
 If port 3000 is already taken, deploy with `WEB_PORT=3100 bash scripts/deploy.sh local`.
-Any port works — the deploy passes it through as the API's allowed CORS origin.
-A port already in use is named rather than skipped, so you find out from the
-deploy rather than from a page that will not load.
-Forwards drop whenever a pod restarts, so `bash scripts/deploy.sh forwards` puts
-them all back and prints which ones answer.
+`API_PORT` moves the API forward the same way. The deploy passes the web port
+through as the API's allowed CORS origin. A port already in use is named rather
+than skipped, so you find out from the deploy rather than from a page that will
+not load. Forwards drop whenever a pod restarts, so `bash scripts/deploy.sh forwards`
+puts them all back and prints which ones answer.
 
-### Path B — processes on your machine
+### Path B: processes on your machine
 
 ```bash
-bash scripts/dev-local.sh             # start, self-heals anything left on its ports
+bash scripts/dev-local.sh             # start, cleans up anything left on its ports first
 bash scripts/dev-local.sh --status    # PID, port and health per service, exit 1 if any is down
 bash scripts/dev-local.sh --restart
 bash scripts/dev-local.sh --stop
 ```
 
-It starts `docker compose` for Postgres (5432), Redis (6379), NATS (4222),
-mosquitto (1883), TimescaleDB (5433), Neo4j, MinIO, pgAdmin and the three edge
-runtimes from `docker-compose.yml`, installs npm and pip
-dependencies when missing, runs migrations, then launches:
+It runs `docker compose up -d`, which starts every service in
+`docker-compose.yml`: Postgres (5432), Redis (6379), NATS (4222), mosquitto
+(1883), TimescaleDB (5433), Neo4j (7474 and 7687), MinIO (9000), pgAdmin (5050)
+and the three edge runtimes (8088 to 8090). It then installs npm and pip
+dependencies when they are missing, runs migrations, seeds agents, accounts,
+portfolio schemas and sample ML models, and launches:
 
 | Process | Port | Notes |
 |---|---|---|
 | API, `uvicorn --reload` | 8000 | `DEBUG=true`, `IS_LOCAL_DEV=1`, `ENVIRONMENT=local`, `PGSSLMODE=disable` |
-| Web, `next dev` | 3000 | |
-| Celery worker | | `--pool=solo`, queues `documents,cognify,agents` |
+| Web, `next dev` | 3000 | `apps/web/.env.local` is created with `NEXT_PUBLIC_API_URL=http://localhost:8000` if missing |
+| Celery worker | | `--pool=solo`, queues `documents,cognify` |
 | NATS consumer, `consumer.py` | health on 8002 | `RUNTIME_MODE=remote`, pool `default` |
 
 It exports `QUEUE_BACKEND=nats`, `SCALING_EXEC_REMOTE=true`, `NATS_USER=abenix`,
 `NATS_PASSWORD=abenix-dev`, `MQTT_URL` and `TSDB_URL` unless you set them, and
-reads the rest from `.env`. Logs go to `logs/<service>.log`. Before it starts it
-stops any `kubectl port-forward` it finds, so a forward to a cluster cannot
-shadow the local ports.
+reads the rest from `.env`. File-writing tools get data directories under
+`.data/`. Logs go to `.local-logs/<service>.log` (`abenix-api.log`,
+`abenix-web.log`, `celery.log`, `consumer.log`), or to `$LOG_DIR` if you set it.
+Before it starts it stops any `kubectl port-forward` it finds, so a forward to a
+cluster cannot shadow the local ports.
 
-### Path C — frontend against a running backend
+The start fails early, with the fix printed, when Docker is not running, when
+the vendored SDK copies have drifted (`bash scripts/sync-sdks.sh` fixes that), or
+when the schema is still missing columns after migrations.
+
+### Path C: frontend against a running backend
 
 ```bash
 # backend in minikube
@@ -173,15 +206,15 @@ cd apps/web
 NEXT_PUBLIC_API_URL=http://localhost:8000 npm run dev
 ```
 
-Both forward the API to `localhost:8000`. Start forwards only through these
-scripts so they can be listed and stopped as a set. You get Next.js hot reload
-with real platform data. Any backend change needs path A or B.
+Both scripts forward the API to `localhost:8000`. Start forwards only through
+these scripts so they can be listed and stopped as a set. You get Next.js hot
+reload with real platform data. Any backend change needs path A or B.
 
 ---
 
 ## Required env vars
 
-`.env` at repo root:
+`.env` at repo root, copied from `.env.example`:
 
 ```bash
 # LLM provider keys (at least one)
@@ -189,7 +222,7 @@ ANTHROPIC_API_KEY=sk-ant-...
 OPENAI_API_KEY=sk-...
 GOOGLE_API_KEY=...
 
-# Tool integrations (optional — without these, related tools degrade gracefully)
+# Tool integrations (optional, the tools that need them say so when they are missing)
 TAVILY_API_KEY=tvly-...
 EIA_API_KEY=...
 BRAVE_SEARCH_API_KEY=...
@@ -200,7 +233,6 @@ ALPHA_VANTAGE_API_KEY=...
 MEDIASTACK_API_KEY=...
 ENTSOE_API_KEY=...
 AISSTREAM_API_KEY=...
-
 ```
 
 `deploy.sh` reads `.env` and passes the provider and tool keys it knows into
@@ -208,10 +240,13 @@ AISSTREAM_API_KEY=...
 `SECRET_KEY` for a local cluster come from `values-local.yaml`, not from
 `.env`. `dev-local.sh` runs the API with `DEBUG=true`, which accepts the
 default `SECRET_KEY` and mints throwaway JWT keys in process, so a restart logs
-everyone out. Set `JWT_PRIVATE_KEY` and `JWT_PUBLIC_KEY` in `.env` if that
-bothers you. `.env.example` lists the rest.
+everyone out. Set `JWT_PRIVATE_KEY` and `JWT_PUBLIC_KEY` in `.env` to avoid
+that, see [09-reference/06-signing-keys](../09-reference/06-signing-keys.md) for
+how to make a pair. `.env.example` lists the rest.
 
-Anything missing degrades the corresponding tool — `tavily_search` returns "tool not configured" instead of crashing.
+A missing tool key does not crash anything. The tool answers that it is not
+configured and names the key, and an admin can add it later under
+**Admin -> Tool Configuration**, see [01-add-a-tool](01-add-a-tool.md).
 
 ### Knowledge bases without an embedding key
 
@@ -232,29 +267,39 @@ answers queries embedded the other way.
 
 ## Running tests
 
-Unit (Python):
+The quickest way to run what CI runs, before you push:
+
 ```bash
-cd apps/api && pytest
-cd apps/agent-runtime && pytest
+bash scripts/check-before-push.sh           # everything
+bash scripts/check-before-push.sh --fast    # skip the web build
+bash scripts/check-before-push.sh --python  # Python gates only
 ```
 
-Unit (TS):
+The pieces on their own, from the repo root:
+
 ```bash
-cd apps/web && npm run test
+python -m pytest tests/unit/ -q                    # unit tests, no services needed
+python -m pytest -q apps/agent-runtime/tests       # runtime tests
+npm run test --workspace=apps/web                  # web unit tests (vitest)
 ```
 
-End-to-end (Playwright):
+`apps/api/tests` talks to a real Postgres through the API's `DATABASE_URL`, so
+run it with path B up.
+
+End-to-end (Playwright), against a running stack:
+
 ```bash
-# Run the audit-fixes spec against your local deployment.
-# BASE and API default to localhost:3000 and localhost:8000, so pass them
-# only if you deployed with WEB_PORT or API_PORT set.
+# BASE and API default to localhost:3000 and localhost:8000 in this spec,
+# so pass them only if you moved the ports
 USE_K8S=true npx playwright test e2e/uat_audit_fixes.spec.ts
 
 # Same spec against a deploy that moved the web port
 USE_K8S=true BASE=http://localhost:3100 npx playwright test e2e/uat_audit_fixes.spec.ts
 ```
 
-See [05-testing](05-testing.md) for the full test catalogue.
+`USE_K8S=true` stops Playwright from starting its own web server. Defaults
+differ between specs, so read the header of the one you run. See
+[05-testing](05-testing.md) for the full catalogue.
 
 ---
 
@@ -269,35 +314,39 @@ k logs -l abenix.io/pool=default -f            # one runtime pool
 k exec -it deploy/abenix-api -- python -c "import app.main; print('ok')"
 ```
 
-Grafana is already forwarded to http://localhost:3030 by `deploy.sh`. For any
-forward that dropped, run `bash scripts/deploy.sh forwards` rather than
-starting one by hand.
+Grafana is forwarded to http://localhost:3030 by `deploy.sh`. For any forward
+that dropped, run
+`bash scripts/deploy.sh forwards` rather than starting one by hand.
 
 ---
 
 ## Resetting
 
 ```bash
-# Nuke the cluster, keep the code
+# Delete the cluster and build it again, keeps your working tree
 FRESH=true bash scripts/deploy.sh local
 
-# Or just reset the database, then let the deploy rebuild schema and seeds
+# Or reset only the database, then let the deploy rebuild schema and seeds
 k exec abenix-postgresql-0 -- bash -c \
   'PGPASSWORD=$POSTGRES_PASSWORD psql -U postgres -d abenix -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"'
 bash scripts/deploy.sh local
 ```
 
-The API pod's `db-migrate` init container runs `python -m bootstrap` and
-`alembic upgrade heads` from `/app/packages/db` on every start, and the deploy
-runs every seed again. For path B, `dev-local.sh` runs the migrations itself.
+The API pod's `db-migrate` init container runs `python -m bootstrap`,
+`alembic upgrade heads` and `python -m bootstrap verify` from `/app/packages/db`
+on every start, and the deploy runs every seed again. For path B,
+`dev-local.sh` runs the migrations itself. If its schema check fails on a fresh
+local database, `bash scripts/verify-schema.sh --reset` drops and rebuilds it,
+which deletes all data.
 
 ---
 
 ## See also
 
-- [01-add-a-tool](01-add-a-tool.md) — first thing to try once running
-- [03-add-a-page](03-add-a-page.md) — first UI change
-- [04-debugging](04-debugging.md) — when things don't work
+- [07-finding-your-way-around](07-finding-your-way-around.md), a tour of the console once you are signed in
+- [01-add-a-tool](01-add-a-tool.md), the first thing to try once running
+- [03-add-a-page](03-add-a-page.md), the first UI change
+- [04-debugging](04-debugging.md), when things do not work
 
 ---
 
@@ -308,9 +357,11 @@ runs every seed again. For path B, `dev-local.sh` runs the migrations itself.
 | **Local dev launcher (docker compose + uvicorn + Celery + NATS consumer + Next.js)** | [`scripts/dev-local.sh`](../../scripts/dev-local.sh) |
 | **Minikube deploy (full Helm chart on local k8s)** | [`scripts/deploy.sh`](../../scripts/deploy.sh) |
 | **Quick restart of an existing minikube demo** | [`scripts/dev-minikube.sh`](../../scripts/dev-minikube.sh) |
+| **Use-case app registry and prompt** | [`scripts/lib/select-apps.sh`](../../scripts/lib/select-apps.sh) |
 | **docker-compose data plane** | [`docker-compose.yml`](../../docker-compose.yml) |
 | **Helm chart (full deploy)** | [`infra/helm/abenix/`](../../infra/helm/abenix/) |
 | **Alembic migrations** | [`packages/db/alembic/versions/`](../../packages/db/alembic/versions/) |
-| **Seed scripts** | [`packages/db/seeds/`](../../packages/db/seeds/) (agents, atlas, tool presets) |
+| **Seed scripts** | [`packages/db/seeds/`](../../packages/db/seeds/) (agents, users, knowledge bases, atlas, tool defaults) |
+| **Default accounts** | [`packages/db/seeds/seed_users.py`](../../packages/db/seeds/seed_users.py) |
 | **Pre-push CI gate (run locally)** | [`scripts/check-before-push.sh`](../../scripts/check-before-push.sh) |
 | **30-minute end-to-end onboarding** | [`ONBOARDING.md`](../../ONBOARDING.md) (top-level) |

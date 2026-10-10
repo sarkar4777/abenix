@@ -739,6 +739,101 @@ async def export_audit(
     )
 
 
+@router.get("/audit/events")
+async def list_audit_events(
+    actor_id: uuid.UUID | None = None,
+    action: str | None = None,
+    q: str | None = None,
+    since: str | None = None,
+    until: str | None = None,
+    before: int | None = None,
+    limit: int = 50,
+    user: User = Depends(require_capability("audit.view")),
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """The tenant's audit trail, newest first, filtered by person, action, text and time."""
+    from sqlalchemy import String, cast, or_
+
+    from app.routers.settings import _clean_activity_details
+    from models.activity_log import ActivityLog
+
+    try:
+        lo = datetime.fromisoformat(since) if since else None
+        hi = datetime.fromisoformat(until) if until else None
+    except ValueError:
+        return error("Use ISO dates for since and until, like 2026-01-01.", 400)
+    limit = max(1, min(limit, 200))
+    stmt = select(ActivityLog).where(ActivityLog.tenant_id == user.tenant_id)
+    if actor_id:
+        stmt = stmt.where(ActivityLog.user_id == actor_id)
+    if action:
+        stmt = stmt.where(ActivityLog.action.ilike(f"{action.strip()}%"))
+    if q and q.strip():
+        like = f"%{q.strip()}%"
+        stmt = stmt.where(
+            or_(
+                ActivityLog.action.ilike(like),
+                cast(ActivityLog.details, String).ilike(like),
+            )
+        )
+    if lo:
+        stmt = stmt.where(ActivityLog.created_at >= lo)
+    if hi:
+        stmt = stmt.where(ActivityLog.created_at < hi)
+    if before:
+        stmt = stmt.where(ActivityLog.audit_seq < before)
+    rows = (
+        (await db.execute(stmt.order_by(ActivityLog.audit_seq.desc()).limit(limit + 1)))
+        .scalars()
+        .all()
+    )
+    more = len(rows) > limit
+    rows = rows[:limit]
+    ids = {r.user_id for r in rows if r.user_id}
+    people: dict[uuid.UUID, User] = {}
+    if ids:
+        for u in (await db.execute(select(User).where(User.id.in_(ids)))).scalars():
+            people[u.id] = u
+    actions = (
+        (
+            await db.execute(
+                select(ActivityLog.action)
+                .where(ActivityLog.tenant_id == user.tenant_id)
+                .distinct()
+                .order_by(ActivityLog.action)
+                .limit(300)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return success(
+        {
+            "items": [
+                {
+                    "id": str(r.id),
+                    "seq": r.audit_seq,
+                    "action": r.action,
+                    "actor_id": str(r.user_id) if r.user_id else None,
+                    "actor_email": (
+                        people[r.user_id].email if r.user_id in people else None
+                    ),
+                    "actor_name": (
+                        people[r.user_id].full_name if r.user_id in people else None
+                    ),
+                    "details": _clean_activity_details(r.details),
+                    "ip_address": r.ip_address,
+                    "created_at": r.created_at.isoformat() if r.created_at else None,
+                    "chained": r.row_hash is not None,
+                }
+                for r in rows
+            ],
+            "next_before": rows[-1].audit_seq if more and rows else None,
+            "actions": list(actions),
+        }
+    )
+
+
 class ReplayBody(BaseModel):
     mode: str = "pinned"  # pinned | current
     model: str | None = None

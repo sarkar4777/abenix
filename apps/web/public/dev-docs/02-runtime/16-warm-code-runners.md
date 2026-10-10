@@ -8,7 +8,7 @@
 
 The Job path in [11-sandboxed-code-execution](11-sandboxed-code-execution.md) starts a pod, fetches the archive and runs the build on every call. A warm runner does that once per asset version and then answers calls over NATS.
 
-Measured on the cluster:
+Measured on the cluster with [`scripts/load/code_runner_bench.py`](../../scripts/load/code_runner_bench.py):
 
 | Case | Time |
 |---|---|

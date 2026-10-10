@@ -672,7 +672,7 @@ async def list_executions(
     elif sort == "duration":
         joined_query = joined_query.order_by(Execution.duration_ms.desc().nullslast())
     else:  # newest (default)
-        joined_query = joined_query.order_by(desc(Execution.created_at))
+        joined_query = joined_query.order_by(desc(Execution.created_at), Execution.id)
 
     joined_query = joined_query.offset(offset).limit(limit)
 

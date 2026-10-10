@@ -13,6 +13,7 @@
  *   BASE=http://localhost:3100 API=http://localhost:8000 npx playwright test e2e/uat_marketplace_ui.spec.ts --workers=1
  */
 import { test, expect, type Browser, type Page } from '@playwright/test';
+import { showAllTools, sidebarToggle } from './helpers/sidebar';
 import * as path from 'path';
 
 const BASE = process.env.BASE || 'http://localhost:3100';
@@ -68,24 +69,6 @@ async function shot(page: Page, name: string) {
 async function noSideScroll(page: Page) {
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
   expect(overflow).toBeLessThanOrEqual(1);
-}
-
-function sidebarToggle(page: Page) {
-  return page.getByTestId('sidebar-mode-toggle').first();
-}
-
-// Essentials hides the store, a person opens the full list from the foot of the sidebar
-async function showAllTools(page: Page) {
-  const toggle = sidebarToggle(page);
-  await expect(toggle).toBeVisible({ timeout: 20_000 });
-  if ((await toggle.getAttribute('data-mode')) !== 'all') {
-    await expect(toggle).toHaveText('Show all tools');
-    const saved = page.waitForResponse((r) => r.url().includes('/api/me/ui-prefs') && r.request().method() === 'PUT');
-    await toggle.click();
-    expect((await saved).ok(), 'sidebar choice saved').toBe(true);
-  }
-  await expect(toggle).toHaveAttribute('data-mode', 'all');
-  await expect(page.getByTestId('sidebar-all').first()).toBeVisible();
 }
 
 async function asUser(browser: Browser, who: { email: string; password: string }) {

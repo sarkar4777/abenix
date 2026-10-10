@@ -39,6 +39,14 @@ async def websocket_endpoint(
         if not sub or str(user_id) != sub:
             await ws.close(code=4001, reason="Unauthorized")
             return
+        if payload.get("sid"):
+            from app.core import sessions
+
+            async with async_session() as s:
+                live = await sessions.is_live(s, payload["sid"], user_id)
+            if not live:
+                await ws.close(code=4001, reason="Unauthorized")
+                return
     except Exception:
         await ws.close(code=4001, reason="Unauthorized")
         return
@@ -78,7 +86,7 @@ async def list_notifications(
     base = (
         select(Notification)
         .where(Notification.user_id == user.id)
-        .order_by(Notification.created_at.desc())
+        .order_by(Notification.created_at.desc(), Notification.id)
     )
 
     count_result = await db.execute(

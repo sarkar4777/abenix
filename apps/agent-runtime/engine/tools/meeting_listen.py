@@ -202,7 +202,9 @@ class MeetingListenTool(BaseTool):
                     )
                 return
             if _is_likely_hallucination(text):
-                logger.debug("dropping likely-hallucinated transcript: %s", text[:80])
+                logger.debug(
+                    "dropping likely-hallucinated transcript (%d chars)", len(text)
+                )
                 return
             words = text.split()
             if len(words) < min_words:

@@ -64,8 +64,9 @@ SAMPLE_PROMPT = (
     "1. Call sample_plant with operation read. It returns pressure_bar, setpoint_bar, demand "
     "and a note on how the plant responds: pressure settles to about setpoint_bar x demand "
     "within 30 seconds, give or take 0.1 bar.\n"
-    "2. Work out the right setpoint, 4.5 / demand rounded to 2 decimals. If setpoint_bar "
-    "already equals it, change nothing and say the plant is fine.\n"
+    "2. Work out the right setpoint, 4.5 / demand rounded to 2 decimals. Only if setpoint_bar "
+    "already equals it exactly, change nothing and say the plant is fine. A gap of 0.01 bar "
+    "still counts, being close is not a reason to skip.\n"
     "3. Otherwise call sample_plant with operation set_setpoint and that setpoint_bar.\n"
     "Always pass _intent, one sentence on why, and _prediction for pressure_bar 30 seconds "
     'later as {"metric": "pressure_bar", "value": v, "low": v - 0.25, "high": v + 0.25, '
@@ -2931,6 +2932,10 @@ async def wait(
             names = await users_by_id(db, [a.decided_by])
             return _wait_view(a, names.get(str(a.decided_by)), approval)
         await db.commit()
+        # the session keeps loaded rows, so the next read would see the old status
+        db.expire(a)
+        if approval is not None:
+            db.expire(approval)
         await asyncio.sleep(1.0)
 
 

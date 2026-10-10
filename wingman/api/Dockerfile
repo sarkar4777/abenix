@@ -19,6 +19,7 @@ COPY main.py .
 COPY cache.py .
 COPY trajectories.py .
 COPY narration.py .
+COPY agent_json.py .
 COPY data/ ./data/
 
 ENV PYTHONPATH=/app:/app/sdk

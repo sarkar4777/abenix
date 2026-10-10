@@ -207,7 +207,9 @@ def read_manifest(storage_uri: str) -> dict[str, Any]:
                 data = json.loads(zf.read(prefix + MANIFEST))
                 out = data if isinstance(data, dict) else {}
     except Exception as e:
+        # an archive not yet on this pod's disk is read again next time, not remembered as empty
         logger.debug("runner manifest unreadable for %s: %s", storage_uri, e)
+        return out
     _manifest_cache[storage_uri] = out
     return out
 
@@ -800,6 +802,8 @@ class WarmOutcome:
 
 _kicked: dict[str, float] = {}
 KICK_EVERY = 20.0
+# how long a call waits for a runner that is starting, before the slower Job path
+WARM_WAIT = float(os.environ.get("CODE_RUNNER_WARM_WAIT", "60"))
 BUSY_RETRIES = 3
 
 
@@ -908,18 +912,21 @@ async def call_warm(
         except Exception as e:
             if _no_responders(e):
                 fire(kick(spec, asset.get("storage_uri") or ""))
-                return WarmOutcome(
-                    reason="no warm runner yet, warming it", name=spec.name
-                )
-            if _timeout(e):
+                msg = await _await_runner(nc, spec, data, asset, timeout_s)
+                if msg is None:
+                    return WarmOutcome(
+                        reason="no warm runner yet, warming it", name=spec.name
+                    )
+            elif _timeout(e):
                 return WarmOutcome(
                     reason="runner did not reply in time",
                     fallback=False,
                     name=spec.name,
                 )
-            return WarmOutcome(
-                reason=f"NATS request failed: {e}", fallback=False, name=spec.name
-            )
+            else:
+                return WarmOutcome(
+                    reason=f"NATS request failed: {e}", fallback=False, name=spec.name
+                )
         try:
             resp = json.loads(msg.data)
         except ValueError:
@@ -941,6 +948,34 @@ async def call_warm(
         name=spec.name,
         duration_ms=int((time.monotonic() - t0) * 1000),
     )
+
+
+def keeps_warm(asset: dict[str, Any]) -> bool:
+    """True when the asset's manifest asks for a runner kept warm."""
+    try:
+        return (
+            min_warm_for(read_manifest(asset.get("storage_uri") or ""), 0, settings())
+            > 0
+        )
+    except Exception:
+        return False
+
+
+async def _await_runner(
+    nc: Any, spec: RunnerSpec, data: bytes, asset: dict[str, Any], timeout_s: int
+) -> Any | None:
+    """Wait for a runner that is starting, when the asset is meant to stay warm."""
+    if WARM_WAIT <= 0 or not keeps_warm(asset):
+        return None
+    deadline = time.monotonic() + WARM_WAIT
+    while time.monotonic() < deadline:
+        await asyncio.sleep(1.0)
+        try:
+            return await nc.request(spec.subject, data, timeout=timeout_s + 20)
+        except Exception as e:
+            if not _no_responders(e):
+                return None
+    return None
 
 
 # ── reaper ───────────────────────────────────────────────────────────────────
@@ -1140,7 +1175,14 @@ def main(argv: list[str]) -> int:
     redis_url = os.environ.get("REDIS_URL", "")
     cmd = argv[1] if len(argv) > 1 else ""
     if cmd == "reap":
-        report = asyncio.run(reap_once(db_url, redis_url))
+        try:
+            report = asyncio.run(reap_once(db_url, redis_url))
+        except Exception as e:
+            # a fresh install runs this before the migrations have made the tables
+            if "does not exist" in str(e):
+                print("schema not migrated yet, nothing to reap")
+                return 0
+            raise
         print(json.dumps({k: v for k, v in report.items() if v}, indent=1))
         return 0
     if cmd in ("warm", "scale-zero") and len(argv) > 2:

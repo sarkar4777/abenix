@@ -37,6 +37,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "apps" / "agent-run
 from engine.moderation_client import (  # noqa: E402
     content_hash,
     evaluate,
+    event_provider_response,
     mask_spans,
     pattern_spans,
 )
@@ -151,6 +152,21 @@ def _hold_settings(body: dict) -> tuple[dict[str, Any], JSONResponse | None]:
     return out, None
 
 
+# Deprecated. OpenAI is the only moderation provider, the column stays with
+# its default and the API neither returns nor stores it.
+MODERATION_PROVIDER = "openai"
+PROVIDER_DEPRECATED = (
+    "'provider' is deprecated. Moderation always uses OpenAI, leave the field out."
+)
+
+
+def _provider_problem(body: dict) -> JSONResponse | None:
+    raw = body.get("provider")
+    if raw in (None, "") or str(raw).strip().lower() == MODERATION_PROVIDER:
+        return None
+    return error(PROVIDER_DEPRECATED, 400, error_code="provider_deprecated")
+
+
 def _policy_dict(p: ModerationPolicy) -> dict[str, Any]:
     return {
         "id": str(p.id),
@@ -161,7 +177,6 @@ def _policy_dict(p: ModerationPolicy) -> dict[str, Any]:
         "pre_llm": p.pre_llm,
         "post_llm": p.post_llm,
         "on_tool_output": p.on_tool_output,
-        "provider": p.provider,
         "provider_model": p.provider_model,
         "thresholds": p.thresholds or {},
         "default_threshold": float(p.default_threshold),
@@ -201,6 +216,8 @@ def _event_dict(e: ModerationEvent) -> dict[str, Any]:
         # Surface the provider error captured at vet-time so the UI can
         # render the underlying reason instead of a generic "error" badge.
         "provider_error": pr.get("_provider_error") if isinstance(pr, dict) else None,
+        "masked_spans": (pr.get("_masked_spans") if isinstance(pr, dict) else None)
+        or [],
         "acted_categories": e.acted_categories or [],
         "latency_ms": e.latency_ms,
         "created_at": e.created_at.isoformat() if e.created_at else None,
@@ -327,12 +344,12 @@ async def vet(
             or "Moderation provider unavailable; policy fail_closed=true forced block."
         )
 
-    persisted_provider_response = dict(decision.provider_response or {})
+    persisted_provider_response = event_provider_response(decision)
     if decision.error:
         persisted_provider_response["_provider_error"] = decision.error
         try:
             moderation_provider_errors_total.labels(
-                provider=(policy.provider if policy else "openai"),
+                provider=MODERATION_PROVIDER,
                 model=provider_model,
             ).inc()
         except Exception:
@@ -443,6 +460,9 @@ async def create_policy(
     except ValueError:
         return error(f"invalid default_action: {default_action_raw}", 400)
 
+    bad_provider = _provider_problem(body)
+    if bad_provider is not None:
+        return bad_provider
     patterns_normalised, err = _normalise_custom_patterns(body)
     if err is not None:
         return err
@@ -470,7 +490,7 @@ async def create_policy(
         pre_llm=bool(body.get("pre_llm", True)),
         post_llm=bool(body.get("post_llm", True)),
         on_tool_output=bool(body.get("on_tool_output", False)),
-        provider=str(body.get("provider") or "openai"),
+        provider=MODERATION_PROVIDER,
         provider_model=str(body.get("provider_model") or "omni-moderation-latest"),
         thresholds=body.get("thresholds") or {},
         default_threshold=float(body.get("default_threshold") or 0.5),
@@ -550,6 +570,9 @@ async def update_policy(
     if not p:
         return error("not found", 404)
 
+    bad_provider = _provider_problem(body)
+    if bad_provider is not None:
+        return bad_provider
     patterns_normalised, err = _normalise_custom_patterns(body)
     if err is not None:
         return err
@@ -575,7 +598,6 @@ async def update_policy(
         "pre_llm",
         "post_llm",
         "on_tool_output",
-        "provider",
         "provider_model",
         "thresholds",
         "default_threshold",

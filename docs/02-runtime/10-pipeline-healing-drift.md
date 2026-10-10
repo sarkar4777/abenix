@@ -62,7 +62,7 @@ Owner means `agents.creator_id`. Cross-tenant ids return 404.
 
 ### What gets captured in a failure diff
 
-`engine/pipeline.py` calls `healing.capture_failure` when a node fails and its `on_error` is `stop` (the default). Nodes with `on_error: continue` or an error branch are not captured. Capture is fire-and-forget and needs the executor to have `db_url`, `tenant_id` and `agent_id` set, which the API and worker paths do.
+`engine/pipeline.py` calls `healing.capture_node_failure`, a wrapper over `capture_failure`, when a node fails and its `on_error` is `stop` (the default). Nodes with `on_error: continue` or an error branch are not captured. Capture is fire-and-forget and needs `db_url`, `tenant_id`, `agent_id` and an `__execution_id` in the run context. The `/api/pipelines/*` routes and the queue consumer set these. The inline `/api/agents/{id}/execute` pipeline paths pass no execution id, so failures there are not captured.
 
 Stored on `pipeline_run_diffs`:
 
@@ -73,7 +73,7 @@ Stored on `pipeline_run_diffs`:
 - `upstream_inputs`: outputs of the nodes this one depends on
 - `recent_success_count`, `recent_failure_count`: completed and failed executions of the pipeline in the last 24h
 
-`capture_failure` accepts `last_success_sample` and `error_traceback` (or `exc`, from which it formats the traceback). The call site in `pipeline.py` currently passes neither, so `expected_*` is null and `error_traceback` is null on every row today. Wiring those two arguments is the open item on the executor side.
+The executor keeps each completed node's output as its last good sample (`remember_success`, Redis `healing:last_success:{pipeline}:{node}`, 7 days, with an in-process fallback) and passes it as `last_success_sample`. It passes the captured traceback for a raised exception, or the error message for a failure the tool reported. `expected_*` is null only when the node has not succeeded within the TTL.
 
 DLP redaction runs before insert on `observed_sample`, `expected_sample`, `upstream_inputs`, `error_message` and `error_traceback`. It uses the patterns in `engine/dlp.py` (email, US phone, SSN, card number, IP, AWS keys, generic API keys, bearer tokens) applied to every string leaf and key. Samples are then truncated to 8 KB, inputs to 4 KB, tracebacks to 4 KB.
 
@@ -112,7 +112,7 @@ A rejected proposal returns 422 from `/diagnose` with the reason. Nothing is wri
 - `reject` sets `rejected`, `decided_by`, `decided_at`
 - `rollback` requires the live config to still hash to `dsl_after.pipeline_config`, else 409 `stale_rollback`. On match it restores `applied_snapshot` (falls back to `dsl_before.pipeline_config` for rows older than the snapshot column) and sets `rolled_back_at`, `rolled_back_by`. Status stays `accepted`. It writes a revision with source `revert` and never waits on the eval gate
 
-Each of the three writes an `activity_logs` row through `app.core.audit.log_action` with action `pipeline_patch.applied`, `pipeline_patch.rejected` or `pipeline_patch.rolled_back`, the patch id, title and the before/after hashes.
+Each of the three writes an `activity_logs` row through `app.core.audit.log_action` with action `pipeline_patch.applied`, `pipeline_patch.rejected` or `pipeline_patch.rolled_back`. Apply and rollback log the patch id, title and before/after hashes, apply also logs risk level and confidence. Reject logs the patch id and title.
 
 Drafting a new proposal marks any older pending proposals on the same pipeline `superseded`.
 
@@ -127,24 +127,24 @@ Migration `1100_f_patch_cas` adds the two compare-and-swap columns. `packages/db
 
 ### UI
 
-`/agents/{id}/healing` lists failures, pending proposals, applied patches and history. A failed run in the builder shows each step's error inline and a Diagnose and fix link to this page. Each proposal lists the changed fields as step, field, old value and new value above the raw JSON-Patch. An applied patch links back to the builder to run it again. Apply and Reject show only when `meta.can_edit` is true. Roll back shows for `can_edit` or when the viewer is the approver. A failed load shows the error and a retry, it no longer reads as "no failures". There is no dashboard widget and drift does not appear on `/alerts`.
+`/agents/{id}/healing` lists failures, pending proposals, applied patches and history. A failed run in the builder shows each step's error inline and a Diagnose and fix link to this page. Each proposal lists the changed fields as step, field, old value and new value above the raw JSON-Patch. An applied patch links back to the builder to run it again. Apply and Reject show only when `meta.can_edit` is true. Roll back shows for `can_edit` or when the viewer is the approver. A failed load shows the error and a retry. There is no dashboard widget and drift does not appear on `/alerts`.
 
 ## Drift detection
 
-Detection is no longer inline only. Every terminal path calls one hook, `record_terminal(db_or_session_factory, execution_row)` in `services/execution_hooks.py`, and a scheduler job sweeps up anything the hooks missed.
+Every terminal path calls one hook, `record_terminal(db_or_session_factory, execution_row)` in `services/execution_hooks.py`, and a scheduler job sweeps up anything the hooks missed.
 
 Terminal paths that call the hook:
 
 - the three execute paths in `routers/agents.py` (streamed, non-streamed, non-streamed pipeline)
-- the queue consumer in `apps/agent-runtime/consumer.py`, from `_mark_done`, so completed and failed runs are scored for both agents and pipelines
+- the queue consumer in `apps/agent-runtime/consumer.py`, from `_mark_done` through `_after_terminal`, which calls `record_terminal_by_id`, so completed and failed runs are scored for both agents and pipelines
 
-The hook reads duration, tokens, cost, confidence, output length, tool failures and total tool calls off the execution row. Pipelines have no token or cost columns filled, so those are summed from `node_results` the way the old inline code did. Failed runs are recorded too, their duration and tool failure rate are part of the signal.
+The hook reads duration, tokens, cost, confidence, output length, tool failures and total tool calls off the execution row. For pipelines, tokens and cost come from the row when set and are summed from `node_results` otherwise. Tool failures and tool-call counts always come from `node_results`. Failed runs are recorded too, their duration and tool failure rate are part of the signal.
 
 Each execution is scored at most once. The hook claims `drift:recorded:{execution_id}` in Redis with `SET NX` (TTL `DRIFT_RECORDED_TTL_SECONDS`, default one day) before recording and drops the claim if the detector raises, so a retry is possible. There is no `drift_recorded_at` column.
 
 ### Backlog scan
 
-`score_drift_backlog` in `core/scheduler.py` runs every `DRIFT_SCAN_INTERVAL_SECONDS` (default 300) under the transaction-scoped `advisory_lock()` so one API replica does the work. It calls `scan_backlog`, which reads completed and failed executions whose `completed_at` falls after the last watermark (`drift:backlog:watermark` in Redis, one interval of overlap) and runs them through the same hook. Already claimed ids are skipped, so a run scored inline costs one Redis read. Batches are capped at `DRIFT_SCAN_BATCH` (default 500), a full batch moves the watermark to the last row instead of now so nothing is skipped.
+`score_drift_backlog` in `core/scheduler.py` runs every `DRIFT_SCAN_INTERVAL_SECONDS` (default 300) under the transaction-scoped `advisory_lock()` so one API replica does the work. It calls `scan_backlog`, which reads completed and failed executions whose `completed_at` falls after the last watermark (`drift:backlog:watermark` in Redis, one interval of overlap) and runs them through the same hook. Already claimed ids are skipped after an agent lookup and the claim attempt, so they are not scored twice. Batches are capped at `DRIFT_SCAN_BATCH` (default 500), a full batch moves the watermark to the last row instead of now so nothing is skipped.
 
 This is what catches a consumer-side miss. The runtime image ships only a few `apps/api` modules, so when the consumer cannot import the hook the next scan scores the run within one interval.
 

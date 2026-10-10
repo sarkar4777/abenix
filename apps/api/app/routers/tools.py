@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import asyncio
 import os
 from typing import Any
 
@@ -540,6 +541,12 @@ TOOL_CATALOG = [
         "id": "ml_model",
         "name": "ML Model",
         "description": "Run inference on registered ML models (sklearn, PyTorch, ONNX, XGBoost) — list_models / predict / get_model_info operations",
+        "category": "ml",
+    },
+    {
+        "id": "ml_model_register",
+        "name": "ML Model Register",
+        "description": "Register a model file made earlier in the run as a new ML model version, from the workspace's export folder or as base64",
         "category": "ml",
     },
     # Code Runners
@@ -1302,6 +1309,12 @@ async def execute_tool(
     tool_started_at = time.time()
     try:
         result = await tool.execute(arguments)
+    except asyncio.CancelledError:
+        # the caller went away, give the slot back before the cancel unwinds
+        await asyncio.shield(
+            tool_gate.release(decision, tool_slug, tenant_id, ok=False)
+        )
+        raise
     except Exception as e:
         await tool_gate.release(decision, tool_slug, tenant_id, ok=False)
         logger.exception("direct tool execute failed: %s", tool_slug)
@@ -1370,6 +1383,23 @@ async def execute_tool(
     )
 
 
+_LOG_TASKS: set = set()
+# a log row keeps a preview, a 30 KB state blob per call would make the log the bottleneck
+_LOG_KEEP_CHARS = int(os.environ.get("TOOL_LOG_KEEP_CHARS", "4000"))
+
+
+def _clip(value):
+    import json as _json
+
+    if value is None:
+        return None
+    text = value if isinstance(value, str) else _json.dumps(value, default=str)
+    if len(text) <= _LOG_KEEP_CHARS:
+        return value
+    clipped = {"truncated": True, "size": len(text), "preview": text[:_LOG_KEEP_CHARS]}
+    return clipped if not isinstance(value, str) else _json.dumps(clipped)
+
+
 async def _log_invocation(
     db,
     user,
@@ -1382,31 +1412,42 @@ async def _log_invocation(
     error_message: str | None = None,
     cache_hit: bool = False,
 ):
+    """Record the call after the answer has gone out, on its own session."""
+    import asyncio
     import time
+
+    from app.core.deps import async_session
     from models.tool_invocation import ToolInvocation, ToolInvocationStatus
 
-    try:
-        row = ToolInvocation(
-            tenant_id=user.tenant_id,
-            user_id=user.id,
-            via="direct",
-            tool_slug=tool_slug,
-            arguments=(body or {}).get("arguments"),
-            config=(body or {}).get("config"),
-            status=ToolInvocationStatus(
-                status if status in {"ok", "error", "timeout"} else "error"
-            ),
-            output=getattr(result, "content", None) if result else None,
-            output_metadata=getattr(result, "metadata", None) if result else None,
-            is_error=getattr(result, "is_error", False) if result else True,
-            error_message=error_message,
-            duration_ms=int((time.time() - started_at) * 1000),
-            requested_via="http",
-        )
-        db.add(row)
-        await db.commit()
-    except Exception as _e:
-        logger.warning("could not log tool invocation: %s", _e)
+    fields = dict(
+        tenant_id=user.tenant_id,
+        user_id=user.id,
+        via="direct",
+        tool_slug=tool_slug,
+        arguments=_clip((body or {}).get("arguments")),
+        config=(body or {}).get("config"),
+        status=ToolInvocationStatus(
+            status if status in {"ok", "error", "timeout"} else "error"
+        ),
+        output=_clip(getattr(result, "content", None)) if result else None,
+        output_metadata=getattr(result, "metadata", None) if result else None,
+        is_error=getattr(result, "is_error", False) if result else True,
+        error_message=error_message,
+        duration_ms=int((time.time() - started_at) * 1000),
+        requested_via="http",
+    )
+
+    async def _write() -> None:
+        try:
+            async with async_session() as session:
+                session.add(ToolInvocation(**fields))
+                await session.commit()
+        except Exception as _e:
+            logger.warning("could not log tool invocation: %s", _e)
+
+    task = asyncio.create_task(_write())
+    _LOG_TASKS.add(task)
+    task.add_done_callback(_LOG_TASKS.discard)
 
 
 @router.get("/invocations")

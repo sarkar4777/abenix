@@ -24,7 +24,7 @@ The fastest way to see the whole ladder. Nothing external is needed.
 1. Open **Monitor -> Autonomy**. On an empty tenant choose **Try it with the sample plant**. This creates the agent "Plant operator (sample)", the action type `sample_plant.set_setpoint`, the limits decision `sample_plant_limits` (setpoint between 2 and 6 bar) and a grant at Watching, all through the public API.
 2. On the grant page press **Run the sample agent** with 1, 3 or 5. Each run reads the simulated plant and, when pressure is outside 4.0 to 5.0 bar, proposes a new setpoint with an intent and a prediction.
 3. Open **Approvals -> Watching reviews**. Answer with the keyboard: `A` agree, `D` I did something else (then type what), `N` not sure.
-4. After 5 reviews with enough agreement the grant shows **Ready to move to Asks first**. Press **Promote**. Because this is the sample, the author may approve it, so the grant page shows the reason and an **Approve now** button. The change is recorded as self-approved. On a real action type a second user with `autonomy.grant` signs it in **Approvals**.
+4. After 5 reviews with enough agreement every requirement under **Ladder** on the grant page is met and **Promote** turns on. Press it. Because this is the sample, the author may approve it, so the grant page shows the reason and an **Approve now** button. The change is recorded as self-approved. On a real action type a second user with `autonomy.grant` signs it in **Approvals**.
 5. Run it again. Each setpoint now waits in **Approvals** as an action card. Approve, Edit and approve, or Reject.
 6. 30 seconds after each approved setpoint the scheduler reads the plant and scores the prediction. After 8 scored actions the grant is ready for Acts within limits.
 7. Flag harm on any executed action from its card. The grant drops to Asks first at once and the owners get a notification.
@@ -73,7 +73,7 @@ See also [01-add-a-tool](01-add-a-tool.md#declare-what-the-tool-changes).
 
 ## 3. Enrol an agent's action from the UI
 
-From **Autonomy -> Enrol an action**, from the agent's **Actions** panel on its info page, or from an unmanaged row:
+From **Autonomy -> Enrol an agent**, from the agent's **Actions** panel on its info page, or from an unmanaged row:
 
 1. **Pick an agent.** Search every agent you can see.
 2. **Pick an action.** Only tools on the agent with an effect show. Each tool lists the actions it is already enrolled on, with an Open link, and the existing actions other agents use. **Use it** joins an existing action with its settings, which suits a pipeline and an agent sending the same command. **New action** starts from the tool's defaults.
@@ -284,7 +284,7 @@ if (d.shouldRun()) {
 | Symptom | Cause |
 |---|---|
 | The agent says it changed something but nothing ran | It ignored the watching result. The sample prompt shows the wording that fixes it: never claim the change unless the tool confirms it |
-| Promote is greyed out | Hover it. The tooltip lists every unmet line, each with a link to fix it |
+| Promote is greyed out | Read the list under it, "Promote is off because". It names every unmet line, each with a link to fix it |
 | "You built this agent, so someone else has to approve its promotion" | Separation of duties. Ask another user with `autonomy.grant`. The author may only self-approve the sample, or when nobody else in the workspace holds `autonomy.grant`, and that is checked again at signing |
 | Level shows lower than granted | The agent's prompt, model or tools changed, the grant is paused, or the call was outside the grant's scope. The card's fallback reason says which |
 | Outcomes stay pending | The probe tool needs a value the probe user (the agent's creator) cannot read, or `path` does not match the result. Use **Test** on the How we judge success card |

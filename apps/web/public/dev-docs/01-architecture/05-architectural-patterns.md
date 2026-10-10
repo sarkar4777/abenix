@@ -1,6 +1,6 @@
 # Architectural patterns reference
 
-> Every recurring shape in the codebase. If you see a piece of code and wonder "why is it built this way?", read the matching entry here. Each pattern lists its file home, its rationale, and the failure mode you get if you violate it.
+> The shapes that recur across the codebase. If a piece of code makes you ask "why is it built this way?", find the matching entry here. Most entries name the file that implements the pattern and what breaks if you ignore it.
 
 ---
 
@@ -16,7 +16,7 @@ async def list_widgets(user = Depends(get_current_user), db = Depends(get_db)):
     return await db.execute(select(Widget).where(Widget.tenant_id == user.tenant_id))
 ```
 
-**Violation symptom** — a missing `WHERE tenant_id = …` silently surfaces another tenant's data. Nothing in the deploy gates catches it. `scripts/verify-schema.sh` and the sentinel check only confirm that listed columns exist, so review is the guard.
+**Violation symptom**: a missing `WHERE tenant_id = …` silently surfaces another tenant's data. Nothing in the deploy gates catches it. `scripts/verify-schema.sh` and the sentinel check only confirm that listed columns exist, so review is the guard.
 
 ### 2. actAs (delegated subject)
 
@@ -24,8 +24,10 @@ A service-account API key acts on behalf of an end user through the `X-Abenix-Su
 
 ```python
 subject = ActingSubject(subject_type="wingman", subject_id=trader.id, email=trader.email)
-result = await client.with_subject(subject).execute(slug, input)
+result = await client.execute(slug, message, act_as=subject)
 ```
+
+The Python SDK ([`packages/sdk/python/abenix_sdk/__init__.py`](../../packages/sdk/python/abenix_sdk/__init__.py)) also takes `act_as` on the `Abenix` constructor as the default for every call.
 
 See [01-tenants-rbac](01-tenants-rbac.md) for the full chain.
 
@@ -55,7 +57,7 @@ Mutating endpoints call `log_action()` ([`apps/api/app/core/audit.py`](../../app
 
 `agents.model_config` (with the pipeline DAG inside it as `pipeline_config`), `executions.tool_calls`, `executions.node_results`, `executions.provenance`, `atlas_nodes.properties`, `tool_invocations.output_metadata` are all JSONB. Structural validation happens at the API/SDK boundary, not at the column level.
 
-**When to add a JSONB field vs a column** — used by all rows + queried often → column. Sometimes-present, schema-evolving, used mostly for read-back → JSONB. Never put `tenant_id`, status, or anything you'll group by in JSONB.
+**JSONB or a column?** A field every row has and queries filter on is a column. A field that is sometimes present, still changing shape, and mostly read back is JSONB. Never put `tenant_id`, a status, or anything you group by in JSONB.
 
 ### 7. Soft delete via status
 
@@ -63,7 +65,7 @@ Agents and pipelines are not hard-deleted. `DELETE /api/agents/{id}` sets `statu
 
 Separately, the `nightly_archive` job dumps recording tables (`executions`, `messages`, `activity_logs`, the `*_invocations` tables) past their retention to object storage and deletes them.
 
-**Trap** — `DELETE FROM agents …` directly in psql fails on the foreign keys from `executions` and `agent_revisions`. Always use the API.
+**Trap**: `DELETE FROM agents …` directly in psql fails on the foreign keys from `executions` and `agent_revisions`. Always use the API.
 
 ### 8. Idempotency keys
 
@@ -75,13 +77,13 @@ curl -X POST .../api/agents/my-agent/execute -H "Idempotency-Key: scan-$CORRIDOR
 
 See [09-state-machines](../02-runtime/09-state-machines.md#idempotency--collapsing-retries-on-the-wire).
 
-### 9. Schema migration policy — expand → backfill → contract
+### 9. Schema migration policy: expand, backfill, contract
 
-For risky migrations: add new column (expand), deploy backfill job, deploy code reading/writing new column, wait one release cycle, drop old column (contract). Never expand-and-contract in one migration on a production table.
+For a risky migration, add the new column (expand), backfill it, ship code that reads and writes the new column, wait one release, then drop the old column (contract). Never expand and contract in one migration on a production table.
 
 ### 10. Schema drift catchup migration
 
-`packages/db/alembic/versions/x4y5z6a7b8c9_schema_drift_catchup.py` is idempotent and information_schema-guarded. It picks up any columns that exist in the ORM but not in the database. Re-running is always safe. The `scripts/_schema-sentinels.sh` file is the single source of truth for which columns must exist post-migration.
+[`x4y5z6a7b8c9_schema_drift_catchup.py`](../../packages/db/alembic/versions/x4y5z6a7b8c9_schema_drift_catchup.py) adds a fixed list of columns that were added to the models without a migration (for example `executions.node_results` and `executions.failure_code`). Each add is guarded by an `information_schema` lookup, so re-running it is safe. A new model column still needs its own migration. [`scripts/_schema-sentinels.sh`](../../scripts/_schema-sentinels.sh) is the one list of columns that must exist after migrating.
 
 ### 11. Retention through the nightly archive
 
@@ -89,7 +91,7 @@ There are no hypertables in the main database. Hot tables stay small through the
 
 ### 12. Sentinel-column verification gate
 
-Both `dev-local.sh` and `deploy-azure.sh` run a post-migration check against `scripts/_schema-sentinels.sh`. If any sentinel column is missing, deploy stops with a clear error. This catches "migration script ran but didn't actually do what it said" — a recurring class of failure before this gate existed.
+Both `dev-local.sh` and `deploy-azure.sh` run a post-migration check against `scripts/_schema-sentinels.sh`. If any sentinel column is missing, the deploy stops and names it. This catches a migration that ran but did not do what it said, which happened more than once before the gate existed.
 
 ---
 
@@ -97,7 +99,7 @@ Both `dev-local.sh` and `deploy-azure.sh` run a post-migration check against `sc
 
 ### 13. The four-pool runtime
 
-Four agent-runtime Deployments on Azure (`default`, `chat`, `heavy-reasoning`, `long-running`) isolate workloads. Each is scaled by KEDA on the lag of its own JetStream consumer. A Monte-Carlo on heavy-reasoning never starves chat.
+On Azure four agent-runtime Deployments (`default`, `chat`, `heavy-reasoning`, `long-running`) keep workloads apart. KEDA scales each one on the lag of its own JetStream consumer, or on its Celery list length when `scaling.queueBackend` is `celery`. A long Monte Carlo run on `heavy-reasoning` never starves `chat`.
 
 - Pool picker: [`apps/api/app/routers/agents.py`](../../apps/api/app/routers/agents.py) reads the `agents.runtime_pool` column, set from `/admin/scaling` or the agent YAML. `inline` keeps the run on the API pod.
 - Deployment manifests: [`infra/helm/abenix/templates/agent-runtime-pools.yaml`](../../infra/helm/abenix/templates/agent-runtime-pools.yaml), one Deployment per entry in `scaling.pools`.
@@ -113,7 +115,7 @@ Tier 2: cached prior result (if fresh)                  (fast path)
 Tier 3: explicit "no data" envelope                     (fail-loud)
 ```
 
-**No synthesis tier.** If the agent fails, the UI shows "no recent scan" rather than fabricating numbers. Trader trust > availability.
+**No synthesis tier.** If the agent fails, the UI shows "no recent scan" rather than made-up numbers. A missing number costs less trust than a wrong one.
 
 ### 15. Approval gates block in the pod
 
@@ -151,8 +153,8 @@ The queue hop carries the context too. The NATS backend puts the `traceparent` i
 
 Each pipeline node has `on_error`: `stop` (default), `continue` or `error_branch`. With `error_branch` and an `error_branch_node`, a failure routes to that recovery node. Recovery nodes often call a meta-agent that decides whether to retry, escalate, or skip.
 
-- Edge resolver: [`apps/agent-runtime/engine/pipeline.py`](../../apps/agent-runtime/engine/pipeline.py) — search for `on_error`.
-- Per-node fail-fast vs failure-isolated branching: [02-runtime/07-pipeline-data-flow](../02-runtime/07-pipeline-data-flow.md#error-handling--on_error).
+- Edge resolver: [`apps/agent-runtime/engine/pipeline.py`](../../apps/agent-runtime/engine/pipeline.py), search for `on_error`.
+- Per-node fail-fast vs failure-isolated branching: [02-runtime/07-pipeline-data-flow](../02-runtime/07-pipeline-data-flow.md#errors-and-retries).
 - Full self-healing + drift doc: [02-runtime/10-pipeline-healing-drift](../02-runtime/10-pipeline-healing-drift.md).
 
 ### 20. Topological-sort scheduler with deterministic layer order
@@ -196,7 +198,7 @@ MCP tools annotated with `destructiveHint: true` require explicit approval. Read
 
 ### 26. Reconciliation sweepers in the API scheduler
 
-There is no Celery beat. Sweepers run on APScheduler in the API pod ([`apps/api/app/core/scheduler.py`](../../apps/api/app/core/scheduler.py)), each under a Postgres advisory lock so one replica does the work. `sweep_stale_executions` flips runs still `running` after `STALE_EXECUTION_MAX_MINUTES` (10) to failed with `STALE_SWEEP`, skipping runs waiting on an approval and runs whose queue lease is still live. `escalate_approvals` escalates overdue tiered approvals every 15 minutes. `reconcile_active_executions_gauge` re-syncs the gauge every 5. These catch the case where a pod died before writing terminal status.
+There is no Celery beat. Sweepers run on APScheduler in the API pod ([`apps/api/app/core/scheduler.py`](../../apps/api/app/core/scheduler.py)). The ones that change rows take a Postgres advisory lock, so one replica does the work. Every 5 minutes `sweep_stale_executions` fails runs still `running` after `STALE_EXECUTION_MAX_MINUTES` (default 10) with `STALE_SWEEP`, skipping runs waiting on an approval and runs whose queue lease is still live. `escalate_approvals` escalates overdue tiered approvals every 15 minutes. `reconcile_active_executions_gauge` re-syncs the active-executions gauge every 5. Together they cover a pod that died before writing a terminal status.
 
 ---
 
@@ -210,11 +212,11 @@ Every non-2xx HTTP response built with `error()` ([`apps/api/app/core/responses.
 
 Sensitive span attributes (`llm.prompt`, `llm.completion`, `llm.messages`, `tool.args`, `tool.input`, `tool.output`, `agent.system_prompt`, `agent.input_message`, `agent.output_message` and a few more) are replaced before export. `_redact_value()` in [`engine/tracing.py`](../../apps/agent-runtime/engine/tracing.py) returns `<redacted len=N sha256=XXX>`.
 
-**Known gap** — redaction is by attribute key. An attribute outside the key list exports as-is, so don't put customer records into custom span attributes.
+**Known gap**: redaction is by attribute key. An attribute outside the key list exports as-is, so don't put customer records into custom span attributes.
 
 ### 29. Failure-code taxonomy with stable strings
 
-`executions.failure_code` is an indexed string. `classify_exception` in [`apps/api/app/core/failure_codes.py`](../../apps/api/app/core/failure_codes.py) maps an error to one code by ordered regex rules, for example `STALE_SWEEP`, `LLM_RATE_LIMIT`, `LLM_PROVIDER_ERROR`, `LLM_AUTH_ERROR`, `SANDBOX_TIMEOUT`, `MODERATION_BLOCKED`, `KILL_SWITCH`, `MODEL_NOT_ALLOWED`, `TOOL_NOT_FOUND`, `TOOL_ERROR`, `BUDGET_EXCEEDED`, `INFRA_CRASH`, with `UNKNOWN_ERROR` as the fallback. Alerts group on it. See [09-state-machines](../02-runtime/09-state-machines.md#failure-code-taxonomy).
+`executions.failure_code` is an indexed string. `classify_exception` in [`apps/api/app/core/failure_codes.py`](../../apps/api/app/core/failure_codes.py) maps an error to one code by ordered regex rules, for example `STALE_SWEEP`, `LLM_RATE_LIMIT`, `LLM_PROVIDER_ERROR`, `LLM_AUTH_ERROR`, `SANDBOX_TIMEOUT`, `MODERATION_BLOCKED`, `KILL_SWITCH`, `MODEL_NOT_ALLOWED`, `TOOL_NOT_FOUND`, `TOOL_ERROR`, `BUDGET_EXCEEDED`, `INFRA_CRASH`, with `UNKNOWN_ERROR` as the fallback. Alerts group on it. See [09-state-machines](../02-runtime/09-state-machines.md#failure-codes).
 
 ### 30. Lazy Prometheus metric registration
 
@@ -238,11 +240,11 @@ The last two answer 429 from the execute handler, so a tenant over quota cannot 
 
 The Python SDK lives canonically at `packages/sdk/python/abenix_sdk/`. The vertical apps that live in this repo vendor a copy under `<app>/api/sdk/abenix_sdk/`. `dev-local.sh` and `deploy-azure.sh` both run `scripts/sync-sdks.sh --check` and stop on drift. The CI workflow does not run it.
 
-**Why vendor** — the SDK runs inside the standalone app's Docker image. Pinning a published version would create a release-coupling problem. Vendoring keeps the example deployments simple. **Third-party apps outside this repo should `pip install abenix-sdk`** — vendoring is an in-repo convenience, not a recommendation.
+**Why vendor**: the SDK runs inside the standalone app's Docker image, and pinning a published version would tie app releases to SDK releases. **Third-party apps outside this repo should `pip install abenix-sdk`.** Vendoring is an in-repo convenience, not a recommendation.
 
 ### 33. Helm for platform, kubectl for example standalones
 
-Platform services are helm-managed. The in-repo standalone apps ship a manifest under `<app>/k8s/` that `deploy-azure.sh` applies with `kubectl apply`. Different release cadences. Coupling them would create cross-team blockers. Third-party apps follow whatever pattern fits their stack.
+Platform services are managed by Helm. The in-repo standalone apps ship manifests under `<app>/k8s/` that `deploy-azure.sh` applies with `kubectl apply`, so an app can ship on its own schedule. Third-party apps use whatever fits their stack.
 
 ### 34. KEDA dual-trigger autoscaling
 
@@ -254,11 +256,11 @@ Each runtime pool's ScaledObject has a queue trigger, JetStream consumer lag, an
 
 ### 36. Per-pool concurrency tuning
 
-`AGENT_CONCURRENCY` comes from each pool's `concurrency_per_replica` in the values (default 3). On Azure: `default` 3, `chat` 6, `heavy-reasoning` 2, `long-running` 1, because each long-running execution can hold a connection to an external service for minutes.
+`AGENT_CONCURRENCY` comes from each pool's `concurrency_per_replica` in the values (default 3). [`values-azure.yaml`](../../infra/helm/abenix/values-azure.yaml) sets `default` 3, `chat` 6, `heavy-reasoning` 2 and `long-running` 1, because one long-running execution can hold a connection to an external service for minutes.
 
 ### 37. Standalone-key reconciler in dev-local
 
-`scripts/dev-local.sh` runs an idempotent reconciler that mints `<APP>_ABENIX_API_KEY` for every standalone app before launch. Already-valid keys are reused. New keys upsert and the script exports them so the app's start.sh inherits the value.
+`scripts/dev-local.sh` mints `<APP>_ABENIX_API_KEY` for each standalone app before launching it. A key that is still valid is reused. A new key is exported so the app's `start.sh` inherits it.
 
 ---
 
@@ -290,15 +292,15 @@ Third-party apps must use the published SDK. They never import from this monorep
 
 ### 43. actAs every call, even from anonymous users
 
-A user-facing flow without login should still set `subject_type="anonymous"` with a synthetic subject_id (e.g. a hashed IP or a UUID stored in a cookie). This keeps the audit log consistent and lets per-anonymous-user shares work the same way as per-real-user shares.
+A user-facing flow without login should still set `subject_type="anonymous"` with a synthetic `subject_id`, such as a hashed IP or a UUID kept in a cookie. Execution rows then always name a subject, and subject-scoped collections (pattern 3) work the same way for anonymous users.
 
 ### 44. SSE proxy at the BFF tier
 
-Standalone apps proxy SSE through their own backend rather than letting the SPA talk to the platform directly. The proxy applies the app's own auth and lets the app pre-filter / enrich events.
+Standalone apps proxy SSE through their own backend instead of letting the browser talk to the platform directly. The proxy applies the app's own auth and can filter or add to events.
 
 ### 45. Cache only with audit trail
 
-Per-app caches only hold values that came from a real platform call. Every cached entry carries the `execution_id` it came from so the UI can deep-link to the trace. Hand-poked cache values violate the audit contract and are forbidden — there's no synthesis tier.
+Per-app caches only hold values that came from a real platform call. Every cached entry carries the `execution_id` it came from so the UI can deep-link to the trace. Hand-written cache values break the audit contract and are not allowed, because there is no synthesis tier.
 
 ---
 
@@ -306,7 +308,7 @@ Per-app caches only hold values that came from a real platform call. Every cache
 
 ### 46. Declare the effect, gate in one hook, earn the level
 
-A tool that changes the world says so on its class with `effect` (or `effect_for` per call), next to `risk_tier`. One hook in `BaseTool._govern` ([`engine/tools/base.py`](../../apps/agent-runtime/engine/tools/base.py)) checks kill switches, then the agent's autonomy level from an in-memory snapshot ([`engine/autonomy.py`](../../apps/agent-runtime/engine/autonomy.py)), then the tier policy. Every built-in, MCP, dynamic and pipeline call passes through it, so no call site knows about autonomy. The level only moves on the scored record in `agent_actions`, promotion needs a person who did not build the agent, and demotion is automatic. See [02-runtime/21-earned-autonomy](../02-runtime/21-earned-autonomy.md).
+A tool that changes the world says so on its class with `effect` (or `effect_for` per call), next to `risk_tier`. One hook, `_govern` in [`engine/tools/base.py`](../../apps/agent-runtime/engine/tools/base.py), runs before every tool call. It checks kill switches, then the agent's autonomy level from an in-memory snapshot ([`engine/autonomy.py`](../../apps/agent-runtime/engine/autonomy.py)), then the tier policy. Every built-in, MCP, dynamic and pipeline call passes through it, so no call site knows about autonomy. The level only moves on the scored record in `agent_actions`, promotion needs a person who did not build the agent, and demotion is automatic. See [02-runtime/21-earned-autonomy](../02-runtime/21-earned-autonomy.md).
 
 **Violation symptom**: a write tool with no `effect` never reaches the ledger, so its agent can never earn or lose autonomy on it. `scripts/check-tool-config.py` fails at medium tier and above. A tool that gates itself instead of using the hook skips kill switches and limits.
 
@@ -314,20 +316,20 @@ A tool that changes the world says so on its class with `effect` (or `effect_for
 
 ## When you should break these
 
-Most of these patterns earn their keep most of the time. Two situations where the pattern is *not* the right answer.
+Two situations where these patterns are not the right answer:
 
-- **One-off experiments**. A throwaway script that wants to test "does this prompt work?" does not need actAs, idempotency, or approval gates. Use the raw HTTP API and move on.
-- **Performance-critical tight loops**. A high-volume inbound webhook handler that wants to call the platform 1k+ times a second should *not* go through the standard SDK. Use the batch endpoints under `/api/batch` or skip the platform entirely if the work is truly stateless. Don't pretend the regular path will scale.
+- **One-off experiments**. A throwaway script that checks whether a prompt works does not need actAs, idempotency or approval gates. Call the HTTP API directly.
+- **High-volume loops**. A webhook handler that would call the platform more than a thousand times a second should not make one SDK call per event. Use the batch endpoints under `/api/batch`, or skip the platform if the work is stateless.
 
-In both cases, the violation should be documented at the call site so the next reader knows why the usual pattern doesn't apply.
+In both cases, say so in a comment at the call site so the next reader knows why the usual pattern does not apply.
 
 ---
 
 ## See also
 
-- [00-overview](00-overview.md) — high-level system view linking back to many of these patterns.
-- [02-runtime/06-agent-to-agent](../02-runtime/06-agent-to-agent.md) — patterns 16, 17, 25 in action.
-- [02-runtime/07-pipeline-data-flow](../02-runtime/07-pipeline-data-flow.md) — patterns 19, 20, 21.
-- [02-runtime/08-queue-scaling](../02-runtime/08-queue-scaling.md) — patterns 13, 34, 36.
-- [02-runtime/09-state-machines](../02-runtime/09-state-machines.md) — patterns 7, 8, 15, 29.
-- [08-howto/04-debugging](../08-howto/04-debugging.md) — patterns under stress.
+- [00-overview](00-overview.md), the system overview.
+- [02-runtime/06-agent-to-agent](../02-runtime/06-agent-to-agent.md), patterns 16, 17 and 25 in use.
+- [02-runtime/07-pipeline-data-flow](../02-runtime/07-pipeline-data-flow.md), patterns 19, 20 and 21.
+- [02-runtime/08-queue-scaling](../02-runtime/08-queue-scaling.md), patterns 13, 34 and 36.
+- [02-runtime/09-state-machines](../02-runtime/09-state-machines.md), patterns 7, 8, 15 and 29.
+- [08-howto/04-debugging](../08-howto/04-debugging.md), what these patterns look like when something breaks.

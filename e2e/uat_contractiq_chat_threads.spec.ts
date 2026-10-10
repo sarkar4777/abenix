@@ -13,13 +13,13 @@ import { test, expect, type Page } from '@playwright/test';
  *   9) /portfolio-schemas (in abenix) renders the new explainer
  *
  * Drives Chromium against the deployed cluster.
- *   BASE=http://localhost:3001  AF_BASE=http://localhost:3000
+ *   BASE=http://localhost:3001  AF_BASE=http://localhost:3100
  *   API=http://localhost:8001
  */
 
-const BASE = process.env.BASE || 'http://localhost:3001';
-const AF_BASE = process.env.AF_BASE || 'http://localhost:3000';
-const API  = process.env.API  || 'http://localhost:8001';
+const BASE = process.env.CIQ_BASE || 'http://localhost:3001';
+const AF_BASE = process.env.AF_BASE || process.env.BASE_AB || 'http://localhost:3100';
+const API  = process.env.CIQ_API  || 'http://localhost:8001';
 const EMAIL = process.env.CIQ_EMAIL || 'test@contractiq.com';
 const PASSWORD = process.env.CIQ_PASSWORD || 'TestPass123!';
 
@@ -47,18 +47,18 @@ async function login(page: Page) {
   }, { t: token, u: me });
 }
 
+/** Sends one turn and returns the text of the reply it produced. */
 async function sendChat(page: Page, message: string): Promise<string> {
-  const input = page.locator('input[placeholder*="contracts" i], input[type="text"]').first();
+  const replies = page.getByTestId('chat-msg-assistant');
+  const before = await replies.count();
+  // the message box is a textarea, Enter sends and Shift+Enter breaks the line
+  const input = page.getByPlaceholder(/Ask about your contracts/i);
   await input.fill(message);
   await input.press('Enter');
-  // Wait for the assistant bubble to appear (look for "ContractIQ" label)
-  await page.waitForSelector('text=ContractIQ', { timeout: 180_000 });
-  // Wait until loading indicator disappears
-  await page.waitForFunction(() => !document.body.innerText.includes('Analyzing your portfolio'), { timeout: 180_000 }).catch(() => {});
-  // Pull the latest assistant bubble text
-  const bubbles = page.locator('div').filter({ hasText: /^/ });
-  const all = await page.textContent('body') || '';
-  return all;
+  await expect(page.getByTestId('chat-msg-user').last()).toContainText(message.slice(0, 30));
+  await expect(replies).toHaveCount(before + 1, { timeout: 240_000 });
+  await expect(page.getByText('Analyzing your portfolio...')).toBeHidden({ timeout: 240_000 });
+  return (await replies.last().innerText()) || '';
 }
 
 test.describe.configure({ mode: 'serial' });
@@ -79,6 +79,10 @@ test.describe('ContractIQ · multi-turn chat threads', () => {
     await page.goto(`${BASE}/chat`, { waitUntil: 'domcontentloaded' });
     await page.waitForLoadState('networkidle').catch(() => {});
     const body = await sendChat(page, "What's my total MW exposure expiring before 2030, and which contract carries the biggest share?");
+    expect(body.length, 'a real reply, not an empty bubble').toBeGreaterThan(40);
+    // the canned empty-portfolio reply means no agent ran and no thread exists,
+    // run uat_contractiq_advanced first, its upload journey adds a contract
+    expect(body, 'the test user has contracts to ask about').not.toMatch(/don't have any contracts yet/i);
     // The whole point of the inline brief: agent must NOT claim it can't access data
     expect(body).not.toMatch(/i apologise|i'm currently unable to access|cannot access the contract portfolio database/i);
     // Real answer should mention MW or a contract title
@@ -101,7 +105,8 @@ test.describe('ContractIQ · multi-turn chat threads', () => {
     await page.goto(`${BASE}/chat`, { waitUntil: 'domcontentloaded' });
     await page.waitForLoadState('networkidle').catch(() => {});
     await page.waitForTimeout(2_000);
-    const threadSidebar = page.locator('aside').nth(1);
+    const threadSidebar = page.getByTestId('chat-threads');
+    await expect(threadSidebar.getByTestId('chat-thread').first()).toBeVisible({ timeout: 15_000 });
     const sidebarText = (await threadSidebar.textContent() || '').toLowerCase();
     // After tests 2 and 3 the persisted thread should be visible with the
     // auto-derived title (first user message was about MW exposure expiring
@@ -114,30 +119,29 @@ test.describe('ContractIQ · multi-turn chat threads', () => {
     await page.goto(`${BASE}/chat`, { waitUntil: 'domcontentloaded' });
     await page.waitForLoadState('networkidle').catch(() => {});
     await page.waitForTimeout(2_000);
-    const threadSidebar = page.locator('aside').nth(1);
-    // Pick the topmost thread + remember its preview text
-    const firstTitle = await threadSidebar.locator('p').first().textContent() || '';
+    const thread = page.getByTestId('chat-thread').first();
+    await expect(thread).toBeVisible({ timeout: 15_000 });
+    const firstTitle = (await thread.locator('p').first().textContent()) || '';
     expect(firstTitle.length).toBeGreaterThan(3);
-    await threadSidebar.locator('p').first().click();
-    await page.waitForTimeout(1_500);
-    const main = await page.textContent('body') || '';
-    // Past assistant content (from earlier turns) should re-render
-    expect(main.toLowerCase()).toMatch(/contract|portfolio|mw|expir/);
+    await thread.click();
+    // Past turns re-render from the persisted thread
+    await expect(page.getByTestId('chat-msg-assistant').first()).toBeVisible({ timeout: 15_000 });
+    const reply = (await page.getByTestId('chat-msg-assistant').first().innerText()).toLowerCase();
+    expect(reply).toMatch(/contract|portfolio|mw|expir/);
   });
 
   test('6 — "New chat" starts a fresh thread (does not pollute prior)', async ({ page }) => {
     await page.goto(`${BASE}/chat`, { waitUntil: 'domcontentloaded' });
     await page.waitForLoadState('networkidle').catch(() => {});
-    const threadSidebar = page.locator('aside').nth(1);
-    const beforeText = await threadSidebar.textContent() || '';
-    const beforeCount = (beforeText.match(/msg/gi) || []).length;
+    const threads = page.getByTestId('chat-thread');
+    await expect(threads.first()).toBeVisible({ timeout: 15_000 });
+    const beforeCount = await threads.count();
     await page.getByRole('button', { name: /new chat/i }).first().click();
-    await page.waitForTimeout(500);
-    await sendChat(page, "What contract types do I have in my portfolio?");
-    await page.waitForTimeout(2_000);
-    const afterText = await threadSidebar.textContent() || '';
-    const afterCount = (afterText.match(/msg/gi) || []).length;
-    expect(afterCount).toBeGreaterThanOrEqual(beforeCount);
+    await expect(page.getByTestId('chat-msg-assistant')).toHaveCount(0);
+    const reply = await sendChat(page, "What contract types do I have in my portfolio?");
+    expect(reply.length).toBeGreaterThan(20);
+    // a new thread, not another turn on the old one
+    await expect(threads).toHaveCount(beforeCount + 1, { timeout: 20_000 });
   });
 
   test('7 — Clause Library renders with Library + Gaps tabs', async ({ page }) => {
@@ -174,9 +178,10 @@ test.describe('Abenix · Portfolio Schemas explainer', () => {
     await page.goto(`${AF_BASE}/portfolio-schemas`, { waitUntil: 'domcontentloaded' });
     await page.waitForLoadState('networkidle').catch(() => {});
     const body = await page.textContent('body') || '';
-    expect(body).toMatch(/What is a Portfolio Schema/i);
-    expect(body).toMatch(/SchemaPortfolioTool/i);
-    expect(body).toMatch(/Wire to agents/i);
-    expect(body).toMatch(/Chat \/ query|Chat\s*\/\s*query/i);
+    // the explainer was rewritten as a three step how-it-works panel
+    expect(body).toMatch(/Give your agents a table of records/i);
+    expect(body).toMatch(/Bring your data/i);
+    expect(body).toMatch(/Use it in an agent/i);
+    expect(body).toMatch(/list_records/i);
   });
 });

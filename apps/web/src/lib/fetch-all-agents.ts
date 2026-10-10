@@ -64,5 +64,27 @@ export async function fetchAllAgents<T = any>(
     if (offset > PAGE_SIZE * 50) break;
   }
 
-  return { agents: out, total: total || out.length };
+  // a page boundary that moved between requests must not show an agent twice
+  const seen = new Set<unknown>();
+  const unique = out.filter((a) => {
+    const id = (a as { id?: unknown })?.id;
+    if (id === undefined) return true;
+    if (seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
+  return { agents: unique, total: total || unique.length };
+}
+
+// Drafts first, newest first so the one being tested is not cut off by the picker's cap, then by name.
+export function sortForPicker<T extends { name: string; status?: string; updated_at?: string | null; created_at?: string | null }>(
+  rows: T[],
+): T[] {
+  const isDraft = (a: T) => a.status === 'draft';
+  const when = (a: T) => Date.parse(a.updated_at || a.created_at || '') || 0;
+  return [...rows].sort((a, b) => {
+    if (isDraft(a) !== isDraft(b)) return isDraft(a) ? -1 : 1;
+    if (isDraft(a)) return when(b) - when(a) || a.name.localeCompare(b.name);
+    return a.name.localeCompare(b.name);
+  });
 }

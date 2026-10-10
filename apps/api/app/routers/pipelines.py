@@ -56,12 +56,14 @@ async def _budget_error(db: AsyncSession, agent: Agent, user: User) -> Any:
 
 
 def _apply_usage(execution: Execution, result: Any) -> None:
-    from engine.pipeline import pipeline_usage
+    from engine.pipeline import pipeline_provider_costs, pipeline_usage
+    from models.execution import set_provider_costs
 
     usage = pipeline_usage(result)
     execution.cost = usage["cost"]
     execution.input_tokens = usage["input_tokens"] or None
     execution.output_tokens = usage["output_tokens"] or None
+    set_provider_costs(execution, pipeline_provider_costs(result))
 
 
 def _run_cost_limit(agent: Agent, requested: float | None) -> float | None:
@@ -71,6 +73,25 @@ def _run_cost_limit(agent: Agent, requested: float | None) -> float | None:
         if v is not None and float(v) > 0
     ]
     return min(caps) if caps else None
+
+
+async def _timeout_for(requested: int | None) -> int:
+    if requested:
+        return requested
+    from app.core.platform_settings import get_int_setting
+
+    return await get_int_setting("pipeline.timeout_seconds", 300)
+
+
+async def _apply_dlp(tenant_id: Any, result: Any) -> None:
+    from app.core.deps import async_session
+    from engine.dlp import apply_to_pipeline_result
+
+    try:
+        async with async_session() as s:
+            await apply_to_pipeline_result(s, tenant_id, result)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("pipeline dlp skipped: %s", exc)
 
 
 async def _save_detached(row: Any) -> None:
@@ -89,6 +110,15 @@ async def execute_pipeline(
     db: AsyncSession = Depends(get_db),
 ) -> Any:
     """Execute a DAG-based pipeline of tool calls against an agent's tool set."""
+    if not body.nodes:
+        return await execute_saved_pipeline(
+            agent_id,
+            ExecuteSavedPipelineRequest(
+                context=body.context, timeout_seconds=body.timeout_seconds
+            ),
+            user,
+            db,
+        )
     # Validate agent exists and user has access (includes OOB agents)
     result = await db.execute(
         select(Agent).where(
@@ -202,7 +232,7 @@ async def execute_pipeline(
     tool_registry = build_tool_registry(tool_names)
     executor = PipelineExecutor(
         tool_registry=tool_registry,
-        timeout_seconds=body.timeout_seconds,
+        timeout_seconds=await _timeout_for(body.timeout_seconds),
         # Without db_url, _resolve_agent_by_slug cannot look up a
         # `type: agent` node and every such node failed with the
         # misleading "agent_slug 'x' not found in DB". agents.py
@@ -251,6 +281,7 @@ async def execute_pipeline(
     execution.duration_ms = pipeline_result.total_duration_ms
     _apply_usage(execution, pipeline_result)
     execution.completed_at = datetime.now(timezone.utc)
+    await _apply_dlp(user.tenant_id, pipeline_result)
     execution.output_message = (
         str(pipeline_result.final_output)[:5000]
         if pipeline_result.final_output
@@ -399,7 +430,7 @@ async def execute_saved_pipeline(
     tool_registry = build_tool_registry(tool_names)
     executor = PipelineExecutor(
         tool_registry=tool_registry,
-        timeout_seconds=body.timeout_seconds,
+        timeout_seconds=await _timeout_for(body.timeout_seconds),
         # Without db_url, _resolve_agent_by_slug cannot look up a
         # `type: agent` node and every such node failed with the
         # misleading "agent_slug 'x' not found in DB". agents.py
@@ -445,6 +476,7 @@ async def execute_saved_pipeline(
     execution.duration_ms = pipeline_result.total_duration_ms
     _apply_usage(execution, pipeline_result)
     execution.completed_at = datetime.now(timezone.utc)
+    await _apply_dlp(user.tenant_id, pipeline_result)
     execution.output_message = (
         str(pipeline_result.final_output)[:5000]
         if pipeline_result.final_output
@@ -539,6 +571,7 @@ async def execute_pipeline_stream(
     from engine.pipeline import (
         PipelineExecutor,
         parse_pipeline_nodes,
+        pipeline_timed_out,
         serialize_pipeline_result,
     )
 
@@ -546,7 +579,10 @@ async def execute_pipeline_stream(
 
     event_queue: asyncio.Queue[str | None] = asyncio.Queue()
 
+    _statuses: dict[str, str] = dict.fromkeys(node_ids, "pending")
+
     async def on_node_start(node_id: str, tool_name: str) -> None:
+        _statuses[node_id] = "running"
         event_data = json_module.dumps({"node_id": node_id, "tool_name": tool_name})
         await event_queue.put(f"event: node_start\ndata: {event_data}\n\n")
 
@@ -558,6 +594,7 @@ async def execute_pipeline_stream(
         error_message: str | None = None,
         error_type: str | None = None,
     ) -> None:
+        _statuses[node_id] = status
         event_data = json_module.dumps(
             {
                 "node_id": node_id,
@@ -572,7 +609,7 @@ async def execute_pipeline_stream(
 
     executor = PipelineExecutor(
         tool_registry=tool_registry,
-        timeout_seconds=body.timeout_seconds,
+        timeout_seconds=await _timeout_for(body.timeout_seconds),
         on_node_start=on_node_start,
         on_node_complete=on_node_complete,
         # agent_id + tenant_id are REQUIRED for self-healing: pipeline.py
@@ -593,7 +630,18 @@ async def execute_pipeline_stream(
         try:
             _ctx = dict(body.context or {})
             _ctx.setdefault("__execution_id", str(execution.id))
-            pipeline_result = await executor.execute(pipeline_nodes, _ctx)
+            try:
+                pipeline_result = await asyncio.wait_for(
+                    executor.execute(pipeline_nodes, _ctx),
+                    # the engine checks its budget between layers, this catches a step that hangs
+                    timeout=executor.timeout_seconds + 5,
+                )
+            except asyncio.TimeoutError:
+                pipeline_result = pipeline_timed_out(
+                    executor.timeout_seconds, _statuses
+                )
+                execution.error_message = pipeline_result.node_errors["pipeline"]
+            await _apply_dlp(user.tenant_id, pipeline_result)
             execution.status = (
                 ExecutionStatus.COMPLETED
                 if pipeline_result.status == "completed"

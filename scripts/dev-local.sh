@@ -207,6 +207,9 @@ export EXPORT_DIR UPLOAD_DIR ML_MODELS_DIR CODE_ASSET_STORE CODE_ASSET_BUILD_CAC
 LOG_DIR="${LOG_DIR:-$ROOT_DIR/.local-logs}"
 mkdir -p "$LOG_DIR" 2>/dev/null || true
 
+# local NATS consumer health and metrics port, kept clear of every app port
+CONSUMER_HEALTH_PORT="${CONSUMER_HEALTH_PORT:-8020}"
+
 # ── Canonical port + label registry (single source of truth) ──────────
 # Every entry: "<port>|<label>|<log-basename>". Used by kill_port loop,
 # wait_port_listening, --status, and self-heal-at-start. Add new apps
@@ -225,6 +228,8 @@ ALL_PORTS=(
   "3005|ClaimsIQ|claimsiq"
   "8006|Wingman API|wingman-api"
   "3006|Wingman Web|wingman-web"
+  "8007|PharmaVigil API|pharmavigil-api"
+  "3007|PharmaVigil Web|pharmavigil-web"
 )
 
 # ── Detect if a port is currently LISTENING ───────────────────────────
@@ -422,6 +427,7 @@ _health_url_for_port() {
     8003) echo "http://localhost:8003/health" ;;
     8004) echo "http://localhost:8004/health" ;;
     8006) echo "http://localhost:8006/health" ;;
+    8007) echo "http://localhost:8007/health" ;;
     3005) echo "http://localhost:3005/actuator/health/liveness" ;;
     *)    echo "http://localhost:$1" ;;
   esac
@@ -752,26 +758,44 @@ cd "$ROOT_DIR"
 # ── Step 6: Seed agents ──────────────────────────────────────
 log "Step 5/7 — Seeding OOB agents..."
 cd "$ROOT_DIR/packages/db"
-SEED_OUTPUT=$(PYTHONPATH="." $PYTHON seeds/seed_agents.py 2>&1) || true
-SEED_COUNT=$(echo "$SEED_OUTPUT" | grep -c "Creating:" 2>/dev/null || echo "0")
+SEED_FAILURES=()
+# runs one seed, shows its tail and keeps a log when it exits non-zero
+run_seed() {
+  local name=$1; shift
+  local rc=0
+  SEED_OUT=$(PYTHONPATH="." $PYTHON "$@" 2>&1) || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    SEED_FAILURES+=("$name")
+    echo "$SEED_OUT" > "$LOG_DIR/seed-$name.log"
+    err "Seed '$name' failed (exit $rc). Last lines:"
+    echo "$SEED_OUT" | tail -15 | sed 's/^/      /'
+    err "Full output: $LOG_DIR/seed-$name.log"
+  fi
+  return 0
+}
+seed_ok() { [[ " ${SEED_FAILURES[*]} " != *" $1 "* ]]; }
+
+run_seed agents seeds/seed_agents.py
+SEED_COUNT=$(echo "$SEED_OUT" | grep -c "Creating:" 2>/dev/null || echo "0")
 if [ "$SEED_COUNT" -gt 0 ] 2>/dev/null; then
   ok "Seeded $SEED_COUNT agents"
-else
+elif seed_ok agents; then
   ok "Agents already seeded"
 fi
 
 log "Step 6/7 — Seeding default accounts..."
-USERS_OUTPUT=$(PYTHONPATH="." $PYTHON seeds/seed_users.py 2>&1) || true
+run_seed users seeds/seed_users.py
+USERS_OUTPUT="$SEED_OUT"
 
 log "       Seeding subject policies (RBAC delegation)..."
-POLICIES_OUTPUT=$(PYTHONPATH="." $PYTHON seeds/seed_subject_policies.py 2>&1) || true
-echo "$POLICIES_OUTPUT" | grep -E "Seeded|Updated|Ensured" | sed 's/^/      /' || true
+run_seed subject-policies seeds/seed_subject_policies.py
+echo "$SEED_OUT" | grep -E "Seeded|Updated|Ensured" | sed 's/^/      /' || true
 echo "$USERS_OUTPUT" | grep -E "Created:|Exists:" | sed 's/^/  /' || true
-ok "Default accounts ready"
+seed_ok users && ok "Default accounts ready"
 
 log "       Seeding portfolio_schemas (energy_contracts for CIQ chat)..."
-PORTFOLIO_SEED_OUT=$(PYTHONPATH="." $PYTHON seeds/seed_portfolio_schemas.py 2>&1) || true
-echo "$PORTFOLIO_SEED_OUT" | grep -E "Seeded|No tenants|template" | sed 's/^/      /' || true
+run_seed portfolio-schemas seeds/seed_portfolio_schemas.py
+echo "$SEED_OUT" | grep -E "Seeded|No tenants|template" | sed 's/^/      /' || true
 
 log "       Seeding sample ML models (from aimodels/)..."
 # If the .pkl files don't exist yet, build them first.
@@ -781,9 +805,13 @@ if [ ! -f "$ROOT_DIR/aimodels/churn_predictor.pkl" ] || \
   log "       Building sample .pkl files (one-time)..."
   (cd "$ROOT_DIR" && $PYTHON aimodels/build_samples.py 2>&1) | tail -5 | sed 's/^/      /' || true
 fi
-ML_SEED_OUTPUT=$(PYTHONPATH="." $PYTHON seeds/seed_ml_models.py 2>&1) || true
-echo "$ML_SEED_OUTPUT" | grep -E "Seeded|Found|No " | sed 's/^/      /' || true
-ok "Sample ML models ready"
+run_seed ml-models seeds/seed_ml_models.py
+echo "$SEED_OUT" | grep -E "Seeded|Found|No " | sed 's/^/      /' || true
+seed_ok ml-models && ok "Sample ML models ready"
+
+if [ ${#SEED_FAILURES[@]} -gt 0 ]; then
+  err "${#SEED_FAILURES[@]} seed step(s) failed: ${SEED_FAILURES[*]}. The stack still starts, but that data is missing."
+fi
 
 # Seed sample IoT data into Redis streams for demo
 log "Seeding IoT demo data into Redis streams..."
@@ -879,8 +907,8 @@ ok "Celery worker starting (PID $CELERY_PID, pool=solo) — queues: documents, c
 # local execution path is byte-for-byte identical to production.
 if [ "$QUEUE_BACKEND" = "nats" ]; then
   cd "$ROOT_DIR/apps/agent-runtime"
-  # HEALTH_PORT 8002 so it doesn't fight with the API on 8000 / api-runtime on 8001
-  RUNTIME_MODE=remote HEALTH_PORT=8002 \
+  # 8000-8008 belong to the API and the standalone apps, so the consumer probe sits above them
+  RUNTIME_MODE=remote HEALTH_PORT="$CONSUMER_HEALTH_PORT" \
     PYTHONPATH=".:../../packages/db:../api" \
     DATABASE_URL="${DATABASE_URL:-postgresql+asyncpg://abenix:abenix@localhost:5432/abenix}" \
     REDIS_URL="${REDIS_URL:-redis://localhost:6379/0}" \
@@ -888,7 +916,7 @@ if [ "$QUEUE_BACKEND" = "nats" ]; then
     > "$LOG_DIR/consumer.log" 2>&1 &
   CONSUMER_PID=$!
   cd "$ROOT_DIR"
-  ok "NATS consumer starting (PID $CONSUMER_PID) — pool=default, backend=nats — log: $LOG_DIR/consumer.log"
+  ok "NATS consumer starting (PID $CONSUMER_PID) — pool=default, backend=nats, health :$CONSUMER_HEALTH_PORT — log: $LOG_DIR/consumer.log"
 fi
 
 # Both API + Web are already verified-listening by wait_port_listening
@@ -1039,6 +1067,7 @@ for k,v in json.load(sys.stdin).items(): print(f'{k}={v}')
   echo -e "  ${CYAN}Industrial-IoT API${NC} http://localhost:8003"
   echo -e "  ${CYAN}ResolveAI API${NC}      http://localhost:8004"
   echo -e "  ${CYAN}Wingman API${NC}        http://localhost:8006"
+  echo -e "  ${CYAN}PharmaVigil API${NC}    http://localhost:8007"
   echo -e "  ${CYAN}API Docs${NC}           http://localhost:8000/docs"
   echo -e "  ${CYAN}Neo4j Browser${NC}      http://localhost:7474"
   echo ""

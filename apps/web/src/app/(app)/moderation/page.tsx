@@ -25,7 +25,6 @@ interface Policy {
   pre_llm: boolean;
   post_llm: boolean;
   on_tool_output: boolean;
-  provider: string;
   provider_model: string;
   thresholds: Record<string, number>;
   default_threshold: number;
@@ -53,6 +52,7 @@ interface Event {
   created_at: string | null;
   provider_error?: string | null;
   provider_response?: any;
+  masked_spans?: { start: number; end: number; category: string }[];
 }
 
 const SOURCE_LABEL = MODERATION_SOURCE_LABEL;
@@ -621,6 +621,17 @@ export default function ModerationPage() {
                   {e.outcome === 'error' && !e.provider_error && (
                     <div className="mt-1 text-[11px] text-amber-300/80">
                       Gate failed but no provider error was captured (legacy event — re-run to repopulate).
+                    </div>
+                  )}
+                  {e.outcome === 'redacted' && (e.masked_spans?.length ?? 0) > 0 && (
+                    <div className="mt-1 text-[11px] text-violet-300" data-testid={`event-masked-${e.id}`}>
+                      Masked {e.masked_spans!.length} {e.masked_spans!.length === 1 ? 'part' : 'parts'} before it was passed on
+                      {' ('}
+                      {Array.from(new Set(e.masked_spans!.flatMap((m) => m.category.split(',')).filter(Boolean)))
+                        .map((c) => categoryLabel(c, policies.find((p) => p.id === e.policy_id)))
+                        .join(', ')}
+                      {', '}
+                      {e.masked_spans!.reduce((n, m) => n + Math.max(0, m.end - m.start), 0)} characters). The text below shows where.
                     </div>
                   )}
                   {e.content_preview && (

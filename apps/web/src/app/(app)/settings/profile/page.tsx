@@ -169,7 +169,13 @@ export default function ProfilePage() {
         }),
       });
       if (res.data) {
-        setPwMsg({ ok: true, text: 'Password changed. Use the new one next time you sign in.' });
+        const others = (res.data as { other_sessions_signed_out?: number }).other_sessions_signed_out || 0;
+        setPwMsg({
+          ok: true,
+          text: others
+            ? `Password changed. ${others} other ${others === 1 ? 'device was' : 'devices were'} signed out.`
+            : 'Password changed. Use the new one next time you sign in.',
+        });
         toastSuccess('Password changed');
         setCurrentPassword('');
         setNewPassword('');
@@ -210,7 +216,7 @@ export default function ProfilePage() {
         steps={[
           'Upload a picture or paste a link to one. Leave it empty to show your initial.',
           'Change your name and press Save changes.',
-          'Change your password below. Other signed in sessions stay signed in.',
+          'Change your password below. Every other device you are signed in on is signed out.',
         ]}
         storageKey="settings-profile"
       />

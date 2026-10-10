@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { Archive, Loader2, Lock, Save } from 'lucide-react';
 import { apiFetch } from '@/lib/api-client';
 
@@ -175,7 +176,14 @@ export default function RetentionCard() {
             )}
           </div>
           {data.can_edit && !dirty && !saved && <p className="mt-1 text-[11px] text-slate-500 text-right">Change a value to enable Save.</p>}
-          {saved && <p role="status" className="mt-2 text-xs text-emerald-300" data-testid="retention-saved">Saved. The next hourly clean-up uses these values.</p>}
+          {saved && (
+            <p role="status" className="mt-2 text-xs text-emerald-300" data-testid="retention-saved">
+              Saved. The next hourly clean-up uses these values.{' '}
+              <Link href="/admin/jobs?job=moderation_retention" className="text-cyan-300 hover:underline" data-testid="retention-run-now">
+                Run it now
+              </Link>
+            </p>
+          )}
           {saveError && <p role="alert" className="mt-2 text-xs text-rose-300">{saveError}</p>}
         </>
       )}

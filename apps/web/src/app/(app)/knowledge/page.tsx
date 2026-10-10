@@ -10,6 +10,7 @@ import {
   FileText,
   FolderOpen,
   Loader2,
+  Lock,
   Plus,
   Search,
   Share2,
@@ -19,6 +20,7 @@ import {
 import PageHeader from '@/components/layout/PageHeader';
 import NextSteps from '@/components/shared/NextSteps';
 import ResourceShareDialog from '@/components/share/ResourceShareDialog';
+import DocumentAccessModal from '@/components/knowledge/DocumentAccessModal';
 import ResponsiveModal from '@/components/ui/ResponsiveModal';
 import { KnowledgeSkeleton } from '@/components/ui/Skeleton';
 import EmptyState from '@/components/ui/EmptyState';
@@ -70,6 +72,8 @@ interface DocumentInfo {
   status: string;
   created_at: string | null;
   error_message?: string | null;
+  version_number?: number;
+  is_current?: boolean;
 }
 
 function getAuthHeaders(): Record<string, string> {
@@ -94,21 +98,34 @@ function statusColor(status: string): string {
   return 'text-red-400 bg-red-500/10';
 }
 
+const VISIBILITY_HELP: Record<string, string> = {
+  project: 'Members of the project can read it.',
+  tenant: 'Everyone in your organisation can read it.',
+  private: 'Only you, admins and people you share it with.',
+};
+
 function CreateModal({
   open,
   onClose,
   onCreated,
+  initialProject = '',
 }: {
   open: boolean;
   onClose: () => void;
   onCreated: (kb: KnowledgeBase) => void;
+  initialProject?: string;
 }) {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
+  const [projectId, setProjectId] = useState(initialProject);
+  const [visibility, setVisibility] = useState('project');
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState('');
+  const { data: projects } = useApi<{ id: string; name: string }[]>(open ? '/api/knowledge-projects?limit=100' : null);
 
-  const reset = () => { setName(''); setDescription(''); setErr(''); };
+  useEffect(() => { if (open) setProjectId(initialProject); }, [open, initialProject]);
+
+  const reset = () => { setName(''); setDescription(''); setVisibility('project'); setErr(''); };
 
   const submit = async () => {
     if (!name.trim()) { setErr('Name is required'); return; }
@@ -118,13 +135,18 @@ function CreateModal({
       const res = await fetch(`${API_URL}/api/knowledge-bases`, {
         method: 'POST',
         headers: getAuthHeaders(),
-        body: JSON.stringify({ name: name.trim(), description: description.trim() }),
+        body: JSON.stringify({
+          name: name.trim(),
+          description: description.trim(),
+          project_id: projectId || undefined,
+          default_visibility: visibility,
+        }),
       });
       const json = await res.json();
       if (json.error) { setErr(json.error.message || 'Could not create the knowledge base'); return; }
-      onCreated(json.data);
       reset();
       onClose();
+      onCreated(json.data);
     } catch {
       setErr('Failed to create');
     } finally {
@@ -157,6 +179,34 @@ function CreateModal({
             className="w-full px-3 py-2 bg-slate-800/50 border border-slate-700 rounded-lg text-sm text-white placeholder-slate-500 resize-none focus:outline-none focus:border-cyan-500"
           />
         </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label htmlFor="kb-new-project" className="block text-xs text-slate-400 mb-1.5">Project</label>
+            <select
+              id="kb-new-project"
+              value={projectId}
+              onChange={(e) => setProjectId(e.target.value)}
+              className="w-full px-3 py-2 bg-slate-800/50 border border-slate-700 rounded-lg text-sm text-white focus:outline-none focus:border-cyan-500"
+            >
+              <option value="">Default project</option>
+              {(projects || []).filter((p) => p.name !== 'Default').map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+          </div>
+          <div>
+            <label htmlFor="kb-new-visibility" className="block text-xs text-slate-400 mb-1.5">Who can read it</label>
+            <select
+              id="kb-new-visibility"
+              value={visibility}
+              onChange={(e) => setVisibility(e.target.value)}
+              className="w-full px-3 py-2 bg-slate-800/50 border border-slate-700 rounded-lg text-sm text-white focus:outline-none focus:border-cyan-500"
+            >
+              <option value="project">Project members</option>
+              <option value="tenant">Everyone in the organisation</option>
+              <option value="private">Only me and people I share with</option>
+            </select>
+          </div>
+        </div>
+        <p className="text-[11px] text-slate-500 -mt-2">{VISIBILITY_HELP[visibility]}</p>
         {err && <p role="alert" className="text-xs text-red-400">{err}</p>}
         <div className="flex justify-end gap-2 pt-2">
           <button onClick={() => { reset(); onClose(); }} className="px-4 py-2 text-sm text-slate-400 hover:text-white transition-colors">
@@ -322,6 +372,7 @@ function KBDetailView({
   const [deletingKB, setDeletingKB] = useState(false);
   const [confirmDeleteKB, setConfirmDeleteKB] = useState(false);
   const [showShare, setShowShare] = useState(false);
+  const [accessDoc, setAccessDoc] = useState<{ id: string; filename: string } | null>(null);
   const dropRef = useRef<HTMLDivElement>(null);
 
   const pollInterval = useRef<ReturnType<typeof setInterval>>();
@@ -518,6 +569,7 @@ function KBDetailView({
                   <span>{doc.file_type.toUpperCase()}</span>
                   <span>{formatSize(doc.file_size)}</span>
                   {doc.chunk_count > 0 && <span>{doc.chunk_count} chunk{doc.chunk_count === 1 ? '' : 's'}</span>}
+                  {(doc.version_number || 1) > 1 && <span className="text-cyan-400" data-testid="kb-doc-version">v{doc.version_number}</span>}
                 </div>
               </div>
               <div className="flex items-center gap-2">
@@ -527,6 +579,17 @@ function KBDetailView({
                   )}
                   {doc.status}
                 </span>
+                {kb.can_edit !== false && (
+                  <button
+                    onClick={() => setAccessDoc({ id: doc.id, filename: doc.filename })}
+                    aria-label={`Who can read ${doc.filename}`}
+                    title="Who can read it, and its versions"
+                    data-testid="kb-doc-access"
+                    className="text-slate-500 hover:text-emerald-400 transition-colors"
+                  >
+                    <Lock className="w-3.5 h-3.5" />
+                  </button>
+                )}
                 <button
                   onClick={() => deleteDoc(doc.id)}
                   disabled={deleting === doc.id}
@@ -553,6 +616,7 @@ function KBDetailView({
         note="Its documents and embeddings are removed permanently."
         onConfirm={deleteKB}
       />
+      <DocumentAccessModal kbId={kb.id} doc={accessDoc} onClose={() => setAccessDoc(null)} />
       <ResourceShareDialog
         open={showShare}
         onClose={() => setShowShare(false)}
@@ -598,6 +662,17 @@ export default function KnowledgePage() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const queryId = searchParams?.get('id') || null;
+  const queryProject = searchParams?.get('project') || '';
+  const queryNew = searchParams?.get('new') === '1';
+
+  useEffect(() => {
+    if (queryNew) setModalOpen(true);
+  }, [queryNew]);
+
+  // the sidebar link to /knowledge drops the id, go back to the list
+  useEffect(() => {
+    if (!queryId) setSelectedKB(null);
+  }, [queryId]);
 
   useEffect(() => {
     if (!queryId || selectedKB?.id === queryId) return;
@@ -817,7 +892,12 @@ export default function KnowledgePage() {
         </div>
       )}
 
-      <CreateModal open={modalOpen} onClose={() => setModalOpen(false)} onCreated={handleCreated} />
+      <CreateModal
+        open={modalOpen}
+        onClose={() => { setModalOpen(false); if (queryNew) router.replace('/knowledge'); }}
+        onCreated={handleCreated}
+        initialProject={queryProject}
+      />
       <DeleteWithDependents
         open={!!deletingCard}
         onClose={() => setDeletingCard(null)}

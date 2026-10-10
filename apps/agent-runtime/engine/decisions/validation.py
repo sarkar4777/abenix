@@ -167,6 +167,22 @@ def _same(a: Any, b: Any) -> bool:
     return canonical_json(a) == canonical_json(b)
 
 
+MATCH_MODES = ("exact", "subset")
+
+
+def _subset(expected: Any, result: Any) -> bool:
+    """Every expected key is in the result with the same value, nested objects alike."""
+    if isinstance(expected, dict) and isinstance(result, dict):
+        return all(k in result and _subset(v, result[k]) for k, v in expected.items())
+    return _same(expected, result)
+
+
+def result_matches(expected: Any, result: Any, match: str | None = "exact") -> bool:
+    if match == "subset":
+        return _subset(expected, result)
+    return _same(result, expected)
+
+
 async def run_tests(
     compiled: Compiled, tests: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:
@@ -183,10 +199,11 @@ async def run_tests(
             want_trace=False,
         )
         want_outcome = t.get("expected_outcome") or "decided"
+        match = t.get("match") or "exact"
         ok = ev.outcome == want_outcome and (
             want_outcome != "decided"
             or t.get("expected") is None
-            or _same(ev.result, t.get("expected"))
+            or result_matches(t.get("expected"), ev.result, match)
         )
         out.append(
             {
@@ -195,6 +212,7 @@ async def run_tests(
                 "passed": ok,
                 "expected_outcome": want_outcome,
                 "expected": t.get("expected"),
+                "match": match,
                 "outcome": ev.outcome,
                 "result": ev.result,
                 "missing_facts": ev.missing_facts,

@@ -163,7 +163,8 @@ The sidebar has two modes. **Essentials** is the default for every role. It show
 | Who | Items |
 |---|---|
 | everyone | Needs you, Home (`/dashboard`), Agents, AI Chat, Knowledge, Monitor (`/executions`) |
-| creators and admins | Agent Builder, Autonomy, Improvements (with `improvements.view`) |
+| reviewers (`moderation.review`) | Review inbox with its count, right under Needs you |
+| creators and admins | Agent Builder, Autonomy (with `autonomy.view`), Improvements (with `improvements.view`) |
 | admins | an Admin entry that opens to the admin pages |
 
 Each essential is the same `NavItem` as in the full list, so the same gates apply. When the current page is not in the short list it shows under "You are here", so a page opened from the palette or a link never leaves the person without a marker.

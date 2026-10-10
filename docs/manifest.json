@@ -5,8 +5,12 @@
       "title": "Getting started",
       "docs": [
         {
+          "slug": "00-how-abenix-fits-together",
+          "title": "How Abenix fits together (start here)"
+        },
+        {
           "slug": "README",
-          "title": "Overview + table of contents"
+          "title": "Docs index"
         }
       ]
     },
@@ -277,6 +281,18 @@
           "title": "Kubernetes specifics"
         },
         {
+          "slug": "06-deployment/07-background-jobs",
+          "title": "Background jobs"
+        },
+        {
+          "slug": "06-deployment/08-dev-catchers",
+          "title": "Dev catchers: email, Slack and SSO"
+        },
+        {
+          "slug": "06-deployment/09-local-sizing",
+          "title": "Sizing a local cluster"
+        },
+        {
           "slug": "06-deployment/deploy-only-trap",
           "title": "The --only deploy trap"
         },
@@ -419,8 +435,8 @@
           "title": "SSO / OIDC sign-in"
         },
         {
-          "slug": "sso",
-          "title": "SSO setup"
+          "slug": "09-reference/06-signing-keys",
+          "title": "Signing keys"
         }
       ]
     }

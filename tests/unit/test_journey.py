@@ -74,6 +74,7 @@ class FakeDB:
         tables = _tables(stmt)
         # the most specific table answers, joins put the answering one first
         for name in (
+            "team_invites",
             "feedback",
             "improvement_proposals",
             "messages",
@@ -339,3 +340,15 @@ async def test_mark_seen():
     assert db.commits == 1
     bad = await J.mark_seen({"step": "nope"}, user=u, db=db)
     assert bad.status_code == 400
+
+
+async def test_invite_step_needs_a_real_invite_or_colleague():
+    # the seeded demo accounts never tick the step
+    view = await J.journey_view(
+        FakeDB({TENANT_A: {"users": [1]}}), _user(UserRole.ADMIN)
+    )
+    assert _flags(view)["invite_team"] is False
+    db = FakeDB({TENANT_A: {"users": [1], "team_invites": [uuid.uuid4()]}})
+    assert (
+        _flags(await J.journey_view(db, _user(UserRole.ADMIN)))["invite_team"] is True
+    )

@@ -116,7 +116,11 @@ async def list_policies(
     count_q = select(func.count()).select_from(query.subquery())
     total = await db.scalar(count_q) or 0
 
-    query = query.order_by(SubjectPolicy.updated_at.desc()).limit(limit).offset(offset)
+    query = (
+        query.order_by(SubjectPolicy.updated_at.desc(), SubjectPolicy.id)
+        .limit(limit)
+        .offset(offset)
+    )
     result = await db.execute(query)
     policies = result.scalars().all()
 

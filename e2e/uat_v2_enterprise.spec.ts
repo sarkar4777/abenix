@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
+import { revealSidebarLink } from './helpers/sidebar';
 
 const BASE = process.env.BASE || 'http://localhost:3000';
 const API = process.env.API || 'http://localhost:8000';
@@ -102,24 +103,21 @@ test('V2 #7 — UI: /settings/cognify renders + has threshold input', async ({ p
   expect(numericInputs).toBeGreaterThan(0);
 });
 
-test('V2 #8 — UI: /settings/gdpr renders + has user-id input', async ({ page }) => {
+test('V2 #8 — UI: /settings/gdpr renders + has the person search', async ({ page }) => {
   await login(page);
   await page.goto(`${BASE}/settings/gdpr`);
   await page.waitForLoadState('domcontentloaded');
-  await page.waitForTimeout(2500);
+  await expect(page.getByTestId('gdpr-person-search')).toBeVisible({ timeout: 15_000 });
   const body = (await page.locator('body').innerText()).toLowerCase();
   expect(body).toMatch(/gdpr|erasure|purge|receipt/);
-  expect(await page.locator('input[type="text"]').count()).toBeGreaterThan(0);
 });
 
 test('V2 #9 — Sidebar: new admin entries reachable', async ({ page }) => {
   await login(page);
   await page.goto(`${BASE}/dashboard`);
   await page.waitForLoadState('domcontentloaded');
-  await page.waitForTimeout(2000);
-  const cognifyLinks = await page.locator('a[href="/settings/cognify"]').count();
-  const gdprLinks = await page.locator('a[href="/settings/gdpr"]').count();
-  expect(cognifyLinks + gdprLinks).toBeGreaterThan(0);
+  await revealSidebarLink(page, '/settings/cognify');
+  await revealSidebarLink(page, '/settings/gdpr');
 });
 
 test('V2 #10 — Doc grant: invalid permission rejected', async ({ page }) => {

@@ -29,6 +29,9 @@ def _get_db_url() -> str:
         base, query = url.split("?", 1)
         kept = [p for p in query.split("&") if not p.lower().startswith("ssl=")]
         url = base + (("?" + "&".join(kept)) if kept else "")
+    # SQLAlchemy 2.1 maps a bare postgresql:// to psycopg 3, which the image lacks
+    if url.startswith("postgresql://"):
+        url = "postgresql+psycopg2://" + url[len("postgresql://") :]
     return url
 
 
@@ -43,7 +46,8 @@ def _fetch_document_chunks(kb_id: str, doc_ids: list[str], config: dict) -> list
         for doc_id in doc_ids:
             row = conn.execute(
                 text(
-                    "SELECT id, filename, file_type, storage_url FROM documents WHERE id = :id AND kb_id = :kb_id"
+                    "SELECT id, filename, file_type, storage_url FROM documents "
+                    "WHERE id = :id AND kb_id = :kb_id AND is_current IS NOT FALSE"
                 ),
                 {"id": doc_id, "kb_id": kb_id},
             ).fetchone()

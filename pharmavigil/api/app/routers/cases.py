@@ -34,18 +34,21 @@ router = APIRouter(prefix="/api/pv/cases", tags=["pv-cases"])
 
 
 class CaseIn(BaseModel):
-    narrative: str = Field(min_length=10, description="The reporter's own words")
-    suspect_drug: str = Field(min_length=1)
-    reporter_type: str = "consumer"
-    country: str = "GB"
-    received_date: str | None = None
-    attachment_urls: list[str] = Field(default_factory=list)
+    narrative: str = Field(min_length=10, max_length=20000, description="The reporter's own words")
+    suspect_drug: str = Field(min_length=1, max_length=200)
+    reporter_type: str = Field(
+        default="consumer",
+        pattern="^(consumer|physician|pharmacist|nurse|other_hcp|lawyer|other)$",
+    )
+    country: str = Field(default="GB", pattern="^[A-Z]{2}$", description="ISO 3166 alpha-2")
+    received_date: date | None = None
+    attachment_urls: list[str] = Field(default_factory=list, max_length=10)
 
 
 class ReviewIn(BaseModel):
     decision: str = Field(pattern="^(approve|reject|merge)$")
-    reviewer: str = "medical.reviewer"
-    notes: str = ""
+    reviewer: str = Field(default="medical.reviewer", min_length=2, max_length=120)
+    notes: str = Field(default="", max_length=4000)
 
 
 def _ok(data: Any) -> dict[str, Any]:
@@ -94,11 +97,44 @@ async def create_case(
         "suspect_drug": body.suspect_drug,
         "reporter_type": body.reporter_type,
         "country": body.country,
-        "received_date": body.received_date or date.today().isoformat(),
+        "received_date": (body.received_date or date.today()).isoformat(),
         "attachment_urls": body.attachment_urls,
     })
     background.add_task(_assess, case["id"], body, subject, tenant_id, store)
     return _ok(case)
+
+
+@router.post("/{case_id}/reassess", status_code=202)
+async def reassess_case(
+    case_id: str,
+    background: BackgroundTasks,
+    store: CaseStore = Depends(get_store),
+    subject: ActingSubject = Depends(get_subject),
+    tenant_id: str = Depends(get_tenant_id),
+):
+    """Run the assessment again on a case whose last run failed."""
+    row = await store.get(case_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="case not found")
+    if row.get("status") != "failed":
+        raise HTTPException(
+            status_code=409,
+            detail=f"case is {row.get('status')}, only a failed assessment can be run again",
+        )
+    body = CaseIn(
+        narrative=row["narrative"],
+        suspect_drug=row["suspect_drug"],
+        reporter_type=row.get("reporter_type") or "consumer",
+        country=row.get("country") or "GB",
+        received_date=row.get("received_date"),
+        attachment_urls=row.get("attachment_urls") or [],
+    )
+    updated = await store.update(
+        case_id, status="received", error_message=None,
+        _event_type="reassess", _event_summary="Assessment started again",
+    )
+    background.add_task(_assess, case_id, body, subject, tenant_id, store)
+    return _ok(updated)
 
 
 @router.post("/{case_id}/review")
@@ -111,11 +147,20 @@ async def review_case(
     row = await store.get(case_id)
     if row is None:
         raise HTTPException(status_code=404, detail="case not found")
-    if row.get("status") not in {"assessed", "submitted", "rejected", "merged"}:
+    if row.get("review_decision"):
         raise HTTPException(
             status_code=409,
-            detail=f"case is {row.get('status')} — wait for the assessment to finish",
+            detail=f"{row.get('reviewed_by')} already chose {row.get('review_decision')} for this case",
         )
+    if row.get("status") != "assessed":
+        raise HTTPException(
+            status_code=409,
+            detail=f"case is {row.get('status')}, wait for the assessment to finish",
+        )
+    if body.decision in {"reject", "merge"} and not body.notes.strip():
+        raise HTTPException(status_code=422, detail=f"Say why you {body.decision} this case")
+    if body.decision == "merge" and not row.get("is_duplicate"):
+        raise HTTPException(status_code=409, detail="this case was not flagged as a duplicate")
     updated = await store.record_review(case_id, body.decision, body.reviewer, body.notes)
     return _ok(updated)
 
@@ -143,7 +188,7 @@ async def _assess(
         counts = {}
     context = {
         "case_id": case_id,
-        "received_date": body.received_date or date.today().isoformat(),
+        "received_date": (body.received_date or date.today()).isoformat(),
         "reporter_type": body.reporter_type,
         "country": body.country,
         "suspect_drug": body.suspect_drug,

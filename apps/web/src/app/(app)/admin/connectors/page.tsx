@@ -9,6 +9,7 @@ import { apiFetch } from '@/lib/api-client';
 import PageHeader from '@/components/layout/PageHeader';
 import { AccessGate } from '@/components/layout/NoAccess';
 import NextSteps from '@/components/shared/NextSteps';
+import UnencryptedSecretsBanner from '@/components/shared/UnencryptedSecretsBanner';
 import { describeTest, type TestResult } from './test-result';
 
 interface PresetSummary {
@@ -229,11 +230,12 @@ function AdminConnectorsPage() {
         secondaryAction={{ label: 'Refresh', icon: RefreshCw, onClick: load, busy: loading }}
         steps={[
           'Click New connector, pick a preset if your system has one, and fill in its address.',
-          'Add the key or password the system needs. It is stored encrypted and never shown again.',
+          'Add the key or password the system needs. It is never shown again, and is encrypted when the cluster has a data key set.',
           'Click Test to check the platform can reach the system.',
           'Agents with the connector call tool can then read from and write to it.',
         ]}
       />
+      <UnencryptedSecretsBanner />
 
       {firstConnector && (
         <NextSteps
@@ -359,9 +361,9 @@ function AdminConnectorsPage() {
 
       {showForm && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setShowForm(false)}>
-          <div className="w-full max-w-2xl bg-[#0F172A] border border-slate-700 rounded-2xl shadow-2xl" onClick={e => e.stopPropagation()}>
+          <div role="dialog" aria-modal="true" aria-labelledby="connector-form-title" className="w-full max-w-2xl bg-[#0F172A] border border-slate-700 rounded-2xl shadow-2xl" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between px-5 py-3 border-b border-slate-800">
-              <h2 className="text-sm font-semibold text-white">{form.id ? 'Edit connector' : 'New connector'}</h2>
+              <h2 id="connector-form-title" className="text-sm font-semibold text-white">{form.id ? 'Edit connector' : 'New connector'}</h2>
               <button onClick={() => setShowForm(false)} className="text-slate-400 hover:text-white"><X className="w-4 h-4" /></button>
             </div>
             <div className="px-5 py-4 space-y-3 max-h-[70vh] overflow-y-auto">

@@ -1,8 +1,13 @@
 """Marketplace and monetization switches.
 
 Two independent server-side settings. The env (helm configmap) sets the
-default, an admin can override either from the UI, and the override lives
-in platform_settings so every API pod sees the same value.
+default, a platform operator can override either from the UI, and the
+override lives in platform_settings so every API pod sees the same value.
+
+The switches are deployment-wide, so a tenant admin cannot change them. A
+platform operator is an admin listed in ABENIX_PLATFORM_OPERATORS (emails,
+comma separated). When that is unset, the admins of the platform tenant, the
+one holding system@abenix.dev, are the operators.
 """
 
 from __future__ import annotations
@@ -28,6 +33,13 @@ SWITCHES: dict[str, tuple[str, str, bool]] = {
     MONETIZATION_KEY: ("monetization", "MONETIZATION_ENABLED", False),
 }
 
+OPERATORS_ENV = "ABENIX_PLATFORM_OPERATORS"
+SYSTEM_USER_EMAIL = "system@abenix.dev"
+OPERATOR_ONLY = (
+    "These switches apply to every tenant on this deployment, so only a "
+    "platform operator can change them."
+)
+
 MARKETPLACE_OFF = "The marketplace is turned off on this deployment."
 MONETIZATION_OFF = "Monetization is turned off on this deployment."
 
@@ -50,6 +62,47 @@ def env_default(key: str) -> bool:
     _, env, fallback = SWITCHES[key]
     parsed = parse_bool(os.environ.get(env))
     return fallback if parsed is None else parsed
+
+
+def operator_emails() -> set[str]:
+    raw = os.environ.get(OPERATORS_ENV, "")
+    return {e.strip().lower() for e in raw.split(",") if e.strip()}
+
+
+def _is_admin(user: Any) -> bool:
+    role = getattr(user, "role", None)
+    r = role.value if hasattr(role, "value") else str(role or "")
+    return r.lower() == "admin"
+
+
+async def _platform_tenant_id(db: AsyncSession) -> Any:
+    try:
+        row = (
+            await db.execute(
+                text("SELECT tenant_id FROM users WHERE lower(email) = :e"),
+                {"e": SYSTEM_USER_EMAIL},
+            )
+        ).first()
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("platform tenant lookup failed: %s", exc)
+        return None
+    return row[0] if row else None
+
+
+async def is_platform_operator(db: AsyncSession, user: Any) -> bool:
+    if not _is_admin(user):
+        return False
+    listed = operator_emails()
+    if listed:
+        return str(getattr(user, "email", "") or "").lower() in listed
+    tid = await _platform_tenant_id(db)
+    return tid is not None and str(tid) == str(getattr(user, "tenant_id", ""))
+
+
+def operator_rule() -> str:
+    if operator_emails():
+        return f"Admins listed in {OPERATORS_ENV}."
+    return "Admins of the platform tenant, the one that holds the system account."
 
 
 async def read_features(db: AsyncSession) -> dict[str, Any]:

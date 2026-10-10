@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query
@@ -7,10 +9,12 @@ from sqlalchemy import String, cast, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, get_db
+from app.core.permissions import is_admin
 from app.core.responses import success
 from models.user import User
 
 router = APIRouter(prefix="/api/search", tags=["search"])
+logger = logging.getLogger(__name__)
 
 
 # Static catalogue of in-app routes. Spotlight matches against label + keywords
@@ -264,7 +268,7 @@ async def search(
     db: AsyncSession = Depends(get_db),
 ):
     """Spotlight-style global search across pages, agents, pipelines,
-    executions, knowledge bases, ML models, code assets.
+    runs, knowledge bases, ML models, code assets, limited to what the caller can open.
 
     Returns a unified result list with category + label + href so the
     client can navigate straight to the matching surface.
@@ -297,163 +301,160 @@ async def search(
 
     tenant_id = user.tenant_id
 
-    # 2. Agents
+    like = f"%{needle}%"
+    admin = is_admin(user)
+
+    # 2. Agents and pipelines the caller can open, platform ones included
     try:
-        from models.agent import Agent
+        from app.services.agent_share import accessible_agent_ids
+        from models.agent import Agent, AgentStatus, AgentType
 
-        like = f"%{needle}%"
-        rows = (
-            await db.execute(
-                select(Agent.id, Agent.name, Agent.description)
-                .where(Agent.tenant_id == tenant_id)
-                .where(or_(Agent.name.ilike(like), Agent.description.ilike(like)))
-                .limit(limit)
+        stmt = select(
+            Agent.id, Agent.name, Agent.description, Agent.model_config_
+        ).where(
+            Agent.status != AgentStatus.ARCHIVED,
+            or_(Agent.name.ilike(like), Agent.description.ilike(like)),
+        )
+        if admin:
+            stmt = stmt.where(
+                or_(Agent.tenant_id == tenant_id, Agent.agent_type == AgentType.OOB)
             )
-        ).all()
-        for r in rows:
-            out.append(
-                {
-                    "category": "Agents",
-                    "label": r.name,
-                    "subtitle": (r.description or "")[:120],
-                    "href": f"/agents/{r.id}",
-                }
-            )
-    except Exception:
-        pass
-
-    # 3. Pipelines
-    try:
-        from models.pipeline import Pipeline
-
-        like = f"%{needle}%"
-        rows = (
-            await db.execute(
-                select(Pipeline.id, Pipeline.name, Pipeline.description)
-                .where(Pipeline.tenant_id == tenant_id)
-                .where(or_(Pipeline.name.ilike(like), Pipeline.description.ilike(like)))
-                .limit(limit)
-            )
-        ).all()
-        for r in rows:
-            out.append(
-                {
-                    "category": "Pipelines",
-                    "label": r.name,
-                    "subtitle": (r.description or "")[:120],
-                    "href": f"/builder?pipeline={r.id}",
-                }
-            )
-    except Exception:
-        pass
-
-    # 4. Knowledge Bases
-    try:
-        from models.knowledge import KnowledgeBase
-
-        like = f"%{needle}%"
-        rows = (
-            await db.execute(
-                select(KnowledgeBase.id, KnowledgeBase.name, KnowledgeBase.description)
-                .where(KnowledgeBase.tenant_id == tenant_id)
-                .where(
-                    or_(
-                        KnowledgeBase.name.ilike(like),
-                        KnowledgeBase.description.ilike(like),
-                    )
+        else:
+            mine = await accessible_agent_ids(db, user)
+            stmt = stmt.where(
+                or_(
+                    Agent.agent_type == AgentType.OOB,
+                    Agent.id.in_(mine or [uuid.UUID(int=0)]),
                 )
-                .limit(limit)
             )
-        ).all()
+        rows = (await db.execute(stmt.order_by(Agent.name).limit(limit * 2))).all()
+        counts: dict[str, int] = {}
         for r in rows:
+            cat = (
+                "Pipelines"
+                if (r.model_config_ or {}).get("mode") == "pipeline"
+                else "Agents"
+            )
+            if counts.get(cat, 0) >= limit:
+                continue
+            counts[cat] = counts.get(cat, 0) + 1
+            out.append(
+                {
+                    "category": cat,
+                    "label": r.name,
+                    "subtitle": (r.description or "")[:120],
+                    "href": f"/agents/{r.id}/info",
+                }
+            )
+    except Exception:
+        logger.exception("search: agents failed")
+
+    # 3. Knowledge bases the caller can read
+    try:
+        from app.services.kb_access import accessible_collection_ids
+        from models.knowledge_base import KnowledgeBase
+
+        stmt = select(
+            KnowledgeBase.id, KnowledgeBase.name, KnowledgeBase.description
+        ).where(
+            KnowledgeBase.tenant_id == tenant_id,
+            or_(KnowledgeBase.name.ilike(like), KnowledgeBase.description.ilike(like)),
+        )
+        allowed = await accessible_collection_ids(db, user=user, tenant_id=tenant_id)
+        if allowed is not None:
+            stmt = stmt.where(KnowledgeBase.id.in_(allowed or [uuid.UUID(int=0)]))
+        for r in (await db.execute(stmt.limit(limit))).all():
             out.append(
                 {
                     "category": "Knowledge",
                     "label": r.name,
                     "subtitle": (r.description or "")[:120],
-                    "href": f"/knowledge/{r.id}",
+                    "href": f"/knowledge?id={r.id}",
                 }
             )
     except Exception:
-        pass
+        logger.exception("search: knowledge failed")
 
-    # 5. ML Models
-    try:
-        from models.ml_model import MLModel
-
-        like = f"%{needle}%"
-        rows = (
-            await db.execute(
-                select(MLModel.id, MLModel.name, MLModel.description)
-                .where(MLModel.tenant_id == tenant_id)
-                .where(or_(MLModel.name.ilike(like), MLModel.description.ilike(like)))
-                .limit(limit)
-            )
-        ).all()
-        for r in rows:
-            out.append(
-                {
-                    "category": "ML Models",
-                    "label": r.name,
-                    "subtitle": (r.description or "")[:120],
-                    "href": f"/ml-models/{r.id}",
-                }
-            )
-    except Exception:
-        pass
-
-    # 6. Code Assets
-    try:
-        from models.code_asset import CodeAsset
-
-        like = f"%{needle}%"
-        rows = (
-            await db.execute(
-                select(CodeAsset.id, CodeAsset.name, CodeAsset.description)
-                .where(CodeAsset.tenant_id == tenant_id)
-                .where(
-                    or_(CodeAsset.name.ilike(like), CodeAsset.description.ilike(like))
-                )
-                .limit(limit)
-            )
-        ).all()
-        for r in rows:
-            out.append(
-                {
-                    "category": "Code Assets",
-                    "label": r.name,
-                    "subtitle": (r.description or "")[:120],
-                    "href": f"/code-runner?asset={r.id}",
-                }
-            )
-    except Exception:
-        pass
-
-    # 7. Recent executions — only match against id prefix (so users can paste a trace_id)
-    if len(needle) >= 8:
+    # 4. ML models and code assets, own, shared or the whole tenant for admins
+    for kind, module, cls, cat, href in (
+        ("ml_model", "models.ml_model", "MLModel", "ML Models", "/ml-models?id={}"),
+        (
+            "code_asset",
+            "models.code_asset",
+            "CodeAsset",
+            "Code Assets",
+            "/code-runner?asset={}",
+        ),
+    ):
         try:
-            from models.execution import Execution
+            import importlib
 
-            like_id = f"{needle}%"
-            rows = (
-                await db.execute(
-                    select(Execution.id, Execution.status, Execution.created_at)
-                    .where(Execution.tenant_id == tenant_id)
-                    .where(cast(Execution.id, String).ilike(like_id))
-                    .order_by(Execution.created_at.desc())
-                    .limit(limit)
-                )
-            ).all()
-            for r in rows:
+            from app.core.permissions import (
+                accessible_resource_ids,
+                apply_resource_scope,
+            )
+
+            model = getattr(importlib.import_module(module), cls)
+            stmt = select(model.id, model.name, model.description).where(
+                or_(model.name.ilike(like), model.description.ilike(like))
+            )
+            stmt = apply_resource_scope(
+                stmt,
+                model,
+                user,
+                kind=kind,
+                accessible_ids=await accessible_resource_ids(db, user, kind=kind),
+            )
+            if hasattr(model, "status"):
+                stmt = stmt.where(cast(model.status, String) != "deleted")
+            for r in (await db.execute(stmt.limit(limit))).all():
                 out.append(
                     {
-                        "category": "Executions",
-                        "label": str(r.id)[:8] + "...",
-                        "subtitle": f"status={r.status}",
-                        "href": f"/executions/{r.id}",
+                        "category": cat,
+                        "label": r.name,
+                        "subtitle": (r.description or "")[:120],
+                        "href": href.format(r.id),
                     }
                 )
         except Exception:
-            pass
+            logger.exception("search: %s failed", kind)
+
+    # 5. Runs, by id prefix or by what they were asked, your own unless admin
+    try:
+        from models.agent import Agent
+        from models.execution import Execution
+
+        conds = [Execution.input_message.ilike(like)]
+        if len(needle) >= 4:
+            conds.append(cast(Execution.id, String).ilike(f"{needle}%"))
+        stmt = (
+            select(
+                Execution.id,
+                Execution.status,
+                Execution.created_at,
+                Execution.input_message,
+                Agent.name,
+            )
+            .join(Agent, Agent.id == Execution.agent_id, isouter=True)
+            .where(Execution.tenant_id == tenant_id, or_(*conds))
+        )
+        if not admin:
+            stmt = stmt.where(Execution.user_id == user.id)
+        rows = (
+            await db.execute(stmt.order_by(Execution.created_at.desc()).limit(limit))
+        ).all()
+        for r in rows:
+            status = getattr(r.status, "value", r.status)
+            asked = (r.input_message or "").strip().replace("\n", " ")
+            out.append(
+                {
+                    "category": "Runs",
+                    "label": f"{r.name or 'Run'}: {asked[:60] or str(r.id)[:8]}",
+                    "subtitle": f"{status}, {str(r.id)[:8]}",
+                    "href": f"/executions/{r.id}",
+                }
+            )
+    except Exception:
+        logger.exception("search: runs failed")
 
     return success({"results": out, "query": q})

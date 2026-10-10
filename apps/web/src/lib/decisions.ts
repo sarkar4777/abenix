@@ -69,7 +69,7 @@ export interface Validation {
   changes: { source: string; name: string; facts: any; before: any; after: any }[];
 }
 export interface TestResult {
-  test_id: string; name: string; passed: boolean; expected_outcome: string; expected: any;
+  test_id: string; name: string; passed: boolean; expected_outcome: string; expected: any; match?: 'exact' | 'subset';
   outcome: string; result: any; missing_facts: string[]; invalid_facts: any[]; applied_rules: string[];
 }
 export interface Evaluation {

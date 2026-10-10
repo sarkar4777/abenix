@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "abenix-sdk"
-version = "1.0.0"
+version = "2.5.5"
 description = "Abenix Python SDK — execute, stream, and monitor AI agents"
 requires-python = ">=3.10"
 dependencies = [

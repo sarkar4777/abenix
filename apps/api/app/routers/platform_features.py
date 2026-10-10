@@ -12,9 +12,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import log_action
 from app.core.deps import get_current_user, get_db
+from app.core import secret_storage
+from app.core.permissions import features_for
 from app.core.platform_features import (
     MARKETPLACE_KEY,
     MONETIZATION_KEY,
+    OPERATOR_ONLY,
+    is_platform_operator,
+    operator_rule,
     parse_bool,
     read_features,
     write_feature,
@@ -31,16 +36,22 @@ router = APIRouter(tags=["platform-features"])
 _BODY_KEYS = {"marketplace": MARKETPLACE_KEY, "monetization": MONETIZATION_KEY}
 
 
-def _is_admin(user: User) -> bool:
-    role = getattr(user, "role", None)
-    r = role.value if hasattr(role, "value") else str(role or "")
-    return r.lower() == "admin"
-
-
 @router.get("/api/platform/features")
 async def get_features(db: AsyncSession = Depends(get_db)) -> JSONResponse:
     """Which of the two switches are on. Open to anyone, it only holds booleans."""
     return success(await read_features(db))
+
+
+@router.get("/api/admin/platform-features")
+async def get_features_for_admin(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """The switches plus whether this caller may change them."""
+    data = await read_features(db)
+    data["can_change"] = await is_platform_operator(db, user)
+    data["operator_rule"] = operator_rule()
+    return success(data)
 
 
 @router.put("/api/admin/platform-features")
@@ -49,8 +60,8 @@ async def set_features(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
-    if not _is_admin(user):
-        return error("Only an admin can change these settings", 403)
+    if not await is_platform_operator(db, user):
+        return error(OPERATOR_ONLY, 403, error_code="PLATFORM_OPERATOR_REQUIRED")
     changes: dict[str, bool] = {}
     for name, key in _BODY_KEYS.items():
         if name not in body:
@@ -78,3 +89,11 @@ async def set_features(
         logger.warning("audit for platform features failed: %s", exc)
     logger.info("[platform.features] %s set %s", user.email, changes)
     return success(await read_features(db))
+
+
+@router.get("/api/admin/secret-storage")
+async def get_secret_storage(user: User = Depends(get_current_user)) -> JSONResponse:
+    """Whether tool and connector secrets are encrypted at rest."""
+    if not features_for(user).get("manage_settings"):
+        return error("Admin role required", 403)
+    return success(secret_storage.status())

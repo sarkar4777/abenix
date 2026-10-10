@@ -204,7 +204,41 @@ async def invite_member(
     await db.commit()
     await db.refresh(invite)
 
-    return success(_serialize_invite(invite, request), status_code=201)
+    data = _serialize_invite(invite, request)
+    data["emailed"] = await _email_invite(db, invite, user, data.get("invite_url", ""))
+    return success(data, status_code=201)
+
+
+async def _email_invite(
+    db: AsyncSession, invite: TeamInvite, inviter: User, link: str
+) -> bool:
+    from html import escape
+
+    from app.core import mailer
+    from models.tenant import Tenant
+
+    if not link or not mailer.available():
+        return False
+    tenant = await db.get(Tenant, invite.tenant_id)
+    workspace = tenant.name if tenant else "an Abenix workspace"
+    who = inviter.full_name or inviter.email
+    text = (
+        f"{who} invited you to join {workspace} on Abenix as {invite.role}.\n\n"
+        f"Accept the invite and choose your password here:\n\n{link}\n\n"
+        "The link works for 7 days.\n"
+    )
+    html = (
+        f"<p>{escape(who)} invited you to join <b>{escape(workspace)}</b> on Abenix "
+        f"as {escape(invite.role)}.</p>"
+        f'<p><a href="{escape(link)}">Accept the invite</a></p>'
+        "<p>The link works for 7 days.</p>"
+    )
+    return await mailer.send(
+        to=invite.email,
+        subject=f"{who} invited you to {workspace} on Abenix",
+        text=text,
+        html=html,
+    )
 
 
 @router.put("/members/{member_id}/role")
@@ -291,6 +325,27 @@ async def cancel_invite(
     return success({"id": str(invite.id), "status": "cancelled"})
 
 
+def quota_value(
+    body: dict, key: str, *, whole: bool
+) -> tuple[float | int | None, str | None]:
+    """The limit to store, None for no limit, or why the value is unusable."""
+    label = "The token limit" if whole else "The cost limit"
+    raw = body.get(key)
+    if raw is None or raw == "":
+        return None, None
+    try:
+        num = float(raw)
+    except (TypeError, ValueError):
+        return None, f"{label} must be a number, or blank for no limit"
+    if num != num or num < 0:
+        return None, f"{label} cannot be negative"
+    if whole:
+        if num != int(num):
+            return None, f"{label} must be a whole number of tokens"
+        return int(num), None
+    return round(num, 2), None
+
+
 @router.put("/members/{member_id}/quota")
 async def set_member_quota(
     member_id: uuid.UUID,
@@ -307,12 +362,16 @@ async def set_member_quota(
     if not member:
         return error("Member not found", 404)
 
+    tokens, problem = quota_value(body, "token_monthly_allowance", whole=True)
+    if problem:
+        return error(problem, 400)
+    cost, problem = quota_value(body, "cost_monthly_limit", whole=False)
+    if problem:
+        return error(problem, 400)
     if "token_monthly_allowance" in body:
-        val = body["token_monthly_allowance"]
-        member.token_monthly_allowance = int(val) if val is not None else None
+        member.token_monthly_allowance = tokens
     if "cost_monthly_limit" in body:
-        val = body["cost_monthly_limit"]
-        member.cost_monthly_limit = float(val) if val is not None else None
+        member.cost_monthly_limit = cost
 
     await db.commit()
 
@@ -322,7 +381,9 @@ async def set_member_quota(
             "email": member.email,
             "token_monthly_allowance": member.token_monthly_allowance,
             "cost_monthly_limit": (
-                float(member.cost_monthly_limit) if member.cost_monthly_limit else None
+                float(member.cost_monthly_limit)
+                if member.cost_monthly_limit is not None
+                else None
             ),
             "tokens_used": member.tokens_used_this_month or 0,
             "cost_used": float(member.cost_used_this_month or 0),

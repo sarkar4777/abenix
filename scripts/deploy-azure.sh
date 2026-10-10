@@ -366,6 +366,13 @@ _build_secrets_flags() {
   [ -n "${ENTSOE_API_KEY:-}" ]           && flags="${flags} --set secrets.entsoeApiKey=${ENTSOE_API_KEY}"
   [ -n "${EIA_API_KEY:-}" ]              && flags="${flags} --set secrets.eiaApiKey=${EIA_API_KEY}"
   [ -n "${CONTRACTIQ_JWT_SECRET:-}" ]    && flags="${flags} --set secrets.contractiqJwtSecret=${CONTRACTIQ_JWT_SECRET}"
+  [ -n "${GOOGLE_OIDC_CLIENT_ID:-}" ]        && flags="${flags} --set secrets.sso.googleClientId=${GOOGLE_OIDC_CLIENT_ID}"
+  [ -n "${GOOGLE_OIDC_CLIENT_SECRET:-}" ]    && flags="${flags} --set secrets.sso.googleClientSecret=${GOOGLE_OIDC_CLIENT_SECRET}"
+  [ -n "${GITHUB_OAUTH_CLIENT_ID:-}" ]       && flags="${flags} --set secrets.sso.githubClientId=${GITHUB_OAUTH_CLIENT_ID}"
+  [ -n "${GITHUB_OAUTH_CLIENT_SECRET:-}" ]   && flags="${flags} --set secrets.sso.githubClientSecret=${GITHUB_OAUTH_CLIENT_SECRET}"
+  [ -n "${MICROSOFT_OIDC_CLIENT_ID:-}" ]     && flags="${flags} --set secrets.sso.microsoftClientId=${MICROSOFT_OIDC_CLIENT_ID}"
+  [ -n "${MICROSOFT_OIDC_CLIENT_SECRET:-}" ] && flags="${flags} --set secrets.sso.microsoftClientSecret=${MICROSOFT_OIDC_CLIENT_SECRET}"
+  [ -n "${MICROSOFT_OIDC_TENANT:-}" ]        && flags="${flags} --set secrets.sso.microsoftTenant=${MICROSOFT_OIDC_TENANT}"
   echo "${flags}"
 }
 
@@ -1105,7 +1112,8 @@ verify_ml_models_shared() {
       log "ML model volume check: no model files yet"
       return 0
     fi
-    if MSYS_NO_PATHCONV=1 kubectl exec -n "${NAMESPACE}" "${rt_pod}" -- sh -c "test -f '${sample}'" 2>/dev/null; then
+    # no MSYS_NO_PATHCONV here, it hides a Git Bash style KUBECONFIG from kubectl and the check hits another cluster
+    if kubectl exec -n "${NAMESPACE}" "${rt_pod}" -- sh -c "test -f '${sample}'" 2>/dev/null; then
       ok "ML models: the runtime reads the files the API stores"
       return 0
     fi
@@ -1712,6 +1720,9 @@ install_observability() {
   if [ -f "${dir}/tempo.yaml" ]; then
     kubectl apply -f "${dir}/tempo.yaml" -n "${NAMESPACE}" 2>&1 | tail -1
   fi
+  kubectl get secret abenix-grafana-admin -n "${NAMESPACE}" >/dev/null 2>&1 \
+    || kubectl create secret generic abenix-grafana-admin -n "${NAMESPACE}" \
+         --from-literal=admin-password="${GRAFANA_ADMIN_PASSWORD:-abenix-admin}" 2>&1 | tail -1
   kubectl apply -f "${dir}/grafana.yaml"    -n "${NAMESPACE}" 2>&1 | tail -1
   kubectl rollout restart deployment/abenix-grafana -n "${NAMESPACE}" 2>&1 | tail -1 || true
   kubectl wait --for=condition=Available --timeout=120s deploy/abenix-prometheus -n "${NAMESPACE}" 2>&1 | tail -1 || true

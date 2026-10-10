@@ -144,7 +144,7 @@ export default function NotificationsPage() {
   const saveSlack = async () => {
     setSlackErr(null);
     const v = slackUrl.trim();
-    if (v && !v.includes('…') && !/^https:\/\/\S+$/i.test(v)) {
+    if (v && !v.includes('…') && !/^https?:\/\/\S+$/i.test(v)) {
       setSlackErr('Paste the full Slack webhook link. It starts with https://hooks.slack.com/');
       return;
     }
@@ -332,10 +332,10 @@ export default function NotificationsPage() {
                 <Mail className="w-4 h-4 text-slate-400" aria-hidden="true" />
               </div>
               <div className="min-w-0">
-                <p id="chan-email-label" className="text-sm font-medium text-white">Email me about failures and alerts</p>
+                <p id="chan-email-label" className="text-sm font-medium text-white">Email me when something needs me</p>
                 <p id="chan-email-desc" className="text-xs text-slate-500">
                   {prefs.delivery.email_available
-                    ? `Failed runs and alerts are also emailed to ${user?.email || 'you'}. Successful runs are not emailed.`
+                    ? `Failed runs, alerts, approval requests and harm flags are also emailed to ${user?.email || 'you'}. Successful runs are not emailed.`
                     : 'Not available. Outgoing email is not set up on this platform. An operator can enable it.'}
                 </p>
               </div>

@@ -306,7 +306,8 @@ def test_actions_propose_wait_executed_outcome():
     assert body["target"] == "plant-1" and body["prediction"]["high"] == 4.6
     assert "agent_id" not in body
     assert seen[1].url.params["timeout_s"] == "120"
-    assert seen[2].url.params["timeout_s"] == "30"
+    # the clock, not a sum of chunks, decides what is left
+    assert 1 <= int(seen[2].url.params["timeout_s"]) <= 120
     assert [(r.method, r.url.path) for r in seen[3:]] == [
         ("POST", "/api/autonomy/actions/a1/executed"),
         ("POST", "/api/autonomy/actions/a1/outcome"),
@@ -400,3 +401,31 @@ def test_improvements_lessons_and_feedback():
         asyncio.run(sdk.feedback.give(0))
     with pytest.raises(ValueError):
         asyncio.run(sdk.lessons.report("a1", " "))
+
+
+def test_approval_wait_rides_out_a_busy_server(monkeypatch):
+    answers = iter(
+        [
+            httpx.Response(503, json={"error": {"message": "busy", "code": 503}}),
+            _ok({"id": "p1", "status": "pending"}),
+            _ok({"id": "p1", "status": "approved"}),
+        ]
+    )
+    sdk, seen = _client(lambda r: next(answers))
+
+    async def no_sleep(_s):
+        return None
+
+    monkeypatch.setattr(asyncio, "sleep", no_sleep)
+    out = asyncio.run(sdk.approvals.wait_for("p1", timeout_seconds=600))
+    assert out["status"] == "approved"
+    assert len(seen) == 3
+    assert seen[0].url.params["timeout_seconds"] == "120"
+
+
+def test_approval_wait_raises_on_a_real_refusal():
+    sdk, _ = _client(
+        lambda r: httpx.Response(404, json={"error": {"message": "Approval not found"}})
+    )
+    with pytest.raises(httpx.HTTPStatusError):
+        asyncio.run(sdk.approvals.wait_for("nope", timeout_seconds=5))

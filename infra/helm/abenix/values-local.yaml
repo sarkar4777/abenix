@@ -197,13 +197,14 @@ postgresql:
       adminPasswordKey: postgres-password
     database: abenix
   primary:
+    # 512Mi let a busy backend hit the limit and put the whole database into crash recovery
     resources:
       requests:
-        cpu: 100m
-        memory: 256Mi
-      limits:
-        cpu: 500m
+        cpu: 200m
         memory: 512Mi
+      limits:
+        cpu: "1"
+        memory: 2Gi
     persistence:
       size: 5Gi
       storageClass: ""
@@ -393,4 +394,9 @@ codeRunners:
 # UAT fixture, so any other in-cluster MCP service has to be named here or the
 # connect call answers 400.
 mcpAllowedHosts: "uat-mcp.abenix.svc.cluster.local,custom-mcp.abenix.svc.cluster.local"
+
+# Mailpit, webhook catcher and mock OIDC for end-to-end tests of email,
+# Slack delivery and SSO. Local only, see docs/06-deployment/08-dev-catchers.md
+devCatchers:
+  enabled: true
 

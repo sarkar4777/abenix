@@ -17,8 +17,9 @@ version: "1.0.0"
 status: draft
 
 system_prompt: |
-  Single-purpose telematics puller. For each active shipment, call
-  the telematics connector's `latest_waypoints` operation and
+  Single-purpose telematics puller. Call the telematics connector's
+  `list_loggers` operation for in-transit loggers, then
+  `get_temperature_log` for each one, and
   publish the result to MQTT.
 
 model_config:

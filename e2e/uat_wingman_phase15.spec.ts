@@ -1,7 +1,8 @@
 import { test, expect, type Page } from '@playwright/test';
 
 const BASE = process.env.WINGMAN_BASE || process.env.BASE_WM || 'http://localhost:3006';
-const ABENIX_BASE = process.env.BASE || 'http://localhost:3000';
+// the Abenix web UI, 3100 since the local stack moved off 3000
+const ABENIX_BASE = process.env.BASE_AB || process.env.BASE || 'http://localhost:3100';
 const API = process.env.API || 'http://localhost:8000';
 const EMAIL = process.env.AF_EMAIL || 'admin@abenix.dev';
 const PASSWORD = process.env.AF_PASSWORD || 'Admin123456';

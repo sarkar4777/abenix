@@ -64,17 +64,16 @@ async def _subscription_state(db: AsyncSession) -> dict[str, Any]:
             if _is_real_key(val):
                 token = val.strip()
                 break
-    enabled = stored.get("llm.subscription.enabled", "false").strip().lower() in _TRUTHY
-    exclusive = (
-        stored.get("llm.subscription.exclusive", "true").strip().lower() in _TRUTHY
-    )
+    from engine.claude_subscription import subscription_state
+
+    state = subscription_state(stored, token)
+    enabled = bool(state["enabled"])
     return {
         "enabled": enabled,
         "token_set": bool(token),
         "active": enabled and bool(token),
-        "exclusive": exclusive,
-        "default_model": stored.get("llm.subscription.default_model", "").strip()
-        or "claude-opus-5",
+        "exclusive": bool(state["exclusive"]),
+        "default_model": state["default_model"],
     }
 
 
@@ -275,14 +274,11 @@ def _display(
     }
 
 
-@router.get("")
-async def list_models(
+async def _catalogue(
+    db: AsyncSession,
     include_deprecated: bool = False,
     include_unavailable: bool = True,
-    user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-) -> JSONResponse:
-    """Public-to-tenant endpoint feeding every model dropdown."""
+) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]], dict[str, Any]]:
     rows = (
         await db.execute(
             text(
@@ -320,8 +316,46 @@ async def list_models(
         if not include_unavailable and avail and avail.status != "available":
             continue
         items.append(_display(row, avail, providers, subscription))
+    return items, providers, subscription
 
-    return success({"models": items, "subscription": subscription})
+
+async def default_agent_model(db: AsyncSession) -> str:
+    """Model a new agent starts on, the same rule the pickers preselect."""
+    from app.core.default_model import FALLBACK_MODEL, pick_default_model
+
+    try:
+        items, providers, subscription = await _catalogue(db)
+    except Exception as exc:
+        logger.debug("default model catalogue read failed: %s", exc)
+        return FALLBACK_MODEL
+    return pick_default_model(items, providers, subscription)
+
+
+@router.get("")
+async def list_models(
+    include_deprecated: bool = False,
+    include_unavailable: bool = True,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """Public-to-tenant endpoint feeding every model dropdown."""
+    from app.core.default_model import pick_default_model
+
+    items, providers, subscription = await _catalogue(
+        db, include_deprecated, include_unavailable
+    )
+    # the default is picked from the full catalogue, not the filtered view
+    if include_deprecated or not include_unavailable:
+        full, _, _ = await _catalogue(db)
+    else:
+        full = items
+    return success(
+        {
+            "models": items,
+            "subscription": subscription,
+            "default_model": pick_default_model(full, providers, subscription),
+        }
+    )
 
 
 @provider_router.get("/available-providers")
@@ -347,8 +381,11 @@ async def resolve_model(
         0, str(Path(__file__).resolve().parents[4] / "apps" / "agent-runtime")
     )
     try:
+        from engine.model_resolver import invalidate_cache  # type: ignore
         from engine.model_resolver import resolve as _resolve  # type: ignore
 
+        # this worker's cache can trail a change made through another worker
+        invalidate_cache()
         required: dict[str, bool] = {}
         if needs_tools:
             required["tools"] = True

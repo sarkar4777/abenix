@@ -76,12 +76,15 @@ class PipelineNodeSchema(BaseModel):
 
 
 class ExecutePipelineRequest(BaseModel):
-    nodes: list[PipelineNodeSchema] = Field(..., min_length=1, max_length=50)
+    # left out, the agent's saved pipeline runs
+    nodes: list[PipelineNodeSchema] = Field(default_factory=list, max_length=50)
     context: dict[str, Any] = Field(default_factory=dict)
-    timeout_seconds: int = Field(default=120, ge=5, le=600)
+    # unset means the platform setting pipeline.timeout_seconds
+    timeout_seconds: int | None = Field(default=None, ge=5, le=3600)
     cost_limit: float | None = Field(default=None, ge=0.001, le=100.0)
 
 
 class ExecuteSavedPipelineRequest(BaseModel):
     context: dict[str, Any] = Field(default_factory=dict)
-    timeout_seconds: int = Field(default=120, ge=5, le=600)
+    # unset means the platform setting pipeline.timeout_seconds
+    timeout_seconds: int | None = Field(default=None, ge=5, le=3600)

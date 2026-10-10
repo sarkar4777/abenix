@@ -1,6 +1,6 @@
 # The `--only` deploy trap
 
-A subtle bite that catches every new contributor on this codebase exactly once. This document exists so it catches you zero times.
+`--only` builds part of the image set but moves every core Deployment to the new tag. Read this before using it.
 
 ## The trap
 
@@ -8,13 +8,16 @@ A subtle bite that catches every new contributor on this codebase exactly once. 
 the listed images, tagged with the current short git SHA. Then, if the list
 names any core service (`api`, `web`, `worker`, `agent-runtime` or
 `cognify-worker`), the Helm step runs and sets the image tag of **every** core
-Deployment to that SHA: api, web, worker, the agent-runtime subchart, every
-runtime pool, the cognify worker and the code runner images.
+Deployment to that SHA: api, web, worker, every runtime pool, the cognify
+worker, the code runner images, and the agent-runtime subchart where it is on
+(the Azure values turn it off). The group `abenix` expands to all core images
+plus `code-runner-python` and `code-runner-node`.
 
 End state after `--only=web`:
 
 - `abenix-web`: new SHA, image was just pushed, pods become Ready.
-- `abenix-api`, `abenix-worker`, `abenix-cognify-worker`, `abenix-agent-runtime`, `abenix-agent-runtime-<pool>`: new SHA, **image never built**, ACR has no such tag, pods go to `ImagePullBackOff`.
+- `abenix-api`, `abenix-worker`, `abenix-cognify-worker`, `abenix-agent-runtime-<pool>`: new SHA, **image never built**, ACR has no such tag, pods go to `ImagePullBackOff`.
+- Warm code runners created after the deploy hit the same missing tag.
 
 The old ReplicaSets keep serving, so nothing is on fire, but every untouched
 Deployment carries a ReplicaSet that will never become Ready, and the reconcile

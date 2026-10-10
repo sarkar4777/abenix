@@ -1567,6 +1567,28 @@ function RetryTab({
           The delay doubles after each attempt.
         </p>
       </div>
+
+      <div className="pt-3 border-t border-slate-800">
+        <label htmlFor={`on-error-${step.id}`} className="block text-xs text-slate-400 mb-1.5">
+          If it still fails
+        </label>
+        <select
+          id={`on-error-${step.id}`}
+          value={step.onError}
+          onChange={(e) => onUpdate(step.id, { onError: e.target.value as PipelineStep['onError'] })}
+          data-testid="step-on-error"
+          className="w-full px-3 py-2 bg-slate-800/50 border border-slate-700 rounded-lg text-sm text-white focus:outline-none focus:border-emerald-500"
+        >
+          <option value="stop">Stop, and skip the steps that depend on it</option>
+          <option value="continue">Carry on, the next steps get the error</option>
+          {step.onError === 'error_branch' && <option value="error_branch">Run its error branch</option>}
+        </select>
+        <p className="text-[10px] text-slate-500 mt-1">
+          {step.onError === 'continue'
+            ? `Steps after this one still run. They can read the failure as {{${step.id}.error}}.`
+            : 'The run is marked failed and the steps after this one do not run.'}
+        </p>
+      </div>
     </div>
   );
 }
@@ -2176,7 +2198,7 @@ export default function StepConfigPanel({
     { key: 'inputs', label: 'Inputs' },
     ...(isSwitch ? [{ key: 'arguments' as Tab, label: 'Switch Cases' }] : []),
     { key: 'condition', label: 'Condition' },
-    { key: 'retry', label: 'Retry' },
+    { key: 'retry', label: 'On failure' },
   ];
 
   const handleLabelChange = (e: ChangeEvent<HTMLInputElement>) => {

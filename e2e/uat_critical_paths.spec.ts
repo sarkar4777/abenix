@@ -116,16 +116,10 @@ test('CRIT #3 — Pipeline: create 2-node agent, execute, verify chained output'
     headers: auth(tok),
     data: { input: { goal: 'test' }, wait_timeout_seconds: 40 },
   });
-  expect([200, 201, 202, 400, 404]).toContain(exec.status());
-  // If we got accepted, verify the response shape carries something useful
-  if ([200, 201, 202].includes(exec.status())) {
-    const b = await exec.json();
-    expect(b.data).toBeTruthy();
-    console.log(`  pipeline exec keys: ${Object.keys(b.data || {}).join(',')}`);
-  } else {
-    // 400/404 acceptable if pipeline DSL not accepted — caller learns gracefully
-    console.log(`  pipeline exec status ${exec.status()} — DSL not accepted, will need DSL fix`);
-  }
+  // no nodes in the body runs the saved pipeline
+  expect([200, 201, 202]).toContain(exec.status());
+  const b = await exec.json();
+  expect(b.data).toBeTruthy();
 
   await page.request.delete(`${API}/api/agents/${ag.id}`, { headers: auth(tok) });
 });
@@ -135,7 +129,7 @@ test('CRIT #3 — Pipeline: create 2-node agent, execute, verify chained output'
 test('CRIT #4 — KB: create, upload text doc, document appears in list', async ({ page }) => {
   const tok = await login(page);
 
-  const c = await page.request.post(`${API}/api/knowledge`, {
+  const c = await page.request.post(`${API}/api/knowledge-bases`, {
     headers: auth(tok),
     data: { name: `crit-kb-${Date.now()}`, description: 'critical UAT KB' },
   });
@@ -143,7 +137,7 @@ test('CRIT #4 — KB: create, upload text doc, document appears in list', async 
   const kb = (await c.json()).data;
   expect(kb.id).toBeTruthy();
 
-  const up = await page.request.post(`${API}/api/knowledge/${kb.id}/upload`, {
+  const up = await page.request.post(`${API}/api/knowledge-bases/${kb.id}/upload`, {
     headers: { Authorization: `Bearer ${tok}` },
     multipart: {
       file: {
@@ -153,20 +147,17 @@ test('CRIT #4 — KB: create, upload text doc, document appears in list', async 
       },
     },
   });
-  expect([200, 201, 202, 400, 404, 422]).toContain(up.status());
+  expect([200, 201, 202]).toContain(up.status());
 
   // Allow time for indexing
   await page.waitForTimeout(3000);
 
-  const docs = await page.request.get(`${API}/api/knowledge/${kb.id}/documents`, { headers: auth(tok) });
-  expect([200, 404]).toContain(docs.status());
-  if (docs.status() === 200) {
-    const arr = (await docs.json()).data || [];
-    expect(Array.isArray(arr)).toBeTruthy();
-    console.log(`  KB docs: ${arr.length}`);
-  }
+  const docs = await page.request.get(`${API}/api/knowledge-bases/${kb.id}/documents`, { headers: auth(tok) });
+  expect(docs.status()).toBe(200);
+  const arr = (await docs.json()).data || [];
+  expect(arr.some((d: { filename?: string; name?: string }) => (d.filename || d.name || '').includes('abenix-overview'))).toBeTruthy();
 
-  await page.request.delete(`${API}/api/knowledge/${kb.id}`, { headers: auth(tok) });
+  await page.request.delete(`${API}/api/knowledge-bases/${kb.id}`, { headers: auth(tok) });
 });
 
 // ─── ML Model: list → invoke seeded model → verify prediction shape ────────

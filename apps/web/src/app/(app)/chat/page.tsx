@@ -27,7 +27,7 @@ import { holdBlockFrom, type ChatMessage as ChatMsg, type ContentBlock } from '@
 import { connectToAgentStream, errorRepeatsReply, type DoneData, type ModerationData, type ToolAutonomyData, type ToolCallData, type ToolResultData } from '@/lib/chat';
 import type { HoldView } from '@/components/moderation/HeldNotice';
 import { autonomyMetaOf } from '@/lib/autonomy';
-import { fetchAllAgents } from '@/lib/fetch-all-agents';
+import { fetchAllAgents, sortForPicker } from '@/lib/fetch-all-agents';
 import { usePageTitle } from '@/hooks/usePageTitle';
 import { CostValue } from '@/components/shared/CostValue';
 import PageHeader from '@/components/layout/PageHeader';
@@ -58,6 +58,9 @@ interface AgentOption {
   model_config?: Record<string, unknown>;
   category: string | null;
   agent_type?: string;
+  status?: string;
+  updated_at?: string | null;
+  created_at?: string | null;
 }
 
 interface SavedMessage {
@@ -190,8 +193,9 @@ export default function ChatPage() {
   const loadAgents = useCallback(async () => {
     setAgentsLoading(true);
     try {
-      const { agents: rows } = await fetchAllAgents<AgentOption>();
-      setAgents(rows.sort((a, b) => a.name.localeCompare(b.name)));
+      // the API keeps only the caller's own drafts, listed first so they can be tested before publishing
+      const { agents: rows } = await fetchAllAgents<AgentOption>({ query: 'drafts=mine' });
+      setAgents(sortForPicker(rows));
     } catch { /* empty list shows its own message */ }
     setAgentsLoading(false);
   }, []);
@@ -648,9 +652,14 @@ export default function ChatPage() {
   const matchingAgents = useMemo(() => {
     const q = agentQuery.trim().toLowerCase();
     if (!q) return agents;
-    return agents.filter((a) =>
-      `${a.name} ${a.slug} ${a.description || ''} ${a.category || ''}`.toLowerCase().includes(q),
-    );
+    // a match on the name comes before one found only in the description
+    const rank = (a: (typeof agents)[number]) =>
+      a.name.toLowerCase().includes(q) ? 0 : (a.slug || '').toLowerCase().includes(q) ? 1 : 2;
+    return agents
+      .filter((a) => `${a.name} ${a.slug} ${a.description || ''} ${a.category || ''}`.toLowerCase().includes(q))
+      .map((a, i) => ({ a, i, r: rank(a) }))
+      .sort((x, y) => x.r - y.r || x.i - y.i)
+      .map((x) => x.a);
   }, [agents, agentQuery]);
 
   const lastModel = useMemo(() => {
@@ -899,6 +908,15 @@ export default function ChatPage() {
                             <div className="flex flex-wrap gap-1 mt-1">
                               {agent.category && (
                                 <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-700/50 text-slate-400">{agent.category}</span>
+                              )}
+                              {agent.status === 'draft' && (
+                                <span
+                                  data-testid="chat-agent-draft-tag"
+                                  title="Only you can see this draft. Publish it to share it."
+                                  className="text-[10px] px-1.5 py-0.5 rounded bg-violet-500/10 text-violet-300"
+                                >
+                                  Draft
+                                </span>
                               )}
                               {isPipeline(agent) && (
                                 <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-300">pipeline, no memory</span>

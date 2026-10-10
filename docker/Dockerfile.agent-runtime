@@ -47,6 +47,9 @@ COPY apps/api/app/core/telemetry.py ./apps/api/app/core/telemetry.py
 COPY apps/api/app/core/connector_presets.py ./apps/api/app/core/connector_presets.py
 # held moderation content is encrypted with the same envelope as the API
 COPY apps/api/app/core/crypto.py ./apps/api/app/core/crypto.py
+# drift is scored as soon as a pool run finishes, not on the next backlog scan
+COPY apps/api/app/services/__init__.py ./apps/api/app/services/__init__.py
+COPY apps/api/app/services/execution_hooks.py ./apps/api/app/services/execution_hooks.py
 # Standalone-app code assets — the code_asset tool unpacks and executes
 # the agentforge.yaml + main.py bundles inside the runtime container.
 # Without these copies, agents that invoke code_asset(name='contractiq-risk-quant')

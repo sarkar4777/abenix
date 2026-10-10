@@ -119,7 +119,7 @@ async def list_reviews(
         select(Review, User)
         .join(User, Review.user_id == User.id)
         .where(Review.agent_id == agent_id)
-        .order_by(Review.created_at.desc())
+        .order_by(Review.created_at.desc(), Review.id)
         .offset(offset)
         .limit(per_page)
     )

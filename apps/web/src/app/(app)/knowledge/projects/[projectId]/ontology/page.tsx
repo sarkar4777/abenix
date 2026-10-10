@@ -178,6 +178,8 @@ function SchemaEditor({
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
+            aria-label="Schema name"
+            data-testid="onto-name"
             className="w-full bg-slate-800/60 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-500"
             placeholder="e.g. Legal Domain v1"
           />
@@ -208,6 +210,7 @@ function SchemaEditor({
           </div>
           <button
             onClick={addEntity}
+            data-testid="onto-add-entity"
             className="inline-flex items-center gap-1 px-3 py-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 text-xs font-medium rounded-md border border-emerald-500/30"
           >
             <Plus className="w-3 h-3" /> Add type
@@ -220,28 +223,33 @@ function SchemaEditor({
             </div>
           )}
           {entities.map((e, i) => (
-            <div key={i} className="bg-slate-800/40 border border-slate-700/40 rounded-lg p-3 grid grid-cols-12 gap-3">
+            <div key={i} data-testid="onto-entity" className="bg-slate-800/40 border border-slate-700/40 rounded-lg p-3 grid grid-cols-1 sm:grid-cols-12 gap-2 sm:gap-3">
               <input
                 value={e.name}
                 onChange={(ev) => updateEntity(i, { name: ev.target.value })}
                 placeholder="Type name"
-                className="col-span-3 bg-slate-900/60 border border-slate-700 rounded px-2 py-1.5 text-sm text-slate-100 font-mono outline-none focus:border-emerald-500"
+                aria-label="Entity type name"
+                data-testid="onto-entity-name"
+                className="sm:col-span-3 bg-slate-900/60 border border-slate-700 rounded px-2 py-1.5 text-sm text-slate-100 font-mono outline-none focus:border-emerald-500"
               />
               <input
                 value={e.description}
                 onChange={(ev) => updateEntity(i, { description: ev.target.value })}
                 placeholder="One-sentence description"
-                className="col-span-7 bg-slate-900/60 border border-slate-700 rounded px-2 py-1.5 text-sm text-slate-100 outline-none focus:border-emerald-500"
+                aria-label="Entity type description"
+                className="sm:col-span-5 bg-slate-900/60 border border-slate-700 rounded px-2 py-1.5 text-sm text-slate-100 outline-none focus:border-emerald-500"
               />
               <input
                 value={(e.synonyms || []).join(', ')}
                 onChange={(ev) => updateEntity(i, { synonyms: ev.target.value.split(',').map((s) => s.trim()).filter(Boolean) })}
-                placeholder="synonyms (comma-sep)"
-                className="col-span-1 bg-slate-900/60 border border-slate-700 rounded px-2 py-1.5 text-xs text-slate-300 outline-none focus:border-emerald-500"
+                placeholder="Other names, comma separated"
+                aria-label="Other names"
+                className="sm:col-span-3 bg-slate-900/60 border border-slate-700 rounded px-2 py-1.5 text-xs text-slate-300 outline-none focus:border-emerald-500"
               />
               <button
                 onClick={() => removeEntity(i)}
-                className="col-span-1 text-slate-500 hover:text-red-400"
+                aria-label={`Remove ${e.name || 'this type'}`}
+                className="sm:col-span-1 justify-self-end text-slate-500 hover:text-red-400"
               >
                 <Trash2 className="w-4 h-4" />
               </button>
@@ -259,6 +267,7 @@ function SchemaEditor({
           </div>
           <button
             onClick={addRel}
+            data-testid="onto-add-rel"
             className="inline-flex items-center gap-1 px-3 py-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 text-xs font-medium rounded-md border border-emerald-500/30"
           >
             <Plus className="w-3 h-3" /> Add relationship
@@ -271,34 +280,44 @@ function SchemaEditor({
             </div>
           )}
           {relationships.map((r, i) => (
-            <div key={i} className="bg-slate-800/40 border border-slate-700/40 rounded-lg p-3 grid grid-cols-12 gap-3">
+            <div key={i} data-testid="onto-rel" className="bg-slate-800/40 border border-slate-700/40 rounded-lg p-3 grid grid-cols-1 sm:grid-cols-12 gap-2 sm:gap-3">
               <input
                 value={r.name}
                 onChange={(ev) => updateRel(i, { name: ev.target.value })}
                 placeholder="REL_NAME"
-                className="col-span-2 bg-slate-900/60 border border-slate-700 rounded px-2 py-1.5 text-sm text-slate-100 font-mono outline-none focus:border-emerald-500 uppercase"
+                aria-label="Relationship name"
+                data-testid="onto-rel-name"
+                className="sm:col-span-3 bg-slate-900/60 border border-slate-700 rounded px-2 py-1.5 text-sm text-slate-100 font-mono outline-none focus:border-emerald-500 uppercase"
               />
               <input
                 value={r.description}
                 onChange={(ev) => updateRel(i, { description: ev.target.value })}
                 placeholder="What does this relationship mean?"
-                className="col-span-5 bg-slate-900/60 border border-slate-700 rounded px-2 py-1.5 text-sm text-slate-100 outline-none focus:border-emerald-500"
+                aria-label="Relationship description"
+                className="sm:col-span-4 bg-slate-900/60 border border-slate-700 rounded px-2 py-1.5 text-sm text-slate-100 outline-none focus:border-emerald-500"
               />
               <input
                 value={(r.source_types || []).join(', ')}
                 onChange={(ev) => updateRel(i, { source_types: ev.target.value.split(',').map((s) => s.trim()).filter(Boolean) })}
-                placeholder="from types"
-                className="col-span-2 bg-slate-900/60 border border-slate-700 rounded px-2 py-1.5 text-xs text-slate-300 outline-none focus:border-emerald-500"
+                placeholder="From types"
+                aria-label="From entity types"
+                list="onto-entity-names"
+                data-testid="onto-rel-from"
+                className="sm:col-span-2 bg-slate-900/60 border border-slate-700 rounded px-2 py-1.5 text-xs text-slate-300 outline-none focus:border-emerald-500"
               />
               <input
                 value={(r.target_types || []).join(', ')}
                 onChange={(ev) => updateRel(i, { target_types: ev.target.value.split(',').map((s) => s.trim()).filter(Boolean) })}
-                placeholder="to types"
-                className="col-span-2 bg-slate-900/60 border border-slate-700 rounded px-2 py-1.5 text-xs text-slate-300 outline-none focus:border-emerald-500"
+                placeholder="To types"
+                aria-label="To entity types"
+                list="onto-entity-names"
+                data-testid="onto-rel-to"
+                className="sm:col-span-2 bg-slate-900/60 border border-slate-700 rounded px-2 py-1.5 text-xs text-slate-300 outline-none focus:border-emerald-500"
               />
               <button
                 onClick={() => removeRel(i)}
-                className="col-span-1 text-slate-500 hover:text-red-400"
+                aria-label={`Remove ${r.name || 'this relationship'}`}
+                className="sm:col-span-1 justify-self-end text-slate-500 hover:text-red-400"
               >
                 <Trash2 className="w-4 h-4" />
               </button>
@@ -307,11 +326,16 @@ function SchemaEditor({
         </div>
       </div>
 
+      <datalist id="onto-entity-names">
+        {entities.filter((e) => e.name.trim()).map((e) => <option key={e.name} value={e.name.trim()} />)}
+      </datalist>
+
       {/* Save */}
       <div className="flex justify-end">
         <button
           onClick={save}
           disabled={saving}
+          data-testid="onto-save"
           className="inline-flex items-center gap-2 px-5 py-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-medium rounded-lg text-sm disabled:opacity-50"
         >
           {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
@@ -327,7 +351,7 @@ function SchemaReadView({ active }: { active: OntologySchema }) {
     <div className="space-y-4 text-sm">
       <div>
         <div className="text-xs uppercase tracking-wider text-slate-400 mb-1">Entity types</div>
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
           {active.entity_types.map((e, i) => (
             <div key={i} className="bg-slate-800/40 border border-slate-700/40 rounded p-2">
               <div className="font-mono text-emerald-300 text-xs">{e.name}</div>
@@ -338,7 +362,7 @@ function SchemaReadView({ active }: { active: OntologySchema }) {
       </div>
       <div>
         <div className="text-xs uppercase tracking-wider text-slate-400 mb-1">Relationship types</div>
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
           {active.relationship_types.map((r, i) => (
             <div key={i} className="bg-slate-800/40 border border-slate-700/40 rounded p-2">
               <div className="font-mono text-cyan-300 text-xs">{r.name}</div>
@@ -466,7 +490,7 @@ export default function OntologyPage(props: { params: Promise<{ projectId: strin
   );
 
   return (
-    <div className="p-8 max-w-7xl mx-auto">
+    <div className="p-4 md:p-8 max-w-7xl mx-auto">
       <PageHeader
         className="mb-6"
         back={{ href: '/knowledge/projects', label: 'Back to projects' }}

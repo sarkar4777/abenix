@@ -308,7 +308,7 @@ function CreateDialog({ catalog, agents, onClose, onCreated }: { catalog: Catalo
             {targetType === 'webhook' ? (
               <>
                 <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://example.com/abenix-events" className="w-full bg-slate-950 border border-slate-700 rounded-md px-3 py-2 text-sm text-white" aria-invalid={!urlOk} data-testid="sub-url" />
-                <p className={`text-[11px] mt-1 ${urlOk ? 'text-slate-500' : 'text-rose-300'}`}>{urlOk ? 'Each call is signed with HMAC-SHA256 in X-Abenix-Signature. Failed calls retry with growing gaps for about eight hours.' : 'Enter a full http or https URL.'}</p>
+                <p className={`text-[11px] mt-1 ${urlOk ? 'text-slate-500' : 'text-rose-300'}`}>{urlOk ? 'Each call is signed with HMAC-SHA256 in X-Abenix-Signature. Failed calls are tried 8 times with growing gaps, over about 20 minutes.' : 'Enter a full http or https URL.'}</p>
               </>
             ) : (
               <div className="space-y-2">
@@ -402,7 +402,7 @@ export default function EventsSettingsPage() {
           'Pick the events to listen for, such as a run finishing or a rule being published.',
           'Choose what happens: call a URL, or run an agent or pipeline with the event in its message.',
           'Calls to a URL are signed. Copy the signing secret when it is shown, it appears only once.',
-          'Failed deliveries retry on their own for about eight hours. Check the delivery log on each card.',
+          'Failed deliveries retry on their own, 8 attempts over about 20 minutes. Check the delivery log on each card.',
         ]}
         docSlug="02-runtime/19-outbound-events"
         storageKey="settings-events"

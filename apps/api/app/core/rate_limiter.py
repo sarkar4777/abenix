@@ -147,3 +147,27 @@ def get_limiter(redis_client) -> RateLimiter:
     if _limiter is None:
         _limiter = RateLimiter(redis_client)
     return _limiter
+
+
+def qps_message(agent_name: str, qps: int, retry_after: int) -> str:
+    unit = "run" if qps == 1 else "runs"
+    return (
+        f"{agent_name} is held to {qps} {unit} per second by its rate limit. "
+        f"Try again in {max(1, retry_after)}s, or raise the limit on Admin, Scaling."
+    )
+
+
+async def agent_qps_decision(
+    tenant_id: str, agent_key: str, qps: int | None
+) -> RateLimitDecision:
+    """Apply an agent's rate_limit_qps. Fails open when Redis is unreachable."""
+    if not qps or qps <= 0:
+        return RateLimitDecision(allowed=True)
+    from app.core.hitl import get_redis
+
+    try:
+        client = await get_redis()
+    except Exception as e:
+        logger.warning("rate_limiter redis unavailable, failing open: %s", e)
+        return RateLimitDecision(allowed=True)
+    return await get_limiter(client).check(str(tenant_id), str(agent_key), int(qps))

@@ -209,13 +209,15 @@ async def hybrid_search(
     restricted by document_grants are dropped before ranking."""
     import time
 
-    from engine.knowledge.document_acl import hidden_for_search
+    from engine.knowledge.document_acl import hidden_for_search, superseded_for_search
 
     start = time.monotonic()
 
-    hidden = await hidden_for_search(
+    restricted = await hidden_for_search(
         kb_ids, user_id=user_id, user_role=user_role, agent_id=agent_id
     )
+    # superseded versions are dropped the same way, only the current version is searched
+    hidden = restricted | await superseded_for_search(kb_ids)
 
     # KB v2 query cache (5-min TTL). Best-effort: redis miss/failure
     # falls through to live search.
@@ -242,7 +244,7 @@ async def hybrid_search(
                     entities_found=cached.get("entities_found", []),
                     graph_hops=cached.get("graph_hops", 0),
                     latency_ms=int((time.monotonic() - start) * 1000),
-                    hidden_documents=len(hidden),
+                    hidden_documents=len(restricted),
                 )
                 return resp
             except Exception:
@@ -250,7 +252,7 @@ async def hybrid_search(
                 pass
 
     response = HybridSearchResponse(
-        results=[], mode_used=mode.value, hidden_documents=len(hidden)
+        results=[], mode_used=mode.value, hidden_documents=len(restricted)
     )
 
     from engine.knowledge import reranker
@@ -437,6 +439,9 @@ async def _vector_search_pgvector(
                 FROM chunks
                 WHERE collection_id = ANY(:ids)
                   AND NOT (document_id = ANY(:hidden))
+                  AND NOT EXISTS (
+                      SELECT 1 FROM documents d
+                      WHERE d.id = chunks.document_id AND d.is_current IS FALSE)
                 ORDER BY embedding <=> CAST(:emb AS vector)
                 LIMIT :k
                 """
@@ -506,8 +511,49 @@ async def _vector_search(
             results.extend(
                 await _vector_search_pinecone(query, ids, top_k, model, hidden)
             )
+            # the worker stores into pgvector when Pinecone refuses a write,
+            # those chunks were invisible to search until now
+            fallback_ids = await _kbs_with_pg_chunks(ids)
+            if fallback_ids:
+                results.extend(
+                    await _vector_search_pgvector(
+                        query, fallback_ids, top_k, model, hidden
+                    )
+                )
     results.sort(key=lambda r: r.score, reverse=True)
     return results
+
+
+async def _kbs_with_pg_chunks(kb_ids: list[str]) -> list[str]:
+    try:
+        import uuid as _uuid
+
+        from sqlalchemy import text as _t
+        from sqlalchemy.ext.asyncio import AsyncSession
+
+        from engine.db_pool import shared_engine
+
+        ids = []
+        for s in kb_ids:
+            try:
+                ids.append(_uuid.UUID(str(s)))
+            except (ValueError, AttributeError):
+                continue
+        if not ids:
+            return []
+        async with AsyncSession(shared_engine(_async_db_url())) as session:
+            rows = (
+                await session.execute(
+                    _t(
+                        "SELECT DISTINCT collection_id::text FROM chunks"
+                        " WHERE collection_id = ANY(:ids)"
+                    ).bindparams(ids=ids)
+                )
+            ).all()
+        return [r[0] for r in rows]
+    except Exception as e:
+        logger.warning("pgvector fallback lookup failed: %s", e)
+        return []
 
 
 async def _vector_search_pinecone(

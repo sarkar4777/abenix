@@ -289,7 +289,7 @@ class CodeExecutorTool(BaseTool):
         "properties": {
             "code": {
                 "type": "string",
-                "description": "Python code to execute. Use print() for output. Last expression is captured as result.",
+                "description": "Python code to execute. Use print() for output. A last expression, or a variable named result, is captured as the result.",
             },
             "variables": {
                 "type": "object",
@@ -508,6 +508,9 @@ class CodeExecutorTool(BaseTool):
                     )
                 else:
                     exec(compile(tree, "<sandbox>", "exec"), safe_globals)
+                    # code that ends with result = {...} instead of printing it
+                    if "result" in safe_globals and "result" not in variables:
+                        result_value = safe_globals["result"]
             except Exception as e:
                 exec_exception.append(e)
 
@@ -548,7 +551,8 @@ class CodeExecutorTool(BaseTool):
                 val_str = json.dumps(result_value, indent=2, default=str)
             except (TypeError, ValueError):
                 val_str = repr(result_value)
-            parts.append(f"\nResult: {val_str}")
+            # alone it is the step's output, so the next step can read it as JSON
+            parts.append(f"\nResult: {val_str}" if output else val_str)
 
         content = "\n".join(parts) if parts else "(no output)"
 

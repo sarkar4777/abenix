@@ -88,9 +88,9 @@ test.describe.serial('Model availability + fallback — Abenix → ContractIQ �
     }, [adminToken]);
     await gotoOk(page, `${ABX_BASE}/builder`);
     await page.waitForLoadState('networkidle').catch(() => {});
-    const modelTab = page.getByRole('button', { name: /^Model$/i }).first();
-    if (await modelTab.count()) await modelTab.click();
-    const dropdownText = await page.locator('select').first().innerText().catch(() => '');
+    await page.getByTestId('config-tab-model').click();
+    await expect(page.getByTestId('model-picker-select')).not.toContainText(/loading models/i, { timeout: 30_000 });
+    const dropdownText = await page.getByTestId('model-picker-select').innerText();
     console.log('  builder model dropdown text snippet:', dropdownText.slice(0, 200));
     expect(dropdownText.toLowerCase()).toContain('azure');
   });
@@ -102,9 +102,10 @@ test.describe.serial('Model availability + fallback — Abenix → ContractIQ �
     }, [adminToken]);
     await gotoOk(page, `${ABX_BASE}/builder`);
     await page.waitForLoadState('networkidle').catch(() => {});
-    const modelTab = page.getByRole('button', { name: /^Model$/i }).first();
-    if (await modelTab.count()) await modelTab.click();
-    await page.locator('select').first().selectOption(claudeModel).catch(() => {});
+    await page.getByTestId('config-tab-model').click();
+    await expect(page.getByTestId('model-picker-select')).not.toContainText(/loading models/i, { timeout: 30_000 });
+    // a new agent starts on the platform default, so pick the model we made unavailable
+    await page.getByTestId('model-picker-select').selectOption(claudeModel);
     const banner = page.getByText(/will not run as|is unavailable|Runs will use/i).first();
     await expect(banner).toBeVisible({ timeout: 10_000 });
   });

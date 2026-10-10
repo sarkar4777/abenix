@@ -30,12 +30,15 @@ infra/helm/
 │   │   ├── ml-models-pvc.yaml      ← ml-models-storage when mlModels.enabled
 │   │   ├── archives-pvc.yaml
 │   │   ├── sandboxed-job-rbac.yaml ← Role + RoleBinding for Jobs and runner Deployments
+│   │   ├── cluster-view-rbac.yaml  ← read-only roles for the /admin/cluster page
+│   │   ├── improvements-proof-pool.yaml ← proof worker Deployment (+ ScaledObject) when improvements.proofPool.enabled
 │   │   ├── backup-cronjob.yaml
 │   │   ├── backup-pvc.yaml
 │   │   ├── networkpolicy.yaml
 │   │   ├── pdb.yaml
 │   │   ├── ingress.yaml
 │   │   ├── servicemonitor.yaml
+│   │   ├── api-deployment.yaml     ← empty, the api subchart owns the Deployment
 │   │   └── _helpers.tpl
 │   └── charts/                     ← packaged dependencies (.tgz)
 ├── api/  web/  worker/  agent-runtime/  neo4j/   ← subchart sources
@@ -45,7 +48,7 @@ infra/helm/
 
 | Dependency | Source | Notes |
 |---|---|---|
-| `api`, `web`, `worker`, `agent-runtime`, `neo4j` | `file://../<name>` | Each has its own Deployment, Service and HPA templates |
+| `api`, `web`, `worker`, `agent-runtime`, `neo4j` | `file://../<name>` | Deployment (StatefulSet for Neo4j), Service and HPA templates. `worker` has no Service. `agent-runtime` renders nothing when `agent-runtime.enabled` is `false`, as in the local and Azure values |
 | `postgresql` 15.5.38 | Bitnami | Image is the pgvector build from `infra/docker/Dockerfile.postgres-pgvector` |
 | `redis` 19.6.4 | Bitnami | |
 
@@ -67,14 +70,18 @@ Image repositories and tags are per subchart. The deploy scripts pass them with
 | Key | Default | What it does |
 |---|---|---|
 | `environment` | `production` | `ENVIRONMENT`. `DEBUG` is `false` only when this is `production` |
+| `agent-runtime.enabled` | unset (on) | `false` drops the single `abenix-agent-runtime` Deployment and Service. The runtime pools replace it |
+| `web.service.port` / `web.containerPort` | `3000` / `3000` (subchart) | Service port, and the port the Next.js image listens on. The container port is named `http` and the probes and the Service `targetPort` use the name, so changing `service.port` alone cannot break the pod. The chart ingress sends `/` to `web.service.port` |
+| `cognifyWorker.enabled` / `queue` / `concurrency` | `true` / `cognify` / `2` | The `abenix-cognify-worker` Deployment, on the `worker` image |
+| `features.marketplace` / `monetization` | `true` / `false` | `MARKETPLACE_ENABLED` / `MONETIZATION_ENABLED` defaults. The value an admin stores wins |
 | `logLevel` | `info` | `LOG_LEVEL` |
 | `runtimeMode` | `embedded` | `RUNTIME_MODE`. `remote` hands runs to the runtime pods |
 | `frontendUrl` | `http://localhost:3000` | `FRONTEND_URL` |
 | `corsOrigins` | `["http://localhost:3000"]` | `CORS_ORIGINS` |
 | `databaseName` | `abenix` | Backup target database |
 | `objectStorage.type` | `local` | `STORAGE_BACKEND`. `s3` or `azure` adds the bucket or container env and secrets |
-| `objectStorage.uploadDir` / `exportDir` / `mlModelsDir` / `codeAssetStore` / `codeAssetBuildCache` | under `/data` | The matching path variables |
-| `sharedData.usePVC` | `false` | `true` mounts the RWX claim `abenix-shared-data` at `/data` instead of the host path |
+| `objectStorage.uploadDir` / `exportDir` / `mlModelsDir` / `codeAssetStore` / `codeAssetBuildCache` / `trajectoryDir` | under `/data` | The matching path variables |
+| `sharedData.usePVC` / `storageClass` / `storageSize` | `false` / empty / `20Gi` | `true` mounts the RWX claim `abenix-shared-data` at `/data` instead of the host path |
 | `sharedDataHostPath` | `/var/lib/abenix/data` | Host path behind `/data` on single-node clusters |
 | `mlModels.enabled` | `false` | Creates `ml-models-storage` and mounts it on the runtime pools |
 | `mlModels.servingImage` | `""` | `ML_MODEL_SERVING_IMAGE`, falls back to the local registry image |
@@ -84,6 +91,7 @@ Image repositories and tags are per subchart. The deploy scripts pass them with
 | `meeting.livekit.url` / `meetUrl`, `meeting.ttsVoice`, `meeting.deferNotifyWebhookUrl` | | LiveKit and meeting tool env |
 | `progress.channelPrefix` / `parentKeyPrefix` / `parentTtl` | `progress:` / `parent:` / `1800` | `PROGRESS_*` |
 | `postProcessorModules` | `""` | `POST_PROCESSOR_MODULES` |
+| `secrets.sso.*` | `""` | SSO provider ids, secrets and the Microsoft tenant, written to `abenix-secrets` only when set. See [05-sso](../09-reference/05-sso.md#kubernetes) |
 | `mcpAllowedHosts` | `""` | `MCP_ALLOWED_HOSTS`. Empty falls back to `uat-mcp.<namespace>.svc.cluster.local` |
 | `eventsAllowedInternalHosts` | `""` | `EVENTS_ALLOWED_INTERNAL_HOSTS`. Exact host names outbound webhooks may save and call although they are cluster-internal or resolve to private addresses |
 | `pinecone.indexName` | `abenix` | `PINECONE_INDEX_NAME`. The template falls back to `agentforge-knowledge` only when this is empty |
@@ -119,6 +127,16 @@ Image repositories and tags are per subchart. The deploy scripts pass them with
 The keys `nats.enabled`, `nats.cluster.enabled` and `nats.jetstream.enabled`
 exist in the values files but no template reads them. NATS is on exactly when
 `scaling.queueBackend` is `nats`.
+
+### Self-improvement proof pool
+
+| Key | Default | What it does |
+|---|---|---|
+| `improvements.proofPool.enabled` | `false` | Renders `<release>-improvements-proof`, the API image running `python -m app.workers.improvements_proof`, and sets `IMPROVEMENTS_PROOF_DRAIN=pool`. Off, API pods prove fixes themselves (`api`) |
+| `improvements.proofPool.minReplicas` / `maxReplicas` / `concurrency` | `0` / `4` / `2` | `concurrency` becomes `IMPROVEMENTS_PROOF_CONCURRENCY`. Without KEDA the Deployment runs at least one replica |
+| `improvements.proofPool.keda.enabled` / `prometheusUrl` / `queueTrigger` | `false` / release Prometheus / `"3"` | ScaledObject on `max(abenix_improvement_proof_queue_depth)` |
+
+No shipped overlay turns it on.
 
 ### Warm code runners
 
@@ -181,23 +199,31 @@ Secret and reuses the value, so pods and NATS keep agreeing. Two consequences:
 - `environment: development`, `logLevel: debug`, `runtimeMode: remote`
 - images from `localhost:5000/abenix/*` with `pullPolicy: Never`, Postgres from the locally built pgvector image
 - standalone Postgres and Redis, small resources, ingress off
+- `agent-runtime.enabled: false`, so the runtime pools are the only runtime pods
 - `scaling.enabled`, `execRemote`, `queueBackend: nats`, one `default` pool, KEDA on with the local Prometheus
 - `codeRunners.enabled` with `maxReplicas: 2`, KEDA off so runners scale on CPU
 - `mlModels.enabled`, `edge.allowUnsigned: true`, local secrets including `jwtSecret`
 
-`values-local-runtime.yaml` is layered on top by `deploy.sh local-runtime` to
-run the full set of runtime pools on minikube.
+`values-local-runtime.yaml` is layered on top by `deploy.sh local-runtime`. It
+adds the `chat` and `heavy-reasoning` pools, turns KEDA off and gives NATS a
+2Gi volume.
 
 `values-azure.yaml`, used by `deploy-azure.sh`:
 
-- `environment: staging`, `runtimeMode: embedded`
+- `environment: staging`, `runtimeMode: embedded`, but `scaling.execRemote: true` with `queueBackend: nats`, so agent runs go to the pools
+- one replica each for api, web and worker, subchart HPAs off, `agent-runtime.enabled: false`, chart ingress off
 - four pools `default` (min 1), `chat`, `heavy-reasoning` and `long-running` (min 0), KEDA and scaling alerts on
 - `codeRunners.enabled` with KEDA on runner load, `pullPolicy: Always`
 - `sharedData.usePVC` and `archives.pvc` on `azurefile-csi`, `backup.enabled`
 - progress prefixes and post-processor modules for the standalone apps
 
 `values-production.yaml` is what `deploy.sh cloud` uses against the current
-kubectl context.
+kubectl context:
+
+- `runtimeMode: remote` against the `agent-runtime` subchart (5 replicas), scaling pools off
+- subchart HPAs on, Postgres `architecture: replication`, network policies and backups on
+- chart ingress for `app.abenix.io` with TLS. Its `ingress.annotations` block is not read, the template hard-codes its own annotations
+- `web.service.port` at the subchart's `3000`, the same as every other values file
 
 ---
 

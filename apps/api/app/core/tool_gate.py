@@ -71,12 +71,13 @@ def _cache_key(slug: str, tenant_id: str, args_hash: str, scope: str) -> str:
     return f"toolcache:{slug}:_:{args_hash}"
 
 
+# leases, one member per call with its own expiry, so a call that never releases frees itself
 def _sem_key_global(slug: str) -> str:
-    return f"toolsem:{slug}:_global"
+    return f"toollease:{slug}:_global"
 
 
 def _sem_key_tenant(slug: str, tenant_id: str) -> str:
-    return f"toolsem:{slug}:{tenant_id}"
+    return f"toollease:{slug}:{tenant_id}"
 
 
 def _breaker_key(slug: str) -> str:
@@ -128,17 +129,17 @@ async def _bucket_take(r, key: str, qps: int) -> tuple[bool, int]:
         return True, 0
 
 
-async def _sem_acquire(r, key: str, cap: int, ttl_s: int = 120) -> bool:
-    """Best-effort distributed semaphore via INCR. Returns True if acquired."""
+async def _sem_acquire(r, key: str, cap: int, ttl_s: int, member: str) -> bool:
+    """Take a lease that expires after ttl_s. A cancelled or crashed call frees its slot by itself."""
     if cap <= 0:
         return True
     try:
-        v = await r.incr(key)
-        # Set a TTL the first time so a crashed releaser doesn't leak forever.
-        if v == 1:
-            await r.expire(key, ttl_s)
-        if v > cap:
-            await r.decr(key)
+        now = time.time()
+        await r.zremrangebyscore(key, "-inf", now)
+        await r.zadd(key, {member: now + ttl_s})
+        await r.expire(key, int(ttl_s) + 60)
+        if await r.zcard(key) > cap:
+            await r.zrem(key, member)
             return False
         return True
     except Exception as e:
@@ -146,11 +147,16 @@ async def _sem_acquire(r, key: str, cap: int, ttl_s: int = 120) -> bool:
         return True
 
 
-async def _sem_release(r, key: str) -> None:
+async def _sem_release(r, key: str, member: str) -> None:
     try:
-        await r.decr(key)
+        await r.zrem(key, member)
     except Exception:
         pass
+
+
+async def _sem_count(r, key: str) -> int:
+    await r.zremrangebyscore(key, "-inf", time.time())
+    return int(await r.zcard(key) or 0)
 
 
 async def _cache_get(r, key: str) -> Optional[dict[str, Any]]:
@@ -335,11 +341,16 @@ async def acquire(
             pass
 
     # 5. Concurrency
+    import uuid as _uuid
+
+    lease = _uuid.uuid4().hex
+    lease_ttl = int(cfg.timeout_seconds or 60) + 30
     if not await _sem_acquire(
         r,
         _sem_key_global(tool_slug),
         cfg.max_inflight_global,
-        max(cfg.timeout_seconds * 2, 60),
+        lease_ttl,
+        lease,
     ):
         return GateDecision(
             allowed=False, reason=f"{tool_slug} at global concurrency cap", config=cfg
@@ -348,16 +359,17 @@ async def acquire(
         r,
         _sem_key_tenant(tool_slug, tenant_id),
         cfg.max_inflight_per_tenant,
-        max(cfg.timeout_seconds * 2, 60),
+        lease_ttl,
+        lease,
     ):
-        await _sem_release(r, _sem_key_global(tool_slug))
+        await _sem_release(r, _sem_key_global(tool_slug), lease)
         return GateDecision(
             allowed=False,
             reason=f"{tool_slug} at per-tenant concurrency cap",
             config=cfg,
         )
 
-    token = f"{tool_slug}|{tenant_id}|{args_hash}|{time.time()}"
+    token = lease
     return GateDecision(
         allowed=True,
         config=cfg,
@@ -383,9 +395,10 @@ async def release(
     if r is None:
         return
 
-    # Release semaphores (acquired in this exact order)
-    await _sem_release(r, _sem_key_tenant(tool_slug, tenant_id))
-    await _sem_release(r, _sem_key_global(tool_slug))
+    # Release the leases (acquired in this exact order)
+    if decision.token:
+        await _sem_release(r, _sem_key_tenant(tool_slug, tenant_id), decision.token)
+        await _sem_release(r, _sem_key_global(tool_slug), decision.token)
 
     # Cache success result
     if (
@@ -416,7 +429,7 @@ async def stats(tool_slug: str) -> dict[str, Any]:
         return {"slug": tool_slug, "redis": False}
     out: dict[str, Any] = {"slug": tool_slug, "redis": True}
     try:
-        out["inflight_global"] = int(await r.get(_sem_key_global(tool_slug)) or 0)
+        out["inflight_global"] = await _sem_count(r, _sem_key_global(tool_slug))
         out["breaker_state"] = await _breaker_state(r, tool_slug)
     except Exception:
         pass

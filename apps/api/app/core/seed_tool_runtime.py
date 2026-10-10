@@ -126,33 +126,49 @@ DEFAULTS: dict[str, dict[str, Any]] = {
         "timeout_seconds": 60,
         "circuit_breaker_threshold": 10,
     },
-    "code_asset": {
-        "max_inflight_global": 6,
+    # loading and checking a large model file takes a while
+    "ml_model_register": {
         "max_inflight_per_tenant": 2,
         "cache_ttl_seconds": 0,
         "timeout_seconds": 300,
-        "pool": "runtime",
     },
+    # the asset already runs in its own runner, a pool hop only adds a round trip
+    "code_asset": {
+        "max_inflight_global": 24,
+        "max_inflight_per_tenant": 8,
+        "cache_ttl_seconds": 0,
+        "timeout_seconds": 300,
+    },
+}
+
+
+# earlier shipped defaults, lifted on upgrade only while an admin has not changed them
+RAISED_FROM: dict[str, dict[str, Any]] = {
+    "code_asset": {"max_inflight_global": 6, "max_inflight_per_tenant": 2},
 }
 
 
 async def seed_tool_runtime_defaults(db: AsyncSession) -> None:
     from models.tool_runtime_config import ToolRuntimeConfig
 
-    existing = (
-        {r.slug for r in (await db.execute(select(ToolRuntimeConfig.slug))).all()}
-        if False
-        else set()
-    )
-    # Simpler: pull all slugs
-    existing = {r[0] for r in (await db.execute(select(ToolRuntimeConfig.slug))).all()}
+    rows = {
+        r.slug: r for r in (await db.execute(select(ToolRuntimeConfig))).scalars().all()
+    }
 
-    inserted = 0
+    inserted = raised = 0
     for slug, overrides in DEFAULTS.items():
-        if slug in existing:
+        row = rows.get(slug)
+        if row is None:
+            db.add(ToolRuntimeConfig(slug=slug, **overrides))
+            inserted += 1
             continue
-        db.add(ToolRuntimeConfig(slug=slug, **overrides))
-        inserted += 1
-    if inserted:
-        logger.info("seed_tool_runtime: inserted %d default rows", inserted)
+        old = RAISED_FROM.get(slug)
+        if old and all(getattr(row, k) == v for k, v in old.items()):
+            for k in old:
+                setattr(row, k, overrides[k])
+            raised += 1
+    if inserted or raised:
+        logger.info(
+            "seed_tool_runtime: inserted %d default rows, raised %d", inserted, raised
+        )
     await db.commit()

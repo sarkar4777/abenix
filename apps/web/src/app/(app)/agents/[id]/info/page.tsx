@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
@@ -13,8 +13,11 @@ const PipelineDAGPreview = dynamic(
 import {
   Bot, Code2, Copy, Check, Clock, Cpu, Database, ExternalLink,
   Play, Sparkles, Terminal, Thermometer, Webhook,
-  Wrench, Zap, Share2, GitBranch, Download, Sprout,
+  Wrench, Zap, Share2, GitBranch, Download, Sprout, MessageSquare,
 } from 'lucide-react';
+import AgentComments from '@/components/agent/AgentComments';
+import EmptyState from '@/components/ui/EmptyState';
+import FavoriteButton from '@/components/agent/FavoriteButton';
 import { useApi } from '@/hooks/useApi';
 import { apiFetch } from '@/lib/api-client';
 import { toastError } from '@/stores/toastStore';
@@ -87,13 +90,16 @@ export default function AgentInfoPage() {
   const router = useRouter();
   const agentId = params.id as string;
   const [copiedField, setCopiedField] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'overview' | 'api' | 'triggers'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'api' | 'triggers' | 'comments'>('overview');
+  useEffect(() => {
+    if (window.location.hash === '#comments') setActiveTab('comments');
+  }, []);
   const [showShare, setShowShare] = useState(false);
   const [showVersions, setShowVersions] = useState(false);
   const [showExport, setShowExport] = useState(false);
   const [duplicating, setDuplicating] = useState(false);
 
-  const { data: agent, mutate: refreshAgent } = useApi<AgentDetail>(agentId ? `/api/agents/${agentId}` : null);
+  const { data: agent, error: agentError, mutate: refreshAgent } = useApi<AgentDetail>(agentId ? `/api/agents/${agentId}` : null);
   usePageTitle(agent?.name ? `${agent.name} — Info` : 'Agent Info');
 
   const copy = (text: string, field: string) => {
@@ -101,6 +107,20 @@ export default function AgentInfoPage() {
     setCopiedField(field);
     setTimeout(() => setCopiedField(null), 2000);
   };
+
+  if (!agent && agentError) {
+    return (
+      <div data-testid="agent-not-found">
+        <EmptyState
+          icon={Bot}
+          title="This agent is not available"
+          description={`It may have been deleted or you no longer have access. ${agentError}`}
+          actionLabel="Back to agents"
+          actionHref="/agents"
+        />
+      </div>
+    );
+  }
 
   if (!agent) {
     return (
@@ -226,6 +246,7 @@ curl -X POST ${API_URL}/api/triggers \\
         secondaryAction={{ label: 'Schedule', href: `/triggers?agent=${agent.id}`, icon: Zap, title: 'Set up webhook or scheduled triggers' }}
         extraActions={
           <div className="flex min-w-0 flex-wrap gap-2">
+            <FavoriteButton agentId={agent.id} agentName={agent.name} />
             {agent.agent_type !== 'oob' && agent.can_edit !== false && (
               <Link
                 href={`/builder?agent=${agent.id}`}
@@ -357,10 +378,12 @@ curl -X POST ${API_URL}/api/triggers \\
           { key: 'overview', label: 'Overview', icon: Bot },
           { key: 'api', label: 'API & SDK', icon: Code2 },
           { key: 'triggers', label: 'Triggers & Events', icon: Zap },
+          { key: 'comments', label: 'Comments', icon: MessageSquare },
         ] as const).map((t) => (
           <button
             key={t.key}
             onClick={() => setActiveTab(t.key)}
+            data-testid={`agent-tab-${t.key}`}
             className={`flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors border-b-2 ${
               activeTab === t.key
                 ? 'text-cyan-400 border-cyan-400'
@@ -372,6 +395,12 @@ curl -X POST ${API_URL}/api/triggers \\
           </button>
         ))}
       </div>
+
+      {activeTab === 'comments' && (
+        <div className="max-w-3xl">
+          <AgentComments agentId={agent.id} canModerate={agent.can_manage === true} />
+        </div>
+      )}
 
       {/* Overview Tab */}
       {activeTab === 'overview' && (

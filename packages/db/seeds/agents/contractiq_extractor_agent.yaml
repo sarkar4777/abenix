@@ -344,7 +344,8 @@ model_config:
   # + risk_assessment). gemini-2.0-flash at 8k truncates mid-JSON.
   model: gemini-2.5-pro
   temperature: 0.0
-  max_iterations: 1
+  # room for the clause classifier and storing the text, then the answer
+  max_iterations: 6
   max_tokens: 65536
   cache: false
   tools:

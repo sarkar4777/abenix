@@ -95,7 +95,8 @@ def train() -> None:
             "properties": {"baseload_gwh_day": {"type": "number"}},
         },
         "training_metrics": {"mae_gwh": mae, "rmse_gwh": rmse, "mape_pct": mape,
-                              "n_train": int(split), "n_test": int(len(df) - split)},
+                              "n_train": int(split), "n_test": int(len(df) - split),
+                              "feature_means": {c: float(df[c].values[:split].mean()) for c in feature_cols}},
         "tags": ["contractiq", "forecaster", "industrial", "baseload"],
         "feature_columns": feature_cols,
         "training_set_description": (

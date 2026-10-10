@@ -33,6 +33,37 @@ public final class KnowledgeClient {
         return asMap(data);
     }
 
+    /**
+     * Create a knowledge project and its collections, idempotently. Each
+     * collection takes name and optionally slug, description,
+     * default_visibility, vector_backend, agent_slugs and agent_permission.
+     */
+    public Map<String, Object> bootstrapProject(String slug, String name, String description, List<Map<String, Object>> collections) {
+        Map<String, Object> body = HttpKit.mapOfNonNull(
+            "slug", slug, "name", name, "description", description == null ? "" : description,
+            "collections", collections == null ? List.of() : collections);
+        return asMap(kit.dataOrRoot(kit.postJson("/api/knowledge-projects/bootstrap", body, null)));
+    }
+
+    /** Add a document. It is indexed in the background, poll {@link #documents} until it is ready. */
+    public Map<String, Object> upload(String kbId, byte[] content, String filename, String contentType) {
+        if (filename == null || filename.isBlank()) {
+            throw new IllegalArgumentException("Pass a filename, its extension picks the parser.");
+        }
+        return asMap(kit.dataOrRoot(kit.postFile(
+            "/api/knowledge-bases/" + kbId + "/upload", filename, content, contentType, null)));
+    }
+
+    /** Documents in a collection with their status: processing, ready, degraded or failed. */
+    public List<Map<String, Object>> documents(String kbId) {
+        JsonNode arr = kit.dataOrRoot(kit.getJson("/api/knowledge-bases/" + kbId + "/documents", null));
+        List<Map<String, Object>> out = new ArrayList<>();
+        if (arr != null && arr.isArray()) {
+            for (JsonNode row : arr) out.add(asMap(row));
+        }
+        return out;
+    }
+
     public Map<String, Object> graphStats(String kbId) {
         JsonNode data = kit.dataOrRoot(kit.getJson("/api/knowledge-engines/" + kbId + "/graph-stats", null));
         return asMap(data);

@@ -117,7 +117,7 @@ export default function CognifyConfigPage() {
           <span className="text-xs text-slate-400">Conflict action</span>
           <select
             value={cfg.conflict_action}
-            onChange={e => setCfg({ ...cfg, conflict_action: e.target.value as Config['conflict_action'] })}
+            onChange={e => { setSaved(false); setCfg({ ...cfg, conflict_action: e.target.value as Config['conflict_action'] }); }}
             className="mt-1 w-56 rounded-md bg-slate-800 border border-slate-700 px-3 py-1.5 text-white"
           >
             <option value="flag">Flag for human review (default)</option>
@@ -144,16 +144,22 @@ export default function CognifyConfigPage() {
           <input
             type="number"
             min={0}
-            step={1}
             value={cfg.daily_budget_usd ?? ''}
-            onChange={e => setCfg({ ...cfg, daily_budget_usd: e.target.value === '' ? null : parseFloat(e.target.value) })}
+            onChange={e => { setSaved(false); setCfg({ ...cfg, daily_budget_usd: e.target.value === '' ? null : parseFloat(e.target.value) }); }}
+            aria-label="Daily budget cap in US dollars"
+            data-testid="cognify-budget"
+            step={0.5}
             className="mt-1 w-32 rounded-md bg-slate-800 border border-slate-700 px-3 py-1.5 text-white"
           />
+          <span className="block mt-1 text-xs text-slate-500">
+            Once today&apos;s Cognify spend reaches this, new jobs stop with a budget message. 0 pauses Cognify until you raise it.
+          </span>
         </label>
 
         <button
           onClick={save}
           disabled={saving}
+          data-testid="cognify-save"
           className="rounded-md bg-cyan-600 px-4 py-2 text-sm font-medium text-white hover:bg-cyan-500 disabled:opacity-50"
         >
           {saving ? 'Saving…' : 'Save config'}

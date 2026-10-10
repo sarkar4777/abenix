@@ -1,44 +1,39 @@
 /**
- * Abenix React SDK — drop-in chat component for embedding agents.
+ * Abenix React SDK, a drop-in chat component for embedding agents.
  *
- * Usage:
  *   import { AgentChat } from '@abenix/react';
  *
- *   <AgentChat
- *     apiKey="af_your_key_here"
- *     agentSlug="deep-research"
- *     baseUrl="https://api.abenix.dev"
- *     theme="dark"
- *   />
+ *   <AgentChat apiKey="af_your_key_here" agentSlug="deep-research" baseUrl="https://api.abenix.dev" />
+ *
+ * Built on useAgentStream, which you can use directly for your own UI.
  */
 
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import type { Abenix, ActingSubject } from '@abenix/sdk';
+import { useAgentStream } from './useAgentStream';
 
-interface AgentChatProps {
-  apiKey: string;
+export interface AgentChatProps {
+  apiKey?: string;
+  /** an existing SDK client instead of apiKey and baseUrl */
+  client?: Abenix;
   agentSlug: string;
   baseUrl?: string;
+  actAs?: ActingSubject;
   theme?: 'dark' | 'light';
   height?: string;
   placeholder?: string;
-  onMessage?: (message: { role: string; content: string }) => void;
+  onMessage?: (message: { role: string; content: string; executionId?: string }) => void;
   onError?: (error: string) => void;
   onCostUpdate?: (cost: { inputTokens: number; outputTokens: number; cost: number }) => void;
   className?: string;
 }
 
-interface Message {
-  id: string;
-  role: 'user' | 'assistant';
-  content: string;
-  toolCalls?: Array<{ name: string; status: string }>;
-  isStreaming?: boolean;
-}
-
 export function AgentChat({
   apiKey,
+  client,
   agentSlug,
   baseUrl = 'http://localhost:8000',
+  actAs,
   theme = 'dark',
   height = '600px',
   placeholder = 'Ask the agent anything...',
@@ -47,146 +42,32 @@ export function AgentChat({
   onCostUpdate,
   className = '',
 }: AgentChatProps) {
-  const [messages, setMessages] = useState<Message[]>([]);
+  const chat = useAgentStream({ client, apiKey, baseUrl, agentSlug, actAs, onError, onCostUpdate });
   const [input, setInput] = useState('');
-  const [isStreaming, setIsStreaming] = useState(false);
-  const [agentId, setAgentId] = useState<string | null>(null);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  const abortRef = useRef<AbortController | null>(null);
+  const endRef = useRef<HTMLDivElement>(null);
+  const reported = useRef(new Set<string>());
 
-  // Resolve agent slug to ID
   useEffect(() => {
-    (async () => {
-      try {
-        const res = await fetch(`${baseUrl}/api/agents`, {
-          headers: { 'X-API-Key': apiKey },
-        });
-        const data = await res.json();
-        const agent = data.data?.find((a: { slug: string; id: string }) => a.slug === agentSlug);
-        if (agent) setAgentId(agent.id);
-      } catch (e) {
-        onError?.(`Failed to resolve agent: ${e}`);
-      }
-    })();
-  }, [apiKey, agentSlug, baseUrl, onError]);
-
-  // Auto-scroll
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
-
-  const sendMessage = useCallback(async () => {
-    if (!input.trim() || !agentId || isStreaming) return;
-
-    const userMsg: Message = {
-      id: `user-${Date.now()}`,
-      role: 'user',
-      content: input.trim(),
-    };
-    setMessages(prev => [...prev, userMsg]);
-    onMessage?.({ role: 'user', content: input.trim() });
-    setInput('');
-    setIsStreaming(true);
-
-    const assistantMsg: Message = {
-      id: `assistant-${Date.now()}`,
-      role: 'assistant',
-      content: '',
-      toolCalls: [],
-      isStreaming: true,
-    };
-    setMessages(prev => [...prev, assistantMsg]);
-
-    const controller = new AbortController();
-    abortRef.current = controller;
-
-    try {
-      const res = await fetch(`${baseUrl}/api/agents/${agentId}/execute`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-API-Key': apiKey,
-        },
-        body: JSON.stringify({ message: userMsg.content, stream: true }),
-        signal: controller.signal,
-      });
-
-      if (!res.ok) {
-        throw new Error(`HTTP ${res.status}`);
-      }
-
-      const reader = res.body?.getReader();
-      if (!reader) throw new Error('No response body');
-
-      const decoder = new TextDecoder();
-      let buffer = '';
-      let currentEvent = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-
-        for (const line of lines) {
-          if (line.startsWith('event: ')) {
-            currentEvent = line.slice(7).trim();
-          } else if (line.startsWith('data: ') && currentEvent) {
-            const data = JSON.parse(line.slice(6));
-            if (currentEvent === 'token') {
-              setMessages(prev => {
-                const updated = [...prev];
-                const last = updated[updated.length - 1];
-                if (last.role === 'assistant') {
-                  last.content += data.text;
-                }
-                return updated;
-              });
-            } else if (currentEvent === 'tool_call') {
-              setMessages(prev => {
-                const updated = [...prev];
-                const last = updated[updated.length - 1];
-                if (last.role === 'assistant') {
-                  last.toolCalls = [...(last.toolCalls || []), { name: data.name, status: 'running' }];
-                }
-                return updated;
-              });
-            } else if (currentEvent === 'done') {
-              onCostUpdate?.({
-                inputTokens: data.input_tokens,
-                outputTokens: data.output_tokens,
-                cost: data.cost,
-              });
-            } else if (currentEvent === 'error') {
-              onError?.(data.message);
-            }
-            currentEvent = '';
-          }
-        }
-      }
-
-      setMessages(prev => {
-        const updated = [...prev];
-        const last = updated[updated.length - 1];
-        if (last.role === 'assistant') {
-          last.isStreaming = false;
-          onMessage?.({ role: 'assistant', content: last.content });
-        }
-        return updated;
-      });
-    } catch (e) {
-      if (e instanceof DOMException && e.name === 'AbortError') return;
-      onError?.(e instanceof Error ? e.message : 'Stream failed');
-    } finally {
-      setIsStreaming(false);
-      abortRef.current = null;
+    // jsdom and some embeds have no scrollIntoView
+    endRef.current?.scrollIntoView?.({ behavior: 'smooth' });
+    for (const m of chat.messages) {
+      if (m.isStreaming || reported.current.has(m.id)) continue;
+      reported.current.add(m.id);
+      onMessage?.({ role: m.role, content: m.content, executionId: m.executionId });
     }
-  }, [input, agentId, isStreaming, apiKey, baseUrl, onMessage, onError, onCostUpdate]);
+  }, [chat.messages, onMessage]);
+
+  const ready = chat.agentState === 'ready';
+  const canSend = ready && !chat.isStreaming && !!input.trim();
+  const submit = () => {
+    if (!canSend) return;
+    const text = input;
+    setInput('');
+    void chat.send(text);
+  };
 
   const isDark = theme === 'dark';
-
+  const muted = isDark ? '#94a3b8' : '#64748b';
   const styles = {
     container: {
       display: 'flex',
@@ -215,6 +96,7 @@ export function AgentChat({
       maxWidth: '70%',
       fontSize: '14px',
       lineHeight: '1.5',
+      overflowWrap: 'anywhere' as const,
     },
     assistantMsg: {
       alignSelf: 'flex-start' as const,
@@ -226,7 +108,10 @@ export function AgentChat({
       fontSize: '14px',
       lineHeight: '1.5',
       whiteSpace: 'pre-wrap' as const,
+      overflowWrap: 'anywhere' as const,
     },
+    notice: { fontSize: '13px', color: muted, textAlign: 'center' as const, margin: 'auto 0' },
+    error: { fontSize: '12px', color: isDark ? '#fca5a5' : '#b91c1c', marginTop: '6px' },
     inputArea: {
       display: 'flex',
       gap: '8px',
@@ -236,6 +121,7 @@ export function AgentChat({
     },
     input: {
       flex: 1,
+      minWidth: 0,
       padding: '10px 16px',
       borderRadius: '8px',
       border: `1px solid ${isDark ? '#334155' : '#cbd5e1'}`,
@@ -253,38 +139,65 @@ export function AgentChat({
       fontSize: '14px',
       fontWeight: '600' as const,
       cursor: 'pointer',
-      opacity: isStreaming || !input.trim() ? 0.5 : 1,
+      opacity: chat.isStreaming || canSend ? 1 : 0.5,
     },
   };
 
   return (
-    <div style={styles.container} className={className}>
-      <div style={styles.messages}>
-        {messages.map(msg => (
-          <div key={msg.id} style={msg.role === 'user' ? styles.userMsg : styles.assistantMsg}>
-            {msg.content}
-            {msg.isStreaming && <span style={{ animation: 'blink 1s infinite' }}>▊</span>}
-            {msg.toolCalls?.map((tc, i) => (
+    <div style={styles.container} className={className} data-testid="abenix-agent-chat">
+      <div style={styles.messages} role="log" aria-live="polite">
+        {chat.agentState === 'loading' && <p style={styles.notice}>Connecting to the agent...</p>}
+        {chat.agentState === 'missing' && (
+          <p style={styles.notice} role="alert">
+            {chat.error || `The agent ${agentSlug} could not be found.`}
+          </p>
+        )}
+        {ready && chat.messages.length === 0 && (
+          <p style={styles.notice}>Ask {chat.agentName || 'the agent'} something to start.</p>
+        )}
+        {chat.messages.map((msg) => (
+          <div
+            key={msg.id}
+            style={msg.role === 'user' ? styles.userMsg : styles.assistantMsg}
+            data-role={msg.role}
+            data-streaming={msg.isStreaming ? 'true' : 'false'}
+          >
+            {msg.content || (msg.isStreaming ? 'Thinking...' : '')}
+            {msg.toolCalls.map((tc, i) => (
               <div key={i} style={{ fontSize: '12px', color: isDark ? '#06b6d4' : '#0284c7', marginTop: '4px' }}>
-                🔧 {tc.name} — {tc.status}
+                Tool {tc.name}: {tc.status === 'running' ? 'running' : 'done'}
               </div>
             ))}
+            {msg.error && (
+              <div style={styles.error} role="alert">
+                {msg.error}
+              </div>
+            )}
           </div>
         ))}
-        <div ref={messagesEndRef} />
+        <div ref={endRef} />
       </div>
       <div style={styles.inputArea}>
         <input
           style={styles.input}
           value={input}
-          onChange={e => setInput(e.target.value)}
-          onKeyDown={e => e.key === 'Enter' && !e.shiftKey && sendMessage()}
-          placeholder={placeholder}
-          disabled={isStreaming}
+          aria-label="Message"
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && !e.shiftKey) submit();
+          }}
+          placeholder={ready ? placeholder : 'Waiting for the agent...'}
+          disabled={!ready || chat.isStreaming}
         />
-        <button style={styles.button} onClick={sendMessage} disabled={isStreaming || !input.trim()}>
-          {isStreaming ? 'Stop' : 'Send'}
-        </button>
+        {chat.isStreaming ? (
+          <button type="button" style={styles.button} onClick={chat.stop}>
+            Stop
+          </button>
+        ) : (
+          <button type="button" style={styles.button} onClick={submit} disabled={!canSend}>
+            Send
+          </button>
+        )}
       </div>
     </div>
   );

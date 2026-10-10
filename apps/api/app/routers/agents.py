@@ -77,6 +77,9 @@ def _pipeline_tool_calls(node_results: dict[str, Any] | None) -> list[dict[str, 
         preview = nr.get("output")
         if not isinstance(preview, str):
             preview = json.dumps(preview, default=str) if preview is not None else ""
+        # a failed node has no output, its error is what the reader needs
+        if not preview and nr.get("status") == "failed":
+            preview = str(nr.get("error") or "")
         entry = {
             "name": nr["tool_name"],
             "node_id": nid,
@@ -428,6 +431,11 @@ async def bulk_delete_agents(
     return success({"deleted": deleted, "requested": len(ids), "skipped": skipped})
 
 
+def _own_drafts_only(user: User) -> Any:
+    # a draft is for its author to test, nobody else picks it
+    return or_(Agent.status != AgentStatus.DRAFT, Agent.creator_id == user.id)
+
+
 @router.get("")
 async def list_agents(
     search: str = Query(
@@ -441,6 +449,11 @@ async def list_agents(
     scope: str = Query("all", description="Visibility scope: all|mine|shared|tenant"),
     published: bool | None = Query(
         None, description="Only agents listed (or not) in the marketplace"
+    ),
+    drafts: str = Query(
+        "all",
+        pattern=r"^(all|mine)$",
+        description="Drafts to include: all visible, or only the caller's own",
     ),
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
@@ -527,17 +540,19 @@ async def list_agents(
             return error(f"Unknown status '{status}'", 400)
     if published is not None:
         query = query.where(Agent.is_published.is_(published))
+    if drafts == "mine":
+        query = query.where(_own_drafts_only(user))
     if mode:
         # mode is stored in model_config JSONB — skip for now
         pass
 
-    # Sort
+    # Sort, with the id as a tie-breaker so seeded agents sharing a timestamp page without repeats
     if sort == "oldest":
-        query = query.order_by(Agent.created_at.asc())
+        query = query.order_by(Agent.created_at.asc(), Agent.id)
     elif sort == "name":
-        query = query.order_by(Agent.name.asc())
+        query = query.order_by(Agent.name.asc(), Agent.id)
     else:  # newest (default)
-        query = query.order_by(Agent.created_at.desc())
+        query = query.order_by(Agent.created_at.desc(), Agent.id)
 
     # Count total before pagination
     count_query = select(func.count()).select_from(query.subquery())
@@ -581,7 +596,9 @@ async def list_deleted_agents(
     rows = (
         (
             await db.execute(
-                q.order_by(Agent.updated_at.desc()).offset(offset).limit(limit)
+                q.order_by(Agent.updated_at.desc(), Agent.id)
+                .offset(offset)
+                .limit(limit)
             )
         )
         .scalars()
@@ -1156,6 +1173,10 @@ async def create_agent(
         nested_cfg_dump["tools"] = list(body.tools)
     if body.model is not None:
         nested_cfg_dump["model"] = body.model
+    elif not nested_model_set:
+        from app.routers.llm_models import default_agent_model
+
+        nested_cfg_dump["model"] = await default_agent_model(db)
 
     agent = Agent(
         tenant_id=user.tenant_id,
@@ -1223,6 +1244,7 @@ async def update_agent(
                 ResourceShare.resource_id == agent_id,
                 ResourceShare.shared_with_user_id == user.id,
                 ResourceShare.permission == SharePermission.EDIT,
+                ResourceShare.live(),
             )
         )
         if not share_check.scalar_one_or_none():
@@ -1324,6 +1346,7 @@ async def update_agent(
                 ResourceShare.resource_id == agent_id,
                 ResourceShare.shared_with_user_id.isnot(None),
                 ResourceShare.shared_with_user_id != user.id,
+                ResourceShare.live(),
             )
         )
         collab_ids = [row[0] for row in share_result.all()]
@@ -2322,6 +2345,23 @@ async def execute_agent(
             breach.message, 429, error_code=BUDGET_EXCEEDED, details=breach.details()
         )
 
+    from app.core.rate_limiter import agent_qps_decision, qps_message
+
+    _qps = await agent_qps_decision(
+        str(user.tenant_id),
+        str(agent.slug or agent.id),
+        getattr(agent, "rate_limit_qps", None),
+    )
+    if not _qps.allowed:
+        _resp = error(
+            qps_message(agent.name, agent.rate_limit_qps, _qps.retry_after_seconds),
+            429,
+            error_code="RATE_LIMITED",
+            details={"rate_limit_qps": agent.rate_limit_qps},
+        )
+        _resp.headers["Retry-After"] = str(max(1, _qps.retry_after_seconds))
+        return _resp
+
     # sub-agent runs from invoke_agent carry the parent run and their nesting depth
     try:
         _raw_body = await request.json()
@@ -2372,21 +2412,26 @@ async def execute_agent(
 
     sanitized_message = sanitize_input(body.message)
 
-    # DLP: scan input for PII before execution
+    # the tenant's DLP mode, the gate applies it again to the reply on every path
     try:
-        from engine.dlp import enforce_dlp, DLPPolicy
+        from engine.dlp import apply as apply_dlp, load_tenant_policy
 
-        dlp_message, dlp_result = enforce_dlp(
-            sanitized_message, DLPPolicy(mode="detect")
+        sanitized_message, _dlp_block, _dlp_scan = apply_dlp(
+            sanitized_message,
+            await load_tenant_policy(db, user.tenant_id),
+            source="pre_llm",
         )
-        if dlp_result.has_pii:
-            # In detect mode: log warning but proceed. In mask/block mode: enforce_dlp handles it.
-            sanitized_message = dlp_message
-    except ValueError as e:
-        # DLP block mode raises ValueError
-        return error(str(e), 400)
-    except Exception:
-        pass  # DLP failure should not block execution
+        if _dlp_scan.has_pii:
+            logger.info(
+                "dlp: personal data in input for agent %s (%s)",
+                agent.id,
+                ",".join(sorted({f["type"] for f in _dlp_scan.findings})),
+            )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("dlp check skipped: %s", exc)
+        _dlp_block = ""
+    if _dlp_block:
+        return error(_dlp_block, 422, error_code="DLP_BLOCKED")
 
     if is_pipeline:
         # agent runs check input inside the executor, pipelines have no such step
@@ -2698,7 +2743,17 @@ async def execute_agent(
                     # the failed row + failure_code; a 5xx here would have
                     # made that invisible to clients (and to dashboards).
                     if errored.startswith("timed out"):
-                        return error(errored, 504)
+                        # still running, so hand back the id to follow rather than an error
+                        return success(
+                            {
+                                "execution_id": str(execution.id),
+                                "status": "running",
+                                "mode": "async",
+                                "wait_timed_out": True,
+                                "message": f"The run is still going after the wait ({errored}). Follow it with GET /api/executions/{execution.id}.",
+                            },
+                            status_code=202,
+                        )
                     _failed_summary = summary or {"status": "failed", "error": errored}
                     if isinstance(_failed_summary, dict) and not _failed_summary.get(
                         "status"
@@ -2977,7 +3032,7 @@ async def _stream_pipeline_execution(
     tenant_id: str = "",
     agent_id: str = "",
     agent_name: str = "",
-    timeout_seconds: int = 120,
+    timeout_seconds: int | None = None,
     caller: dict[str, Any] | None = None,
     cost_limit: float | None = None,
 ) -> Any:
@@ -2988,10 +3043,16 @@ async def _stream_pipeline_execution(
     from engine.agent_executor import build_tool_registry
     from engine.pipeline import (
         PipelineExecutor,
+        build_run_context,
         parse_pipeline_nodes,
+        pipeline_timed_out,
         pipeline_usage,
         serialize_pipeline_result,
     )
+    from app.core.platform_settings import get_int_setting
+
+    if not timeout_seconds:
+        timeout_seconds = await get_int_setting("pipeline.timeout_seconds", 300)
 
     _caller = caller or {}
     tool_registry = build_tool_registry(
@@ -3121,9 +3182,32 @@ async def _stream_pipeline_execution(
 
     async def run_pipeline() -> None:
         try:
-            result = await executor.execute(
-                pipeline_nodes, {"user_message": message, **(context or {})}
-            )
+            try:
+                result = await _asyncio.wait_for(
+                    executor.execute(
+                        pipeline_nodes,
+                        build_run_context(message, str(execution_id), context=context),
+                    ),
+                    # the engine checks its budget between layers, this catches a step that hangs
+                    timeout=timeout_seconds + 5,
+                )
+            except _asyncio.TimeoutError:
+                result = pipeline_timed_out(timeout_seconds, _node_statuses)
+                for nid in result.failed_nodes:
+                    _node_statuses[nid] = "failed"
+                await event_queue.put(
+                    "event: error\ndata: "
+                    + json.dumps(
+                        {
+                            "message": result.node_errors["pipeline"],
+                            "type": "timeout",
+                        }
+                    )
+                    + "\n\n"
+                )
+            from engine.dlp import apply_to_pipeline_result
+
+            await apply_to_pipeline_result(db, tenant_id, result)
             pipeline_result[0] = result
 
             serialized = serialize_pipeline_result(result)
@@ -3287,6 +3371,10 @@ async def _stream_pipeline_execution(
             execution.output_tokens = _usage["output_tokens"] or None
             # Zero is a real cost; NULL would read as "never recorded".
             execution.cost = _usage["cost"]
+            from engine.pipeline import pipeline_provider_costs
+            from models.execution import set_provider_costs
+
+            set_provider_costs(execution, pipeline_provider_costs(pr))
             execution.tool_calls = _pipeline_tool_calls(node_results_data) or None
 
             # Store pipeline data for flight recorder
@@ -3308,7 +3396,11 @@ async def _stream_pipeline_execution(
                     for nid, nr in (node_results_data or {}).items()
                     if isinstance(nr, dict) and nr.get("error")
                 ]
-                execution.error_message = ("; ".join(_errs) or "pipeline failed")[:2000]
+                execution.error_message = (
+                    (pr.node_errors or {}).get("pipeline")
+                    or "; ".join(_errs)
+                    or "pipeline failed"
+                )[:2000]
             await db.commit()
         # Complete live state
         await complete_state(str(execution_id), tenant_id)
@@ -3336,6 +3428,7 @@ async def _non_stream_pipeline_execution(
         from engine.agent_executor import build_tool_registry
         from engine.pipeline import (
             PipelineExecutor,
+            build_run_context,
             parse_pipeline_nodes,
             serialize_pipeline_result,
         )
@@ -3394,23 +3487,11 @@ async def _non_stream_pipeline_execution(
             metadata={"mode": "pipeline"},
         )
 
-        # Provide the user message under multiple common variable names that
-        # seed pipelines may reference (ticket_content, prompt, input, etc.)
-        # so pipeline templates resolve consistently regardless of wording.
-        base_context = {
-            "user_message": message,
-            "message": message,
-            "input": message,
-            "prompt": message,
-            "content": message,
-            "text": message,
-            "ticket_content": message,
-            "query": message,
-            "request": message,
-        }
         result = await executor.execute(
             pipeline_nodes,
-            {**base_context, **(input_defaults or {}), **(context or {})},
+            build_run_context(
+                message, str(execution.id), defaults=input_defaults, context=context
+            ),
         )
     except Exception as e:
         execution.status = ExecutionStatus.FAILED
@@ -3448,6 +3529,9 @@ async def _non_stream_pipeline_execution(
             }
         )
 
+    from engine.dlp import apply_to_pipeline_result
+
+    await apply_to_pipeline_result(db, tenant_id, result)
     serialized = serialize_pipeline_result(result)
     execution.status = (
         ExecutionStatus.COMPLETED
@@ -3461,6 +3545,10 @@ async def _non_stream_pipeline_execution(
     execution.cost = serialized["cost"]
     execution.input_tokens = serialized["input_tokens"] or None
     execution.output_tokens = serialized["output_tokens"] or None
+    from engine.pipeline import pipeline_provider_costs
+    from models.execution import set_provider_costs
+
+    set_provider_costs(execution, pipeline_provider_costs(result))
     _finalize_execution_timing(execution)
     try:
         from app.core.failure_codes import emit_outcome_metric
@@ -3929,6 +4017,7 @@ async def _stream_execution(
             )
             # a timeout or a runtime error arrives as done.error, or as an error event with no done
             _runtime_error = None
+            _dlq_after = False
             if not _mod_blocked and not _grounding_violation:
                 _runtime_error = final_data.get("error") or (
                     _stream_error if not final_data else None
@@ -3976,6 +4065,8 @@ async def _stream_execution(
                     else classify_exception(Exception(str(_runtime_error)))
                 )
                 execution.error_message = str(_runtime_error)[:2000]
+                # a platform or config failure, an admin can fix the cause and replay it
+                _dlq_after = True
                 execution.output_message = full_output
                 execution.input_tokens = final_data.get("input_tokens") or 0
                 execution.output_tokens = final_data.get("output_tokens") or 0
@@ -4052,6 +4143,14 @@ async def _stream_execution(
                 except Exception:
                     pass
 
+            from models.execution import set_provider_costs
+
+            set_provider_costs(
+                execution,
+                final_data.get("provider_costs"),
+                final_data.get("effective_model") or final_data.get("model"),
+            )
+
             # Store confidence score and execution trace
             if hasattr(execution, "confidence_score"):
                 execution.confidence_score = final_data.get("confidence_score")
@@ -4092,6 +4191,22 @@ async def _stream_execution(
                     float(final_data.get("cost", 0) or 0),
                 )
             await db.commit()
+            if _dlq_after:
+                try:
+                    from app.services.dlq import dead_letter
+
+                    await dead_letter(
+                        db,
+                        execution,
+                        reason=str(_runtime_error),
+                        failure_code=execution.failure_code or "UNKNOWN_ERROR",
+                        payload={"context": user_context, "is_pipeline": False},
+                    )
+                    await db.commit()
+                except Exception as _dlq_exc:  # noqa: BLE001
+                    logger.warning(
+                        "dead letter write failed for %s: %s", execution_id, _dlq_exc
+                    )
 
             # Drift detection, the hook gates on env + tenant + agent and dedupes
             try:
@@ -4475,6 +4590,19 @@ async def _non_stream_execution(
             except Exception:
                 pass
 
+        from models.execution import set_provider_costs
+
+        set_provider_costs(
+            execution,
+            {
+                "anthropic": getattr(result, "anthropic_cost", 0.0),
+                "openai": getattr(result, "openai_cost", 0.0),
+                "google": getattr(result, "google_cost", 0.0),
+                "other": getattr(result, "other_cost", 0.0),
+            },
+            getattr(result, "model", None),
+        )
+
         # Store confidence and execution trace
         if hasattr(execution, "confidence_score") and confidence is not None:
             execution.confidence_score = confidence
@@ -4589,6 +4717,15 @@ async def _non_stream_execution(
             await client.close()
 
 
+def completion_event_type(event_type: str, execution: Any) -> str:
+    status = getattr(getattr(execution, "status", None), "value", None) or str(
+        getattr(execution, "status", "") or ""
+    )
+    if event_type == "execution_complete" and status.lower() == "failed":
+        return "execution_failed"
+    return event_type
+
+
 async def _emit_execution_event(
     db: AsyncSession,
     execution: Execution,
@@ -4596,7 +4733,17 @@ async def _emit_execution_event(
     cost: float | None = None,
     duration_ms: int | None = None,
     error_message: str | None = None,
-) -> None:
+    redis: Any = None,
+) -> bool:
+    """Tell the run's owner it finished. False when it was already announced."""
+    from app.services import run_announcer
+
+    if not await run_announcer.claim(execution.id, redis=redis):
+        return False
+    # the finish path runs for blocked and errored runs too, they must not read as completed
+    event_type = completion_event_type(event_type, execution)
+    if event_type == "execution_failed" and not error_message:
+        error_message = execution.error_message or None
     agent_result = await db.execute(
         select(Agent.name).where(Agent.id == execution.agent_id)
     )
@@ -4644,7 +4791,7 @@ async def _emit_execution_event(
             metadata=event_data,
         )
         await db.commit()
-    except Exception:
-        pass
-
+    except Exception as e:  # noqa: BLE001
+        logger.warning("run notification failed for %s: %s", execution.id, e)
     # execution events reach webhooks through the outbox, written by a database trigger
+    return True

@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
-import { FlaskConical, LayoutDashboard, TrendingUp } from 'lucide-react';
+import { FilePlus2, FlaskConical, LayoutDashboard, TrendingUp } from 'lucide-react';
 
 import ToastHost from '@/components/ToastHost';
 import './globals.css';
@@ -28,7 +28,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en">
       <body className="bg-slate-950 text-slate-200 antialiased">
         <div className="flex min-h-screen">
-          <aside className="w-56 shrink-0 border-r border-slate-800/80 bg-slate-900/40">
+          <aside className="hidden md:block w-56 shrink-0 border-r border-slate-800/80 bg-slate-900/40">
             <div className="p-4 border-b border-slate-800/80 flex items-center gap-2.5">
               <div className="w-8 h-8 rounded-lg bg-teal-500/15 ring-1 ring-teal-500/40 grid place-items-center">
                 <FlaskConical className="w-4 h-4 text-teal-300" />
@@ -42,6 +42,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             </div>
             <nav className="p-3 space-y-1 text-sm">
               <NavItem href="/" label="Case queue" icon={<LayoutDashboard className="w-4 h-4" />} />
+              <NavItem href="/cases/new" label="New report" icon={<FilePlus2 className="w-4 h-4" />} />
               <NavItem href="/signals" label="Signal board" icon={<TrendingUp className="w-4 h-4" />} />
             </nav>
             <div className="px-4 pb-4 mt-auto">
@@ -51,7 +52,17 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               </p>
             </div>
           </aside>
-          <div className="flex-1 min-w-0">{children}</div>
+          <div className="flex-1 min-w-0">
+            {/* phones get a top bar, the sidebar alone left no room for the queue */}
+            <header className="md:hidden flex items-center gap-3 px-4 py-3 border-b border-slate-800/80 bg-slate-900/60">
+              <FlaskConical className="w-4 h-4 text-teal-300" />
+              <span className="text-sm font-bold text-white mr-auto">PharmaVigil</span>
+              <Link href="/" className="text-xs text-slate-300 hover:text-teal-300">Queue</Link>
+              <Link href="/cases/new" className="text-xs text-slate-300 hover:text-teal-300">New</Link>
+              <Link href="/signals" className="text-xs text-slate-300 hover:text-teal-300">Signals</Link>
+            </header>
+            {children}
+          </div>
         </div>
         <ToastHost />
       </body>

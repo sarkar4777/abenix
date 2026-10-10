@@ -137,6 +137,10 @@ class DecisionTest(UUIDMixin, TenantMixin, TimestampMixin, Base):
     facts: Mapped[dict] = mapped_column(JSONB, default=dict)
     expected_outcome: Mapped[str] = mapped_column(String(32), default="decided")
     expected: Mapped[dict | list | None] = mapped_column(JSONB, nullable=True)
+    # exact, or subset where extra result keys are ignored
+    match_mode: Mapped[str] = mapped_column(
+        String(16), default="exact", server_default="exact"
+    )
     as_of: Mapped[str | None] = mapped_column(String(32), nullable=True)
     created_by: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), nullable=True

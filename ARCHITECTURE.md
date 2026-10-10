@@ -1,6 +1,6 @@
 # Architecture
 
-A map of the repo so a new contributor knows where to land.
+A map of the repo so a new contributor knows where to land. For what the product parts are and how they relate (agents, pipelines, tools, knowledge, decisions, approvals, autonomy, improvements, runs), read [How Abenix fits together](docs/00-how-abenix-fits-together.md) first.
 
 ## What ships
 
@@ -37,7 +37,7 @@ Five things ship from this monorepo:
 ├── scripts/                   # deploy, dev, lint, UAT, load and publish scripts
 ├── e2e/                       # Playwright specs (uat_*.spec.ts) and fixtures
 ├── tests/                     # unit/ (CI gate), integration/, load/
-└── docs/                      # developer docs, also served in-app at /dev-docs
+└── docs/                      # developer docs, also served in-app at /docs
 ```
 
 ## Request flow, agent execution
@@ -94,7 +94,11 @@ Everything is tenant-scoped via `tenant_id`. The model lives in [packages/db/mod
 | `eval_suites`, `eval_cases`, `eval_runs`, `eval_results` | evaluation suites and their scored runs |
 | `watch_sources`, `source_snapshots`, `source_changes` | Source Watch |
 | `risk_policies`, `kill_switches`, `permission_sets`, `permission_assignments`, `execution_config_snapshots` | governance |
-| `tenant_tool_credentials`, `platform_settings` | tool configuration saved per tenant, and platform-wide settings including `tool.credential.*` |
+| `action_types`, `autonomy_grants`, `autonomy_changes`, `agent_actions` | earned autonomy: what an agent may do, its level per action, level history and the action ledger |
+| `feedback`, `lessons`, `lesson_clusters`, `improvement_proposals` | self-improvement: thumbs and corrections, the lessons drawn from them, groups of lessons and the fixes proposed for them |
+| `moderation_policies`, `moderation_events`, `moderation_reviews` | moderation: policies, what each check saw, and content held for a person to review |
+| `meetings`, `meeting_deferrals`, `persona_items` | meetings the bot joins, questions it handed back, and each user's Persona KB |
+| `tenant_tool_credentials`, `platform_settings` | tool configuration saved per tenant, and platform-wide settings including `tool.credential.*` and the marketplace and monetization switches |
 
 ## SSO (Google / GitHub / Microsoft)
 
@@ -102,7 +106,7 @@ Both auth paths share `users.id` — the JWT issued at the end is identical. The
 
 Password flow (existing): `/api/auth/register` and `/api/auth/login` in [auth.py](apps/api/app/routers/auth.py). Stores a bcrypt hash in `users.password_hash`.
 
-SSO flow (new in v1.11): three endpoints in [sso.py](apps/api/app/routers/sso.py):
+SSO flow: three endpoints in [sso.py](apps/api/app/routers/sso.py):
 
 1. `GET /api/auth/oidc/providers` — returns the list of providers the SPA should show buttons for (only those with creds in env).
 2. `GET /api/auth/oidc/{provider}/start?return_to=/dashboard` — signs a short-lived state JWT (return_to + nonce + provider, 10-min expiry) and 302s to the provider's authorize endpoint.
@@ -110,15 +114,15 @@ SSO flow (new in v1.11): three endpoints in [sso.py](apps/api/app/routers/sso.py
 
 State is a signed JWT (HS256, same secret as access tokens) — no Redis needed. The `users.auth_provider` + `users.external_id` columns (added in migration `a7b8c9d0e1f2`) carry the SSO link. The pair is unique-indexed so callback resolves in one query.
 
-End-user docs in [docs/sso.md](docs/sso.md). Per-provider setup, env vars, and the kubectl one-liner are there.
+Per-provider setup and env vars are in [docs/09-reference/05-sso.md](docs/09-reference/05-sso.md).
 
 ## Knowledge — KB, Atlas, PersonaKB (v2.0)
 
-Three intertwined surfaces, all tenant-scoped, all auditable, all designed for the Fortune-500 use case of indexing tens of thousands of documents for agent consumption.
+Three linked surfaces, all tenant-scoped and audited, built to index tens of thousands of documents for agents.
 
 ### Knowledge Bases (KB)
 
-A KB is one collection of documents, with vectors stored either in Pinecone (default) or pgvector. Every chunk carries metadata `{tenant_id, kb_id, doc_id, page, chunk_index, char_offset_start, char_offset_end}` so retrieval results can be cited back to the exact source.
+A KB is one collection of documents, with vectors stored in Pinecone (the default) or pgvector, set per collection by `vector_backend`. Every chunk carries metadata `{tenant_id, kb_id, doc_id, page, chunk_index, char_offset_start, char_offset_end}` so retrieval results can be cited back to the exact source.
 
 ```mermaid
 flowchart LR
@@ -144,7 +148,7 @@ Key columns on `documents` (v2.0):
 
 | Column | Role |
 |---|---|
-| `is_current` | search default filters `is_current=true`, superseded versions excluded |
+| `is_current` | `true` on the newest version only. Search and Cognify use current versions |
 | `parent_document_id` | head of the version chain |
 | `version_number` | monotonic counter (1, 2, 3, …) |
 | `superseded_by` | pointer to the row that replaced this one |
@@ -163,7 +167,7 @@ Each collection embeds with its own `embedding_model`, one of `text-embedding-3-
 
 ### Atlas — the typed knowledge graph
 
-Atlas lives in **Neo4j** (graph structure) with mirror rows in Postgres (`atlas_graphs`, `atlas_nodes`, `atlas_edges`) for ACL and audit. Five starter ontologies ship in `ATLAS_STARTERS`: FIBO Core, FIX Protocol, EMIR, ISDA, ETRM EOD. New ontologies are a YAML drop.
+Atlas lives in **Neo4j** (graph structure) with mirror rows in Postgres (`atlas_graphs`, `atlas_nodes`, `atlas_edges`) for ACL and audit. Five starter ontologies ship in `ATLAS_STARTERS` in `apps/api/app/routers/atlas.py`: FIBO Core, FIX Protocol, EMIR, ISDA, ETRM EOD. A new starter is one more entry in that dict.
 
 **Five agent tools** access Atlas:
 
@@ -275,6 +279,18 @@ The API scheduler checks due sources every 30 seconds, keeps immutable snapshots
 
 A `code_asset` call can run in a warm pod that holds one tenant's build of one asset version, called over NATS request and reply, instead of a one-off Job. `CODE_RUNNER_MODE` picks `auto`, `warm` or `job`. The gateway is `apps/code-runner/`, the controller `apps/agent-runtime/engine/code_runners.py`, the chart values `codeRunners.*`. See [docs/02-runtime/16-warm-code-runners.md](docs/02-runtime/16-warm-code-runners.md).
 
+### Earned autonomy
+
+An agent earns the right to act on its own one kind of action at a time. Each action type has five levels: Off, Watching, Asks first, Acts within limits, Acts and reports. Every call is scored in the `agent_actions` ledger. Promotion needs a person who did not build the agent and goes through **Approvals**, demotion is automatic when the record slips. Code is in `apps/api/app/routers/autonomy.py`, `apps/api/app/services/autonomy.py` and `apps/agent-runtime/engine/autonomy.py`. See [docs/02-runtime/21-earned-autonomy.md](docs/02-runtime/21-earned-autonomy.md) and [docs/08-howto/13-earned-autonomy.md](docs/08-howto/13-earned-autonomy.md).
+
+### Lessons and governed self-improvement
+
+Thumbs down with a correction, failed runs, rejected or edited actions and harm flags become lessons. Similar lessons are grouped and each group suggests test cases. A group can get one proposed fix, which is proven offline against the agent's own tests and history, approved by a person, released as a new revision and watched against the old one. Worse means an automatic rollback with the reason. Code is in `apps/api/app/services/lessons.py`, `apps/api/app/services/improvements.py` and the `lessons` and `improvements_proposals` routers. See [docs/02-runtime/22-lessons-and-improvements.md](docs/02-runtime/22-lessons-and-improvements.md) and [docs/02-runtime/23-governed-self-improvement.md](docs/02-runtime/23-governed-self-improvement.md).
+
+### Wayfinding: Start here, Needs you, Essentials
+
+The web app keeps a new person oriented. **Start here** on the dashboard is a role checklist from `GET /api/me/journey` (`journey.py`). **Needs you** (`/inbox`) counts everything waiting on the person from `GET /api/me/inbox-counts` (`inbox.py`). The sidebar starts in **Essentials** and saves the choice through `/api/me/ui-prefs`. Every page opens with `PageHeader` (purpose, primary action, How this works, Docs link) and shows `NextSteps` after a success. `e2e/uat_lostness_gate.spec.ts` and `e2e/uat_first_use_tasks.spec.ts` hold the line. See [docs/05-ui/00-app-shell.md](docs/05-ui/00-app-shell.md).
+
 ### Tool configuration
 
 A tool declares the keys it needs as `config_fields` and reads them through `self.cfg()`. Values resolve from a tenant value, a platform value, the environment, `packages/db/seeds/tool_defaults.yaml`, then the declared default. **Admin -> Tool Configuration** is generated from the declarations, and `scripts/check-tool-config.py` keeps tools honest in CI. See [docs/08-howto/08-tool-configuration.md](docs/08-howto/08-tool-configuration.md).
@@ -302,6 +318,17 @@ A tool declares the keys it needs as `config_fields` and reads them through `sel
 | Tools registry | [apps/api/app/routers/tools.py](apps/api/app/routers/tools.py) |
 | Tool runtime invoke | [apps/api/app/routers/tool_runtime.py](apps/api/app/routers/tool_runtime.py) |
 | Tenant settings (DLP, retention, sandbox) | [apps/api/app/routers/settings.py](apps/api/app/routers/settings.py) |
+| Earned autonomy | [apps/api/app/routers/autonomy.py](apps/api/app/routers/autonomy.py) |
+| Feedback and lessons | [apps/api/app/routers/lessons.py](apps/api/app/routers/lessons.py) |
+| Improvement proposals | [apps/api/app/routers/improvements_proposals.py](apps/api/app/routers/improvements_proposals.py) |
+| Needs you counts and sidebar mode | [apps/api/app/routers/inbox.py](apps/api/app/routers/inbox.py) |
+| Start here journey | [apps/api/app/routers/journey.py](apps/api/app/routers/journey.py) |
+| Moderation policies and held content | [apps/api/app/routers/moderation.py](apps/api/app/routers/moderation.py) |
+| Marketplace | [apps/api/app/routers/marketplace.py](apps/api/app/routers/marketplace.py) |
+| Marketplace and monetization switches | [apps/api/app/routers/platform_features.py](apps/api/app/routers/platform_features.py) |
+| Meetings | [apps/api/app/routers/meetings.py](apps/api/app/routers/meetings.py) |
+| Connectors | [apps/api/app/routers/connectors.py](apps/api/app/routers/connectors.py) |
+| Cluster view | [apps/api/app/routers/admin_cluster.py](apps/api/app/routers/admin_cluster.py) |
 
 ## How to add a new...
 
@@ -323,14 +350,14 @@ A tool declares the keys it needs as `config_fields` and reads them through `sel
 ## Tests
 
 - `tests/unit/` is pure Python with no live services and gates CI, along with `apps/agent-runtime/tests/` and the lint scripts (`lint-agent-seeds.py`, `check-tool-config.py`, `gen-tool-docs.py --check` and others).
-- `e2e/` holds 69 `uat_*.spec.ts` Playwright specs that run against a local stack or a deployed cluster. `scripts/uat.sh` runs the 13 that form the deploy gate. The 2.5 surfaces have their own specs: `uat_rules_to_agents`, `uat_decisions`, `uat_governance`, `uat_evals`, `uat_source_watch`, `uat_tool_config`.
+- `e2e/` holds 89 `uat_*.spec.ts` Playwright specs that run against a local stack or a deployed cluster. `scripts/uat.sh` runs the 13 that form the deploy gate. `uat_lostness_gate` and `uat_first_use_tasks` are the wayfinding release gate, run by hand before a release.
 - `apps/api/tests/` needs a reachable Postgres, `tests/integration/` needs a running API and `ABENIX_INTEGRATION=1`.
 
 Details, env vars and the CI matrix are in [docs/08-howto/05-testing.md](docs/08-howto/05-testing.md).
 
 ## Where to start as a new contributor
 
-1. Read this file.
+1. Read [How Abenix fits together](docs/00-how-abenix-fits-together.md), then this file.
 2. Read [CONTRIBUTING.md](CONTRIBUTING.md) for the contribution mechanics.
 3. Read [ONBOARDING.md](ONBOARDING.md) for the 30-minute local setup.
 4. Look at a recent PR that touched code near what you want to change — git blame is the cheapest way to learn local conventions.

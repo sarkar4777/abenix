@@ -435,7 +435,9 @@ async def list_webhook_deliveries(
     rows = (
         (
             await db.execute(
-                q.order_by(desc(WebhookDelivery.created_at)).offset(offset).limit(limit)
+                q.order_by(desc(WebhookDelivery.created_at), WebhookDelivery.id)
+                .offset(offset)
+                .limit(limit)
             )
         )
         .scalars()

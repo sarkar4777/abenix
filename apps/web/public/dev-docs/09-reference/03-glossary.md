@@ -1,6 +1,6 @@
 # Glossary
 
-> Quick lookup for the terminology used across the codebase + docs.
+> Terms used across the code and these docs, with the tables and files behind them. For the plain words the app shows to users, see [How Abenix fits together](../00-how-abenix-fits-together.md#words-you-will-see-in-the-app).
 
 ---
 
@@ -26,9 +26,9 @@
 
 **Audit chain** — The per-tenant hash chain over `activity_logs`. Each row's `row_hash` covers the previous row's hash plus the row's content, so editing or removing a row breaks verification. A database trigger keeps the table append-only. See [`04-data-model/05-governance-decisions`](../04-data-model/05-governance-decisions.md#audit-chain-on-activity_logs).
 
-**BUDGET_EXCEEDED** — The failure code and HTTP 429 error code for a run refused because the agent is over `daily_cost_limit` (its spend across all callers per UTC day) or `daily_budget_usd` (one tenant's spend on it per UTC day).
-
 **BLPG** — Baltic LPG freight index. Three routes — BLPG1 (Ras Tanura → Chiba), BLPG2 (Houston → Flushing), BLPG3 (Houston → Chiba via Panama). The `freight_baltic_blpg` tool returns curated mids + low/high range.
+
+**BUDGET_EXCEEDED** — The failure code and HTTP 429 error code for a run refused because the agent is over `daily_cost_limit` (its spend across all callers per UTC day) or `daily_budget_usd` (one tenant's spend on it per UTC day).
 
 **Cache (vertical-app)** — File-backed result store at `/data/<app>-cache/<page>/<key>.json`. TTL 30 min by default. Holds only agent-produced numbers — never synthesised.
 
@@ -36,9 +36,11 @@
 
 **Check / propose / publish** — The decision lifecycle calls. Check validates a draft without saving. Propose runs validation and golden tests, then moves the version to `proposed` and opens a publish approval when the tier needs approvers. Publish makes an `approved` version effective and supersedes or closes the overlapping live versions.
 
-**Cognify** — The KB ingestion pipeline. Parse → chunk → embed → extract entities + relationships → write to Neo4j. Runs in the `cognify-worker` pod.
+**Cluster view** — The admin page `/admin/cluster` (sidebar **Cluster Health**). Nodes, services grouped by role, pods with events and log tail, and a warnings timeline, read from the Kubernetes API by `apps/api/app/routers/admin_cluster.py`. See [`06-deployment/04-observability`](../06-deployment/04-observability.md).
 
 **Code asset** — A user-uploaded zip or git repo, analysed and exposed as a `code_asset` tool. Runs in a container, a one-off Job or a warm runner, with gVisor when the nodes have it. Each upload bumps `code_assets.version` and keeps the previous archive in `version_history`.
+
+**Cognify** — The KB ingestion pipeline. Parse → chunk → embed → extract entities + relationships → write to Neo4j. Runs in the `cognify-worker` pod.
 
 **Config fields** — The values a tool needs, declared on the tool class as `config_fields` (`ConfigField`: key, kind, required, group, signup URL). The Admin → Tool Configuration screen is generated from them, and `scripts/check-tool-config.py` checks that every key a tool reads is declared.
 
@@ -46,13 +48,13 @@
 
 **Corridor** — A pair (origin port, destination port) for a commodity. Wingman's primary unit of analysis. Four active corridors: USGC-NWE, USGC-FE, MEG-FE, USGC-LATAM.
 
-**Document grant** — A row in `document_grants` naming a user or agent who may read one document. A document with no grants is open to everyone who can read its collection. The first grant restricts it to its grantees, tenant admins, the collection creator and WRITE or ADMIN holders on the collection.
-
 **Decision** — A named set of versioned business rules, a row in `decision_models`, evaluated by the ZEN engine from the API or the `decision_*` tools in an agent or pipeline. Callers address it by `key`.
 
 **Decision version** — One immutable revision of a decision's rules in `decision_versions`. Carries effective dates (`valid_from` / `valid_to`), recorded times (`recorded_at`, `published_at`, `superseded_at`) and a state from `draft` through `published` to `superseded` or `retired`.
 
 **Declared inputs** — An agent or pipeline's `model_config.input_variables`. Each has a name and an optional default that is applied under whatever the caller sends, and the pipeline validator treats the names as valid template targets.
+
+**Document grant** — A row in `document_grants` naming a user or agent who may read one document. A document with no grants is open to everyone who can read its collection. The first grant restricts it to its grantees, tenant admins, the collection creator and WRITE or ADMIN holders on the collection.
 
 **Earned autonomy** — Agents move between five levels per action type (Off, Watching, Asks first, Acts within limits, Acts and reports) on their scored record. Promotion needs a person who did not build the agent, demotion is automatic. See [`02-runtime/21-earned-autonomy`](../02-runtime/21-earned-autonomy.md).
 
@@ -61,6 +63,8 @@
 **Embedding model** — The model a collection's chunks are embedded with, stored on `knowledge_collections.embedding_model` and used by ingest and search. Changed by the re-embed job, which re-reads every document and switches the collection in one step.
 
 **Escalation** — A notification to tenant admins when a tiered approval has waited longer than the tier's `escalate_after_hours`. Sent once per approval and recorded in `approvals.escalated_at`.
+
+**Essentials** — The default sidebar mode, a short flat list built by `essentialItems()` in `Sidebar.tsx`. **Show all tools** switches to the grouped list. The choice is saved with `PUT /api/me/ui-prefs`. See [`05-ui/00-app-shell`](../05-ui/00-app-shell.md#essentials-and-all-tools).
 
 **Eval case** — One input plus context and assertions inside a suite, a row in `eval_cases`. Can be captured from a real run, which fills `source_execution_id` and `reference_output`.
 
@@ -76,9 +80,17 @@
 
 **Fair value** — In Wingman, the `wingman-mispricing-fairvalue` BayesianRidge model's prediction of where a corridor's spread should sit given the 15-feature vector. Compared to the observed spread to compute residual + verdict.
 
+**Feedback** — A thumbs up or down on an answer, with an optional correction, a row in `feedback`. Needs `feedback.give`. A thumbs down becomes a lesson. See [`02-runtime/22-lessons-and-improvements`](../02-runtime/22-lessons-and-improvements.md).
+
+**First-use tasks** — `e2e/uat_first_use_tasks.spec.ts`. Times a new creator, member and admin doing their first job by following only the on-screen guidance. Part of the wayfinding release gate. See [`08-howto/05-testing`](../08-howto/05-testing.md#the-wayfinding-release-gate).
+
 **Golden test** — A decision test in `decision_tests`. Fixed facts with the expected outcome and result. Every test runs on propose and a failure blocks the proposal.
 
+**Held content** — Text a moderation policy with action `hold` stopped for a person to release, redact or reject. A row in `moderation_reviews`, sealed with the tenant key when a KEK is set. Reviewed on `/review-queue` with `moderation.review`. See [`02-runtime/13-moderation-gate`](../02-runtime/13-moderation-gate.md).
+
 **Hypertable** — TimescaleDB's auto-partitioned time-series table. The stack's TimescaleDB chart creates one, `metrics`, used by the `tsdb_query` tool and the pipeline `tsdb_sink`. `executions` is a plain Postgres table.
+
+**Improvement proposal** — One proposed fix for a lesson group, a row in `improvement_proposals`. Moves from `drafting` through `proving` and `awaiting_approval` to `released`, then `kept` or `rolled_back`. See [`02-runtime/23-governed-self-improvement`](../02-runtime/23-governed-self-improvement.md).
 
 **JetStream** — NATS' persistent-stream extension. Provides at-least-once delivery + replay. The platform queues agent runs on it, one subject `agents.<pool>` per pool, and KEDA scales the pools on its consumer lag. Queued agent runs need it, Celery cannot carry them.
 
@@ -88,9 +100,23 @@
 
 **Knowledge Base (KB)** — A collection of documents that an agent can search via the `knowledge_search` tool. Stored in `knowledge_collections`. Chunks are embedded into Pinecone or the pgvector `chunks` table, set per collection by `vector_backend`. An agent needs a grant in `agent_collection_grants`. Optionally Cognified into the Atlas graph.
 
-**Mispricing** — Wingman's term for a corridor spread that's significantly off the fair-value model's prediction. Threshold: residual z-score > 2σ = `dislocated`, 1σ < |z| < 2σ = `stretched`, |z| < 1σ = `aligned`.
+**Lesson** — One signal about an agent's behaviour, a row in `lessons`: a thumbs down with a correction, a failed run, a rejected or edited action, a harm flag, or a good example. Similar lessons share a row in `lesson_clusters`.
+
+**Lostness gate** — `e2e/uat_lostness_gate.spec.ts`. Opens every sidebar page as admin, creator, member and viewer at 390 and 1440 px and fails a page with no purpose line, no primary action or onward link, a raw error or sideways scroll. Part of the wayfinding release gate.
+
+**Marketplace switch** — The platform switch for the marketplace, on by default (`MARKETPLACE_ENABLED`). Stored in the global `platform_settings`, so it applies to every tenant. Read from `GET /api/platform/features` and set by an admin on **Admin -> Marketplace & Billing**. Off hides Marketplace and Creator Hub and the marketplace API answers 404 `MARKETPLACE_OFF`. See [`08-howto/14-marketplace-and-monetization`](../08-howto/14-marketplace-and-monetization.md).
 
 **MCP** — Model Context Protocol. The Anthropic-led spec for how LLMs talk to external tool servers. Abenix is an MCP client. See [`02-runtime/03-mcp`](../02-runtime/03-mcp.md).
+
+**Mispricing** — Wingman's term for a corridor spread that's significantly off the fair-value model's prediction. Threshold: residual z-score > 2σ = `dislocated`, 1σ < |z| < 2σ = `stretched`, |z| < 1σ = `aligned`.
+
+**Moderation retention** — How long held text, decision records and event previews are kept, per tenant. Defaults 30, 365 and 30 days, set with `PUT /api/moderation/retention` by an admin.
+
+**Monetization switch** — The platform switch that adds prices, Stripe checkout, creator payouts and the Billing settings tab, off by default (`MONETIZATION_ENABLED`). Set beside the marketplace switch, deployment-wide.
+
+**Needs you** — The `/inbox` page and its sidebar count. One tab per source (approvals, proposals, watching reviews, held content, marketplace submissions, alerts), counted by `GET /api/me/inbox-counts` in `apps/api/app/routers/inbox.py`.
+
+**NextSteps** — The "Done. What next?" card (`components/shared/NextSteps.tsx`) a page shows after a success, two to four links to what people usually do next.
 
 **Observed spread** — The actual measured spread on a corridor today. Computed as `dest_spot - origin_spot - freight_per_mt`. The arb residual a trader actually books.
 
@@ -98,25 +124,35 @@
 
 **Output schema** — Optional JSON Schema on `model_config.output_schema`. The post-processor validates and normalises the final output against it and records warnings. An agent run as a pipeline step is asked once to correct a mismatch. A tier policy with `require_output_schema` will not let the agent go live without one.
 
+**PageHeader** — The block every page opens with (`components/layout/PageHeader.tsx`): title, purpose line, primary action, a How this works panel and a Docs link from `docSlug`. The lostness gate checks it.
+
 **Permission set** — A named bundle of capabilities in `permission_sets`, assigned to users through `permission_assignments`.
 
 **Pipeline** — A DAG of nodes. Agents, tools, switches, for-each loops, parallel fan-out, human gates. Defined in `model_config.pipeline_config` as JSONB. Executed by the pipeline engine in the agent-runtime.
 
 **Pool** — One of the agent-runtime Deployments. Each pool isolates a class of workload. An agent picks its pool with the `agents.runtime_pool` column, and `inline` keeps the run on the API pod. See [`06-deployment/03-keda`](../06-deployment/03-keda.md).
 
+**Proof** — The offline replay of a proposed fix against the agent's accepted test cases and past runs. A fix that misses the proof bar ends in `failed_proof`.
+
 **Provenance** — What a run used, written by the `executions_provenance` trigger: `risk_tier`, `agent_revision`, `prompt_hash` and the `provenance` JSON (`config_hash`, agent version, model, temperature, tools). The prompt and config themselves go to `execution_config_snapshots` so a run can be replayed pinned.
 
 **Provider credentials** — The LLM provider keys (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_API_KEY` and others) declared in `engine/provider_credentials.py`. They resolve like any tool credential, so a key saved under Admin → Tool Configuration reaches the router without a restart.
 
+**Queue lease** — The claim a runtime pod holds on a queued execution: `runner_id`, `lease_expires_at` and `delivery_attempts` on the `executions` row. Renewed while the run lives. A duplicate delivery waits while the lease is live and takes over once it expires. After `CONSUMER_MAX_ATTEMPTS` (3) pickups the run fails with `STALE_SWEEP`.
+
 **Reference set** — A named, versioned list of values in `reference_sets`, such as product codes. Decision rules can test membership. The values are compiled into a decision version, and `reference_versions` records which set version was used.
 
-**Queue lease** — The claim a runtime pod holds on a queued execution: `runner_id`, `lease_expires_at` and `delivery_attempts` on the `executions` row. Renewed while the run lives. A duplicate delivery waits while the lease is live and takes over once it expires. After `CONSUMER_MAX_ATTEMPTS` (3) pickups the run fails with `STALE_SWEEP`.
+**Rehearsal** — Practising a meeting bot on `/meetings/{id}/rehearse` with typed or dictated turns and no room. Shows scope decisions, citations, hand-backs and reply latency. **Live join** (`/meetings/{id}/join`) opens the real LiveKit room in the browser. See [`08-howto/15-meetings`](../08-howto/15-meetings.md).
+
+**Release watch** — After a fix is released, the new revision is compared with the old one. Worse results roll it back with the reason, better ones mark it `kept`.
 
 **Reranker** — The step that reorders search hits by relevance. Cohere runs when `COHERE_API_KEY` is set, the Claude Haiku scorer only with `RERANKER_PROVIDER=llm`.
 
 **ResourceShare** — The polymorphic sharing table. One row per `(resource_type, resource_id, recipient_user_id)`. Seven resource types, three permission levels. See [`04-data-model/04-resource-shares`](../04-data-model/04-resource-shares.md).
 
 **Return (approval)** — A sign-off with decision `return`. Sets the approval to `returned` and sends a decision version back to `draft` with the reviewer's note, instead of rejecting it.
+
+**Review inbox** — `/review-queue`. Held content for `moderation.review` holders and marketplace submissions for admins.
 
 **Risk tier** — `low`, `medium`, `high` or `critical`. Set on agents (`model_config.risk_tier`), decisions, tools and watch sources. A run starts at its agent's tier and can only rise, recorded in `executions.risk_tier` and `risk_reasons`.
 
@@ -134,6 +170,8 @@
 
 **Standalone app** — A vertical app (Wingman, E&C-Copilot, etc.) that rides on top of the platform via the SDK. Owns UI + auth + caching but no business logic. See [`07-standalone-apps/00-pattern`](../07-standalone-apps/00-pattern.md).
 
+**Start here** — The role checklist on the dashboard (`components/shared/StartHere.tsx`), built by `GET /api/me/journey` in `apps/api/app/routers/journey.py` from real tenant data.
+
 **Subject** — Per actAs. The `(subject_type, subject_id)` pair recorded on `executions` and on audit rows. Tells RBAC + audit who the action was on behalf of.
 
 **Tenant** — An organisation on the platform. Identified by a UUID. Every table that holds user data has a `tenant_id` column. Tenants are isolated from each other.
@@ -150,11 +188,15 @@
 
 **Trace hash** — SHA-256 over the canonical JSON of a decision evaluation's facts, rules content hash, result and applied rules. Stored in `decision_evaluations.trace_hash`. Equal hashes mean the same decision for the same reason.
 
+**URL guard** — `apps/agent-runtime/engine/url_guard.py`. Refuses outbound calls to internal names, cluster DNS names and private, loopback, link-local, multicast or reserved addresses, before and after DNS and on every redirect. Used by connectors and `connector_call`. See [`02-runtime/14-connectors-and-triggers`](../02-runtime/14-connectors-and-triggers.md).
+
 **Verdict** — Wingman's classification of a corridor's spread. `aligned` / `stretched` / `dislocated` based on the residual z-score against the fair-value posterior std.
 
 **Warm runner** — A long-lived code runner Deployment per tenant and code asset version, called over NATS instead of starting a Job per call. Scales down after `codeRunners.idleSeconds` without calls, to a floor set per risk tier by `codeRunners.minWarmByTier`. See [`02-runtime/16-warm-code-runners`](../02-runtime/16-warm-code-runners.md).
 
 **Watch source** — A row in `watch_sources`. A URL the tenant monitors on a cadence, with an optional selector, credentials key and collection to feed. Each fetch that differs creates a snapshot and a source change.
+
+**Watching** — The second autonomy level. The agent records what it would do without doing it, and a person with `actions.review` answers whether they agree.
 
 **Worker** — The `worker` pod runs Celery tasks: Cognify, document processing, KB re-embedding and Pinecone vacuum. Queued agent runs go to the runtime pools over NATS, not to the worker. Scheduled jobs such as triggers, the stale sweeper, event delivery, Source Watch checks, eval schedules and the audit chainer run in the API's APScheduler instead.
 

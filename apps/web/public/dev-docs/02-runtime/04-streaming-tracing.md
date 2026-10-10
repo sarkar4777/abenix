@@ -1,144 +1,110 @@
 # Streaming events + distributed tracing
 
-> Every execution emits ~5-50 events over its lifetime. Those events drive the live UI, the audit log, and the OTel trace. This is the doc on how they flow.
+> How a run reports progress while it runs, and how it shows up in traces afterwards.
 
 ---
 
-## Two parallel streams, one origin
+## Three channels
 
-```mermaid
-flowchart LR
-  subgraph R["agent-runtime pod"]
-    AL["Agent loop"]
-  end
-  AL --> NEV["NATS publish<br/>subject: exec.id.event_type"]
-  AL --> OT["OTel span<br/>name: exec.id"]
+| Channel | Carries | Kept for | Read by |
+|---|---|---|---|
+| Redis pub/sub `exec:events:<execution_id>` plus the list `exec:events:<execution_id>:log` | Every event of a queued run | Last 500 events, 1 hour | `GET /api/executions/{id}/stream`, `/watch`, and the streaming execute call for pool-routed agents |
+| The HTTP response of an inline run | The same events, written straight to the caller as SSE | The life of the request | The chat and pipeline pages that called execute with `stream: true` |
+| Redis live state (`execution_state.py`) | A small status record per running execution | 1 hour | Live Debug, `GET /api/executions/live` and `/live/stream` |
 
-  NEV --> NN["NATS JetStream"]
-  NN --> API["abenix-api SSE"]
-  API --> WC["Web client"]
+Only the queue consumer publishes to `exec:events:*`. An inline run streams over its own response and does not publish to the bus.
 
-  OT --> OE["OTLP gRPC"]
-  OE --> T["Tempo"]
-  T --> G["Grafana Explore"]
-
-  NEV -. event_id .-> PG[("Postgres<br/>audit_logs")]
-  OT -. trace_id .-> PG
-```
-
-Two completely separate pipes:
-- **NATS events** drive the live UI. Short-lived. the stream retains 24h.
-- **OTel traces** drive forensics. Long-lived. Tempo retains 7 days by default.
-
-Both reference the same `execution_id` and `trace_id` so you can jump from one to the other.
-
-**Source map**:
-- Event publisher: [`apps/agent-runtime/engine/progress.py`](../../apps/agent-runtime/engine/progress.py)
-- SSE bridge endpoint: [`apps/api/app/routers/executions.py`](../../apps/api/app/routers/executions.py) — search for `stream` and `watch`
-- OTel setup: [`apps/api/app/core/telemetry.py`](../../apps/api/app/core/telemetry.py) and [`apps/agent-runtime/engine/tracing.py`](../../apps/agent-runtime/engine/tracing.py)
-- Frontend SSE consumer: [`apps/web/src/hooks/useExecutionStream.ts`](../../apps/web/src/hooks/) (or similar — the hook that powers `/executions/live`)
+OpenTelemetry traces are separate. See [OpenTelemetry tracing](#opentelemetry-tracing).
 
 ---
 
 ## Event types
 
-Subjects pattern: `exec.{execution_id}.{event_type}`.
+Each event is a JSON object with an `event` field. The consumer puts the payload fields next to it ([`consumer.py`](../../apps/agent-runtime/consumer.py) `_publish`).
 
-| Type | Payload | Emitted by |
+| `event` | Payload | Sent by |
 |---|---|---|
-| `start` | `{agent_slug, input}` | api on enqueue |
-| `picked_up` | `{runtime_pod, runtime_pool}` | runtime on consume |
-| `iteration.start` | `{iteration: int}` | runtime per loop |
-| `llm.request` | `{provider, model, prompt_tokens_est}` | runtime before LLM call |
-| `llm.response` | `{response_tokens, cost_usd, latency_ms}` | runtime after LLM call |
-| `tool.start` | `{tool_slug, args_preview}` | runtime before tool call |
-| `tool.end` | `{tool_slug, is_error, latency_ms, metadata}` | runtime after tool call |
-| `text` | `{text_fragment}` | runtime on text deltas (streaming-aware providers) |
-| `approval.requested` | `{approval_id, payload_preview}` | runtime on HITL pause |
-| `approval.granted` | `{approval_id, approver}` | api on signoff |
-| `approval.denied` | `{approval_id, approver, reason}` | api on deny |
-| `resume` | `{from_iteration}` | api after approval |
-| `completed` | `{output, cost_usd, duration_ms}` | runtime on success |
-| `failed` | `{failure_code, error_message}` | runtime on terminal error |
-| `cancelled` | `{cancelled_by}` | api on user cancel |
+| `start` | `execution_id`, `agent`, `pool`, `mode` (`agent` or `pipeline`) | Consumer, on pickup |
+| `token` | `data`, a text fragment | Executor, as the model streams |
+| `tool_call` | The call the model asked for: `name`, `arguments` | Executor, before the tool runs |
+| `tool_result` | `name`, `result`, `is_error`, and `autonomy` when an earned-autonomy gate acted | Executor, after the tool runs |
+| `node_trace` | `node_type`, `tool`, `duration_ms`, `input`, `output_preview` (500 characters), `output`, `is_error`, `metadata`, `output_summary` | Executor, after the tool runs |
+| `action_pending` | `name`, `autonomy` | Executor, while an earned-autonomy action waits for a person |
+| `reply_checking` | `message` | Executor, while a moderation policy checks the reply |
+| `moderation` | `source`, `outcome`, `review_id`, `categories`, `content`, `message` and the hold timeout | Executor, when moderation blocks or holds |
+| `node_start` | `node_id`, `tool_name`, `label` | Consumer, pipeline runs |
+| `node_complete` | `node_id`, `status`, `duration_ms`, then `error` and `error_type`, or `output_preview` and `produced_fields` | Consumer, pipeline runs |
+| `done` | `execution_id`, `output`, `input_tokens`, `output_tokens`, `cost`, `duration_ms`, `model`, `failure_code`, and `validation_warnings` when an output schema found problems | Consumer, on success |
+| `error` | The same fields as `done`, with `error` set | Consumer, on failure |
 
-Web clients subscribe via SSE. backend services subscribe via NATS directly.
+A subscriber also sees `heartbeat` every 15 seconds while nothing arrives. A subscription ends after `done` or `error`.
+
+The inline execute stream ([`agents.py`](../../apps/api/app/routers/agents.py) `_stream_execution`) sends the same names, with `token` as `{text}` and `error` as `{message}`. Inline pipelines send `node_start`, `node_complete`, `token`, `done` and `error`. `POST /api/pipelines/{agent_id}/execute-stream` sends `node_complete`, `pipeline_complete` and `pipeline_error`.
 
 ---
 
-## The SSE endpoint
+## SSE endpoints
 
-`GET /api/executions/{id}/events?since=<timestamp>` returns an SSE stream:
+| Route | Gives |
+|---|---|
+| `POST /api/agents/{id}/execute` with `stream: true` | The run's events as SSE. An inline run streams directly. A pool-routed run is read from the bus and rewritten to the inline shape |
+| `GET /api/executions/{id}/stream` | The stored log, then live events from the bus, as `event: <name>` frames. Tenant-checked |
+| `GET /api/executions/{id}/watch` | A `snapshot` frame with the whole DAG state on connect and after each bus event (at most one per 50 ms), then `end`. Takes `?token=` because a browser `EventSource` cannot set headers |
+| `GET /api/executions/live/stream` | A `state` frame with every live run in the tenant when it changes, checked every 2 seconds, and `idle` when nothing runs |
+| `GET /api/executions/{id}/replay` | Not a stream. The stored `execution_trace` steps for step-through replay |
+
+Example from `/stream`:
 
 ```
-event: picked_up
-data: {"runtime_pod": "agent-runtime-default-7b8d9c-xyz", "runtime_pool": "default"}
+event: start
+data: {"event": "start", "execution_id": "…", "agent": "Market Analyst", "pool": "default", "mode": "agent"}
 
-event: iteration.start
-data: {"iteration": 1}
+event: tool_call
+data: {"event": "tool_call", "name": "web_search", "arguments": {"query": "propane prices"}}
 
-event: tool.start
-data: {"tool_slug": "eia_open_data", "args_preview": "{\"series\": \"PROPANE_USGC_MB\"}"}
-
-event: tool.end
-data: {"tool_slug": "eia_open_data", "is_error": false, "latency_ms": 142}
-
-event: completed
-data: {"output": {...}, "cost_usd": 0.0042, "duration_ms": 2417}
+event: done
+data: {"event": "done", "execution_id": "…", "output": "…", "cost": 0.0042, "duration_ms": 2417, "model": "claude-sonnet-4-5-20250929"}
 ```
-
-The connection closes cleanly after `completed` / `failed` / `cancelled`.
 
 ### Reconnecting
 
-The client should send `Last-Event-ID` (standard SSE) on reconnect. the server replays events from that point using NATS' deliver-from-sequence semantics. If the gap exceeds the 24h retention window the server sends a `gap` event and replays from the beginning (it can — the events are also stored in `executions.event_log` JSONB).
+There is no `Last-Event-ID` support. A client that reconnects to `/stream` gets the stored log again from the start, up to 500 events, then live events. After an hour the log is gone, so read the finished run from `GET /api/executions/{id}` instead.
+
+The Python SDK's `watch` reads `/watch`. The web app uses it in [`LiveDagView.tsx`](../../apps/web/src/components/shared/LiveDagView.tsx).
 
 ---
 
 ## OpenTelemetry tracing
 
-The platform emits spans for every layer:
+[`engine/tracing.py`](../../apps/agent-runtime/engine/tracing.py) sets up tracing in each runtime consumer (service `agent-runtime-<pool>`), the runtime HTTP server (`agent-runtime`) and the API (`abenix-api`). Nothing is exported unless `OTEL_EXPORTER_OTLP_ENDPOINT` (or `OTEL_TEMPO_ENDPOINT`) is set. Export is OTLP over gRPC. The sampler is parent-based with ratio `OTEL_TRACES_SAMPLER_ARG`, default 0.1. The helm chart sets the endpoint only on the runtime pools, see [06-deployment/04-observability](../06-deployment/04-observability.md#traces).
 
-```
-exec.{id}                                      ← top-level span (API or worker entrypoint)
-├── api.request POST /agents/.../execute
-├── runtime.consume_message
-├── runtime.iteration[0]
-│   ├── runtime.llm.chat                       ← Anthropic SDK auto-instrumentation
-│   └── runtime.dispatch_tool[eia_open_data]
-│       ├── tool.eia_open_data
-│       │   └── httpx.GET api.eia.gov
-│       └── invocation_log.record
-├── runtime.iteration[1]
-│   ├── runtime.llm.chat
-│   └── (no tool — final text)
-└── runtime.persist_completion
-```
+Spans the runtime makes:
 
-Every span carries:
-- `tenant_id`
-- `agent_id`
-- `execution_id`
-- `tool_slug` (on tool spans)
+| Span | Where | Attributes |
+|---|---|---|
+| `agent_runtime.run` | Consumer, one per queued run | `abenix.execution_id`, `abenix.pool` |
+| `agent.execute` | Executor, one per run | `agent.id`, `agent.name`, `agent.model`, `execution.id`, `tenant.id` |
+| `tool.<name>` | Executor, one per tool call | `tool.name`, `tool.args_preview`, `tool.is_error` |
+| `<METHOD> <path>` | Runtime HTTP server, only for requests that carry `traceparent` | |
 
-These are queryable in Tempo. From the executions detail page in the UI there's a **"View Trace"** chip that deep-links to the Tempo Explore view filtered to that trace_id.
+The API adds FastAPI and httpx auto-instrumentation when the packages are installed.
 
 ### Context across the queue
 
 With `OTEL_EXPORTER_OTLP_ENDPOINT` set, one trace spans a whole run. The NATS backend puts the W3C `traceparent` in the message's `trace` field, and the pool consumer starts its `agent_runtime.run` span under it. `invoke_agent` sends the header on the execute call it makes for a child agent, and the runtime's HTTP server continues any incoming `traceparent`. So API, queue, runtime and child runs share one `trace_id`.
 
-### What's instrumented automatically
+The run's `trace_id` is stored on the execution row. On `/executions/<id>` the **View Trace** button opens Grafana Explore on Tempo with that id. It uses `NEXT_PUBLIC_GRAFANA_URL`, default `http://localhost:3010`.
 
-- FastAPI requests (via `opentelemetry-instrumentation-fastapi`)
-- HTTPx outbound calls
-- SQLAlchemy queries (debug-only — too noisy in prod)
-- Anthropic / OpenAI / Google SDK calls (via `opentelemetry-instrumentation-anthropic` etc.)
+### Redaction
 
-### Manual instrumentation pattern
+A span processor replaces these attributes with `<redacted len=N sha256=<12 hex>>` before export: `llm.prompt`, `llm.completion`, `llm.messages`, `tool.args`, `tool.args_preview`, `tool.input`, `tool.output`, `agent.system_prompt`, `agent.input_message`, `agent.output_message`, `input.value`, `output.value`. There is no switch to turn it off.
+
+### Adding a span
 
 ```python
-from opentelemetry import trace
-tracer = trace.get_tracer(__name__)
+from engine.tracing import get_tracer
+
+tracer = get_tracer("abenix.my_tool")
 
 async def heavy_compute():
     with tracer.start_as_current_span("compute.fft", attributes={"window_size": 1024}) as span:
@@ -147,39 +113,31 @@ async def heavy_compute():
         return result
 ```
 
-Use this inside tools and pipeline nodes when the operation is non-trivial and you want a child span.
+`get_tracer` returns a no-op tracer when OpenTelemetry is not installed, so the code runs either way.
 
 ---
 
-## PII redaction in spans
+## Progress narration
 
-A `SpanProcessor` in [`packages/agent-sdk/abenix_sdk/tracing.py`](../../packages/agent-sdk/abenix_sdk/tracing.py) masks sensitive attributes before export:
-
-- `llm.prompt`, `llm.response`, `tool.args`, `tool.result`, `agent.system_prompt` → replaced with `sha256:<hash>[:8]:len=<bytes>`.
-- Plaintext is logged at DEBUG level only (off in prod).
-
-This means traces are safe to share with support without leaking customer payloads. If you need full payloads for debugging, set `OTEL_PII_REDACT=false` (only in non-prod).
-
----
-
-## Correlation IDs in logs
-
-Every log line emitted by an instrumented service carries:
-- `trace_id` (W3C traceparent)
-- `span_id`
-- `tenant_id`
-- `execution_id` (if applicable)
-
-Sample log line (Loki / kubectl):
-```
-2026-05-20T15:42:11Z INFO runtime.dispatch tool=eia_open_data tenant=… exec=… trace_id=abc123 span_id=def456 latency_ms=142
-```
-
-Loki + Tempo correlate via `trace_id`. From a log line on the alerts page click the trace_id to jump to Tempo. from a Tempo span click the log link to jump back.
+[`engine/progress.py`](../../apps/agent-runtime/engine/progress.py) is a separate, optional channel for standalone apps that want tool-level narration across a parent run and its sub-agents. It publishes to `progress:<root_execution_id>` in Redis. The prefixes come from `PROGRESS_CHANNEL_PREFIX` and `PROGRESS_PARENT_KEY_PREFIX`. With no `REDIS_URL` it does nothing.
 
 ---
 
 ## See also
 
-- [06-deployment/04-observability](../06-deployment/04-observability.md) — the deployed Tempo/Prom/Grafana stack
-- [08-howto/04-debugging](../08-howto/04-debugging.md) — when to look at NATS vs traces vs logs
+- [00-agent-execution](00-agent-execution.md) for the loop that emits these events
+- [06-deployment/04-observability](../06-deployment/04-observability.md) for the deployed Tempo, Prometheus and Grafana stack
+- [08-howto/04-debugging](../08-howto/04-debugging.md) for when to look at events, traces or logs
+
+---
+
+## Source map
+
+| What | Where |
+|---|---|
+| **Consumer publish** | [`apps/agent-runtime/consumer.py`](../../apps/agent-runtime/consumer.py) — `_publish`, `_run_one`, `_run_traced` |
+| **Event bus** | [`apps/api/app/core/execution_bus.py`](../../apps/api/app/core/execution_bus.py) — `subscribe_events` |
+| **Live state** | [`apps/api/app/core/execution_state.py`](../../apps/api/app/core/execution_state.py) |
+| **SSE routes** | [`apps/api/app/routers/executions.py`](../../apps/api/app/routers/executions.py) — `stream_execution_events`, `watch_execution`, `stream_live_executions` |
+| **Executor events** | [`apps/agent-runtime/engine/agent_executor.py`](../../apps/agent-runtime/engine/agent_executor.py) — `stream` |
+| **Tracing** | [`apps/agent-runtime/engine/tracing.py`](../../apps/agent-runtime/engine/tracing.py), [`apps/api/app/core/telemetry.py`](../../apps/api/app/core/telemetry.py) |

@@ -1,12 +1,12 @@
 # Agent-to-agent communication
 
-> Multi-agent orchestration sits on top of a single primitive — the `invoke_agent` tool — plus a Redis pub/sub channel that aggregates progress events across the whole call tree. Both pieces are small and worth reading top to bottom.
+> Multi-agent work rests on one tool, `invoke_agent`, plus an optional Redis pub/sub channel that collects progress events from the whole call tree.
 
 ---
 
 ## The shape of a multi-agent call
 
-Most multi-agent flows in this codebase follow a fan-out / fan-in pattern that looks like this.
+Most multi-agent flows here fan out to specialists and fan back in.
 
 ```mermaid
 sequenceDiagram
@@ -15,44 +15,38 @@ sequenceDiagram
   participant Plat as Platform API
   participant Root as Root agent<br/>(desk-copilot)
   participant Sub1 as Sub-agent<br/>(arb-analyzer)
-  participant Sub2 as Sub-agent<br/>(mispricing-extractor)
-  participant Sub3 as Sub-agent<br/>(scenario-forecaster)
-  participant Bus as Redis pub/sub
+  participant Sub2 as Sub-agent<br/>(scenario-forecaster)
+  participant Bus as Redis progress channel
 
-  Caller->>Plat: POST /agents/desk-copilot/execute
+  Caller->>Plat: POST /api/agents/{id}/execute
   Plat->>Root: dispatch (execution_id=R)
-  Root->>Bus: subscribe channel R
-  Root->>Root: invoke_agent("arb-analyzer", …)
-  Root->>Plat: POST /agents/arb-analyzer/execute
-  Plat->>Sub1: dispatch (execution_id=S1, parent=R)
-  Sub1->>Bus: publish to channel R<br/>(sub_started, S1)
-  par
-    Root->>Plat: invoke_agent("mispricing-extractor", …)
-    Plat->>Sub2: dispatch (S2, parent=R)
-  and
-    Root->>Plat: invoke_agent("scenario-forecaster", …)
-    Plat->>Sub3: dispatch (S3, parent=R)
-  end
+  Caller->>Bus: subscribe progress:R
+  Root->>Plat: invoke_agent("arb-analyzer"), POST /api/agents/{id}/execute
+  Plat->>Sub1: dispatch (S1, parent=R)
+  Root->>Bus: sub_started (S1)
   Sub1-->>Plat: completed
+  Root->>Bus: sub_finished (S1)
+  Root->>Plat: invoke_agent("scenario-forecaster")
+  Plat->>Sub2: dispatch (S2, parent=R)
+  Root->>Bus: sub_started (S2)
   Sub2-->>Plat: completed
-  Sub3-->>Plat: completed
-  Root->>Bus: publish (sub_finished, S1, S2, S3)
-  Root->>Root: synthesise final brief from sub outputs
+  Root->>Bus: sub_finished (S2)
+  Root->>Root: write the brief from the sub outputs
   Root-->>Plat: completed
-  Plat-->>Caller: SSE stream + final output
+  Plat-->>Caller: final output
 ```
 
-Five things to notice.
+Things to notice.
 
-1. The **fan-out** is just three back-to-back `invoke_agent` calls. The tool returns once the sub-agent's execution finishes. Concurrency is the caller's job — wrap them in `asyncio.gather` if you want parallel.
-2. Every sub-execution gets a fresh `execution_id` and an explicit `parent_execution_id` pointing at the root.
-3. Progress events from every level **publish to the root's channel**. The SSE consumer subscribes once and sees the whole tree.
-4. The cost ledger on the root execution accumulates each sub's cost. The dashboard shows one cost number per top-level run.
+1. The fan-out is a series of `invoke_agent` calls. The tool returns once the sub-agent finishes, and the executor runs a turn's tool calls one at a time, so the sub-agents run one after another.
+2. Every sub-execution gets its own `execution_id` and a `parent_execution_id` pointing at the execution that invoked it.
+3. Progress events from every level go to the root's channel, so a subscriber such as Wingman's narration endpoint sees the whole tree.
+4. Each execution records only its own cost. Children are listed by `GET /api/executions/{id}/children`.
 5. There is no shared memory between sub-agents. They communicate only through their inputs (passed by the root) and their outputs (read by the root).
 
 ---
 
-## The `invoke_agent` tool — every load-bearing line
+## The `invoke_agent` tool
 
 The tool lives in [`apps/agent-runtime/engine/tools/invoke_agent.py`](../../apps/agent-runtime/engine/tools/invoke_agent.py). It does five things in order.
 
@@ -60,7 +54,7 @@ The tool lives in [`apps/agent-runtime/engine/tools/invoke_agent.py`](../../apps
 
 Every API call the tool makes carries a short-lived access token for the user who started the parent run. The token has the same claims as a login token (`sub`, `tenant_id`, `role`, `type: access`, `exp`, `iat`) and lives 5 minutes. A fresh one is signed per request, so a long poll never outlives it.
 
-The runtime signs with the key the API verifies with. For the default `JWT_ALGORITHM=RS256` that is `JWT_PRIVATE_KEY` from the `abenix-secrets` envFrom. An `HS*` algorithm signs with `SECRET_KEY`. Inside the API process (inline runs) the tool falls back to the API's own `create_access_token`.
+The runtime signs with the key the API verifies with. For the default `JWT_ALGORITHM=RS256` that is `JWT_PRIVATE_KEY` from the `abenix-secrets` envFrom. An `HS*` algorithm signs with `SECRET_KEY`. Inside the API process (inline runs) the tool falls back to the API's own `create_access_token`. What the key is, how to make one and how to check every pod has it: [09-reference/06-signing-keys](../09-reference/06-signing-keys.md).
 
 What this means in practice:
 
@@ -68,7 +62,7 @@ What this means in practice:
 - The usual 2.5 access rules apply. The caller must own the agent, be an admin, or hold a share with EXECUTE. Platform agents are open to everyone. Anything else returns `agent slug not found or not shared with you: <slug>`.
 - If a token cannot be signed for a known user the call fails. It never quietly switches to the platform key.
 
-Runs with no user behind them (a trigger or system run) fall back to the platform key from `ABENIX_PLATFORM_API_KEY`. That path only resolves agents in the run's own tenant and logs a warning each time.
+Runs with no user behind them (a trigger or system run) fall back to the platform key, `ABENIX_PLATFORM_API_KEY`, then `INTERNAL_API_TOKEN`, `ABENIX_INTERNAL_API_KEY` or `PLATFORM_API_KEY`. That path only resolves agents in the run's own tenant and logs a warning each time.
 
 The user id, role, execution id and depth reach the tool through `build_tool_registry`. The queue consumer reads them from the job payload and the inline API paths pass the authenticated user.
 
@@ -118,14 +112,14 @@ if root_id:
     }, root_execution_id=root_id)
 ```
 
-`progress.root_for` resolves "what is the *root* execution for the current run?" — if the current run is itself a sub, it walks one hop up. `set_parent` stores the child → root mapping in Redis. From then on, every progress event published by the sub-execution's runtime pod lands on the *root's* SSE channel.
+`progress.root_for` looks up the root of the current run, or returns the run's own id when it has no mapping. `set_parent` stores the child to root mapping in Redis. From then on every progress event the child publishes goes to the root's channel.
 
-This is what makes nested fan-outs work. A root invokes A. A invokes B. B's events still publish to the root's channel because B's `set_parent` walked up through A and found the root.
+Nested fan-outs work because each mapping already points at the root. A root invokes A, A invokes B, and B's mapping is set to A's root.
 
 ### 4. Poll until terminal
 
 ```python
-deadline = t0 + timeout       # default 240s, max 600s
+deadline = t0 + timeout       # wait_timeout_seconds, default 240
 while time.time() < deadline:
     await asyncio.sleep(2.0)
     poll_r = await client.get(f"/api/executions/{sub_exec_id}", headers=headers)
@@ -134,7 +128,7 @@ while time.time() < deadline:
         break
 ```
 
-Two-second polling. Stops on any terminal state. If the deadline hits first, the tool emits a `sub_timeout` event and returns a tool error to the LLM — which can decide whether to retry, fall back, or give up.
+It polls every 2 seconds and stops on any terminal state. If the deadline comes first, the tool publishes `sub_timeout` and returns a tool error, and the model decides whether to retry, fall back or give up.
 
 ### 5. Parse the output and return the envelope
 
@@ -154,68 +148,94 @@ return ToolResult(content=json.dumps(envelope, default=str),
                   metadata={"agent_slug": slug, "execution_id": sub_exec_id})
 ```
 
-The envelope is what the calling LLM sees in its tool result. `output` is the sub-agent's parsed JSON. `cost_usd` lets the LLM reason about cost if it has been prompted to. The `metadata` field is for the runtime's accounting — the LLM does not read it.
+The envelope is what the calling model sees. `output` is the sub-agent's parsed JSON. `metadata` goes on the trace and the model does not read it.
 
-If the sub's output is markdown-fenced JSON, the parse fallback finds the first balanced `{...}` block and extracts that. If it cannot parse anything sensible it returns `{"raw": "<first 2000 chars>"}` — the calling agent will see a string, not a structured output, and that is enough information for it to decide what to do.
+When the output is not plain JSON, the tool tries the text from the first `{` to the last `}`. If that fails it returns `{"raw": "<first 2000 chars>"}`, and with no braces at all `output` is the raw string.
 
 ---
 
-## The Redis pub/sub channel — one root, one channel, all levels
+## Across pods and pools
 
-The events that drive the live UI come from [`apps/agent-runtime/engine/progress.py`](../../apps/agent-runtime/engine/progress.py). Three primitives.
+A sub-agent call never goes from one runtime pod to another directly. It always goes through the API, and the API sends the child wherever the child agent is set to run.
 
-```python
-async def set_parent(child_execution_id: str, root_execution_id: str) -> None:
-    """Map child to root. Stored as Redis SET key: progress.parent.<child> -> <root>."""
+```mermaid
+sequenceDiagram
+  autonumber
+  participant P as Runtime pod, pool chat<br/>(lead agent)
+  participant A as API
+  participant N as NATS agents.heavy-reasoning
+  participant C as Runtime pod, pool heavy-reasoning<br/>(sub-agent)
 
-async def root_for(execution_id: str) -> str:
-    """Walk up at most 8 hops to find the root. Returns "" if none."""
-
-async def publish(execution_id: str, event: dict, root_execution_id: str = None) -> None:
-    """Publish to the root's channel: progress.<root_execution_id>."""
+  P->>A: POST /api/agents/{id}/execute as the caller, signed with JWT_PRIVATE_KEY
+  A->>N: publish the child run (runtime_pool of the sub-agent)
+  A-->>P: execution_id
+  N->>C: deliver
+  C-->>A: completed, output on the execution row
+  loop every 2 s
+    P->>A: GET /api/executions/{child}
+  end
 ```
 
-Channel naming is `progress.<root_execution_id>`. The API server's SSE bridge subscribes when a client opens the stream and unsubscribes when the client disconnects. There is no buffering — events that arrive while no subscriber is attached are lost. (Critical paths like terminal `completed` events are *also* persisted to the executions table, so the UI can poll if it missed the live tick.)
+What that means:
 
-### Event types you will see
+- **The child runs on its own agent's pool**, from the `runtime_pool` set on the sub-agent, not on the caller's pool. A chat-pool lead can call a heavy-reasoning specialist, and the specialist's pool scales on its own backlog. An agent set to `inline` runs in an API pod.
+- **The pods only need to reach the API.** The runtime calls `ABENIX_INTERNAL_URL`, then `ABENIX_API_URL`, and defaults to `http://abenix-api:8000`. Set one of them when the Helm release is not named `abenix`, since the service name follows the release.
+- **Every pool needs the signing key.** All pool Deployments read `abenix-secrets`, so a pool added in values or woken from zero by KEDA starts with it. A pod that started before the key existed has to be restarted, see [09-reference/06-signing-keys](../09-reference/06-signing-keys.md).
+- **A waiting lead keeps its slot.** The lead's run holds one of its pool's `concurrency_per_replica` slots while it polls the child. If every slot of a pool is held by leads whose children are queued on the same pool and the pool is at `max_replicas`, the children wait until the leads time out at `wait_timeout_seconds`. Put orchestrating agents and their specialists on different pools, or leave headroom in `max_replicas`.
+- **A child on a pool scaled to zero starts cold.** The first run waits for a pod to start, and that time counts against the lead's `wait_timeout_seconds`. Keep `min_replicas` above zero for specialists that leads call often.
+- **Progress still reaches the root.** The parent mapping and the `progress:<root>` channel live in Redis, which every pool shares, so a narration endpoint sees the whole tree whichever pods ran it.
+
+---
+
+## The progress channel
+
+[`apps/agent-runtime/engine/progress.py`](../../apps/agent-runtime/engine/progress.py) has three primitives:
+
+| Function | Does |
+|---|---|
+| `set_parent(child, root)` | Stores Redis key `parent:<child>` with the root id (prefix `PROGRESS_PARENT_KEY_PREFIX`), expiring after `PROGRESS_PARENT_TTL`, default 1800 s |
+| `root_for(execution_id)` | One lookup of `parent:<id>`. Returns the mapped root, or the id itself |
+| `publish(execution_id, event)` | Publishes to `progress:<root>` (prefix `PROGRESS_CHANNEL_PREFIX`), adding `ts`, `execution_id` and `root_execution_id`. Mirrors to `PROGRESS_LEGACY_CHANNEL_PREFIX` when set |
+
+Consumers such as Wingman's narration endpoint subscribe through `progress.subscribe`. There is no buffering, so events published while nobody listens are lost. The platform's own execution SSE uses the separate `exec:events:<id>` bus, see [04-streaming-tracing](04-streaming-tracing.md).
+
+### Phases
 
 | Phase | Emitted by | Carries |
 |---|---|---|
-| `agent_started` | runtime pod | execution_id, agent_slug, model |
-| `iteration_start` | runtime pod (each loop) | iteration index, prior tool count |
-| `tool_call` | runtime pod | tool name, args (redacted), iteration |
-| `tool_result` | runtime pod | tool name, duration, is_error |
-| `sub_started` | invoke_agent | sub_execution_id, agent_slug |
-| `sub_finished` | invoke_agent | sub_execution_id, status, duration_ms, cost_usd |
-| `sub_timeout` | invoke_agent | sub_execution_id, timeout_seconds |
-| `agent_finished` | runtime pod | execution_id, status, cost_usd |
+| `tool_call` | Executor | `tool`, `arguments_preview`, `agent_id` |
+| `tool_result` | Executor | `tool`, `is_error`, `duration_ms`, `result_preview`, `agent_id` |
+| `sub_started` | `invoke_agent` | `agent_slug`, `agent_name`, `sub_execution_id` |
+| `sub_finished` | `invoke_agent` | `agent_slug`, `sub_execution_id`, `status`, `duration_ms`, `cost_usd` |
+| `sub_timeout` | `invoke_agent` | `agent_slug`, `sub_execution_id` |
+| `narration` | `narrate` tool | The narration text |
+| `autonomy_waiting` | Earned autonomy | An action waiting for a person |
+| `heartbeat` | `subscribe` | Nothing, keeps the stream open |
 
-Every event has an `execution_id` (the emitter) and a `root_execution_id` (the subscriber's channel). The UI uses `execution_id` to draw the right node on the live DAG. It uses the channel as a coarse filter — every event for this top-level run, regardless of depth.
+Wingman's desk canvas uses `execution_id` to draw the right node, and the channel to scope events to one top-level run.
 
 ---
 
-## Cost attribution across the tree
+## Cost across the tree
 
-There is no special-case logic for "sum sub-costs into root". Each execution row carries its own `cost`, `anthropic_cost`, `openai_cost`, `google_cost`, `other_cost`. The dashboard's "total cost for top-level run" query is a simple recursive CTE on `parent_execution_id`.
+Each execution row carries its own `cost`, `anthropic_cost`, `openai_cost`, `google_cost` and `other_cost`. Nothing sums children into the root, and the executions list shows each row's own cost. To total a tree, run a recursive query on `parent_execution_id`:
 
 ```sql
 WITH RECURSIVE tree AS (
-  SELECT id, parent_execution_id, cost, agent_id
+  SELECT id, parent_execution_id, cost
     FROM executions WHERE id = :root_execution_id
   UNION ALL
-  SELECT e.id, e.parent_execution_id, e.cost, e.agent_id
+  SELECT e.id, e.parent_execution_id, e.cost
     FROM executions e JOIN tree t ON e.parent_execution_id = t.id
 )
 SELECT SUM(cost) FROM tree;
 ```
 
-This is the source of truth for the per-run cost shown on the executions list. If you ever see the dashboard report a smaller number than the sum of LLM provider invoices, the first place to look is whether some sub-execution wrote `cost = NULL` instead of `0`. The trigger that backfills cost from `(input_tokens, output_tokens, model)` only fires on insert — manually-inserted test rows can slip past it.
-
 ---
 
 ## When to use invoke_agent vs pipeline DAG
 
-Both shapes exist and they overlap a lot. The rule of thumb:
+Both shapes overlap. A rule of thumb:
 
 | Use **invoke_agent** when… | Use a **pipeline** when… |
 |---|---|
@@ -224,11 +244,11 @@ Both shapes exist and they overlap a lot. The rule of thumb:
 | You want full LLM judgement on retries, fallbacks, and "is this answer good enough?". | You want reliable, deterministic behaviour with cheap-and-predictable retries. |
 | There are 3–10 calls per run. | There are 10+ calls per run, or any forEach/while loops. |
 
-The Wingman Desk Copilot is the canonical `invoke_agent` example. It looks at the trader's question, decides which 2–5 specialists to call, fires them, and writes a synthesised brief.
+The Wingman Desk Copilot is the main `invoke_agent` example. It reads the trader's question, picks 2 to 5 specialists, calls them and writes a brief.
 
-The Wingman Mispricing Scan is the canonical pipeline example. It always runs the same six tool calls in the same order with the same merge logic. There's no LLM judgement in the orchestration — the LLM only judges within each step.
+The Wingman Mispricing Scan is the main pipeline example. It runs the same steps in the same order every time. The model judges only inside each step.
 
-Mixing the two is fine and common. A pipeline node with `type: agent` runs an `agent_step` wrapping an LLM call. An LLM step can call `invoke_agent` as a tool. The runtime doesn't care which way the call goes — every execution looks the same from the cost / audit / RBAC perspective.
+Mixing the two is common. A pipeline node with `type: agent` runs an `agent_step`, and an agent can call `invoke_agent` as a tool.
 
 ---
 
@@ -244,25 +264,23 @@ A subset of multi-agent flows in this codebase use `recall_trajectory` as the fi
 
 Trajectories are JSON files under `TRAJECTORY_DIR` (`/data/trajectories`), one folder per tenant plus `shared`. Writers and the recall tool use that one setting. The store is described in [`docs/TRAJECTORY_MEMORY.md`](../TRAJECTORY_MEMORY.md).
 
-This is what lets the Wingman Desk Copilot get noticeably better the more it is used by the same desk. It is not RL. It is not fine-tuning. It is structured memory of "the last 200 plans that worked here".
-
 ---
 
 ## Sub-agent budgets and safeguards
 
-Four hard limits keep multi-agent fan-outs from running away.
+Four limits keep a fan-out in check.
 
-### Per-call timeout (240s default, 600s max)
+### Per-call timeout
 
-`invoke_agent`'s `wait_timeout_seconds` argument is clamped between 30 and 600. A sub-agent that takes longer than the configured ceiling returns a tool error and frees the parent LLM to retry or fall back. The default of 240s is calibrated for "an agent that does a real KB search plus a couple of tool calls".
+`wait_timeout_seconds` defaults to 240. The schema allows 30 to 600, but the tool does not clamp it. A sub-agent that runs longer returns a tool error and the parent model can retry or fall back.
 
 ### Per-execution iteration budget
 
-Every agent execution has a `max_iterations` ceiling (default 25, configurable per-agent). The runtime stops after that many tool-call rounds, regardless of whether the LLM thinks it is done. This is what stops a buggy LLM that gets stuck in "call this tool again, no really" from burning the whole budget.
+Every run has a `max_iterations` ceiling, default 10 from the `agent.max_iterations` platform setting, set per agent in `model_config.max_iterations`. The loop stops after that many rounds. See [The step limit](00-agent-execution.md#the-step-limit).
 
 ### No privilege gain through invoke_agent
 
-The sub-call runs as the same user as the parent, with that user's access. It does not propagate the parent execution's X-Abenix-Subject. The platform looks up the root execution's subject via `parent_execution_id` for audit and collection scoping. A sub-agent can never reach an agent its caller could not run by hand.
+The sub-call runs as the same user as the parent, with that user's access. It does not pass on the parent's `X-Abenix-Subject`. The child copies the parent's run origin and nothing else. A sub-agent can never reach an agent its caller could not run by hand.
 
 ### Depth limit of 3
 
@@ -272,14 +290,14 @@ A top-level run is depth 0 and each `invoke_agent` hop adds one. A child at dept
 
 ## Debugging a fan-out
 
-When a multi-agent run goes wrong, the symptoms usually look like "the synthesised brief is missing something important" rather than a hard error. The reliable debugging sequence:
+A multi-agent run usually goes wrong as a brief that misses something, not as a hard error. Work through it like this:
 
 1. Open the top-level run in the **Flight Recorder** (`/executions/<id>`). The **Sub-agent runs** list links every child with its status and duration. A child's page shows **Started by** with a link back to its parent.
 2. Click into the slowest or most-failing sub. The sub's own execution detail shows the LLM turns and tool calls.
 3. If one sub returned `{"raw": "<text>"}` instead of structured JSON, that is the bug. The sub-agent's system prompt is not constraining its output shape. Fix it there.
-4. If a sub succeeded but its output looks fine and the brief is still wrong, the bug is in the root's synthesis prompt — it is mis-reading the structured output. Look at the LLM turn where the root sees the tool result.
+4. If every sub looks fine and the brief is still wrong, the root's prompt is misreading the structured output. Look at the turn where the root sees the tool result.
 
-The OTel trace ties all of this together. One trace spans root + every sub + every LLM call. Search by `root_execution_id` in Tempo.
+With tracing on, one trace spans the root and every sub, because `invoke_agent` sends `traceparent`. Search Tempo by the root's trace id or by `execution.id`.
 
 ---
 
@@ -287,7 +305,7 @@ The OTel trace ties all of this together. One trace spans root + every sub + eve
 
 - [00-agent-execution](00-agent-execution.md) — single agent run, the building block
 - [01-pipelines](01-pipelines.md) — static-DAG alternative
-- [04-streaming-tracing](04-streaming-tracing.md) — how the SSE bridge subscribes to the root channel
+- [04-streaming-tracing](04-streaming-tracing.md) — the execution event bus and traces
 - [05-approvals-hitl](05-approvals-hitl.md) — what happens when a sub-agent hits a human gate
 - [TRAJECTORY_MEMORY](../TRAJECTORY_MEMORY.md) — the recall_trajectory backing store
 
@@ -299,6 +317,6 @@ The OTel trace ties all of this together. One trace spans root + every sub + eve
 |---|---|
 | **`invoke_agent` tool** | [`apps/agent-runtime/engine/tools/invoke_agent.py`](../../apps/agent-runtime/engine/tools/invoke_agent.py) |
 | **`recall_trajectory` tool** | [`apps/agent-runtime/engine/tools/recall_trajectory.py`](../../apps/agent-runtime/engine/tools/recall_trajectory.py) |
-| **Root-execution walk-up (`root_for`)** | [`apps/agent-runtime/engine/progress.py`](../../apps/agent-runtime/engine/progress.py) — at line 75 |
+| **Progress channel** | [`apps/agent-runtime/engine/progress.py`](../../apps/agent-runtime/engine/progress.py) — `set_parent`, `root_for`, `publish`, `subscribe` |
 | **Execution `parent_execution_id` column** | [`packages/db/models/execution.py`](../../packages/db/models/execution.py) |
-| **Trajectory memory model** | [`packages/db/models/agent_memory.py`](../../packages/db/models/agent_memory.py) |
+| **Trajectory store** | JSON files under `TRAJECTORY_DIR`, written by `wingman/api/trajectories.py`, read by `recall_trajectory` |

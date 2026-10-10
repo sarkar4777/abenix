@@ -17,6 +17,12 @@ pools appear without breaking anything else.
 {{- if .Values.scaling.enabled }}
 
 {{- range .Values.scaling.pools }}
+{{- /* hasKey, not default: default treats 0 as unset and turned scale-to-zero into 1 */}}
+{{- $min := 1 }}
+{{- if and (hasKey . "min_replicas") (not (kindIs "invalid" .min_replicas)) }}
+{{- $min = int .min_replicas }}
+{{- end }}
+{{- $kedaOn := $.Values.scaling.keda.enabled }}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -29,7 +35,7 @@ metadata:
     app.kubernetes.io/instance: {{ $release }}
     abenix.io/pool: {{ .key }}
 spec:
-  replicas: {{ default 1 .min_replicas }}
+  replicas: {{ if $kedaOn }}{{ $min }}{{ else }}{{ max 1 $min }}{{ end }}
   selector:
     matchLabels:
       app.kubernetes.io/name: agent-runtime
@@ -234,7 +240,7 @@ metadata:
 spec:
   scaleTargetRef:
     name: {{ $release }}-agent-runtime-{{ .key }}
-  minReplicaCount: {{ default 1 .min_replicas }}
+  minReplicaCount: {{ $min }}
   maxReplicaCount: {{ default 10 .max_replicas }}
   pollingInterval: 15
   cooldownPeriod: 300
@@ -282,7 +288,8 @@ spec:
       metadata:
         serverAddress: {{ $.Values.scaling.keda.prometheusUrl | quote }}
         metricName: abenix_execution_p95_ms
-        query: 'histogram_quantile(0.95, sum by(le) (rate(abenix_execution_duration_seconds_bucket{pool="{{ .key }}"}[5m]))) * 1000'
+        # emitted by the pool consumer on every finished run, 0 when the pool is idle
+        query: '(histogram_quantile(0.95, sum by(le) (rate(abenix_execution_duration_seconds_bucket{pool="{{ .key }}"}[5m]))) * 1000) or vector(0)'
         threshold: "90000"       # 90s p95 triggers scale-up
     {{- end }}
 {{- end }}

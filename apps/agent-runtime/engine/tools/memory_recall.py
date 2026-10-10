@@ -122,7 +122,7 @@ class MemoryRecallTool(BaseTool):
         try:
             import uuid as uuid_mod
 
-            from sqlalchemy import select, or_
+            from sqlalchemy import select
             from sqlalchemy.ext.asyncio import AsyncSession
 
             from engine.db_pool import shared_engine
@@ -149,19 +149,15 @@ class MemoryRecallTool(BaseTool):
                     query = query.where(
                         AgentMemory.memory_type == MemoryType(memory_type)
                     )
+                score = None
                 if search:
-                    pattern = f"%{search}%"
-                    query = query.where(
-                        or_(
-                            AgentMemory.key.ilike(pattern),
-                            AgentMemory.value.ilike(pattern),
-                        )
-                    )
+                    match, score = _search_terms(search, AgentMemory)
+                    query = query.where(match)
 
-                query = query.order_by(
-                    AgentMemory.importance.desc(),
-                    AgentMemory.updated_at.desc(),
-                ).limit(limit)
+                order = [AgentMemory.importance.desc(), AgentMemory.updated_at.desc()]
+                if score is not None:
+                    order.insert(0, score.desc())
+                query = query.order_by(*order).limit(limit)
 
                 result = await db.execute(query)
                 memories = result.scalars().all()
@@ -191,3 +187,21 @@ class MemoryRecallTool(BaseTool):
             )
         except Exception as e:
             return ToolResult(content=f"Failed to recall memories: {e}", is_error=True)
+
+
+def _search_terms(search: str, model: Any) -> tuple[Any, Any]:
+    """Match any word of the search in the key or value, best matches first.
+
+    favourite colour finds favourite_colour, and favourite color still finds it
+    through the shared word."""
+    import re
+
+    from sqlalchemy import case, func, or_
+
+    hay = func.concat(func.replace(model.key, "_", " "), " ", model.value)
+    words = [w for w in re.split(r"[\s_,.;:!?]+", search.strip()) if len(w) > 2]
+    if not words:
+        words = [search.strip()]
+    hits = [hay.ilike(f"%{w}%") for w in words]
+    score = sum((case((h, 1), else_=0) for h in hits[1:]), case((hits[0], 1), else_=0))
+    return or_(*hits), score

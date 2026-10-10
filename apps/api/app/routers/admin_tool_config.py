@@ -33,6 +33,10 @@ from models.user import User
 
 logger = logging.getLogger(__name__)
 audit = logging.getLogger("abenix.audit.tool_config")
+from app.services.model_availability import (
+    PROVIDER_KEYS,
+    schedule_reprobe,
+)  # noqa: E402
 
 router = APIRouter(prefix="/api/admin/tool-config", tags=["admin-tool-config"])
 
@@ -180,6 +184,8 @@ async def set_value(
     await db.commit()
     credentials.invalidate()
     _audit(user, "set", key, s)
+    if key in PROVIDER_KEYS:
+        schedule_reprobe()
     return success(await _row_state(key, user.tenant_id, s))
 
 
@@ -214,6 +220,8 @@ async def clear_value(
     await db.commit()
     credentials.invalidate()
     _audit(user, "cleared", key, s)
+    if key in PROVIDER_KEYS:
+        schedule_reprobe()
     return success(await _row_state(key, user.tenant_id, s))
 
 

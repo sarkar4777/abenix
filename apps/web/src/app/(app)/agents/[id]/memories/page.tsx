@@ -7,11 +7,10 @@ import {
   Brain, Database, Search, Trash2, RefreshCw,
 } from 'lucide-react';
 import { useApi } from '@/hooks/useApi';
+import { apiFetch } from '@/lib/api-client';
 import { usePageTitle } from '@/hooks/usePageTitle';
 import { toastSuccess, toastError } from '@/stores/toastStore';
 import PageHeader from '@/components/layout/PageHeader';
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 interface Memory {
   id: string;
@@ -42,39 +41,25 @@ export default function AgentMemoriesPage() {
   if (search) queryParams.set('search', search);
   if (typeFilter) queryParams.set('memory_type', typeFilter);
 
-  const { data: memories, mutate } = useApi<Memory[]>(
+  const { data: memories, mutate, isLoading, error: loadError } = useApi<Memory[]>(
     agentId ? `/api/agents/${agentId}/memories?${queryParams.toString()}` : null,
   );
 
-  const deleteMemory = useCallback(async (memoryId: string) => {
-    const token = localStorage.getItem('access_token');
-    if (!token) return;
-    try {
-      await fetch(`${API_URL}/api/agents/${agentId}/memories/${memoryId}`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      toastSuccess('Memory deleted');
-      mutate();
-    } catch {
-      toastError('Failed to delete memory');
-    }
+  const deleteMemory = useCallback(async (mem: Memory) => {
+    if (!confirm(`Delete the memory "${mem.key}"? The agent will no longer recall it.`)) return;
+    const r = await apiFetch(`/api/agents/${agentId}/memories/${mem.id}`, { method: 'DELETE', throwOnError: false });
+    if (r.error) { toastError('Could not delete the memory', r.error); return; }
+    toastSuccess('Memory deleted', mem.key);
+    mutate();
   }, [agentId, mutate]);
 
   const clearAll = useCallback(async () => {
-    if (!confirm('Delete ALL memories for this agent? This cannot be undone.')) return;
-    const token = localStorage.getItem('access_token');
-    if (!token) return;
-    try {
-      await fetch(`${API_URL}/api/agents/${agentId}/memories?all=true`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      toastSuccess('All memories cleared');
-      mutate();
-    } catch {
-      toastError('Failed to clear memories');
-    }
+    if (!confirm('Delete every memory this agent saved? This cannot be undone.')) return;
+    const r = await apiFetch<{ deleted_count: number }>(`/api/agents/${agentId}/memories?all=true`, { method: 'DELETE', throwOnError: false });
+    if (r.error) { toastError('Could not clear memories', r.error); return; }
+    const n = r.data?.deleted_count ?? 0;
+    toastSuccess('All memories cleared', `${n} deleted`);
+    mutate();
   }, [agentId, mutate]);
 
   return (
@@ -90,6 +75,7 @@ export default function AgentMemoriesPage() {
           memories && memories.length > 0 ? (
             <button
               onClick={clearAll}
+              data-testid="memories-clear-all"
               className="inline-flex min-h-[40px] items-center justify-center gap-1.5 px-3 py-1.5 text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg hover:bg-red-500/20 transition-colors"
             >
               <Trash2 className="w-3 h-3" />
@@ -114,6 +100,8 @@ export default function AgentMemoriesPage() {
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
+            aria-label="Search memories"
+            data-testid="memories-search"
             placeholder="Search memories..."
             className="w-full pl-9 pr-3 py-2 bg-slate-800/50 border border-slate-700 rounded-lg text-sm text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500"
           />
@@ -137,13 +125,22 @@ export default function AgentMemoriesPage() {
 
       {/* Memory list */}
       <div className="space-y-2">
-        {(!memories || memories.length === 0) && (
+        {isLoading && !memories && (
+          <div className="text-center py-10 text-sm text-slate-500" data-testid="memories-loading">Loading memories…</div>
+        )}
+        {loadError && (
+          <div role="alert" className="rounded-xl border border-red-500/40 bg-red-500/10 p-4 text-sm text-red-300">
+            Could not load memories. {loadError}
+          </div>
+        )}
+        {!isLoading && !loadError && memories && memories.length === 0 && (
           <div className="text-center py-16 bg-slate-800/30 border border-slate-700/50 rounded-xl">
             <Database className="w-12 h-12 text-slate-600 mx-auto mb-3" />
-            <h3 className="text-lg font-semibold text-white mb-1">No memories stored</h3>
-            <p className="text-sm text-slate-500">
-              This agent hasn&apos;t stored any persistent memories yet.
-              Memories are created when the agent uses the memory_store tool during execution.
+            <h3 className="text-lg font-semibold text-white mb-1" data-testid="memories-empty">{search || typeFilter ? 'Nothing matches' : 'No memories stored'}</h3>
+            <p className="text-sm text-slate-500 px-4">
+              {search || typeFilter
+                ? 'Try another word or clear the filter.'
+                : 'Memories appear here when this agent has the memory tools and saves something while it runs.'}
             </p>
           </div>
         )}
@@ -151,12 +148,14 @@ export default function AgentMemoriesPage() {
         {(memories || []).map((mem) => (
           <div
             key={mem.id}
+            data-testid="memory-row"
+            data-key={mem.key}
             className="bg-slate-800/30 border border-slate-700/50 rounded-xl p-4"
           >
             <div className="flex items-start gap-3">
               <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 mb-1">
-                  <code className="text-sm font-mono text-cyan-400 font-medium">{mem.key}</code>
+                <div className="flex flex-wrap items-center gap-2 mb-1">
+                  <code className="text-sm font-mono text-cyan-400 font-medium break-all">{mem.key}</code>
                   <span className={`text-[9px] px-1.5 py-0.5 rounded-full ${TYPE_COLORS[mem.memory_type] || 'bg-slate-700 text-slate-400'}`}>
                     {mem.memory_type}
                   </span>
@@ -178,7 +177,9 @@ export default function AgentMemoriesPage() {
                 </p>
               </div>
               <button
-                onClick={() => deleteMemory(mem.id)}
+                onClick={() => deleteMemory(mem)}
+                aria-label={`Delete memory ${mem.key}`}
+                data-testid="memory-delete"
                 className="p-1.5 text-slate-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors shrink-0"
               >
                 <Trash2 className="w-4 h-4" />

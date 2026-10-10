@@ -125,7 +125,7 @@ export default function GDPRPage() {
         steps={[
           'Search for the person by name or email. Members can only erase themselves.',
           'Press Erase and confirm. Their account is closed and their data is deleted.',
-          'The database, vector and graph stores, uploaded files and agent memory are all cleared.',
+          'The database, persona vectors, graph entities, uploaded files and run records are cleared. Files still in use are kept.',
           'Each store writes a receipt so you can show the request was carried out.',
         ]}
         docSlug="01-architecture/07-governance"

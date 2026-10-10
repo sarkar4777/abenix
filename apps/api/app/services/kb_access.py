@@ -17,6 +17,25 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "packages" / "db"))
 from models.collection_grant import UserCollectionGrant  # noqa: E402
 from models.knowledge_base import KnowledgeBase  # noqa: E402
 from models.knowledge_project import CollectionVisibility  # noqa: E402
+from models.resource_share import ResourceShare, SharePermission  # noqa: E402
+
+KB_SHARE_KIND = "knowledge_base"
+
+
+async def _kb_share_permission(db: AsyncSession, *, user, kb_id: uuid.UUID):
+    # The Share dialog writes ResourceShare rows, so they grant access too.
+    return (
+        await db.execute(
+            select(ResourceShare.permission)
+            .where(
+                ResourceShare.resource_type == KB_SHARE_KIND,
+                ResourceShare.resource_id == kb_id,
+                ResourceShare.shared_with_user_id == user.id,
+                ResourceShare.live(),
+            )
+            .limit(1)
+        )
+    ).scalar_one_or_none()
 
 
 def _is_tenant_admin(user) -> bool:
@@ -47,14 +66,17 @@ async def user_can_edit_collection(
             .where(
                 UserCollectionGrant.collection_id == kb.id,
                 UserCollectionGrant.user_id == user.id,
+                UserCollectionGrant.live(),
             )
             .limit(1)
         )
     ).scalar_one_or_none()
-    if grant is None:
-        return False
-    perm = grant.value if hasattr(grant, "value") else str(grant)
-    return perm.lower() in _WRITE_PERMS
+    if grant is not None:
+        perm = grant.value if hasattr(grant, "value") else str(grant)
+        if perm.lower() in _WRITE_PERMS:
+            return True
+    share = await _kb_share_permission(db, user=user, kb_id=kb.id)
+    return share == SharePermission.EDIT
 
 
 async def user_can_access_collection(
@@ -67,6 +89,8 @@ async def user_can_access_collection(
     if kb.tenant_id != user.tenant_id:
         return False
     if _is_tenant_admin(user):
+        return True
+    if getattr(kb, "created_by", None) == user.id:
         return True
 
     visibility = kb.default_visibility
@@ -94,11 +118,14 @@ async def user_can_access_collection(
             .where(
                 UserCollectionGrant.collection_id == kb.id,
                 UserCollectionGrant.user_id == user.id,
+                UserCollectionGrant.live(),
             )
             .limit(1)
         )
     ).scalar_one_or_none()
-    return grant is not None
+    if grant is not None:
+        return True
+    return await _kb_share_permission(db, user=user, kb_id=kb.id) is not None
 
 
 async def accessible_collection_ids(
@@ -123,10 +150,21 @@ async def accessible_collection_ids(
         await db.execute(
             select(UserCollectionGrant.collection_id).where(
                 UserCollectionGrant.user_id == user.id,
+                UserCollectionGrant.live(),
             )
         )
     ).scalars()
     grant_ids = set(grant_rows)
+    share_rows: Iterable[uuid.UUID] = (
+        await db.execute(
+            select(ResourceShare.resource_id).where(
+                ResourceShare.resource_type == KB_SHARE_KIND,
+                ResourceShare.shared_with_user_id == user.id,
+                ResourceShare.live(),
+            )
+        )
+    ).scalars()
+    grant_ids |= set(share_rows)
 
     # Collections visible via tenant/project visibility OR direct grant.
     rows = (
@@ -135,6 +173,7 @@ async def accessible_collection_ids(
                 KnowledgeBase.id,
                 KnowledgeBase.default_visibility,
                 KnowledgeBase.project_id,
+                KnowledgeBase.created_by,
             ).where(
                 KnowledgeBase.tenant_id == tenant_id,
             )
@@ -142,8 +181,10 @@ async def accessible_collection_ids(
     ).all()
 
     visible: set[uuid.UUID] = set()
-    for kb_id, visibility, project_id in rows:
+    for kb_id, visibility, project_id, created_by in rows:
         v = visibility.value if hasattr(visibility, "value") else visibility
+        if created_by == user.id:
+            visible.add(kb_id)
         if v == CollectionVisibility.TENANT.value:
             visible.add(kb_id)
         elif v == CollectionVisibility.PROJECT.value:

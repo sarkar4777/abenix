@@ -106,3 +106,20 @@ def test_rule_order_moderation_beats_tool_error():
         classify_exception(Exception("Moderation blocked from tool exception"))
         == "MODERATION_BLOCKED"
     )
+
+
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        ("Triage is held to 2 runs per second by its rate limit.", "RATE_LIMITED"),
+        ("rate limit (per-tenant, retry 3s)", "RATE_LIMITED"),
+        ("Rate limit exceeded for user 42", "RATE_LIMITED"),
+        ("agent triage is over its limits, try later", "RATE_LIMITED"),
+        ("failure_code=RATE_LIMITED", "RATE_LIMITED"),
+        ("anthropic rate_limit_error: 429", "LLM_RATE_LIMIT"),
+        ("HTTP 429 Too Many Requests", "LLM_RATE_LIMIT"),
+        ("rate limit exceeded", "LLM_RATE_LIMIT"),
+    ],
+)
+def test_platform_and_provider_rate_limits_are_both_reachable(text, expected):
+    assert classify_exception(text) == expected

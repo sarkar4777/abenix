@@ -92,6 +92,7 @@ SCHEMA_CANONICAL_COLUMNS=(
   "eval_cases.source_lesson_id"
   "agent_revisions.source"
   "agent_revisions.proposal_id"
+  "decision_tests.match_mode"
 )
 
 SCHEMA_USE_CASE_COLUMNS=(

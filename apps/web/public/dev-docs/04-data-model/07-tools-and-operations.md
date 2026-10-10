@@ -2,6 +2,8 @@
 
 The tables behind tool configuration, code assets, ML models, MCP, connectors, the LLM catalogue and the archiver.
 
+The per-call logs live in [02-executions](02-executions.md): `tool_invocations` (direct tool calls), `execution_idempotency` and `dead_letter_executions`.
+
 Migrations: [`d6e7f8a9b0c1_tenant_tool_credentials`](../../packages/db/alembic/versions/d6e7f8a9b0c1_tenant_tool_credentials.py), [`b1c2d3e4f5a6_code_asset_versions`](../../packages/db/alembic/versions/b1c2d3e4f5a6_code_asset_versions.py), [`f8a9b0c1d2e3_mcp_tool_orphaned`](../../packages/db/alembic/versions/f8a9b0c1d2e3_mcp_tool_orphaned.py), [`a3c4d5e6f7a8_archive_tenant_scope`](../../packages/db/alembic/versions/a3c4d5e6f7a8_archive_tenant_scope.py), [`e7f8a9b0c1d2_archive_storage_key`](../../packages/db/alembic/versions/e7f8a9b0c1d2_archive_storage_key.py), [`a8b9c0d1e2f3_model_availability`](../../packages/db/alembic/versions/a8b9c0d1e2f3_model_availability.py)
 
 ---
@@ -17,24 +19,36 @@ One row per tenant and key. Source: [`tenant_tool_credential.py`](../../packages
 | `tenant_id` | uuid | Primary key part. `ON DELETE CASCADE`. |
 | `key` | varchar(128) | Primary key part. The environment-style name a tool declares in `config_fields`, for example `TAVILY_API_KEY`. |
 | `value` | text | Encrypted with the cluster KEK when `ABENIX_DATA_KEY_KEK_BASE64` is set, stored as is otherwise. |
-| `updated_at` / `updated_by` | | |
+| `updated_at` / `updated_by` | timestamptz / uuid | `updated_by` is a foreign key to `users`. |
 
 ### `platform_settings`
 
-Admin-only key/value table (`key` primary key, `value`, `description`, `category`, `updated_at`, `updated_by`). Created by raw SQL in the API startup hook as well as the model. Platform-wide tool credentials live here as `tool.credential.<KEY>` rows, encrypted the same way. See [09-reference/04-platform-settings](../09-reference/04-platform-settings.md).
+Admin-only key/value table: `key` varchar(128) primary key, `value`, `description`, `category` (default `general`, indexed), `updated_at`, `updated_by`. Created by raw SQL in the API startup hook as well as the model. Platform-wide tool credentials live here as `tool.credential.<KEY>` rows, encrypted the same way. See [09-reference/04-platform-settings](../09-reference/04-platform-settings.md).
 
 The resolver in [`engine/credentials.py`](../../apps/agent-runtime/engine/credentials.py) reads a value in this order: test override, `tenant_tool_credentials` row for the current tenant, `platform_settings` row, process environment, `packages/db/seeds/tool_defaults.yaml`, the tool's declared default, empty. LLM provider keys (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_API_KEY` and others) go through the same path, declared in [`engine/provider_credentials.py`](../../apps/agent-runtime/engine/provider_credentials.py). See [08-howto/08-tool-configuration](../08-howto/08-tool-configuration.md).
 
 ### `tool_runtime_config`
 
-One row per tool slug, platform-wide. `slug` primary key, `enabled`, `pool`, `max_inflight_global`, `max_inflight_per_tenant`, `rate_limit_qps_global`, `rate_limit_qps_per_tenant`, `cache_ttl_seconds`, `cache_scope`, circuit breaker threshold, window and cooldown, `timeout_seconds`, `daily_budget_calls_per_tenant`.
+One row per tool slug, platform-wide, because vendor rate limits apply to the whole platform. Columns, all non-null with defaults:
+
+| Column | Default |
+|---|---|
+| `slug` | Primary key, varchar(120). |
+| `enabled` | true |
+| `pool` | `inline` |
+| `max_inflight_global` / `max_inflight_per_tenant` | 50 / 20 |
+| `rate_limit_qps_global` / `rate_limit_qps_per_tenant` | 0 (no limit) |
+| `cache_ttl_seconds` / `cache_scope` | 0 (no cache) / `global` |
+| `circuit_breaker_threshold` / `circuit_breaker_window_s` / `circuit_breaker_cooldown_s` | 0 (breaker off) / 30 / 60 |
+| `timeout_seconds` | 30 |
+| `daily_budget_calls_per_tenant` | 0 (no limit) |
 
 ### `tool_presets` and `saved_tools`
 
 | Table | Key columns | Notes |
 |---|---|---|
-| `tool_presets` | `slug`, `label`, `tool_slug`, `default_args`, `config`, `category`, `ui_group`, `asset_class`, `enabled`, `is_system` | A labelled tool plus default arguments per tenant |
-| `saved_tools` | `name`, `code`, `input_schema`, `created_by`, `approved_by`, `status`, `is_public`, `usage_count`, `review_score`, `permissions` | AI-generated tools that need admin approval before use |
+| `tool_presets` | `slug`, `label`, `description`, `tool_slug`, `default_args`, `config`, `category`, `ui_group`, `asset_class`, `enabled`, `is_system`, `created_by` | A labelled tool plus default arguments per tenant. Unique `(tenant_id, slug)`. Indexes on `(tenant_id, tool_slug)` and `(tenant_id, ui_group)` |
+| `saved_tools` | `name`, `description`, `code`, `input_schema`, `created_by`, `approved_by`, `status`, `is_public`, `usage_count`, `review_score`, `review_notes`, `permissions` | AI-generated tools that need admin approval before use. `status` is `pending`, `approved` or `rejected`. Unique `(tenant_id, name)`. Index on `(tenant_id, status)` |
 
 ---
 
@@ -58,7 +72,7 @@ Warm code runners are Kubernetes Deployments keyed by tenant and asset version. 
 | Table | Key columns | Notes |
 |---|---|---|
 | `ml_models` | `name`, `version`, `framework`, `file_uri`, `original_filename`, `input_schema`, `output_schema`, `status`, `training_metrics`, `tags`, `is_active`, `created_by` | The registry. A model that failed its load check has `status=error`, `is_active=false` and the reason in `training_metrics.validation_error` |
-| `ml_model_deployments` | `model_id`, `deployment_type`, `endpoint_url`, `replicas`, `status`, `pod_name`, `service_name`, `k8s_namespace`, `config` | In-process or a Kubernetes pod |
+| `ml_model_deployments` | `model_id`, `deployment_type`, `endpoint_url`, `replicas`, `status`, `pod_name`, `service_name`, `k8s_namespace`, `config` | In-process or a Kubernetes pod. No `tenant_id`, it is reached through the model |
 
 See [02-runtime/12-ml-models](../02-runtime/12-ml-models.md).
 
@@ -83,8 +97,8 @@ See [02-runtime/12-ml-models](../02-runtime/12-ml-models.md).
 | Table | Key columns | Notes |
 |---|---|---|
 | `llm_model_pricing` | `model`, `provider`, `input_per_m`, `output_per_m`, `cached_input_per_m`, batch prices, `capabilities`, `fallback_to`, `provider_endpoint`, `display_name`, `is_deprecated`, `deprecated_at`, `migration_hint`, `effective_from`, `is_active` | Source of truth for run cost and fallback chains. Added by `s9t0u1v2w3x4`, extended by `a8b9c0d1e2f3` |
-| `model_availability` | `model`, `provider`, `status`, `last_checked_at`, `last_ok_at`, `last_error`, `consecutive_failures`, `latency_ms`, `status_since` | Health per model |
-| `model_availability_events` | `model`, `from_status`, `to_status`, `error` | Status transitions. Created by migration `a8b9c0d1e2f3` and written with raw SQL, no ORM model |
+| `model_availability` | `model`, `provider`, `status`, `last_checked_at`, `last_ok_at`, `last_error`, `consecutive_failures`, `latency_ms`, `status_since` | Health per model. Checked every hour and a few seconds after a subscription or provider key changes. Runs read it through a cache that refreshes every 60 s, `GET /api/llm-models/resolve` always reads it fresh |
+| `model_availability_events` | `id`, `model`, `from_status`, `to_status`, `error`, `at` | Status transitions, index on `(model, at)`. Created by migration `a8b9c0d1e2f3`, ORM model `ModelAvailabilityEvent` so a fresh install has it too |
 
 ---
 
@@ -104,7 +118,7 @@ Problems come back as a 422 with `error.details.problems`, one line each.
 
 ### Spreadsheet import (`pf_` tables)
 
-A schema only works against a table that exists, so the page can also make the table. [`portfolio_import.py`](../../apps/api/app/core/portfolio_import.py) reads an uploaded CSV (and `.xlsx` when `openpyxl` is installed, which the API image does not do today, so the cluster takes CSV only and says so), and the router creates:
+A schema only works against a table that exists, so the page can also make the table. [`portfolio_import.py`](../../apps/api/app/core/portfolio_import.py) reads an uploaded CSV or `.xlsx` file (`.xlsx` needs `openpyxl`, which the API installs from its `pyproject.toml`), and the router creates:
 
 - a table `pf_<first 8 hex of tenant id>_<domain>`, at most 63 characters (a long domain is cut and gets an 8 character hash)
 - columns `id uuid` primary key with `gen_random_uuid()`, `owner_id uuid not null`, `created_at timestamptz default now()`, then one column per kept spreadsheet column
@@ -134,9 +148,9 @@ Source: [`archive.py`](../../packages/db/models/archive.py). Both tables were fi
 
 | Column | Notes |
 |---|---|
-| `tenant_id` | Added by `a3c4d5e6f7a8`. `ON DELETE CASCADE`. |
+| `tenant_id` | Added by `a3c4d5e6f7a8`. Nullable, indexed, `ON DELETE CASCADE`. |
 | `source_table` | One of `executions`, `messages`, `activity_logs`, `code_asset_invocations`, `ml_model_invocations`, `kb_query_invocations`. |
-| `triggered_by` / `is_manual` / `status` | `status` is `pending`, `running`, `completed` or `failed`. |
+| `triggered_by` / `is_manual` / `status` | `status` is the `archive_run_status` enum, stored as `PENDING`, `RUNNING`, `COMPLETED` or `FAILED`. |
 | `started_at` / `completed_at` / `cutoff_at` | |
 | `rows_archived` / `rows_deleted` | |
 | `file_uri` / `file_size_bytes` / `file_sha256` | The dump. |
@@ -154,6 +168,6 @@ Archiving `activity_logs` follows the audit chain rules in [05-governance-decisi
 
 ## See also
 
-- [02-runtime/02-tools](../02-runtime/02-tools.md) — the tool framework
-- [02-runtime/03-mcp](../02-runtime/03-mcp.md) — MCP integration
-- [06-deployment/02-helm](../06-deployment/02-helm.md) — where the KEK and storage backend are set
+- [02-runtime/02-tools](../02-runtime/02-tools.md), the tool framework
+- [02-runtime/03-mcp](../02-runtime/03-mcp.md), MCP integration
+- [06-deployment/02-helm](../06-deployment/02-helm.md), where the KEK and storage backend are set

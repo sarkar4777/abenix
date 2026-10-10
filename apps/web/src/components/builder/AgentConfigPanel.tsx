@@ -944,6 +944,10 @@ export default function AgentConfigPanel({
                   />
                 </div>
               </div>
+              <p className="text-[10px] text-amber-300/90 mt-1" data-testid="builder-replicas-not-enforced">
+                Replicas and concurrency are a sizing note only, the worker pool&apos;s own Helm settings decide them.
+                The rate limit and daily budget below are enforced on every run.
+              </p>
 
               <div className="grid grid-cols-2 gap-2 mt-3">
                 <div>

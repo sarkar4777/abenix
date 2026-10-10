@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import { usePageTitle } from '@/hooks/usePageTitle';
+import { fetchDefaultModel } from '@/lib/models';
 import { useIsMobile } from '@/hooks/useMediaQuery';
 import {
   addEdge,
@@ -260,6 +261,8 @@ export default function BuilderPage() {
   const [dirty, setDirty] = useState(false);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [mcpExtensions, setMcpExtensions] = useState<MCPExtensions | undefined>(undefined);
+  const [platformDefaultModel, setPlatformDefaultModel] = useState<string | null>(null);
+  const modelTouched = useRef(false);
   const [builderMode, setBuilderMode] = useState<BuilderMode>('agent');
   const [showExecutionViewer, setShowExecutionViewer] = useState(false);
   const [agentStatus, setAgentStatus] = useState<string | null>(null);
@@ -583,6 +586,31 @@ export default function BuilderPage() {
     },
     [setNodes],
   );
+
+  useEffect(() => {
+    if (agentParam) return;
+    let alive = true;
+    fetchDefaultModel().then((m) => {
+      if (alive && m) setPlatformDefaultModel(m);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [agentParam]);
+
+  // a new agent starts on the platform default, applied once so a model picked later is never undone
+  const defaultApplied = useRef(false);
+  useEffect(() => {
+    if (agentParam || loading || !platformDefaultModel || defaultApplied.current) return;
+    defaultApplied.current = true;
+    if (modelTouched.current) return;
+    if (_forcedModelFromLocalStorage() || config.model !== DEFAULT_CONFIG.model) return;
+    if (platformDefaultModel === config.model) return;
+    setConfig((prev) => ({ ...prev, model: platformDefaultModel }));
+    setNodes((nds) =>
+      nds.map((n) => (n.id === 'agent' ? { ...n, data: { ...n.data, model: platformDefaultModel } } : n)),
+    );
+  }, [agentParam, loading, platformDefaultModel, config.model, setNodes]);
 
   // Toggle tool from palette (click to add/remove)
   const toggleTool = useCallback(
@@ -967,7 +995,7 @@ export default function BuilderPage() {
       name: (aiConfig.name as string) || 'AI Generated Agent',
       description: (aiConfig.description as string) || '',
       system_prompt: (aiConfig.system_prompt as string) || '',
-      model: forcedModel || (mc.model as string) || 'claude-sonnet-4-5-20250929',
+      model: forcedModel || (mc.model as string) || platformDefaultModel || DEFAULT_CONFIG.model,
       temperature: typeof mc.temperature === 'number' ? mc.temperature : 0.7,
       max_tokens: 4096,
       input_variables: (mc.input_variables || aiConfig.input_variables || []) as AgentConfig['input_variables'],
@@ -1011,7 +1039,7 @@ export default function BuilderPage() {
     }
 
     setDirty(true);
-  }, [setNodes, setEdges, buildInitialNodes, buildInitialEdges, pipelineStore]);
+  }, [setNodes, setEdges, buildInitialNodes, buildInitialEdges, pipelineStore, platformDefaultModel]);
 
   // Publish
   const publish = useCallback(async () => {
@@ -1119,7 +1147,10 @@ export default function BuilderPage() {
             </label>
             <ModelPicker
               value={config.model}
-              onChange={(v) => updateConfig({ model: v })}
+              onChange={(v) => {
+                modelTouched.current = true;
+                updateConfig({ model: v });
+              }}
             />
           </div>
 

@@ -2,7 +2,7 @@
 
 > Every route in `apps/web/src/app/`, where it sits in the sidebar, what gates it and what it is for. Use this as a starting point when you're hunting for a feature.
 
-There are 100 `page.tsx` files. 94 live in the authenticated `(app)/` group and 6 are public. Sources below are relative to `apps/web/src/app/(app)/` unless they start with `app/`.
+There are 102 `page.tsx` files. 96 live in the authenticated `(app)/` group and 6 are public. Sources below are relative to `apps/web/src/app/(app)/` unless they start with `app/`.
 
 ## Reading the Gate column
 
@@ -15,7 +15,7 @@ The sidebar ([`Sidebar.tsx`](../../apps/web/src/components/layout/Sidebar.tsx)) 
 | `admin` | shown only when `is_admin` is true or the signed-in user's role is `admin` |
 | none | always shown |
 
-The sidebar opens in Essentials mode, a short list of Needs you, Home, Agents, AI Chat, Knowledge and Monitor, plus Agent Builder and Autonomy for creators and an Admin entry for admins. Show all tools at the bottom reveals the full grouped list below. See [00-app-shell](00-app-shell.md#essentials-and-all-tools).
+The sidebar opens in Essentials mode, a short list of Needs you, Home, Agents, AI Chat, Knowledge and Monitor. Reviewers also get Review inbox, creators and admins get Agent Builder, Autonomy and Improvements, and admins get an Admin entry. Show all tools at the bottom reveals the full grouped list below. See [00-app-shell](00-app-shell.md#essentials-and-all-tools).
 
 The sidebar gate is UX only. The API enforces access on every route. Most pages render for anyone who types the URL and show whatever the API returns. The pages that check a capability themselves are noted.
 
@@ -90,11 +90,12 @@ Collapsed by default.
 | Route | Sidebar | Gate | Purpose |
 |---|---|---|---|
 | `/admin/cluster` | Cluster Health | `admin` | Health verdict with reasons, node cards with CPU, memory and pressure, services grouped as Core, Runtime pools, Data and Apps with ready counts, image, restarts and a scaling sparkline, a pod drawer with events and log tail, and a warnings timeline. Refreshes every 15 seconds with a pause. Says what is hidden and which helm value fixes it, and explains when the API runs outside Kubernetes |
-| `/admin/scaling` | Scaling | `admin` | Per-agent pool routing, replicas, concurrency, rate limits, budgets and dedicated mode |
+| `/admin/scaling` | Scaling | `admin` | Per-agent pool routing, rate limits, budgets and dedicated mode. Replicas and concurrency are saved as a note and the page says they are not applied |
 | `/admin/tool-scaling` | Tool Scaling | `admin` | Per-tool cache, concurrency, rate limit, circuit breaker, daily budget and pool routing |
 | `/admin/pipeline-scaling` | Pipeline Scaling | `admin` | Which `runtime_pool` each pipeline lands on |
 | `/admin/archives` | Archives | `admin` | Nightly archive runs of recording tables to `/data/archives/`, retention policies, manual trigger and download |
 | `/admin/dlq` | Dead Letter Queue | `admin` | Executions that failed past the retry budget. Replay with the original input |
+| `/admin/jobs` | Background jobs | `admin` | Every scheduled job with what it does, schedule, last and next run, outcome, duration, last error in plain words and run count. Run now runs one under its lock, jobs that change data ask first. `?job=<id>` opens on one job |
 | `/admin/audit` | Audit log | `admin` | Recent admin actions from `/api/admin/audit-log`, or a stand-in built from settings and team changes |
 | `/admin/models` | Models catalogue | `admin` | Tenant ML models plus the LLM catalogue |
 | `/admin/market-sources` | Market data | `admin` | Connectors that feed price, fundamentals, regulatory and energy data |
@@ -141,7 +142,7 @@ Collapsed by default.
 | `/settings/notifications` | Notifications | Per-user notification preferences and tenant notification settings |
 | `/settings/observability` | Observability | Health from `/api/health/ready`, metrics and SLOs |
 | `/settings/security` | Security | Active sessions and account activity |
-| `/settings/data` | Data & DLP | DLP scanning of agent inputs and data retention |
+| `/settings/data` | Data & DLP | DLP mode for agent inputs and answers, and data retention |
 | `/settings/privacy` | Privacy & GDPR | Export or delete your account data, privacy and retention settings |
 | `/settings/webhooks` | Events | Event subscriptions. Shown only with `events.manage` |
 | `/settings/quotas` | Token Quotas | Monthly token and cost limits per member |
@@ -243,8 +244,8 @@ Who holds what by default (`ROLE_DEFAULTS` in `apps/api/app/core/capabilities.py
 
 | Role | Capabilities |
 |---|---|
-| `user` | `decisions.view`, `decisions.evaluate`, `risk.view`, `evals.run`, `runs.replay`, `autonomy.view`, `actions.review` |
-| `creator` | the user set plus `decisions.author`, `evals.manage`, `sources.manage`, `events.manage`, `autonomy.manage` |
+| `user` (Member in the UI) | `decisions.view`, `decisions.evaluate`, `risk.view`, `evals.run`, `runs.replay`, `autonomy.view`, `actions.review`, `feedback.give` |
+| `creator` | the user set plus `decisions.author`, `evals.manage`, `sources.manage`, `events.manage`, `autonomy.manage`, `improvements.view`, `improvements.propose` |
 | `admin` | `*` |
 
 What each one does:

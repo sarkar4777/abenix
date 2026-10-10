@@ -1,8 +1,8 @@
 # Java SDK
 
-> JDK 21. Blocking calls on the JDK `HttpClient`, Jackson for JSON. It lives in [`claimsiq/sdk/`](../../claimsiq/sdk/) and covers execute, watch, approvals and the read-side clients. There are no decisions, sources or events clients in Java yet.
+> JDK 21. Blocking calls on the JDK `HttpClient`, Jackson for JSON. It lives in [`claimsiq/sdk/`](../../claimsiq/sdk/) and covers execute, watch, approvals, actions, feedback and the read-side clients. There are no decisions, sources or events clients in Java yet.
 
-Install: it is not published to a Maven repository. It is a Gradle subproject of `claimsiq/` (group `com.abenix`, version `0.1.0`). Inside that build, depend on it the way the ClaimsIQ app does:
+Install: it is not published to a Maven repository. It is a Gradle subproject of `claimsiq/` (group `com.abenix`, version `2.5.5`, see [versions](00-overview.md#versions)). Inside that build, depend on it the way the ClaimsIQ app does:
 
 ```kotlin
 // build.gradle.kts
@@ -15,11 +15,12 @@ Elsewhere, build the jar with Gradle 8.x and put it on your classpath with its t
 
 ```bash
 cd claimsiq && gradle :sdk:jar
-# claimsiq/sdk/build/libs/sdk-0.1.0.jar
+# claimsiq/sdk/build/libs/sdk-2.5.5.jar
+# gradle :sdk:copyRuntimeLibs puts jackson and slf4j in build/libs/deps
 ```
 
 ```kotlin
-implementation(files("libs/sdk-0.1.0.jar"))
+implementation(files("libs/sdk-2.5.5.jar"))
 implementation("com.fasterxml.jackson.core:jackson-databind:2.17.2")
 implementation("org.slf4j:slf4j-api:2.0.13")
 ```
@@ -54,7 +55,7 @@ Abenix client = Abenix.builder()
     .build();
 ```
 
-`Abenix` implements `AutoCloseable`, but `close()` does nothing today. Sub-clients hang off accessor methods: `approvals()`, `agents()`, `tools()`, `presets()`, `mlModels()`, `knowledge()`, `chat()`, `executions()`.
+`Abenix` implements `AutoCloseable`, but `close()` does nothing today. Sub-clients hang off accessor methods: `approvals()`, `agents()`, `tools()`, `presets()`, `mlModels()`, `knowledge()`, `chat()`, `executions()`, `actions()`, `autonomy()`, `improvements()`, `lessons()`, `feedback()`. `me()` returns `{user: {...}}` and `permissions()` returns the key's role and capabilities, both as `Map<String, Object>`.
 
 ---
 
@@ -135,7 +136,7 @@ try (WatchStream stream = client.watch(executionId)) {
 }
 ```
 
-`watch(executionId)` opens the `/api/executions/{id}/watch` SSE stream and yields `DagSnapshot` records (status, progress, nodes, edges, cost so far). `WatchStream` is `Iterable<DagSnapshot>` and `AutoCloseable`, and also has `onSnapshot(cb)`, `onError(cb)`, `latest()` and `terminal()`, a `CompletableFuture<DagSnapshot>` for the final snapshot. The connection opens on the first `onSnapshot`, `terminal()` or iteration.
+`watch(executionId)` opens the `/api/executions/{id}/watch` SSE stream and yields `DagSnapshot` records (status, progress, nodes, edges, cost so far). `WatchStream` is `Iterable<DagSnapshot>` and `AutoCloseable`, and also has `onSnapshot(cb)`, `onError(cb)`, `latest()` and `terminal()`, a `CompletableFuture<DagSnapshot>` for the final snapshot. The connection opens on the first `onSnapshot`, `terminal()` or iteration. Only `snapshot` events become records, `end` closes the stream and an `error` event completes `terminal()` exceptionally. Snapshot times are read as `Instant`.
 
 There is no token-level streaming in Java.
 
@@ -161,10 +162,11 @@ client.approvals().signoff(approvalId, "approve", "Looks right", "signoff-123");
 | `create` | `(title, payload, requiredSignoffs, expiresSeconds, gateKind, clientToken)` |
 | `signoff` | `(approvalId, decision, reason, clientToken)` |
 | `approve` / `deny` | `(approvalId, reason)` |
-| `waitFor` | `(approvalId, timeoutSeconds)`, long-polls `/wait` in chunks of up to 120 s |
+| `approve` with edits | `(approvalId, reason, editedArguments)`, action approvals only, the action runs with those values |
+| `waitFor` | `(approvalId, timeoutSeconds)`, long-polls `/wait` in chunks of up to 120 s. A busy answer (429, 502, 503, 504) or a dropped connection is retried until the timeout |
 | `configureWebhook` | `(url, secret)`, needs the admin or owner role. A null `url` clears the URL, a null `secret` keeps the stored one |
 
-They return the `Approval` record. There is no `returnForChanges` in Java, send `signoff(approvalId, "return", reason, null)` instead. `client.approve(executionId, gateId, comment)` and `client.reject(...)` are the old gate-id shape. Approving an action with edited arguments is not wrapped in Java yet.
+They return the `Approval` record. There is no `returnForChanges` in Java, send `signoff(approvalId, "return", reason, null)` instead. `client.approve(executionId, gateId, comment)` and `client.reject(...)` are the old gate-id shape.
 
 ---
 
@@ -190,7 +192,7 @@ if (d.shouldRun()) {
 | Method | Signature |
 |---|---|
 | `propose` | `(ProposeRequest req)` or `(actionKey, arguments)`, returns `ActionDecision` |
-| `waitFor` | `(actionId, timeoutSeconds)`, long-polls in chunks of up to 120 s, returns `ActionDecision` |
+| `waitFor` | `(actionId, timeoutSeconds)`, long-polls in chunks of up to 120 s and retries a busy server, returns `ActionDecision` |
 | `executed` | `(actionId, ok, resultPreview)` |
 | `reportOutcome` | `(actionId, value, note)`, sends `source: "api"`. Needs `actions.review` |
 | `flagHarm` | `(actionId, note)`, `IllegalArgumentException` on a blank note. Needs `actions.review` |
@@ -208,13 +210,13 @@ Each returns `Map<String, Object>` or `List<Map<String, Object>>`.
 
 | Client | Methods |
 |---|---|
-| `agents()` | `list()`, `get(agentId)`, `findBySlug(slug)` (null when not found) |
-| `executions()` | `live()`, `get(id)`, `replay(id)`, `tree(id)`, `pendingApprovals()` |
+| `agents()` | `list()`, `get(agentId)`, `findBySlug(slug)` (search based), `bySlug(slug)` (exact, null when not found), `create(body)` |
+| `executions()` | `live()`, `list()`, `list(ListOptions)`, `get(id)`, `replay(id)`, `tree(id)`, `pendingApprovals()`. Build filters with `ExecutionsClient.ListOptions.empty().agentId(id).status("failed").triggerKind("schedule", "webhook").triggerId(t).search(q).limit(20).offset(0)` |
 | `autonomy()` | `overview()`, `grant(grantId)`, `grantActions(grantId, status, limit, before)` |
 | `improvements()` | `list()`, `list(agentId, state, limit)`, `get(proposalId)` |
 | `lessons()` | `report(agentId, note)`, `report(agentId, note, expected, executionId)`. Sent with `source: sdk` |
 | `feedback()` | `give(rating, executionId, agentId, correction)`, `giveOnMessage(rating, conversationId, messageId, correction)`. `rating` is 1 or -1 |
-| `knowledge()` | `cognify(kbId, docIds, model, chunkSize, chunkOverlap)`, `graphStats(kbId)`, `search(kbId, query, mode, topK, graphDepth)`, `graph(kbId, limit)`, `cognifyJobs(kbId)` |
+| `knowledge()` | `bootstrapProject(slug, name, description, collections)`, `upload(kbId, bytes, filename, contentType)` (multipart, returns the document with `status: processing`), `documents(kbId)`, `cognify(kbId, docIds, model, chunkSize, chunkOverlap)`, `graphStats(kbId)`, `search(kbId, query, mode, topK, graphDepth)`, `graph(kbId, limit)`, `cognifyJobs(kbId)` |
 | `chat()` | `create(agentSlug, agentId, appSlug, title, actAs)`, `list(appSlug, agentSlug, archived, limit, offset, actAs)`, `get`, `send(threadId, content, context, agentSlug, attachments, actAs)`, `rename`, `archive`, `delete` |
 | `tools()` | `list()`, `catalog()`, `execute(slug, arguments, config)` |
 | `presets()` | `list()`, `list(toolSlug, uiGroup, assetClass)`, `get`, `upsert(body)`, `delete`, `run(slug, arguments, config)` |
@@ -260,12 +262,13 @@ public class ScanController {
 
 ## Errors
 
-Every failure throws `AbenixException`, an unchecked `RuntimeException`. An HTTP error's message holds the call, the status and up to 400 characters of the response body (the approvals client includes the whole body). Transport errors keep the original as the cause. There are no `status` or `code` fields and no subclasses, so parse the message if you need the status. An unknown slug throws with `No agent matched slug: ...`. The SDK does not retry.
+Every failure throws `AbenixException`, an unchecked `RuntimeException`. An HTTP error carries `status()` and `code()` (the server's `error_code`, such as `UNKNOWN_ACTION`), and its message holds the call, the status and the server's message. Transport errors have `status()` 0 and keep the original as the cause. An unknown slug throws with `No agent matched slug: ...`. The SDK does not retry.
 
 ```java
 try {
     client.execute("invoice-triage", "Route INV-1042");
 } catch (AbenixException e) {
+    if (e.status() == 404) log.warn("not there: {}", e.code());
     log.error("abenix call failed: {}", e.getMessage(), e);
 }
 ```

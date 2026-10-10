@@ -4,6 +4,7 @@ from datetime import datetime
 
 from sqlalchemy import (
     DateTime,
+    event,
     Enum,
     ForeignKey,
     Index,
@@ -124,6 +125,60 @@ class Execution(UUIDMixin, TenantMixin, Base):
 
     agent: Mapped["Agent"] = relationship(back_populates="executions")
     user: Mapped["User"] = relationship(back_populates="executions")
+
+
+PROVIDERS = ("anthropic", "openai", "google", "other")
+
+
+def provider_of(model: str | None) -> str:
+    m = (model or "").lower().split("/")[-1]
+    if m.startswith("us.anthropic.") or m.startswith("anthropic."):
+        return "anthropic"
+    if m.startswith("claude"):
+        return "anthropic"
+    if m.startswith(("gpt", "o1", "o3", "o4", "chatgpt")):
+        return "openai"
+    if m.startswith("gemini"):
+        return "google"
+    return "other"
+
+
+def provider_cost_values(
+    costs: dict[str, float] | None = None,
+    total: float | None = None,
+    model: str | None = None,
+) -> dict[str, float]:
+    """Column values for the per-provider split.
+
+    An exact split wins. Without one the whole total goes to the provider of
+    the model that ran, which is right for every single-model run.
+    """
+    split = {p: round(float((costs or {}).get(p) or 0), 6) for p in PROVIDERS}
+    if not any(split.values()) and total:
+        split[provider_of(model)] = round(float(total), 6)
+    return {f"{p}_cost": v for p, v in split.items()}
+
+
+def set_provider_costs(
+    row: "Execution",
+    costs: dict[str, float] | None = None,
+    model: str | None = None,
+) -> None:
+    total = float(getattr(row, "cost", 0) or 0)
+    model = model or getattr(row, "model_used", None)
+    for col, v in provider_cost_values(costs, total, model).items():
+        setattr(row, col, v)
+
+
+@event.listens_for(Execution, "before_insert")
+@event.listens_for(Execution, "before_update")
+def _fill_provider_costs(_mapper, _conn, row: "Execution") -> None:
+    # writers that only set the total still get a split
+    if not row.cost:
+        return
+    if any(float(getattr(row, f"{p}_cost") or 0) for p in PROVIDERS):
+        return
+    set_provider_costs(row)
 
 
 from models.agent import Agent  # noqa: E402

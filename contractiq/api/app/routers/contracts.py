@@ -587,6 +587,23 @@ async def extract_contract(
                 extraction_text = result.output or ""
                 logger.info("Abenix extraction complete: %d chars, %d tool_calls, $%.4f",
                            len(extraction_text), len(result.tool_calls), result.cost)
+                # a failed run comes back with no output, say why instead of
+                # reporting it as unparseable text
+                if result.status == "failed" or not extraction_text.strip():
+                    reason = ""
+                    if result.execution_id:
+                        try:
+                            row = await forge.executions.get(result.execution_id)
+                            reason = (row or {}).get("error_message") or ""
+                        except Exception:  # noqa: BLE001
+                            reason = ""
+                    reason = reason or "the extraction agent returned nothing"
+                    await _set_status(
+                        ContractStatus.ERROR,
+                        summary_patch={"extraction_error": reason[:500], "execution_id": result.execution_id},
+                    )
+                    await emit({'event': 'error', 'message': f"Extraction failed: {reason[:300]}"})
+                    return
 
             await emit({'event': 'status', 'agent': 'document_ingester', 'status': 'complete'})
             await emit({'event': 'status', 'agent': 'commercial_extractor', 'status': 'complete'})

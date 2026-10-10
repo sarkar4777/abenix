@@ -82,14 +82,14 @@ async def user_wants_notification(
     return _settings_allows(prefs if isinstance(prefs, dict) else None, notif_type, "")
 
 
+# Need someone to act, so they are emailed like failures
+EMAIL_ALWAYS = {"approval_pending", "autonomy_demoted", "moderation_review_requested"}
+
+
 def email_channel_available() -> bool:
-    if not os.environ.get("SMTP_HOST", "").strip():
-        return False
-    try:
-        import aiosmtplib  # type: ignore  # noqa: F401
-    except ImportError:
-        return False
-    return True
+    from app.core import mailer
+
+    return mailer.available()
 
 
 def tenant_slack_webhook(tenant: Any) -> str:
@@ -105,11 +105,33 @@ def tenant_slack_webhook(tenant: Any) -> str:
 
 
 def mask_webhook(url: str) -> str:
-    """Show only the tail so an admin can recognise the hook without seeing it."""
+    """Show the host and the tail so an admin can recognise the hook without seeing it."""
     if not url:
         return ""
+    from urllib.parse import urlparse
+
+    u = urlparse(url)
     tail = url[-6:] if len(url) > 6 else url
-    return f"https://hooks.slack.com/…{tail}"
+    return f"{u.scheme or 'https'}://{u.netloc or 'hooks.slack.com'}/…{tail}"
+
+
+async def slack_url_problem(url: str) -> str | None:
+    """Why a Slack webhook cannot be used, or None. Private targets need a named allow-list entry."""
+    from urllib.parse import urlparse
+
+    from app.services.events import unsafe_target
+
+    u = urlparse(url or "")
+    if u.scheme not in ("http", "https") or not u.hostname:
+        return "Paste the full webhook link. It starts with https://"
+    allowed = {
+        h.strip().lower()
+        for h in os.environ.get("EVENTS_ALLOWED_INTERNAL_HOSTS", "").split(",")
+        if h.strip()
+    }
+    if u.scheme != "https" and u.hostname.lower() not in allowed:
+        return "The webhook link must use https://"
+    return await unsafe_target(url)
 
 
 def platform_slack_webhook() -> str:
@@ -123,9 +145,14 @@ async def _post_slack(
     """Best-effort Slack post via incoming webhook. Returns True on"""
     if not webhook_url:
         return False
-    payload: dict[str, Any] = {
-        "text": f"*{title}*\n{message}",
-    }
+    blocked = await slack_url_problem(webhook_url)
+    if blocked:
+        logger.warning("Slack post skipped: %s", blocked)
+        return False
+    text = f"*{title}*\n{message}"
+    if link:
+        text += f"\n<{link}|Open in Abenix>"
+    payload: dict[str, Any] = {"text": text}
     if link:
         payload["attachments"] = [
             {
@@ -143,35 +170,58 @@ async def _post_slack(
 
 
 async def _send_email(*, to: str, subject: str, body: str) -> bool:
-    """Best-effort SMTP send. Uses the SMTP_* env vars already wired"""
-    host = os.environ.get("SMTP_HOST", "").strip()
-    if not host or not to:
-        return False
-    try:
-        import aiosmtplib  # type: ignore
-        from email.message import EmailMessage
+    from app.core import mailer
 
-        msg = EmailMessage()
-        msg["From"] = os.environ.get("SMTP_FROM", "no-reply@abenix.dev")
-        msg["To"] = to
-        msg["Subject"] = subject
-        msg.set_content(body)
-        await aiosmtplib.send(
-            msg,
-            hostname=host,
-            port=int(os.environ.get("SMTP_PORT", "587")),
-            username=os.environ.get("SMTP_USER") or None,
-            password=os.environ.get("SMTP_PASS") or None,
-            start_tls=True,
-            timeout=10,
-        )
-        return True
-    except ImportError:
-        logger.debug("aiosmtplib not installed; email channel disabled")
+    return await mailer.send(to=to, subject=subject, text=body)
+
+
+def _email_body(title: str, message: str, link: str | None) -> str:
+    from app.core import mailer
+
+    lines = [title, "", message, ""]
+    if link:
+        lines += [f"Open it in Abenix: {mailer.frontend_url(link)}", ""]
+    lines += [
+        "You get this email because email copies are on for you.",
+        f"Change that under Settings, Notifications: {mailer.frontend_url('/settings/notifications')}",
+    ]
+    return "\n".join(lines)
+
+
+def _full_link(link: str | None) -> str | None:
+    if not link:
+        return None
+    if link.startswith("http://") or link.startswith("https://"):
+        return link
+    from app.core import mailer
+
+    return mailer.frontend_url(link)
+
+
+async def post_once_to_tenant_slack(
+    db: AsyncSession,
+    tenant_id: uuid.UUID,
+    *,
+    title: str,
+    message: str,
+    link: str | None,
+) -> bool:
+    """One post to the workspace channel for an event several members were told about."""
+    from sqlalchemy import select
+    from models.tenant import Tenant
+
+    tenant = (
+        await db.execute(select(Tenant).where(Tenant.id == tenant_id))
+    ).scalar_one_or_none()
+    hook = tenant_slack_webhook(tenant)
+    if not hook:
         return False
-    except Exception as e:
-        logger.debug("email send failed: %s", e)
-        return False
+    ok = await _post_slack(
+        hook, title=f"Abenix — {title}", message=message, link=_full_link(link)
+    )
+    if ok:
+        _emit_notif_metric("slack", _severity_for("approval_pending"))
+    return ok
 
 
 def _emit_notif_metric(channel: str, severity: str) -> None:
@@ -204,6 +254,7 @@ async def create_notification(
     link: str | None = None,
     metadata: dict | None = None,
     push: bool = True,
+    slack: bool = True,
 ) -> Notification | None:
     """Persist, push and fan out a notification, None when the user turned its type off."""
     # Load the user + tenant config so we know who to notify and where.
@@ -260,12 +311,16 @@ async def create_notification(
         logger.debug("ws push failed: %s", e)
 
     # Slack — outbound, gated on tenant having a webhook + user opt-in.
-    if slack_webhook and _settings_allows(prefs, type_key=type, channel_key="slack"):
+    if (
+        slack
+        and slack_webhook
+        and _settings_allows(prefs, type_key=type, channel_key="slack")
+    ):
         ok = await _post_slack(
             slack_webhook,
             title=f"Abenix — {title}",
             message=message,
-            link=(os.environ.get("FRONTEND_URL", "") + (link or "")) if link else None,
+            link=_full_link(link),
         )
         if ok:
             _emit_notif_metric("slack", severity)
@@ -273,14 +328,16 @@ async def create_notification(
     # Email — only fires for error-severity by default, to avoid inbox
     # noise. Operators can override per-user via prefs.email_for_info=true
     # if they really want everything.
-    email_eligible = severity == "error" or (
-        prefs and prefs.get("email_for_info") is True
+    email_eligible = (
+        severity == "error"
+        or str(type) in EMAIL_ALWAYS
+        or bool(prefs and prefs.get("email_for_info") is True)
     )
     if email_eligible and _settings_allows(prefs, type_key=type, channel_key="email"):
         ok = await _send_email(
             to=user_email,
             subject=f"Abenix: {title}",
-            body=f"{message}\n\nDetails: {os.environ.get('FRONTEND_URL', '') + (link or '') if link else '(no link)'}",
+            body=_email_body(title, message, link),
         )
         if ok:
             _emit_notif_metric("email", severity)
@@ -398,18 +455,18 @@ async def notify_platform_alert(
                 .all()
             )
             for t in t_rows:
-                hook = (getattr(t, "slack_webhook_url", None) or "").strip()
+                # stored encrypted, posting the ciphertext never reached Slack
+                hook = tenant_slack_webhook(t)
                 if hook:
                     webhooks.add(hook)
         except Exception as e:
             logger.debug("tenant webhook lookup failed: %s", e)
-    frontend = os.environ.get("FRONTEND_URL", "")
     for hook in webhooks:
         ok = await _post_slack(
             hook,
             title=f"Abenix — {title}",
             message=body,
-            link=f"{frontend}{link}" if frontend else None,
+            link=_full_link(link),
         )
         if ok:
             _emit_notif_metric(

@@ -207,7 +207,7 @@ asyncio.run(go())
 "
 ```
 
-Expected, in order: a conversion, a one-line warning naming the key, and the standard rejected-key error. `credentials.override` is the test seam. It wins over every other source inside the `with` block.
+This needs internet access but no running stack. Expected, in order: a conversion, a one-line warning naming the key, and the tool's rejected-key error. `credentials.override` is the test seam. It wins over every other source inside the `with` block.
 
 ---
 
@@ -217,7 +217,7 @@ Expected, in order: a conversion, a one-line warning naming the key, and the sta
 python scripts/check-tool-config.py
 ```
 
-It parses every file under `engine/tools/` and fails when
+It scans every file under `apps/agent-runtime/engine/tools/`, imports each `BaseTool` subclass, and fails when
 
 - `os.environ` or `os.getenv` appears in a tool, unless the name is infrastructure (`DATABASE_URL`, `REDIS_URL` and the like),
 - a key is read with `cfg()` or `credentials.get()` but no tool declares it,
@@ -228,7 +228,7 @@ It parses every file under `engine/tools/` and fails when
 
 `--report` also lists every environment read by file. CI runs it in the `python-test` job and fails on any problem, and `tests/unit/test_tool_contract.py` runs it under pytest. `deploy.sh` runs it before building images but only warns. This is what makes the guarantee hold: a tool that passes CI is on the admin screen.
 
-Then regenerate the builder's tool docs. CI runs the same script with `--check` and fails when the file is stale.
+Then regenerate the builder's tool docs in `apps/web/src/lib/tool-docs.ts`. The script reads each tool's `description` and `input_schema`, so the builder's help for your tool comes from the class. CI runs the same script with `--check` and fails when the file is stale.
 
 ```bash
 python scripts/gen-tool-docs.py --write
@@ -238,7 +238,7 @@ python scripts/gen-tool-docs.py --write
 
 ## Step 5. See it on the admin screen
 
-Nothing to write. Deploy, or restart the API locally, then open **Admin -> Tool Configuration**. There is a card called Open Exchange Rates with one row, `OPENEXCHANGERATES_APP_ID`, marked optional, "not set", with "used by currency_convert" and a link to the signup page. Paste a value and Save. The row now reads "saved for this tenant". Agents use it within 30 seconds, no redeploy. Clear it and the platform value, the environment or the defaults file applies again.
+Nothing to write. Deploy, or run `bash scripts/dev-local.sh --restart` locally, then open **Admin -> Tool Configuration**. There is a card called Open Exchange Rates with one row, `OPENEXCHANGERATES_APP_ID`, marked optional, "not set", with "used by currency_convert" and a link to the signup page. Paste a value and Save. The row now reads "saved for this tenant". Agents use it within 30 seconds, no redeploy. Clear it and the platform value, the environment or the defaults file applies again.
 
 The same declaration shows up as a badge on `/tools`, in the builder palette, and in the agent panel's setup checklist. The Integrations page lists it under Tool credentials.
 
@@ -269,11 +269,7 @@ requires_credentials:
   - OPENEXCHANGERATES_APP_ID
 ```
 
-Check it with `python scripts/lint-agent-seeds.py`, then seed. `scripts/dev-local.sh` seeds from the working tree on every start. On a cluster the seed files are baked into the API image, so a new YAML needs a rebuild first (`bash scripts/deploy.sh local` rebuilds every image), then:
-
-```bash
-kubectl -n abenix exec deploy/abenix-api -c api -- python /app/packages/db/seeds/seed_agents.py
-```
+Check it with `python scripts/lint-agent-seeds.py`, then seed. `bash scripts/dev-local.sh` seeds from the working tree on every start. On a cluster the seed files are baked into the API image, so run `bash scripts/deploy.sh local` (or `bash scripts/deploy-azure.sh redeploy`). It rebuilds the changed images and runs every seed again.
 
 The deploy prints, after seeding, which seeded agents need credentials that are not set.
 
@@ -281,7 +277,7 @@ The deploy prints, after seeding, which seeded agents need credentials that are 
 
 ## Step 7. Try it via the UI
 
-Open `/agents`, pick finance-translator, Test. Ask
+Open `/agents`, find Finance Translator and press **Chat**. Ask
 
 ```
 Convert 1000 USD to JPY.

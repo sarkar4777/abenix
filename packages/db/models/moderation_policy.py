@@ -72,8 +72,9 @@ class ModerationPolicy(UUIDMixin, TenantMixin, TimestampMixin, Base):
         Boolean, default=False, server_default="false"
     )
 
-    # Moderation provider + model. `omni-moderation-latest` supports
-    # multi-modal; `text-moderation-latest` is text-only legacy.
+    # Deprecated, always openai. Kept so no migration is needed, the API
+    # neither reads nor returns it. `omni-moderation-latest` supports
+    # multi-modal, `text-moderation-latest` is text-only legacy.
     provider: Mapped[str] = mapped_column(
         String(40), default="openai", server_default="openai"
     )

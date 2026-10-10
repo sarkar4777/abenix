@@ -22,6 +22,9 @@ class QueueBackend:
     async def status(self, task_id: str) -> dict: ...
     async def stream(self, queue_name: str) -> AsyncIterator[dict]: ...
 
+    async def pending(self, queue_name: str) -> int | None:
+        return None
+
 
 CELERY_UNSUPPORTED = (
     "QUEUE_BACKEND=celery cannot run agents on the runtime pools. Queued agent "
@@ -128,6 +131,11 @@ class NATSBackend(QueueBackend):
             "result": None,
             "note": "Use the executions endpoint for NATS-backed status",
         }
+
+    async def pending(self, queue_name: str) -> int | None:
+        await self._ensure()
+        info = await self._js.consumer_info("agents", f"abenix-{queue_name}-consumer")
+        return int(info.num_pending or 0)
 
     async def stream(self, queue_name: str) -> AsyncIterator[QueueMessage]:
         await self._ensure()

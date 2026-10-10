@@ -3,9 +3,12 @@
 import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
+  ArrowLeft,
   ArrowRight,
+  Building2,
   Eye,
   EyeOff,
+  KeyRound,
   Lock,
   Mail,
   Shield,
@@ -16,6 +19,11 @@ import {
 import { readSignInParams } from '@/lib/auth-redirect';
 
 type Tab = 'login' | 'register';
+
+interface TwoFactorStep {
+  challenge: string;
+  email: string;
+}
 
 interface FormData {
   email: string;
@@ -61,12 +69,79 @@ export default function AuthCard() {
   const [ssoProviders, setSsoProviders] = useState<string[]>([]);
   const [returnTo, setReturnTo] = useState('/dashboard');
   const [sessionExpired, setSessionExpired] = useState(false);
+  const [notice, setNotice] = useState('');
+  const [twoFactor, setTwoFactor] = useState<TwoFactorStep | null>(null);
+  const [code, setCode] = useState('');
+  const [ssoMode, setSsoMode] = useState(false);
 
   useEffect(() => {
     const params = readSignInParams();
     setReturnTo(params.returnTo);
     setSessionExpired(params.expired);
+    const q = new URLSearchParams(window.location.search);
+    const ssoError = q.get('sso_error');
+    if (ssoError) setError(ssoError);
+    if (q.get('reset') === 'done') setNotice('Your password was changed. Sign in with the new one.');
+    const prefill = q.get('email');
+    if (prefill) setForm((f) => ({ ...f, email: prefill }));
   }, []);
+
+  function finishSignIn(data: { access_token?: string; refresh_token?: string }) {
+    if (!data.access_token) return;
+    localStorage.setItem('access_token', data.access_token);
+    if (data.refresh_token) localStorage.setItem('refresh_token', data.refresh_token);
+    window.location.href = returnTo;
+  }
+
+  async function submitCode(e: React.FormEvent) {
+    e.preventDefault();
+    if (!twoFactor) return;
+    setLoading(true);
+    setError('');
+    try {
+      const res = await fetch(`${API_URL}/api/auth/login/2fa`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ challenge: twoFactor.challenge, code }),
+      });
+      const json = await res.json();
+      if (json.error) {
+        setError(json.error.message);
+        if (res.status === 401 && /took too long/i.test(json.error.message)) setTwoFactor(null);
+        return;
+      }
+      finishSignIn(json.data || {});
+    } catch {
+      setError('Connection failed');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function startSso(e: React.FormEvent) {
+    e.preventDefault();
+    setLoading(true);
+    setError('');
+    try {
+      const res = await fetch(`${API_URL}/api/auth/sso/discover`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: form.email }),
+      });
+      const json = await res.json();
+      if (json.error) {
+        setError(json.error.message);
+        return;
+      }
+      const url = new URL(json.data.start_url);
+      url.searchParams.set('return_to', returnTo);
+      window.location.href = url.toString();
+    } catch {
+      setError('Connection failed');
+    } finally {
+      setLoading(false);
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -105,6 +180,11 @@ export default function AuthCard() {
         return;
       }
 
+      if (json.data?.two_factor_required) {
+        setTwoFactor({ challenge: json.data.challenge, email: json.data.email });
+        setCode('');
+        return;
+      }
       if (json.data?.access_token) {
         localStorage.setItem('access_token', json.data.access_token);
         localStorage.setItem('refresh_token', json.data.refresh_token);
@@ -143,11 +223,12 @@ export default function AuthCard() {
         return;
       }
 
-      if (json.data?.access_token) {
-        localStorage.setItem('access_token', json.data.access_token);
-        localStorage.setItem('refresh_token', json.data.refresh_token);
-        window.location.href = returnTo;
+      if (json.data?.two_factor_required) {
+        setTwoFactor({ challenge: json.data.challenge, email: json.data.email });
+        setCode('');
+        return;
       }
+      finishSignIn(json.data || {});
     } catch {
       setError('Connection failed');
     } finally {
@@ -196,6 +277,122 @@ export default function AuthCard() {
           </p>
         )}
 
+        {notice && (
+          <p
+            role="status"
+            data-testid="auth-notice"
+            className="mt-4 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-200 text-center"
+          >
+            {notice}
+          </p>
+        )}
+
+        {twoFactor ? (
+          <form onSubmit={submitCode} className="mt-6 space-y-4" data-testid="auth-2fa-form">
+            <div className="rounded-lg border border-cyan-500/30 bg-cyan-500/5 px-3 py-2.5 text-xs text-cyan-100">
+              Two-step sign-in is on for {twoFactor.email}. Open your authenticator app and type the
+              6-digit code it shows for Abenix.
+            </div>
+            <div>
+              <label htmlFor="auth-2fa-code" className="block text-xs font-medium text-slate-400 mb-1.5">
+                Code from your app
+              </label>
+              <div className="relative">
+                <KeyRound className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" aria-hidden="true" />
+                <input
+                  id="auth-2fa-code"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  autoFocus
+                  placeholder="123456"
+                  value={code}
+                  onChange={(e) => {
+                    setCode(e.target.value);
+                    setError('');
+                  }}
+                  required
+                  maxLength={20}
+                  className="w-full bg-slate-800/50 border border-slate-700 rounded-lg pl-10 pr-4 py-3 text-white text-sm tracking-widest placeholder-slate-500 focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500/50 transition outline-none"
+                />
+              </div>
+              <p className="text-xs text-slate-500 mt-1">
+                Lost your phone? Type one of the recovery codes you saved instead.
+              </p>
+            </div>
+            {error && <p role="alert" className="text-red-400 text-xs">{error}</p>}
+            <button
+              type="submit"
+              disabled={loading || !code.trim()}
+              data-testid="auth-2fa-submit"
+              className="w-full bg-gradient-to-r from-cyan-500 to-purple-600 text-white font-semibold py-3 rounded-lg shadow-lg shadow-cyan-500/25 transition-all flex items-center justify-center gap-2 text-sm disabled:opacity-50"
+            >
+              {loading ? (
+                <span className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" aria-hidden="true" />
+              ) : (
+                <>Verify and sign in<ArrowRight className="w-4 h-4" aria-hidden="true" /></>
+              )}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setTwoFactor(null);
+                setError('');
+              }}
+              className="w-full text-xs text-slate-400 hover:text-slate-200 inline-flex items-center justify-center gap-1"
+            >
+              <ArrowLeft className="w-3 h-3" aria-hidden="true" /> Use a different account
+            </button>
+          </form>
+        ) : ssoMode ? (
+          <form onSubmit={startSso} className="mt-6 space-y-4" data-testid="auth-sso-form">
+            <p className="text-xs text-slate-400">
+              Type your work email. If your company signs in to Abenix with single sign-on, we send you
+              to its sign-in page.
+            </p>
+            <div>
+              <label htmlFor="auth-sso-email" className="block text-xs font-medium text-slate-400 mb-1.5">
+                Work email
+              </label>
+              <div className="relative">
+                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" aria-hidden="true" />
+                <input
+                  id="auth-sso-email"
+                  type="email"
+                  autoFocus
+                  placeholder="you@company.com"
+                  value={form.email}
+                  onChange={(e) => updateField('email', e.target.value)}
+                  required
+                  className="w-full bg-slate-800/50 border border-slate-700 rounded-lg pl-10 pr-4 py-3 text-white text-sm placeholder-slate-500 focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500/50 transition outline-none"
+                />
+              </div>
+            </div>
+            {error && <p role="alert" className="text-red-400 text-xs">{error}</p>}
+            <button
+              type="submit"
+              disabled={loading}
+              data-testid="auth-sso-submit"
+              className="w-full bg-gradient-to-r from-cyan-500 to-purple-600 text-white font-semibold py-3 rounded-lg shadow-lg shadow-cyan-500/25 transition-all flex items-center justify-center gap-2 text-sm disabled:opacity-50"
+            >
+              {loading ? (
+                <span className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" aria-hidden="true" />
+              ) : (
+                <>Continue with single sign-on<ArrowRight className="w-4 h-4" aria-hidden="true" /></>
+              )}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setSsoMode(false);
+                setError('');
+              }}
+              className="w-full text-xs text-slate-400 hover:text-slate-200 inline-flex items-center justify-center gap-1"
+            >
+              <ArrowLeft className="w-3 h-3" aria-hidden="true" /> Sign in with a password instead
+            </button>
+          </form>
+        ) : (
+          <>
         <div className="flex mt-6 border-b border-slate-700/50">
           {(['login', 'register'] as Tab[]).map((t) => (
             <button
@@ -308,22 +505,17 @@ export default function AuthCard() {
                 </p>
               </>
             )}
-            {/*
-              Self-serve password reset isn't wired yet — link to a
-              mailto so users have a clear next step instead of a
-              dead end. The href will switch to an /auth/forgot
-              flow once that ships. Always rendered (both tabs) so a
-              user who got here via the wrong tab can still find help.
-            */}
-            <div className="mt-2 text-right">
-              <a
-                href="mailto:support@abenix.dev?subject=Password%20reset"
-                className="text-xs text-cyan-400/80 hover:text-cyan-300 transition"
-                aria-label="Forgot password? Email support"
-              >
-                Forgot password?
-              </a>
-            </div>
+            {tab === 'login' && (
+              <div className="mt-2 text-right">
+                <a
+                  href={`/auth/forgot${form.email ? `?email=${encodeURIComponent(form.email)}` : ''}`}
+                  className="text-xs text-cyan-400/80 hover:text-cyan-300 transition"
+                  data-testid="auth-forgot-link"
+                >
+                  Forgot password?
+                </a>
+              </div>
+            )}
           </div>
 
           {error && (
@@ -402,6 +594,24 @@ export default function AuthCard() {
               )}
             </div>
           </div>
+        )}
+
+
+        <div className="mt-3">
+          <button
+            type="button"
+            onClick={() => {
+              setSsoMode(true);
+              setError('');
+            }}
+            data-testid="auth-sso-toggle"
+            className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg border border-slate-700 bg-slate-800/40 text-sm text-slate-200 hover:border-slate-500 hover:bg-slate-800 transition"
+          >
+            <Building2 className="w-4 h-4" aria-hidden="true" />
+            Sign in with your company (SSO)
+          </button>
+        </div>
+          </>
         )}
 
         <div className="mt-4 text-center">

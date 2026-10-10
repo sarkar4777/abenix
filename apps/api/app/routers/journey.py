@@ -22,7 +22,14 @@ from models.governance import RiskPolicy
 from models.improvement import Feedback, ImprovementProposal
 from models.knowledge_base import KnowledgeBase
 from models.moderation_policy import ModerationPolicy
+from models.team_invite import TeamInvite
 from models.user import User
+
+SEEDED_EMAILS = (
+    "system@abenix.dev",
+    "demo@abenix.dev",
+    "viewer@abenix.dev",
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/me/journey", tags=["journey"])
@@ -89,13 +96,19 @@ async def _model_connected(db: AsyncSession) -> bool:
 
 async def admin_facts(db: AsyncSession, user: User) -> dict[str, bool]:
     t = user.tenant_id
+    # seeded demo accounts are not a team, an invite or a real colleague is
     users = (
         await db.execute(
             select(func.count())
             .select_from(User)
-            .where(User.tenant_id == t, User.is_active.is_(True))
+            .where(
+                User.tenant_id == t,
+                User.is_active.is_(True),
+                User.email.notin_(SEEDED_EMAILS),
+            )
         )
     ).scalar() or 0
+    invited = await _exists(db, select(TeamInvite.id).where(TeamInvite.tenant_id == t))
     risk_changed = await _exists(
         db,
         select(RiskPolicy.id).where(
@@ -110,7 +123,7 @@ async def admin_facts(db: AsyncSession, user: User) -> dict[str, bool]:
     )
     return {
         "connect_model": await _model_connected(db),
-        "invite_team": int(users) > 1,
+        "invite_team": invited or int(users) > 1,
         "review_risk": risk_changed or _seen(user, "risk"),
         "moderation": moderation_on,
     }

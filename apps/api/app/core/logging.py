@@ -49,6 +49,15 @@ def setup_logging(log_level: str = "INFO", debug: bool = False) -> None:
     for noisy in ("uvicorn.access", "httpx", "httpcore"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
+    try:
+        from engine import log_redaction
+    except ImportError:
+        logging.getLogger(__name__).warning(
+            "engine.log_redaction not importable, LLM request bodies are not redacted"
+        )
+        return
+    log_redaction.install()
+
 
 def get_logger(name: str) -> structlog.stdlib.BoundLogger:
     return structlog.get_logger(name)

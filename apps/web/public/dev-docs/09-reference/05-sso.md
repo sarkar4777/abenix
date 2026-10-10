@@ -1,85 +1,89 @@
 # SSO / OIDC sign-in
 
-Abenix ships three OIDC sign-in paths out of the box — **Google**, **GitHub**, **Microsoft (Azure AD)** — alongside the email + password flow. Each provider is opt-in, configured by env var, and disabled gracefully when its creds are absent.
+There are two kinds. **Workspace SSO** is set up by a workspace admin in the UI and works with any OpenID Connect provider. **Platform providers** (Google, GitHub, Microsoft) are turned on by an operator with env vars and anyone can use them.
 
-## What you ship as a developer
+## Workspace SSO
 
-When you set the creds, three things happen automatically:
+An admin opens Settings, Single sign-on and fills in the provider's issuer URL, a client ID and secret, the company's email domains and the role new people get. The page shows the redirect address to register with the provider. Test connection fetches the provider's discovery document so a typo shows up before anyone tries to sign in.
 
-1. `/api/auth/oidc/providers` starts listing the newly-configured provider.
-2. The login page picks that up on render and shows the matching "Sign in with X" button.
-3. End users completing the OAuth handshake get a fresh Abenix tenant (if their email is new) or get linked to their existing password account (if the email already exists).
+On the sign-in page people choose Sign in with your company (SSO) and type their work email. `POST /api/auth/sso/discover` finds the workspace that owns the domain and sends the browser to `/api/auth/sso/<workspace>/start`, which redirects to the provider. The callback exchanges the code on the back channel, checks the ID token's audience, issuer, expiry and nonce, and then:
 
-No code change is needed to enable a provider. No code change is needed if you turn one off either — the button just stops rendering.
+- finds the member by provider subject, or by email inside the same workspace,
+- refuses an email that already belongs to another workspace, so a provider cannot claim someone else's account,
+- refuses an email outside the configured domains,
+- creates the member with the configured role when Create an account is on, or asks them to get an invite when it is off.
 
-## The wire flow
+Errors come back to the sign-in page as a plain message. The issuer must be public `https://`. A dev cluster maps a localhost issuer to a service name with `OIDC_INTERNAL_URL_MAP`, see [08-dev-catchers](../06-deployment/08-dev-catchers.md).
+
+Every sign-in, SSO included, starts a session that shows up under Settings, Security, where it can be signed out.
+
+## Platform providers
+
+Abenix has three sign-in providers besides email and password: **Google**, **GitHub** and **Microsoft (Azure AD / Entra ID)**. Each one is opt-in and turned on by env vars on the API. With none configured the login page shows only email and password.
+
+## What users see
+
+The login page asks `GET /api/auth/oidc/providers` which providers are configured and renders one "Sign in with X" button for each. The user signs in at the provider and lands back on Abenix signed in.
+
+- **New email.** A first-time SSO user gets a new tenant named `<full name>'s Workspace`, the `admin` role and the default moderation policy, the same as a password sign-up.
+- **Known email.** If the email already belongs to a password account, the SSO identity is linked to that account. The password keeps working and SSO resolves to the same user.
+- **Returning SSO user.** Matched by provider and provider subject. Name and avatar are refreshed on each sign-in.
+
+No code change or web rebuild is needed to turn a provider on or off. Set or remove its env vars and restart the API.
+
+## The flow
 
 ```mermaid
 sequenceDiagram
   autonumber
   participant U as User
-  participant SPA as Abenix SPA
+  participant B as Browser
   participant API as Abenix API
   participant P as Provider<br/>(Google / GitHub / Microsoft)
 
-  U->>SPA: click "Sign in with Google"
-  SPA->>API: GET /api/auth/oidc/google/start?return_to=/dashboard
-  API->>API: sign state JWT (10 min expiry, provider+return_to+nonce)
-  API-->>SPA: 302 to provider authorize URL
-  SPA->>P: GET authorize?client_id=...&state=...
-  U->>P: authenticate + consent
-  P-->>SPA: 302 to /api/auth/oidc/google/callback?code=...&state=...
-  SPA->>API: GET /api/auth/oidc/google/callback
+  U->>B: click "Sign in with Google"
+  B->>API: GET /api/auth/oidc/google/start?return_to=/dashboard
+  API->>API: sign state JWT (provider, return_to, nonce, 10 min expiry)
+  API-->>B: 302 to provider authorize URL
+  B->>P: GET authorize?client_id=...&state=...
+  U->>P: authenticate and consent
+  P-->>B: 302 to /api/auth/oidc/google/callback?code=...&state=...
+  B->>API: GET /api/auth/oidc/google/callback
   API->>API: verify state JWT
   API->>P: POST token endpoint (exchange code)
   P-->>API: access_token
-  API->>P: GET userinfo
-  P-->>API: { sub, email, name, picture }
-  API->>API: upsert by (provider, sub) -> by email -> new tenant
-  API->>API: issue access + refresh tokens
-  API-->>SPA: 302 to WEB_BASE_URL/auth/callback#tokens
-  SPA->>SPA: stash tokens, forward to return_to
+  API->>P: GET user profile
+  P-->>API: { id, email, name, picture }
+  API->>API: find user by (provider, subject), then by email, else create tenant + user
+  API->>API: issue Abenix access and refresh tokens
+  API-->>B: 302 to WEB_BASE_URL/auth/callback#access_token=...&refresh_token=...&return_to=...
+  B->>B: store tokens, go to return_to
 ```
 
-State is a signed JWT (HS256, reuses `JWT_SECRET_KEY`) — no Redis needed, the state is self-contained. The state carries `provider`, `return_to`, a 16-byte `nonce`, and a 10-minute `exp`. On callback the API rejects any state where the provider field doesn't match the callback path or the JWT signature is wrong.
+The state is a signed JWT (HS256, signed with `JWT_SECRET_KEY`), so nothing is stored in Redis or the database. It carries `provider`, `return_to`, a random `nonce`, `type: oidc_state` and a 10-minute `exp`. On callback the API rejects a state with a bad signature, an expired `exp`, the wrong `type`, or a `provider` that does not match the callback path.
 
-## The data model
+Tokens go back in the URL fragment, so they never reach a server log. The web page at `/auth/callback` reads them and forwards to `return_to`.
 
-Two columns on `users` (added in migration `a7b8c9d0e1f2_sso_external_auth.py`):
+## Required env vars on the API
 
-| Column | Type | Notes |
-|---|---|---|
-| `auth_provider` | `varchar(32)` | NULL for password-auth users. Otherwise `google` / `github` / `microsoft` (extensible — anything < 32 chars works). |
-| `external_id` | `varchar(255)` | The provider's stable subject. Google's `sub`, GitHub's numeric `id`, Microsoft's `oid`. |
+Whichever providers you turn on, the API needs two public URLs:
 
-Unique index `ix_users_provider_external` on `(auth_provider, external_id)` so the callback resolves in one query without scanning.
-
-`password_hash` is now nullable. SSO-provisioned users have `password_hash = NULL`. Local users keep their hash. If a local user signs in via SSO with the same email later, we **link the SSO** to their existing account — both flows continue to work afterwards.
-
-## Adding a new OIDC provider
-
-The router pattern is small enough that adding a fourth provider (Okta, Auth0, Keycloak, your in-house IdP) is mostly copy-paste. The contract:
-
-1. Add the slug to the `PROVIDERS` tuple in `apps/api/app/routers/sso.py`.
-2. Add a `_provider_configured(...)` branch that returns `True` when the relevant env vars are set.
-3. Add a branch in `start()` that builds the authorize URL with the provider's params.
-4. Add an `_exchange_<provider>(code)` helper that returns `{ external_id, email, full_name, avatar_url }`.
-5. Add a branch in `callback()` that calls your helper.
-
-For a fully spec-compliant OIDC provider, steps 3 and 4 are nearly identical to the existing Google branch. Look at `apps/api/app/routers/sso.py` for the cleanest reference.
-
-## Required env vars on the API pod
-
-Independent of which providers you enable, two URLs MUST be set:
-
-```
-PUBLIC_API_BASE_URL=https://api.your-host.com    # where the provider redirects back
-WEB_BASE_URL=https://app.your-host.com           # SPA root for the final hop
+```bash
+PUBLIC_API_BASE_URL=https://api.your-host.com   # where the provider redirects back
+WEB_BASE_URL=https://app.your-host.com           # web root for the final redirect
 ```
 
-These are the URLs end users hit — not in-cluster service names. Get them wrong and the OAuth handshake fails with `redirect_uri_mismatch`.
+They default to `http://localhost:8000` and `http://localhost:3000`. Use the URLs users reach, not in-cluster service names. A wrong value fails the handshake with `redirect_uri_mismatch` at the provider.
 
-## Per-provider env vars
+The redirect URI to register with every provider is:
+
+```
+${PUBLIC_API_BASE_URL}/api/auth/oidc/<provider>/callback
+```
+
+## Per-provider setup
+
+A provider counts as configured when both its client ID and client secret are set.
 
 ### Google
 
@@ -88,7 +92,11 @@ These are the URLs end users hit — not in-cluster service names. Get them wron
 | `GOOGLE_OIDC_CLIENT_ID` | yes |
 | `GOOGLE_OIDC_CLIENT_SECRET` | yes |
 
-Redirect URI to register with Google: `${PUBLIC_API_BASE_URL}/api/auth/oidc/google/callback`. Get the client ID at <https://console.cloud.google.com/apis/credentials> as an "OAuth 2.0 Client ID" of type "Web application".
+1. Open [Google Cloud Console, Credentials](https://console.cloud.google.com/apis/credentials).
+2. Create an **OAuth 2.0 Client ID** of type **Web application**.
+3. Add the authorized redirect URI `https://api.your-host.com/api/auth/oidc/google/callback`.
+
+Scopes requested: `openid email profile`. The subject stored is Google's `sub`.
 
 ### GitHub
 
@@ -97,99 +105,120 @@ Redirect URI to register with Google: `${PUBLIC_API_BASE_URL}/api/auth/oidc/goog
 | `GITHUB_OAUTH_CLIENT_ID` | yes |
 | `GITHUB_OAUTH_CLIENT_SECRET` | yes |
 
-Redirect URI: `${PUBLIC_API_BASE_URL}/api/auth/oidc/github/callback`. Register at <https://github.com/settings/developers> → "New OAuth App".
+1. Open [Developer settings, OAuth Apps](https://github.com/settings/developers) and click **New OAuth App**.
+2. Set the authorization callback URL to `https://api.your-host.com/api/auth/oidc/github/callback`.
 
-The user must have a **verified primary email** on GitHub for sign-in to succeed, because the API needs the email to provision or link the account.
+Scopes requested: `read:user user:email`. The subject stored is GitHub's numeric user `id`. The user needs a **verified email** on GitHub. If the profile email is hidden, the API reads `/user/emails` and takes the verified primary one, or any verified one.
 
-### Microsoft (Azure AD)
+### Microsoft (Azure AD / Entra ID)
 
 | Env var | Required |
 |---|---|
 | `MICROSOFT_OIDC_CLIENT_ID` | yes |
 | `MICROSOFT_OIDC_CLIENT_SECRET` | yes |
-| `MICROSOFT_OIDC_TENANT` | no (default `common`) |
+| `MICROSOFT_OIDC_TENANT` | no, default `common` |
 
-Redirect URI: `${PUBLIC_API_BASE_URL}/api/auth/oidc/microsoft/callback`. Register at <https://portal.azure.com> → App registrations.
+1. Open [Azure portal, App registrations](https://portal.azure.com/#blade/Microsoft_AAD_RegisteredApps/ApplicationsListBlade) and register an app with platform **Web**.
+2. Set the redirect URI to `https://api.your-host.com/api/auth/oidc/microsoft/callback`.
+3. Create a client secret under **Certificates & secrets**.
 
-`MICROSOFT_OIDC_TENANT=common` accepts personal + work accounts. Set it to your tenant GUID (e.g. `9188040d-6c67-...`) to restrict sign-in to a single org.
+`common` accepts personal and work accounts. Set `MICROSOFT_OIDC_TENANT` to your directory (tenant) ID to allow only your organization. The API reads the profile from Microsoft Graph `/me`. The subject stored is the Graph object `id`, and the email is `mail`, or `userPrincipalName` when `mail` is empty.
 
-## kubectl one-liner (AKS / GKE / EKS)
+## Turning it on
 
-To enable Google + Microsoft on an existing deployment:
+### Local dev
 
-```bash
-kubectl create secret generic abenix-sso \
-  --from-literal=GOOGLE_OIDC_CLIENT_ID=... \
-  --from-literal=GOOGLE_OIDC_CLIENT_SECRET=... \
-  --from-literal=MICROSOFT_OIDC_CLIENT_ID=... \
-  --from-literal=MICROSOFT_OIDC_CLIENT_SECRET=... \
-  --from-literal=PUBLIC_API_BASE_URL=https://api.your-host.com \
-  --from-literal=WEB_BASE_URL=https://app.your-host.com \
-  -n abenix --dry-run=client -o yaml | kubectl apply -f -
-
-kubectl set env deploy/abenix-api --from=secret/abenix-sso -n abenix
-kubectl rollout restart deploy/abenix-api -n abenix
-```
-
-## Helm one-liner
-
-```bash
-helm upgrade abenix infra/helm/abenix \
-  --set secrets.google_oidc_client_id=... \
-  --set secrets.google_oidc_client_secret=... \
-  --set secrets.microsoft_oidc_client_id=... \
-  --set secrets.microsoft_oidc_client_secret=... \
-  --set secrets.public_api_base_url=https://api.your-host.com \
-  --set secrets.web_base_url=https://app.your-host.com \
-  --reuse-values
-```
-
-## Local dev recipe
-
-The minimum loop to test Google sign-in against your laptop:
-
-1. Create an OAuth client at <https://console.cloud.google.com/apis/credentials>. Authorized redirect URI: `http://localhost:8000/api/auth/oidc/google/callback`.
-2. Export and restart the API:
+1. Create an OAuth client with redirect URI `http://localhost:8000/api/auth/oidc/google/callback`.
+2. Add to `.env`:
    ```bash
-   export GOOGLE_OIDC_CLIENT_ID=...
-   export GOOGLE_OIDC_CLIENT_SECRET=...
-   export PUBLIC_API_BASE_URL=http://localhost:8000
-   export WEB_BASE_URL=http://localhost:3000
+   GOOGLE_OIDC_CLIENT_ID=...
+   GOOGLE_OIDC_CLIENT_SECRET=...
+   PUBLIC_API_BASE_URL=http://localhost:8000
+   WEB_BASE_URL=http://localhost:3000
    ```
-3. Reload the login page at <http://localhost:3000>. The Google button appears.
+3. Run `bash scripts/dev-local.sh --restart` and reload <http://localhost:3000>. The Google button appears.
 
-GitHub and Microsoft work the same way — register a callback URL pointing at `localhost:8000`, export the matching env vars, restart the API.
+GitHub and Microsoft work the same way with their own env vars. See also [ONBOARDING.md, Optional: SSO local test](../../ONBOARDING.md#optional-sso-local-test).
 
-## Failure modes (and how the code handles them)
+### Kubernetes
 
-| Failure | What happens |
+The chart has SSO keys under `secrets.sso`. Each one that is set lands in `abenix-secrets`, which the API already reads:
+
+```yaml
+publicApiUrl: https://api.your-host.com     # PUBLIC_API_BASE_URL, the callback base
+frontendUrl: https://app.your-host.com      # where the browser lands after sign-in
+secrets:
+  sso:
+    googleClientId: ...
+    googleClientSecret: ...
+    githubClientId: ""
+    githubClientSecret: ""
+    microsoftClientId: ""
+    microsoftClientSecret: ""
+    microsoftTenant: ""                     # empty means common
+```
+
+`deploy.sh` and `deploy-azure.sh` fill these from `GOOGLE_OIDC_CLIENT_ID`, `GOOGLE_OIDC_CLIENT_SECRET`, `GITHUB_OAUTH_CLIENT_ID`, `GITHUB_OAUTH_CLIENT_SECRET`, `MICROSOFT_OIDC_CLIENT_ID`, `MICROSOFT_OIDC_CLIENT_SECRET` and `MICROSOFT_OIDC_TENANT` when they are in your `.env`. An empty key is left out of the Secret, so a provider never shows as half configured.
+
+Admins can check which providers are live at **Settings > Integrations**, under "Identity provider (SSO)".
+
+## Data model
+
+Migration [`a7b8c9d0e1f2_sso_external_auth.py`](../../packages/db/alembic/versions/a7b8c9d0e1f2_sso_external_auth.py) adds two columns to `users`:
+
+| Column | Type | Notes |
+|---|---|---|
+| `auth_provider` | `varchar(32)` | NULL for password users, else `google`, `github` or `microsoft` |
+| `external_id` | `varchar(255)` | The provider's stable subject for the user |
+
+The unique index `ix_users_provider_external` on `(auth_provider, external_id)` makes the callback lookup a single query. `password_hash` is nullable, and SSO-created users have none. A linked password user keeps their hash, so both sign-in paths work.
+
+## Errors
+
+| Case | Response |
 |---|---|
-| Caller hits `/start` for a provider with no env config | 503 `<provider> SSO is not configured on this deployment` |
-| State JWT expired or signature invalid | 400 `Invalid or expired OIDC state` |
-| Code exchange call to provider 5xx's | 502 `Token exchange with <provider> failed: <reason>` |
-| Provider returns no email (e.g. GitHub user has no verified email) | 400 `<provider> account has no verified email` |
-| Account is disabled (`users.is_active = false`) | 403 `Account is disabled` |
-| `return_to` is not a relative path | quietly rewritten to `/dashboard` — open-redirect attempt blocked |
+| Unknown provider slug | 404 `Unknown provider: <provider>` |
+| Provider has no client ID or secret | 503 `<provider> SSO is not configured on this deployment` |
+| User denied consent at the provider | 400 `<provider> authorization denied: <error>` |
+| `code` or `state` missing on callback | 400 `Missing code or state` |
+| State expired, tampered with or for another provider | 400 `Invalid or expired OIDC state` |
+| Token or profile call to the provider failed | 502 `Token exchange with <provider> failed: <reason>` |
+| GitHub or Microsoft account has no usable email | 400 with the reason |
+| Profile has no email or subject | 502 `<provider> returned an incomplete profile (missing email or subject)` |
+| User is disabled (`users.is_active = false`) | 403 `Account is disabled` |
+| `return_to` is not a relative path | replaced with `/dashboard`, which blocks open redirects |
 
-All five paths log to `activity_log`, so a `user.sso_link_failed` audit row exists for forensics.
+A provider that is half configured only loses its own button. Sign-in for everyone else keeps working.
+
+Successful paths write audit rows to `activity_log`: `user.registered_via_sso` for a new account, `user.sso_linked` when an existing password account is linked, and `user.login_sso` on every SSO sign-in. Failed attempts are not audited.
 
 ## Security notes
 
-- **State is self-contained, not stored.** A leaked state token from a man-in-the-middle still can't be replayed because (a) it expires in 10 minutes and (b) the provider's `code` is single-use.
-- **The `code → token` exchange** runs on the API server, never in the browser. The provider's client secret never reaches the SPA.
-- **No PKCE yet.** State JWT does the equivalent of PKCE for our threat model (server-side IdP, no public client). For a public-client variant (mobile, native), add a PKCE branch on `start()` and verify in `callback()`.
-- **The Abenix JWT issued after sign-in** is the same shape as the password-auth JWT. Downstream code can't tell — and doesn't need to tell — which path the user came in through.
+- **State is self-contained.** It expires in 10 minutes and the provider's `code` is single use, so a leaked state cannot be replayed.
+- **The code exchange runs on the API.** The client secret never reaches the browser.
+- **No PKCE.** The signed state covers the same risk for a server-side confidential client. A public client (mobile, native) would need a PKCE branch in `start()` and a check in `callback()`.
+- **Same tokens as password sign-in.** Downstream code cannot tell which way the user signed in, and does not need to.
 
-## What's NOT shipped yet (roadmap)
+## Adding a provider
 
-- **SAML** — OIDC covers Okta / Azure AD / Google Workspace / GitHub Enterprise. SAML is on the roadmap for the enterprise tier. File an issue if your IdP only speaks SAML.
-- **Just-in-time provisioning rules** — currently a fresh SSO user always gets their own tenant. Adding "if email is `@acme.com`, join the acme tenant as a `user` role" requires extending `_upsert_user()` in `sso.py` with a tenant-mapping table.
-- **Logout federation (RP-initiated logout)** — the Abenix logout clears local tokens but does NOT call the provider's end-session endpoint. Most users want this, and it can land if anyone files the issue.
+Okta, Auth0, Keycloak or an in-house IdP follow the Google pattern in [`apps/api/app/routers/sso.py`](../../apps/api/app/routers/sso.py):
+
+1. Add the slug to the `PROVIDERS` tuple.
+2. Add a branch to `_provider_configured()` that checks its env vars.
+3. Add a branch to `start()` that builds the authorize URL.
+4. Add an `_exchange_<provider>(code)` helper that returns `{external_id, email, full_name, avatar_url}`.
+5. Call it from `callback()`.
+
+The login buttons live in [`AuthCard.tsx`](../../apps/web/src/components/landing/AuthCard.tsx), so a new provider also needs a button there.
+
+## Not built yet
+
+- **SAML.** OIDC covers Okta, Azure AD, Google Workspace and GitHub Enterprise. File an issue if your IdP only speaks SAML.
+- **Tenant mapping.** A new SSO user always gets their own tenant. Rules like "`@acme.com` joins the acme tenant as `user`" would need a mapping table and a change to `_upsert_user()`.
+- **Federated logout.** Abenix logout clears local tokens but does not call the provider's end-session endpoint.
 
 ## Related
 
-- End-user-facing setup guide: [`docs/sso.md`](../sso.md) — same content, indexed for non-developers
-- Settings page that surfaces SSO config status to admins: `/settings/integrations` → "Identity provider (SSO)"
-- Migration: [`packages/db/alembic/versions/a7b8c9d0e1f2_sso_external_auth.py`](../../packages/db/alembic/versions/a7b8c9d0e1f2_sso_external_auth.py)
 - Router: [`apps/api/app/routers/sso.py`](../../apps/api/app/routers/sso.py)
-- SPA callback: [`apps/web/src/app/auth/callback/page.tsx`](../../apps/web/src/app/auth/callback/page.tsx)
+- Web callback: [`apps/web/src/app/auth/callback/page.tsx`](../../apps/web/src/app/auth/callback/page.tsx)
+- Env vars: [01-env-vars.md](01-env-vars.md)

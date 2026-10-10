@@ -20,6 +20,8 @@ Rules
   5. Every tool declares its risk_tier.
   6. Every tool at medium tier or above declares an `effect`, READ_ONLY for
      one that only reads, so the autonomy gate knows what it changes.
+  7. A string that is exactly a credential name (..._API_KEY, _SECRET, _TOKEN,
+     _PASSWORD) is declared, which catches keys read through a lookup table.
 
 Reads are found on the AST, so a name inside a string literal or a call split
 over several lines is seen for what it is.
@@ -192,6 +194,33 @@ def scan_files():
     return env_reads, dynamic, cfg_reads, cfg_dynamic
 
 
+CRED_NAME = re.compile(r"^[A-Z][A-Z0-9_]*_(API_KEY|SECRET|TOKEN|PASSWORD)$")
+
+
+def credential_literals() -> dict[str, set[Path]]:
+    """String constants that are exactly a credential-style env name."""
+    found: dict[str, set[Path]] = defaultdict(set)
+    for f in sorted(TOOLS.rglob("*.py")):
+        try:
+            tree = ast.parse(f.read_text(encoding="utf-8-sig"))
+        except SyntaxError:
+            continue
+        # a fallback in d.get("env", "AUTH_TOKEN") is display text, not a read
+        defaults = {
+            id(n.args[1])
+            for n in ast.walk(tree)
+            if isinstance(n, ast.Call)
+            and isinstance(n.func, ast.Attribute)
+            and n.func.attr == "get"
+            and len(n.args) > 1
+        }
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                if CRED_NAME.match(node.value) and id(node) not in defaults:
+                    found[node.value].add(f)
+    return found
+
+
 def tool_classes():
     """Every BaseTool subclass under engine/tools, by import, plus failures."""
     sys.path.insert(0, str(RUNTIME))
@@ -271,6 +300,13 @@ def main(argv: list[str]) -> int:
         if key not in declared and not is_infra(key):
             problems.append(
                 f"{', '.join(sorted(rel(p) for p in files))}: reads {key} through cfg() but no tool declares it."
+            )
+
+    # 2b. a credential named in a lookup table and read under a run-time name
+    for key, files in sorted(credential_literals().items()):
+        if key not in declared and not is_infra(key):
+            problems.append(
+                f"{', '.join(sorted(rel(p) for p in files))}: names the credential {key} but no tool declares it. Add it to config_fields, dynamic=True when it is read through a table."
             )
 
     # 3. declared but never read

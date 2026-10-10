@@ -250,3 +250,12 @@ e2e/uat_*/report.json
 e2e/uat_*/report.md
 e2e/uat_*/state.json
 e2e/uat_first_use_tasks/
+
+# sdk e2e: key minted in the UI and build output
+e2e/sdk/.sdk-key
+e2e/sdk/js/node_modules/
+e2e/sdk/**/shots/
+
+# scripts/ci-e2e-stack.sh logs and its copy of the web build
+logs/ci-e2e/
+claimsiq/.gradle/

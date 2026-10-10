@@ -7,18 +7,32 @@
 [`apps/api/app/core/crypto.py`](../../apps/api/app/core/crypto.py) encrypts
 these values before they are written:
 
-| Value | Where it is stored |
-|---|---|
-| Tool credentials saved from **Admin -> Tool Configuration**, platform scope | `platform_settings`, keys `tool.credential.<KEY>` |
-| Tool credentials saved for one tenant | `tenant_tool_credentials` |
-| Tenant Slack webhook URL | `tenants.slack_webhook_url` |
-| Approval webhook secret | `tenants.settings.approval_webhook_secret` |
-| MCP connection secrets and OAuth access tokens | MCP connection rows |
+| Value | Where it is stored | Key scope |
+|---|---|---|
+| Tool credentials saved from **Admin -> Tool Configuration**, platform scope | `platform_settings`, keys `tool.credential.<KEY>` | platform |
+| Tool credentials saved for one tenant | `tenant_tool_credentials` | platform |
+| Connector secrets | `tenant_tool_credentials` | platform |
+| Tenant Slack webhook URL | `tenants.slack_webhook_url` | tenant |
+| Approval webhook secret | `tenants.settings.approval_webhook_secret` | tenant |
+| MCP connection secrets and OAuth access tokens | MCP connection rows | tenant |
+| Content held by moderation for review | `moderation_reviews.held_content` | tenant |
+
+Tool credentials and connector secrets all use one fixed platform scope, even
+when the row belongs to one tenant, so the runtime decodes every credential row
+the same way ([`tool_secrets.py`](../../apps/api/app/core/tool_secrets.py) and
+`decode_stored()` in
+[`engine/credentials.py`](../../apps/agent-runtime/engine/credentials.py)). The
+other values use a key derived from their tenant id.
 
 Without a KEK, `encrypt()` returns the value unchanged, so these are stored as
-entered. The platform works the same either way. The Tool Configuration screen
-says which mode is in effect (`encrypted_at_rest` in
-`GET /api/admin/tool-config`).
+entered. The platform works the same either way, but it says so:
+
+- The API logs `Secrets are stored unencrypted. Set ABENIX_DATA_KEY_KEK_BASE64 to encrypt them.` at startup.
+- **Admin -> Tool Configuration** and **Admin -> Connectors** show an amber banner with the same text and a link here. It reads `GET /api/admin/secret-storage`, which admins can call.
+- With `ENVIRONMENT=production` the API refuses to start without a valid KEK. Set `ABENIX_ALLOW_PLAINTEXT_SECRETS=true` to start anyway. Local (`development`) and Azure (`staging`) only warn.
+
+A value that is not base64 or not 32 bytes once decoded counts as no KEK.
+`encrypted_at_rest` in `GET /api/admin/tool-config` reports the same mode.
 
 `persona_items` has `encrypted` and `key_version` columns, but nothing writes
 encrypted persona content today.
@@ -30,12 +44,12 @@ flowchart LR
   KMS[Azure Key Vault<br/>AWS Secrets Manager · Vault] -->|32-byte b64| ENV[ABENIX_DATA_KEY_KEK_BASE64]
   ENV --> KEK[Cluster KEK<br/>32 bytes]
   KEK -->|HMAC-SHA256 of tenant id| DEK_T[DEK per tenant]
-  KEK -->|HMAC-SHA256 of the platform scope| DEK_P[DEK for platform rows]
+  KEK -->|HMAC-SHA256 of the platform scope| DEK_P[DEK for credential rows]
   DEK_T --> CT["AES-256-GCM<br/>v1:base64(nonce + ct + tag)"]
   DEK_P --> CT
 ```
 
-Same KEK and same tenant id give the same DEK on every pod. No shared cache, no
+Same KEK and same scope give the same DEK on every pod. No shared cache, no
 key table.
 
 ## Prerequisites
@@ -107,12 +121,13 @@ kubectl rollout restart deploy -n abenix -l app.kubernetes.io/name=agent-runtime
 kubectl rollout status deploy/abenix-api -n abenix --timeout=120s
 ```
 
-The chart has no checksum annotation on the Secret, so a deploy rolls these pods only when the image tag changes. Restart them anyway.
+The chart has no checksum annotation on the Secret, so a deploy rolls these pods only when the image tag changes. `deploy-azure.sh` tags images with the git commit, so a redeploy from the same commit leaves the old pods running without the key. Restart them anyway.
 
 ## Step 5 — Verify
 
 ```bash
-# the screen's mode, needs an admin token
+# the screen's mode, needs an admin token and the API forward from
+# scripts/portforward-azure.sh (AKS) or scripts/deploy.sh forwards (minikube)
 curl -s -H "Authorization: Bearer <admin token>" http://localhost:8000/api/admin/tool-config | grep -o '"encrypted_at_rest":[a-z]*'
 # → "encrypted_at_rest":true
 
@@ -131,8 +146,8 @@ kubectl exec -n abenix deploy/abenix-api -- sh -c 'printenv ABENIX_DATA_KEY_KEK_
 ## Values saved before the KEK
 
 Rows written while no KEK was set stay as plaintext. There is no backfill job.
-Save each one again from its screen, Tool Configuration, tenant settings or
-approval webhooks, and it is written encrypted.
+Save each one again from its screen (Tool Configuration, Connectors, MCP
+Servers, tenant settings or approval webhooks) and it is written encrypted.
 
 The reverse also holds. A `v1:` value read without the KEK is returned as the
 raw ciphertext string, so tools see a broken credential rather than an error.
@@ -149,8 +164,9 @@ the new KEK, then save each one again.
 | Symptom | Cause | Fix |
 |---|---|---|
 | `encrypted_at_rest` is false | Variable missing on the pod | Steps 3 and 4, check namespace and Secret name |
-| Log line starting `invalid ABENIX_DATA_KEY_KEK_BASE64` | The value is not base64 or not 32 bytes once decoded | Generate again with `openssl rand -base64 32` |
-| Log line `decrypt failed for v=v1` | The KEK changed since the value was written | Put the old KEK back, or save the value again |
+| API log line starting `invalid ABENIX_DATA_KEY_KEK_BASE64` | The value is not base64 or not 32 bytes once decoded. The runtime treats such a value as no KEK, without a log line | Generate again with `openssl rand -base64 32` |
+| API log line `decrypt failed for v=v1` | The KEK changed since the value was written | Put the old KEK back, or save the value again |
+| Runtime log line `tool configuration: stored value could not be decrypted`, and the tool says its key is not configured | Same, for a tool credential. The runtime reads it as empty | Put the old KEK back, or save the value again |
 | Tool says its key is invalid after a redeploy | The deploy ran without the KEK, values are still ciphertext | Put the KEK back in `.env` and redeploy |
 
 ## Related

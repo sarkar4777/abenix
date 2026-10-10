@@ -2,6 +2,15 @@
 
 > The second half of the loop in [22-lessons-and-improvements](22-lessons-and-improvements.md). A group of lessons gets one proposed fix, the fix is proven offline against the agent's own tests and history, a person approves it, it is released as a revision and watched against the old version. Worse means an automatic rollback with the reason. Tables are in [04-data-model/09-self-improvement](../04-data-model/09-self-improvement.md).
 
+## In short
+
+1. **Propose.** A group of lessons gets one small change: examples, a prompt edit, a tool setting, a read-only tool, a model, or a pipeline patch. A person can ask for it, or it is proposed on its own once the group has 5 lessons or turns high severity.
+2. **Prove.** The change runs offline against the agent's tests and a replay of recent real inputs. Tools that act are never executed during a proof. Only a proposal that fixes something, breaks nothing and stays within cost and speed margins goes on.
+3. **Approve.** A person with `improvements.approve` who did not build the agent signs it on `/approvals`. A rejection becomes a lesson for the next draft.
+4. **Watch.** The change is released as a new revision and compared with the old one for 7 days or 200 runs. Anything worse rolls it back at once, with the reason.
+
+Find it on `/improvements` (sidebar **Improvements**, needs `improvements.view`) and on each agent's Improvements tab at `/agents/{id}/improvements`. The step-by-step guide is [08-howto/16-self-improvement](../08-howto/16-self-improvement.md).
+
 ---
 
 ## Where it lives
@@ -42,7 +51,7 @@ One model call on the tenant's own credentials. The model is the tenant's cheape
 |---|---|---|
 | `examples` | `{"examples": [{"input", "output"}]}` | 1 to 5, appended under one header, at most 8 kept, a repeated input replaces the old one |
 | `prompt_edit` | `{"edits": [{"find", "replace"}]}` or `{"append": "..."}` | Each `find` must match exactly once, at most 5 edits, never more than 60% of the instructions |
-| `tool_config` | `{"tool", "set": {...}}` | Only a tool the agent uses, only `parameter_defaults`, `locked_defaults`, `max_calls`, `require_approval`. Never removes an approval step or unlocks a value |
+| `tool_config` | `{"tool", "set": {...}}` | Only a tool the agent uses, only `parameter_defaults`, `locked_defaults`, `max_calls`, `require_approval`. Never removes an approval step or frees a locked value |
 | `tool_set` | `{"add": [..]}` or `{"remove": [..]}` | One tool. Only read-only tools are added, tools that act need a person |
 | `model` | `{"model": "..."}` | Must be on the tier's allowed list |
 | `pipeline_patch` | `{"patch": [JSON-Patch]}` | Pipelines only, drafted by the [Pipeline Surgeon](10-pipeline-healing-drift.md) and checked by its validator |
@@ -59,7 +68,7 @@ The proof runs every case of the agent's suites that is accepted, the suggested 
 - **Sample.** Up to `replay_sample` inputs (default 50) from completed runs of the last 30 days, distinct, round robin over input length and first word.
 - **Progress.** Steps `draft`, `test_set`, `replay`, `comparing`, `done`, each with done and total. Saved at most once a second. People can leave and come back.
 
-Proof JSON: `fixed`, `broken`, `still_failing`, `target_lessons`, `cases_run`, `scores.before` and `scores.after` (`pass_rate`, `quality`, `cost_usd`, `latency_ms` median, `tool_calls`), `replay` (`sampled`, `changed`, `watching_effects`), `gating`, `examples` (three), `passed_bar`, `bar_reasons`, `tokens`.
+Proof JSON: `fixed`, `broken`, `still_failing`, `target_lessons`, `cases_run`, `scores.before` and `scores.after` (`pass_rate`, `quality`, `cost_usd`, `latency_ms` median, `timed_latency_ms` and `timed_runs` for the runs timed side by side, `tool_calls`), `replay` (`sampled`, `changed`, `watching_effects`), `gating`, `examples` (three), `passed_bar`, `bar_reasons`, `tokens`.
 
 ## The bar
 
@@ -68,7 +77,7 @@ A person only ever sees a proposal that meets all of these.
 1. Fixes at least one lesson in the target cluster.
 2. Breaks nothing that passed before, cases and replays. A replay that worked before and fails now counts as broken.
 3. Cost per run at most `cost_margin` worse (default 20%).
-4. Speed at most `latency_margin` worse (default 20%). Judged only with 10 or more runs on each side, a handful of runs is too noisy.
+4. Speed at most `latency_margin` worse (default 20%). Judged only on runs timed side by side in this proof, 10 or more on each side. Cached answers of the current version and replayed history ran at another time under another load, so they show on the Speed bar but are not judged, and the proof says so.
 5. Passes the agent's gating suites at their thresholds.
 
 A proposal below the bar stays as `failed_proof` with its proof, so people can see what was tried. `request-approval` refuses it with 409 `NOT_PROVEN`.
@@ -129,7 +138,7 @@ Tenant settings under `improvements`, each overridable per agent under `improvem
 | `watch_days`, `watch_runs`, `watch_min_runs` | 7, 200, 10 |
 | `auto_propose`, `auto_propose_min_count` | true, 5 |
 
-A proof counts toward the day when it is first claimed. When the budget is spent, queued proposals stay in line with `progress.waiting` saying so in plain words, and start the next day. `GET /api/improvements/budget` feeds the meter on the Improvements page.
+A proof counts toward the day when it is first claimed. Automatic proposals may use at most half of the day's proofs and tokens, so a fix a person asks for can still run, and a person's proposal is claimed ahead of automatic ones. A running proof checks the budget each time it saves progress and stops with a plain reason once the day is spent. When the budget is spent, queued proposals stay in line with `progress.waiting` saying so in plain words, and start the next day. `GET /api/improvements/budget` feeds the meter on the Improvements page, with `tokens_left` and `proofs_left` for what a person's fix can still use.
 
 The kill switch scope `improvements` stops all proposing and proving for the tenant. Proposing returns 409 `KILL_SWITCH`, queued proposals wait with the reason. Releases already in their watch keep being watched, so a rollback can still happen.
 

@@ -6,14 +6,14 @@ import { test, expect, type Page } from '@playwright/test';
  * (default http://localhost:3001). Validates the 13 features in
  * Features.xlsx + the 12-row ETRM Deal-Type Matrix from Sheet 2.
  *
- *   BASE=http://localhost:3001 \
- *   API=http://localhost:8001 \
+ *   CIQ_BASE=http://localhost:3001 \
+ *   CIQ_API=http://localhost:8001 \
  *   npx playwright test e2e/uat_contractiq_browser.spec.ts \
  *     --reporter=list --workers=1 --timeout=180000
  */
 
-const BASE = process.env.BASE || 'http://localhost:3001';
-const API  = process.env.API  || 'http://localhost:8001';
+const BASE = process.env.CIQ_BASE || 'http://localhost:3001';
+const API  = process.env.CIQ_API  || 'http://localhost:8001';
 const EMAIL = process.env.CIQ_EMAIL || 'test@contractiq.com';
 const PASSWORD = process.env.CIQ_PASSWORD || 'TestPass123!';
 

@@ -37,6 +37,7 @@
 
 ## 🧭 Contents
 
+- [How it fits together](#how-it-fits-together)
 - [Why Abenix](#why-abenix)
 - [Architecture](#architecture)
 - [Quick start](#quick-start)
@@ -80,21 +81,34 @@ Same agent. Same definition. Cloud or edge. Built for the long-running, knowledg
 
 <p align="center">
   <img src="docs/screenshots/01-dashboard.png" alt="Abenix Dashboard" width="100%" />
-  <br/><em>A fresh install from the one-command setup, signed in for the first time with a model connected: the getting-started checklist and live activity</em>
+  <br/><em>A fresh install from the one-command setup, signed in for the first time with a model connected: the Start here checklist and live activity</em>
 </p>
+
+---
+
+<a id="how-it-fits-together"></a>
+## 🗺 How it fits together
+
+New here? Read [How Abenix fits together](docs/00-how-abenix-fits-together.md) first. It explains the core objects (agents, pipelines, tools, knowledge, decisions, approvals, autonomy, improvements, runs), what each role does, every word the UI uses, and where to start.
+
+In the app, three things keep you oriented:
+
+- **Start here** on Home is a short checklist for your role. Admins connect a model and invite the team, creators build, test and improve an agent, members chat and give feedback.
+- **Needs you** counts everything waiting on you: approvals, proposed fixes, watching reviews, held content, marketplace submissions and new alerts.
+- The sidebar starts in **Essentials**, a short list for daily work. **Show all tools** opens every page, grouped as Build, Run & Test, Monitor, Marketplace, Admin and Workspace. Every page opens with a one-line purpose, its main action and a "How this works" panel, and the **Help** page covers every screen.
 
 ---
 
 <a id="why-abenix"></a>
 ## ✨ Why Abenix
 
-Ten things that, taken together, you do not get anywhere else open-source:
+Eleven things that, taken together, you do not get anywhere else open-source:
 
 ### 1. Graph-grounded knowledge — Atlas + Knowledge Engine
 
 Documents and concepts live on the same canvas. Drop a PDF → multimodal extraction proposes typed nodes and edges with confidence scores. Type a sentence → cardinality inference. Time-slider snapshots the whole graph on every save. Five starter ontologies in the box (FIBO Core, FIX Protocol, EMIR, ISDA, ETRM EOD).
 
-Agents query the graph through four typed tools — `atlas_describe`, `atlas_query`, `atlas_traverse`, `atlas_search_grounded` — and get back **paths of cited evidence**, not three similar paragraphs. The vanilla-RAG comparison:
+Agents query the graph through five typed tools — `atlas_describe`, `atlas_query`, `atlas_traverse`, `atlas_search_grounded` and `atlas_as_of` — and get back **paths of cited evidence**, not three similar paragraphs. The vanilla-RAG comparison:
 
 | Question | Vanilla RAG | Abenix |
 |---|---|---|
@@ -102,7 +116,7 @@ Agents query the graph through four typed tools — `atlas_describe`, `atlas_que
 | *"Counterparties with > 5 unconfirmed trades in 7 days"* | Cosine miss | Pattern walk over the typed graph, structured rows back |
 | *"Why is this contract risky?"* | Generic clause text | Path from clause → similar past clauses → flagged outcomes |
 
-Token cost typically drops **5–10×** because agents read curated evidence, not noisy near-neighbours. Postgres + Neo4j — no extra vector DB to operate.
+Token cost drops because agents read curated evidence, not noisy near-neighbours. The graph lives in Neo4j with Postgres mirror rows, and vectors go to pgvector or Pinecone, picked per collection.
 
 ### 2. Agents that reason, rules that decide — governed by risk tier
 
@@ -161,7 +175,7 @@ Around that sit the controls an auditor asks for:
 
 - **Separation of duties.** Who may sign comes from capabilities in permission sets, and the author of a change cannot approve it at high or critical tier. Reviewers approve, deny, or return a change with a note that sends it back to draft.
 - **Evaluation gate.** A high-tier agent cannot be published until its golden-case suite passes against the exact configuration being published.
-- **Kill switches.** Stop a tool, an agent, a pipeline, a model or a trigger for a tenant, or everything at once. Work already running stops at its next tool call.
+- **Kill switches.** Stop a tool, an agent, a pipeline, a model, a trigger, a decision or a watched source for a tenant, or everything at once. Work already running stops at its next tool call.
 - **Tamper-evident audit.** Audit rows form a hash chain checked every night, with an alert if it breaks.
 - **Provenance and replay.** Every run stores the configuration it ran with and its hash, so it can be replayed and compared later.
 
@@ -183,11 +197,11 @@ n8n / Zapier / LangGraph are excellent when the problem is *integration-shaped* 
 
 ### 4. Real multi-tenancy + actAs delegation
 
-`tenant_id` on every row. Cross-tenant reads return `404`, not `403`. Vector backends enforce the same filter at the index level. Three roles (admin / creator / user) plus per-feature flags via `/api/me/permissions`. `ResourceShare` for cross-team grants.
+`tenant_id` on every row. Cross-tenant reads return `404`, not `403`. Vector backends enforce the same filter at the index level. Three roles (admin, creator, and member, which the API calls `user`) plus per-feature flags via `/api/me/permissions`. `ResourceShare` for cross-team grants.
 
 The killer feature is **actAs**: a SaaS app holding a single platform key serves N end-users by passing `X-Abenix-Subject` on each request. Quotas, audit log, and data isolation all attribute to the right user. Five showcase apps in this repo ride this exact path.
 
-**Sign-in**: email + password works out of the box. Drop in OIDC creds for **Google**, **GitHub**, or **Microsoft** and the login page renders the matching button. SSO-provisioned users get their own tenant on first sign-in. Both flows can coexist on the same email — link a password account to SSO and either continues to work. See [`docs/sso.md`](docs/sso.md) for the 5-minute setup per provider.
+**Sign-in**: email + password works out of the box. Drop in OIDC creds for **Google**, **GitHub**, or **Microsoft** and the login page renders the matching button. SSO-provisioned users get their own tenant on first sign-in. Both flows can coexist on the same email — link a password account to SSO and either continues to work. See [`docs/09-reference/05-sso.md`](docs/09-reference/05-sso.md) for the setup per provider.
 
 **Enterprise knowledge (v2.0)**: document-level ACL on a shared KB, document versioning + supersedes, incremental Cognify, bi-temporal Atlas with as-of queries, embedding-model swap without downtime, OCR + table extraction for scanned docs, GDPR cascade delete with audit receipts, per-tenant encryption at rest. Read-only Cypher tool for agents. The 16-feature v2 reference: [`docs/02-runtime/15-v2-knowledge-enterprise.md`](docs/02-runtime/15-v2-knowledge-enterprise.md).
 
@@ -199,7 +213,7 @@ Failures are first-class citizens, not exception traces in a log file:
 - **Pipeline Surgeon** — every node crash captures a structured failure-diff. The Surgeon proposes a JSON-Patch (RFC 6902) you Apply or Reject from `/agents/{id}/healing`. Never auto-applied. One-click rollback to `dsl_before`.
 - **`Idempotency-Key` header** on `/api/agents/{id}/execute` — replay returns the cached payload for 24 h.
 - **Dead-letter queue** at `/admin/dlq` — failed executions land here with one-click replay or discard.
-- **Workflow shell** — a 30-verb REPL ("kubectl for pipelines") that drives every change through the same JSON-Patch ledger so audits remain coherent.
+- **Workflow shell** — a 28-verb REPL ("kubectl for pipelines") that drives every change through the same JSON-Patch ledger so audits remain coherent.
 
 ### 6. Production primitives, in the box
 
@@ -250,6 +264,18 @@ An agent gets more freedom one action type at a time, from its measured record. 
 - **Apps too.** `actions.propose`, `wait` and `report_outcome` in the Python, TypeScript and Java SDKs put an app's own actions on the same ladder.
 
 **Monitor → Autonomy → Try it with the sample plant** shows the whole ladder in a few minutes with a simulated plant. See [Earned autonomy](docs/02-runtime/21-earned-autonomy.md).
+
+### 11. Governed self-improvement — agents learn, people decide
+
+Agents get better from their own mistakes without ever changing themselves unchecked.
+
+- **Every signal becomes a lesson.** A thumbs down with what the answer should have said, a failed run, a rejected or edited action, a harm flag. Similar lessons are grouped, and each group suggests test cases a person accepts or drops.
+- **One proposed fix per group.** The improver suggests one change to the agent's instructions, tools or settings.
+- **Proven before anyone sees it.** The fix is replayed offline against the agent's own tests and past runs, and must clear a proof bar.
+- **A person approves.** The fix waits in **Needs you → Proposals**. Someone other than the agent's author signs, except on the sample agent or for a builder working alone.
+- **Watched after release.** The fix ships as a new revision and is compared with the old one. Worse means an automatic rollback with the reason.
+
+**Improvements** in the sidebar has a sample agent with a planted mistake to try it on. See [Lessons and improvements](docs/02-runtime/22-lessons-and-improvements.md) and [Governed self-improvement](docs/02-runtime/23-governed-self-improvement.md).
 
 ---
 
@@ -319,11 +345,22 @@ flowchart LR
 
 | Tool | Notes |
 |---|---|
-| Docker Desktop (or Docker Engine) | Running, with at least 12 GB of memory and 4 CPUs for it |
+| Docker Desktop (or Docker Engine) | Running. Memory depends on the apps you pick, see the table below |
 | minikube | Any recent version, the script starts the cluster for you |
 | kubectl and Helm 3 | On your PATH |
-| Git and bash | On Windows use Git Bash, on macOS and Linux any terminal |
-| Disk | About 40 GB free for the images and the cluster |
+| Git and bash | On Windows use Git Bash, on macOS and Linux any terminal. `curl` and `openssl` come with both |
+| Python 3 | Only for `scripts/sync-claude-subscription.sh`, the no-key path below |
+| Disk | About 20 GB free for the core platform, 40 GB for everything |
+
+How much memory Docker needs:
+
+| What you run | Docker at least | Machine RAM, typical |
+|---|---|---|
+| Core platform only (`APPS=none`) | 10 GB | 16 GB |
+| Core plus one to four apps | 11 to 13 GB | 24 GB |
+| Everything (the default) | 16 GB | 32 GB |
+
+On Windows, Docker Desktop with WSL 2 gets half the machine's RAM unless `%UserProfile%\.wslconfig` says otherwise. The deploy checks this before it starts and tells you what to change. Details, and how to give Docker more: [docs/06-deployment/09-local-sizing.md](docs/06-deployment/09-local-sizing.md).
 
 <a id="one-command-on-minikube"></a>
 ### One command on minikube
@@ -334,34 +371,53 @@ cd abenix
 bash scripts/deploy.sh local
 ```
 
-That starts minikube, builds every image, installs the Helm chart, runs the migrations and seeds, and forwards the ports. The first run takes 30 to 60 minutes, mostly image builds. It asks which use-case apps to include and starts all of them if you do not answer.
+That starts minikube, builds every image, installs the Helm chart, runs the migrations and seeds, and forwards the ports. The first run takes 45 to 90 minutes, mostly image builds, and later runs reuse the cache. While an image builds the script prints a "still building" line every minute.
 
-You do not need a `.env` to start. To give agents a model, either put at least one of `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` or `GOOGLE_API_KEY` in `.env` (copy it from `.env.example`) before you run the command, or add a key afterwards under Admin, Tool Configuration.
+Right at the start it asks which use-case apps to include. Press Enter, or wait 20 seconds, and it builds all of them. For the core platform only, which is the quickest first run and fits in 10 GB of Docker memory, use `APPS=none bash scripts/deploy.sh local`. minikube is sized for the apps you pick, and if Docker is too small for them the deploy stops before it creates anything and says how many apps fit. You can add apps later by running the same command again, as long as the cluster has room. Growing it needs `FRESH=true`, which starts over.
 
-Then open http://localhost:3000 and sign in with `admin@abenix.dev` / `Admin123456`.
+It ends with a summary of every URL. Open http://localhost:3000 and sign in with `admin@abenix.dev` / `Admin123456`. A member account, `demo@abenix.dev` / `Demo123456`, is there too.
+
+<a id="connect-a-model"></a>
+### Connect a model
+
+Agents cannot answer until a model is connected, and the deploy does not need one to finish. Pick one of these.
+
+- **An API key.** As admin open **Admin → Tool Configuration**, search for `ANTHROPIC_API_KEY` (or `OPENAI_API_KEY`, `GOOGLE_API_KEY`), paste the key and save. It applies within 30 seconds. You can also put the key in `.env` (copy `.env.example`) before you run the deploy.
+- **A Claude Pro or Max subscription, no key.** Sign in with Claude Code on the same machine, then run `bash scripts/sync-claude-subscription.sh`. It copies the current credential into the platform, switches on subscription mode and checks it against Anthropic. The credential rotates, so re-run the script when agent runs fail with `OAuth access token has been revoked`. A subscription has usage limits, and a run that hits one fails with `rate_limit_error` until the limit resets.
+
+Once a model is connected, the **Connect an AI model** step on the home page ticks itself off.
+
+<a id="first-steps"></a>
+### First steps after sign-in
+
+1. **Start here** on the home page is a short checklist for your role. Work down it.
+2. **Agent Builder** builds an agent. Give it a name, a description, a system prompt and a category, save it, then try it.
+3. **AI Chat** talks to any agent. A thumbs down with what the answer should have said becomes a lesson.
+4. **Knowledge** holds documents agents can search. Create a knowledge base, upload a file, then attach it to an agent in the builder.
+5. **Needs you** collects everything waiting on you, such as approvals, proposed fixes and new alerts.
+6. **Autonomy → Try it with the sample plant** walks an agent up the autonomy ladder with a simulated plant.
+7. **Improvements → Try it on the sample agent** shows a planted mistake turned into lessons, then a proven fix you approve.
+
+Chat, the samples and every agent run need the model from the step above. The pages themselves open without one.
 
 <a id="other-ways-to-run-it"></a>
 ### Other ways to run it
 
 | Goal | Command | Time |
 |---|---|---|
-| **Production-shape on your laptop**, full Helm chart on minikube | `bash scripts/deploy.sh local` | 30 to 60 min first run |
+| **Production-shape on your laptop**, full Helm chart on minikube | `bash scripts/deploy.sh local` | 45 to 90 min first run |
 | **Localhost**, docker-compose for infra, then npm dev for api, web and the standalone apps | `bash scripts/dev-local.sh` | ~5 min first run |
-| **Minikube with auto port forward** | `bash scripts/dev-minikube.sh` | 30 to 60 min first run |
+| **Minikube with auto port forward** | `bash scripts/dev-minikube.sh` | 45 to 90 min first run |
 | **Azure AKS**, provisions the resource group, registry and cluster, builds and pushes images, installs the chart, runs migrations and seeds | `bash scripts/deploy-azure.sh deploy` | ~25 min |
 
-**No API key?** If you have a Claude Pro or Max subscription and are signed in
-with Claude Code on the same machine, run `bash scripts/sync-claude-subscription.sh`
-instead of filling in a key. It copies the current credential into the platform,
-switches on subscription mode, and verifies it. Every feature then routes through
-the subscription and records tokens at zero cost. The credential rotates, so
-re-run the script whenever agent runs start failing with
-`OAuth access token has been revoked`.
-
-**Port 3000 already taken?** The minikube path takes `WEB_PORT`, for example
-`WEB_PORT=3100 bash scripts/deploy.sh local`. Use `bash scripts/deploy.sh forwards`
-to re-establish every port forward after a pod restart, and
-`bash scripts/deploy.sh reload <service>` to rebuild and restart a single
+**A port already taken?** Every local port can be moved, for example
+`WEB_PORT=3100 API_PORT=8100 bash scripts/deploy.sh local`. The others are
+`NEO4J_PORT`, `GRAFANA_PORT`, `PROMETHEUS_PORT` and `LIVEKIT_PORT`. A moved API port
+is built into the web app, so set it on the deploy, and pass the same `API_PORT`
+to `scripts/sync-claude-subscription.sh`. The forwards are tied to the kube context
+they were started for, so a second cluster on the same machine keeps its own.
+Use `bash scripts/deploy.sh forwards` to re-establish every port forward after a pod
+restart, and `bash scripts/deploy.sh reload <service>` to rebuild and restart a single
 service without a full redeploy.
 
 <a id="where-everything-lives"></a>
@@ -381,7 +437,7 @@ gets a hostname under the ingress load balancer's IP via `nip.io`.
 | ClaimsIQ | http://localhost:3005 | `http://claims.<ip>.nip.io` | no login — open UI |
 | Wingman | http://localhost:3006 | `http://wm.<ip>.nip.io` | platform login |
 | PharmaVigil | http://localhost:3007 | `http://safety.<ip>.nip.io` | no login — open UI |
-| Grafana | http://localhost:3030 | `http://grafana.<ip>.nip.io` | `admin` / `abenix-admin` |
+| Grafana | http://localhost:3030 | `http://grafana.<ip>.nip.io` | `admin` / secret `abenix-grafana-admin` (default `abenix-admin`) |
 | Prometheus | http://localhost:9090 | `http://prom.<ip>.nip.io` | none |
 
 `<ip>` is the ingress controller's load-balancer address. You do not have to
@@ -393,16 +449,16 @@ Same accounts work on both.
 <a id="required-env-vars"></a>
 ### Required env vars
 
-At least one LLM key — Anthropic (recommended), OpenAI, or Google. The full list lives in `.env.example`. For Kubernetes, set the same keys in `infra/helm/abenix/values-*.yaml`.
+None to start. A model key can come from `.env` or be added after sign-in, see [Connect a model](#connect-a-model). The full list lives in `.env.example`, and on Kubernetes outside minikube the same keys go in `infra/helm/abenix/values-*.yaml`. Values set on the command line win over `.env`.
 
-Every other key a tool needs can be added later, at run time, by an admin under **Admin -> Tool Configuration**. The screen lists them all, grouped by provider, with a signup link and a Test button, and says which tools each one unlocks. Nothing has to be redeployed. Reference: [`docs/08-howto/08-tool-configuration.md`](docs/08-howto/08-tool-configuration.md).
+Every other key a tool needs can be added later, at run time, by an admin under **Admin → Tool Configuration**. The screen lists them all, grouped by provider, with a signup link and a Test button, and says which tools each one unlocks. Nothing has to be redeployed. The deploy prints which sample agents still miss one. Reference: [`docs/08-howto/08-tool-configuration.md`](docs/08-howto/08-tool-configuration.md).
 
 ---
 
 <a id="showcase-apps"></a>
 ## 🎯 Showcase apps
 
-Seven standalone apps ship in this repo, plus OracleNet which lives inside the core UI. Each one is a real product surface — every line of business logic flows through the platform via the SDK + actAs pattern. They all auto-start with `dev-local.sh` and auto-deploy with `deploy-azure.sh`.
+Seven standalone apps ship in this repo, plus OracleNet which lives inside the core UI. Each one is a real product surface — every line of business logic flows through the platform via the SDK + actAs pattern. `dev-local.sh` and `deploy.sh` ask which ones to start, and `deploy-azure.sh` deploys them.
 
 <a id="oraclenet-strategic-decision-analysis"></a>
 ### OracleNet — strategic decision-analysis
@@ -464,7 +520,7 @@ Six tabs covering the highest-frequency industrial use cases:
 
 Four pipelines on the same case data: Inbound Resolution (6-agent), SLA Sweep (cron), Post-QA (on case close), Trend Mining (weekly). Refund tiers + escalation paths + tone guidelines live in a seeded KB.
 
-*Why it's interesting.* Customer-service teams drown in repetitive triage, and their highest-leverage moves (deflection, tone calibration, trend detection) get neglected. ResolveAI runs all four loops continuously while a human stays in approve / takeover mode.
+*Why it's interesting.* Customer-service teams drown in repetitive triage, and the work that pays off most (deflection, tone calibration, trend detection) gets neglected. ResolveAI runs all four loops continuously while a human stays in approve / takeover mode.
 
 <p align="center">
   <img src="docs/screenshots/usecases/resolveai-case.png" alt="ResolveAI case detail" width="100%" />
@@ -476,7 +532,7 @@ Four pipelines on the same case data: Inbound Resolution (6-agent), SLA Sweep (c
 <a id="contractiq-energy-contract-intelligence"></a>
 ### ContractIQ — energy contract intelligence
 
-Ingests LNG and power contracts, extracts the terms that matter (volumes,
+The app shows itself as **E&C-Copilot**. It ingests LNG and power contracts, extracts the terms that matter (volumes,
 indexation, take-or-pay, force majeure), values the book against live curves,
 and benchmarks a clause against comparable deals. 19 agents behind an Insights
 Hub, with a delegation model where every run is stamped with the ContractIQ
@@ -646,7 +702,7 @@ The full bundle format (manifest schema, signing math, failure modes) is documen
 ## 📦 Deploy anywhere
 
 ```bash
-# Local development — docker-compose + npm dev + 5 standalones
+# Local development — docker compose + npm dev + the standalone apps you pick
 bash scripts/dev-local.sh
 
 # Minikube — full Helm chart, production architecture on your laptop
@@ -707,17 +763,17 @@ The Java SDK's public surface is stdlib-only (JDK 21 `HttpClient`, Jackson, SLF4
 | Concern | What ships |
 |---|---|
 | **Tenant isolation** | `tenant_id` on every row, and cross-tenant reads return `404`, not `403`. Vector backends enforce the same filter at the index level. |
-| **RBAC + multiplexing** | 3 roles (admin / creator / user) + per-feature flags via `/api/me/permissions`. `ResourceShare` for cross-team grants. **actAs** delegation for SaaS apps. |
+| **RBAC + multiplexing** | 3 roles (admin / creator / member) + per-feature flags via `/api/me/permissions`. `ResourceShare` for cross-team grants. **actAs** delegation for SaaS apps. |
 | **Auth** | Email + bcrypt, JWT with refresh, per-key scopes (`execute`, `read`, `write`, `can_delegate`), API keys SHA-256-hashed at rest. |
-| **Moderation + DLP** | Pre-LLM gate on input + post-LLM gate on output. Actions: `block`, `redact`, `flag`, `allow`. Tenant-scoped, non-bypassable. |
+| **Moderation + DLP** | Pre-LLM gate on input, post-LLM gate on output and a check on tool output. Actions: `block`, `hold`, `redact`, `flag`, `allow`. `hold` parks the message in the **Review inbox** for a person to release, redact or reject, and held text is kept only for the tenant's retention period. Tenant-scoped, non-bypassable. |
 | **Quotas + budgets** | Per-tenant + per-user monthly USD cap, executions/day, tokens/day. Overage returns `BUDGET_EXCEEDED`. |
 | **Approvals** | Multi-signoff `approval_gate` with TTL — block any agent action behind N humans. Real inbox at `/approvals`. The risk tier sets the floor: how many sign, whether the author may, and which capability signs. Return for changes and escalation included. |
-| **Risk tiers + kill switches** | Four tiers on agents, pipelines, tools and decisions, each with a tenant policy. Kill switches per tool, agent, pipeline, model, trigger or tenant, enforced at the next tool call. |
+| **Risk tiers + kill switches** | Four tiers on agents, pipelines, tools and decisions, each with a tenant policy. Kill switches per tool, agent, pipeline, model, trigger, decision, watched source or tenant, enforced at the next tool call. |
 | **Capabilities** | Fine-grained capabilities on top of the three roles, granted through permission sets under Admin, Permissions. |
 | **Tamper-evident audit + provenance** | Audit rows are hash-chained with a salted PII digest and verified nightly, with an alert on a break. Every run stores its config snapshot and hash, and runs can be replayed and compared. |
 | **Audit log + GDPR** | Every execution, tool call, KB query, atlas mutation, role change — tenant-scoped, integrity-hashed. Per-tenant data export, soft delete + scheduled hard purge, configurable retention. v2.0 adds `POST /api/gdpr/users/{id}/purge` — one call, five stores (postgres / pinecone / neo4j / blob / trajectory), every attempt logged to `gdpr_purge_log` for regulator-provable receipts. |
-| **At-rest encryption** | Sensitive PersonaItem + AgentMemory fields wrap with AES-256-GCM (v2.0). Cluster-wide KEK lives in `ABENIX_DATA_KEY_KEK_BASE64` — sourced from Azure Key Vault / AWS KMS / Vault, never the DB. Per-tenant DEK derives deterministically as `HMAC-SHA256(KEK, tenant_id)` so every pod agrees without persisting key rows. Ciphertext is versioned (`key_version`) for rotation. **Missing KEK = encryption is a silent no-op** — set it in production. Setup: [`docs/08-howto/06-encryption-setup.md`](docs/08-howto/06-encryption-setup.md). |
-| **Observability** | Prometheus + Grafana bundled. Stable failure codes (`LLM_RATE_LIMIT`, `SANDBOX_TIMEOUT`, `MODERATION_BLOCKED`). `/alerts` page groups by code. Slack + email fan-out via env var. **v1.4 adds per-resource invocation log:** every `code_asset` pod run + `ml_model` prediction + `knowledge_search` query persists to dedicated tables with input/output/duration/cost/predicted-class — Invocations tab on `/code-runner` and `/ml-models` streams new rows live via SSE. Tempo-backed distributed traces (v1.5+) link agent → tool → LLM spans end-to-end. |
+| **At-rest encryption** | Sensitive PersonaItem + AgentMemory fields wrap with AES-256-GCM (v2.0). Cluster-wide KEK lives in `ABENIX_DATA_KEY_KEK_BASE64` — sourced from Azure Key Vault / AWS KMS / Vault, never the DB. Per-tenant DEK derives deterministically as `HMAC-SHA256(KEK, tenant_id)` so every pod agrees without persisting key rows. Ciphertext is versioned (`key_version`) for rotation. **Missing KEK = values are stored in plain text with no warning** — set it in production. Setup: [`docs/08-howto/06-encryption-setup.md`](docs/08-howto/06-encryption-setup.md). |
+| **Observability** | Prometheus + Grafana bundled. Stable failure codes (`LLM_RATE_LIMIT`, `SANDBOX_TIMEOUT`, `MODERATION_BLOCKED`). `/alerts` page groups by code. Slack + email fan-out via env var. **Per-resource invocation log:** every `code_asset` pod run + `ml_model` prediction + `knowledge_search` query persists to dedicated tables with input/output/duration/cost/predicted-class — Invocations tab on `/code-runner` and `/ml-models` streams new rows live via SSE. Tempo-backed distributed traces link agent → tool → LLM spans end-to-end. Admins see nodes, services and pods on **Admin → Cluster Health**. |
 | **Archives** | Recording tables (invocations / executions / messages / activity_logs) auto-archive nightly to gzip'd JSONL on a hostPath PV. Admin-editable retention per table (defaults: 30d invocations, 60d executions, 90d audit). Manifest + sha256 in `archive_runs`. Manual trigger + download at `/admin/archives`. |
 | **Idempotency + DLQ** | `Idempotency-Key` header → 24 h replay cache. Failed executions land in `/admin/dlq` with one-click replay. |
 | **Edge security** | RSA-PSS / SHA-256 signed `.agent` bundles. Tampering refuses to load. Tool whitelist enforced at compile and load. MQTT publish constrained by per-agent ACL. |
@@ -735,7 +791,7 @@ The Java SDK's public surface is stdlib-only (JDK 21 `HttpClient`, Jackson, SLF4
 
 | Layer | Stack |
 |---|---|
-| Web | Next.js 14, React 18, Tailwind, React Flow, Mermaid, Framer Motion |
+| Web | Next.js 15, React 18, Tailwind, React Flow, Mermaid, Framer Motion |
 | API | FastAPI, SQLAlchemy 2 async, Alembic, asyncpg, Pydantic 2 |
 | Runtime | Python 3.12, NATS, Docker / Podman sandbox |
 | Edge | Python 3.12 / Rust 1.86 / C (alpine + musl) |
@@ -748,9 +804,10 @@ The Java SDK's public surface is stdlib-only (JDK 21 `HttpClient`, Jackson, SLF4
 <a id="documentation"></a>
 ## 📚 Documentation
 
-- **Docs** — [`docs/`](docs/README.md) covers architecture, runtime, SDKs, data model, UI, deployment, how-tos and reference. New in 2.5: [governance](docs/01-architecture/07-governance.md), [decisions](docs/08-howto/09-decisions.md), [warm code runners](docs/02-runtime/16-warm-code-runners.md), [Source Watch](docs/02-runtime/17-source-watch.md), [evaluation suites](docs/02-runtime/18-evaluation-suites.md), [outbound events](docs/02-runtime/19-outbound-events.md), [tool configuration](docs/08-howto/08-tool-configuration.md)
-- **In-app help** — every running instance has a `/help` route with the full user guide
-- **API reference** — every running instance has `/docs` (FastAPI Swagger)
+- **Start here** — [How Abenix fits together](docs/00-how-abenix-fits-together.md): the core objects, roles, glossary and a first path per role. Then [ONBOARDING.md](ONBOARDING.md) for a local setup and [ARCHITECTURE.md](ARCHITECTURE.md) for the repo map.
+- **Docs** — [`docs/`](docs/README.md) covers architecture, runtime, SDKs, data model, UI, deployment, how-tos and reference. Newer features: [governance](docs/01-architecture/07-governance.md), [decisions](docs/08-howto/09-decisions.md), [evaluation suites](docs/02-runtime/18-evaluation-suites.md), [Source Watch](docs/02-runtime/17-source-watch.md), [outbound events](docs/02-runtime/19-outbound-events.md), [tool configuration](docs/08-howto/08-tool-configuration.md), [earned autonomy](docs/08-howto/13-earned-autonomy.md), [self-improvement](docs/08-howto/16-self-improvement.md), [marketplace and monetization](docs/08-howto/14-marketplace-and-monetization.md), [meetings](docs/08-howto/15-meetings.md), [the app shell and wayfinding](docs/05-ui/00-app-shell.md)
+- **In-app help** — every running instance has a `/help` page with the user guide, and `/docs` in the web app serves these developer docs with search
+- **API reference** — the API serves Swagger at `/docs` and ReDoc at `/redoc` on its own port (`http://localhost:8000/docs` locally), and [docs/09-reference/00-rest-api.md](docs/09-reference/00-rest-api.md) lists the routes
 - **Roadmap** — `NEXT_PLANS.md` in this repo (private mirror)
 
 ---
@@ -758,9 +815,9 @@ The Java SDK's public surface is stdlib-only (JDK 21 `HttpClient`, Jackson, SLF4
 <a id="contributing"></a>
 ## 🤝 Contributing
 
-We welcome contributions. See `CONTRIBUTING.md` for the quick start, and `CODE_OF_CONDUCT.md` for community guidelines. Good first issues: new tools, new Atlas starter ontologies, new connectors, new edge runtime tool shims.
+We welcome contributions. See [CONTRIBUTING.md](CONTRIBUTING.md) for the quick start, and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for community guidelines. Good first issues: new tools, new Atlas starter ontologies, new connectors, new edge runtime tool shims.
 
-Found a vulnerability? See `SECURITY.md`. Please don't open a public issue.
+Found a vulnerability? See [SECURITY.md](SECURITY.md). Please don't open a public issue.
 
 ---
 

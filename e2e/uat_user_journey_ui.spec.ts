@@ -256,7 +256,9 @@ test('a new teammate builds a supplier risk desk through the UI', async ({ page 
       await page.getByPlaceholder('e.g. Product Documentation').fill(NAMES.kb);
       await page.getByPlaceholder('What kind of documents will this contain?').fill('Procurement risk policy PRP-7');
       await page.getByRole('button', { name: /^Create$/ }).click();
-      await page.locator(`[data-testid="kb-card"][data-name="${NAMES.kb}"]`).click();
+      // creating opens the new base straight away
+      await page.waitForURL(/\/knowledge\?id=[0-9a-f-]{36}/, { timeout: 30_000 });
+      await expect(page.getByText(NAMES.kb, { exact: true }).first()).toBeVisible({ timeout: 30_000 });
       await page.getByTestId('kb-dropzone-input').setInputFiles(path.join(FIX, 'procurement_policy.md'));
       const doc = page.locator('[data-testid="kb-doc-row"][data-name="procurement_policy.md"]');
       await expect(doc).toBeVisible({ timeout: 30_000 });
@@ -451,7 +453,7 @@ test('a new teammate builds a supplier risk desk through the UI', async ({ page 
       await expect(page.getByTestId('live-result-panel')).toContainText(/Nordtek/i, { timeout: 300_000 });
       await record(page, 'sdk run live', true, 'live run from the playground scored Nordtek');
       await page.getByRole('button', { name: 'Python' }).first().click();
-      await page.getByRole('button', { name: 'Generate Code' }).click();
+      await page.getByTestId('generate-code').click();
       await expect(page.locator('pre').filter({ hasText: /import|abenix/i }).first()).toBeVisible({ timeout: 120_000 });
       await page.getByRole('button', { name: /^Run$/ }).first().click();
       const output = page.locator('section, div').filter({ hasText: /^Output/ }).last();
@@ -524,7 +526,37 @@ test('a new teammate builds a supplier risk desk through the UI', async ({ page 
     });
 
     await test.step('the guide is complete', async () => {
+      // a member's guide also asks for a follow-up and feedback, done the way the guide leads
       await go(page, '/dashboard');
+      const followUp = page.getByTestId('start-here-follow_up-go');
+      if (await followUp.waitFor({ timeout: 10_000 }).then(() => true, () => false)) {
+        await followUp.click();
+        await page.waitForURL(/\/chat/, { timeout: 20_000 });
+        const history = page.getByTestId('chat-history-item').first();
+        if (await history.waitFor({ timeout: 5_000 }).then(() => true, () => false)) await history.click();
+        const reply = await chat(page, 'Say that again in five words or fewer.');
+        await record(page, 'follow up', reply.trim().length > 2, 'the agent answered the follow-up in the same thread');
+        await go(page, '/dashboard');
+      }
+      const feedback = page.getByTestId('start-here-give_feedback-go');
+      if (await feedback.waitFor({ timeout: 10_000 }).then(() => true, () => false)) {
+        await feedback.click();
+        await page.waitForURL(/\/chat/, { timeout: 20_000 });
+        const history = page.getByTestId('chat-history-item').first();
+        if (await history.waitFor({ timeout: 5_000 }).then(() => true, () => false)) await history.click();
+        const bar = page.locator('[data-testid="chat-message"][data-role="assistant"]').last().getByTestId('chat-feedback');
+        await expect(bar).toBeVisible({ timeout: 30_000 });
+        await bar.getByTestId('chat-feedback-down').click();
+        // the correction box opens once the thumbs down is saved
+        await expect(bar.getByTestId('chat-feedback-box')).toBeVisible({ timeout: 20_000 });
+        await bar.getByTestId('chat-feedback-correction').fill('It should have kept to five words.');
+        await expect(bar.getByTestId('chat-feedback-send')).toBeEnabled({ timeout: 20_000 });
+        await bar.getByTestId('chat-feedback-send').click();
+        // isVisible does not wait, so wait for the confirmation itself
+        const thanked = await bar.getByTestId('chat-feedback-thanks').waitFor({ timeout: 20_000 }).then(() => true, () => false);
+        await record(page, 'feedback', thanked, 'the thumbs took the correction');
+        await go(page, '/dashboard');
+      }
       const left = await page.locator('[data-testid^="start-here-"][data-done="false"]').count();
       await record(page, 'getting started done', left === 0 || !(await page.getByTestId('start-here').isVisible()), `${left} steps still open`);
     });
@@ -540,6 +572,8 @@ test('a new teammate builds a supplier risk desk through the UI', async ({ page 
       const revokes = page.locator('[data-testid^="apikey-revoke-"]');
       const before = await revokes.count();
       await revokes.first().click();
+      // revoking asks first, since anything using the key stops at once
+      await page.getByRole('dialog').getByRole('button', { name: 'Revoke key' }).click();
       await expect(page.locator('body')).toContainText('API key revoked', { timeout: 15_000 });
       await expect(revokes).toHaveCount(before - 1, { timeout: 15_000 }).catch(() => {});
       await record(page, 'api key revoke', (await revokes.count()) === before - 1, 'key revoked and removed from the list');

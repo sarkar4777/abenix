@@ -17,6 +17,8 @@ import { toastSuccess, toastError } from '@/stores/toastStore';
 import { useApi } from '@/hooks/useApi';
 import { apiFetch, API_URL } from '@/lib/api-client';
 import { usePageTitle } from '@/hooks/usePageTitle';
+import SubjectPicker, { useSubjectNames } from '@/components/share/SubjectPicker';
+import { ShareExpiryBadge, ShareExpiryInput, expiryToIso } from '@/components/share/ShareExpiry';
 
 interface KProject {
   id: string;
@@ -156,7 +158,13 @@ function CreateProjectModal({
 // ─── Grants Modal (per-collection) ──────────────────────────────────
 
 interface AgentGrant { id: string; agent_id: string; permission: string; granted_at: string | null; }
-interface UserGrant { id: string; user_id: string; permission: string; granted_at: string | null; expires_at: string | null; }
+interface UserGrant { id: string; user_id: string; permission: string; granted_at: string | null; expires_at: string | null; expired?: boolean; }
+
+const COLLECTION_PERM_HELP: Record<string, string> = {
+  READ: 'Can search and read the documents.',
+  WRITE: 'Can also upload, replace and delete documents.',
+  ADMIN: 'Can also change who has access.',
+};
 
 function GrantsModal({
   collectionId, collectionName, open, onClose,
@@ -166,26 +174,29 @@ function GrantsModal({
   open: boolean;
   onClose: () => void;
 }) {
-  const [tab, setTab] = useState<'agents' | 'users'>('agents');
+  const [tab, setTab] = useState<'agents' | 'users'>('users');
   const [agents, setAgents] = useState<AgentGrant[]>([]);
   const [users, setUsers] = useState<UserGrant[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState('');
   const [newId, setNewId] = useState('');
   const [newPerm, setNewPerm] = useState('READ');
+  const [expiry, setExpiry] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const { names } = useSubjectNames();
 
   const refresh = async () => {
     if (!collectionId) return;
     setLoading(true);
+    setLoadError('');
     try {
       const [aRes, uRes] = await Promise.all([
-        fetch(`${API_URL}/api/knowledge-collections/${collectionId}/agents`, { headers: authHeaders() }),
-        fetch(`${API_URL}/api/knowledge-collections/${collectionId}/users`, { headers: authHeaders() }),
+        apiFetch<AgentGrant[]>(`/api/knowledge-collections/${collectionId}/agents`, { silent: true, throwOnError: false }),
+        apiFetch<UserGrant[]>(`/api/knowledge-collections/${collectionId}/users`, { silent: true, throwOnError: false }),
       ]);
-      const aJson = await aRes.json();
-      const uJson = await uRes.json();
-      setAgents(aJson.data || []);
-      setUsers(uJson.data || []);
+      if (aRes.error || uRes.error) setLoadError(aRes.error || uRes.error || 'Could not load access');
+      setAgents(aRes.data || []);
+      setUsers(uRes.data || []);
     } finally {
       setLoading(false);
     }
@@ -196,27 +207,25 @@ function GrantsModal({
       void refresh();
       setNewId('');
       setNewPerm('READ');
+      setExpiry('');
     }
-     
   }, [open, collectionId]);
 
   const grant = async () => {
-    if (!collectionId || !newId.trim()) return;
+    if (!collectionId || !newId) return;
     setSubmitting(true);
     try {
       const path = tab === 'agents'
-        ? `${API_URL}/api/knowledge-collections/${collectionId}/agents`
-        : `${API_URL}/api/knowledge-collections/${collectionId}/users`;
+        ? `/api/knowledge-collections/${collectionId}/agents`
+        : `/api/knowledge-collections/${collectionId}/users`;
       const body = tab === 'agents'
-        ? { agent_id: newId.trim(), permission: newPerm }
-        : { user_id: newId.trim(), permission: newPerm };
-      const res = await fetch(path, {
-        method: 'POST', headers: authHeaders(), body: JSON.stringify(body),
-      });
-      const json = await res.json();
-      if (json.error) { toastError(json.error.message || 'Grant failed'); return; }
-      toastSuccess('Grant saved');
+        ? { agent_id: newId, permission: newPerm }
+        : { user_id: newId, permission: newPerm, expires_at: expiryToIso(expiry) };
+      const res = await apiFetch(path, { method: 'POST', body: JSON.stringify(body), throwOnError: false });
+      if (res.error) { toastError('Grant failed', res.error); return; }
+      toastSuccess('Access granted', `${names[newId] || 'They'} can now use ${collectionName}`);
       setNewId('');
+      setExpiry('');
       await refresh();
     } finally {
       setSubmitting(false);
@@ -225,92 +234,190 @@ function GrantsModal({
 
   const revoke = async (subjectId: string) => {
     if (!collectionId) return;
+    if (!window.confirm(`Remove access for ${names[subjectId] || 'this grantee'}?`)) return;
     const path = tab === 'agents'
-      ? `${API_URL}/api/knowledge-collections/${collectionId}/agents/${subjectId}`
-      : `${API_URL}/api/knowledge-collections/${collectionId}/users/${subjectId}`;
-    const res = await fetch(path, { method: 'DELETE', headers: authHeaders() });
-    const json = await res.json();
-    if (json.error) { toastError(json.error.message || 'Revoke failed'); return; }
-    toastSuccess('Grant revoked');
+      ? `/api/knowledge-collections/${collectionId}/agents/${subjectId}`
+      : `/api/knowledge-collections/${collectionId}/users/${subjectId}`;
+    const res = await apiFetch(path, { method: 'DELETE', throwOnError: false });
+    if (res.error) { toastError('Revoke failed', res.error); return; }
+    toastSuccess('Access removed');
     await refresh();
   };
 
+  const rows: (AgentGrant | UserGrant)[] = tab === 'agents' ? agents : users;
+  const subjectOf = (g: AgentGrant | UserGrant) => ('agent_id' in g ? g.agent_id : g.user_id);
+
   return (
-    <ResponsiveModal open={open} onClose={onClose} title={`Manage Access — ${collectionName}`}>
-      <div className="space-y-4">
+    <ResponsiveModal open={open} onClose={onClose} title={`Who can use ${collectionName}`}>
+      <div className="space-y-4" data-testid="collection-grants-modal">
         <div className="flex gap-2 border-b border-slate-800">
-          {(['agents', 'users'] as const).map((t) => (
+          {(['users', 'agents'] as const).map((t) => (
             <button
               key={t}
-              onClick={() => setTab(t)}
-              className={`px-3 py-2 text-sm capitalize ${tab === t ? 'text-emerald-400 border-b-2 border-emerald-400 -mb-px' : 'text-slate-400 hover:text-slate-200'}`}
+              onClick={() => { setTab(t); setNewId(''); }}
+              data-testid={`grants-tab-${t}`}
+              className={`px-3 py-2 text-sm ${tab === t ? 'text-emerald-400 border-b-2 border-emerald-400 -mb-px' : 'text-slate-400 hover:text-slate-200'}`}
             >
               {t === 'agents' ? <Shield className="w-4 h-4 inline -mt-px mr-1" /> : <Users className="w-4 h-4 inline -mt-px mr-1" />}
-              {t}
+              {t === 'agents' ? 'Agents' : 'People'}
             </button>
           ))}
         </div>
 
-        {/* Existing grants list */}
+        {loadError && <p role="alert" className="text-xs text-red-400">{loadError}</p>}
+
         <div className="space-y-2 max-h-72 overflow-auto pr-1">
           {loading ? (
             <div className="flex justify-center py-6"><Loader2 className="w-5 h-5 animate-spin text-slate-500" /></div>
-          ) : tab === 'agents' ? (
-            agents.length === 0 ? (
-              <div className="text-center text-xs text-slate-500 py-6">No agent grants yet.</div>
-            ) : agents.map((g) => (
-              <div key={g.id} className="flex items-center justify-between bg-slate-800/40 border border-slate-700/40 rounded-lg px-3 py-2">
-                <div>
-                  <div className="text-xs font-mono text-slate-300">{g.agent_id.slice(0, 8)}…</div>
-                  <div className="text-[10px] uppercase tracking-wider text-slate-500">{g.permission}</div>
+          ) : rows.length === 0 ? (
+            <div className="text-center text-xs text-slate-500 py-6">
+              {tab === 'agents' ? 'No agent can search this collection yet.' : 'Nobody has been given access yet.'}
+            </div>
+          ) : rows.map((g) => {
+            const sid = subjectOf(g);
+            const expired = 'expired' in g && g.expired;
+            return (
+              <div key={g.id} data-testid="grant-row" data-subject={sid} className={`flex items-center justify-between gap-2 bg-slate-800/40 border border-slate-700/40 rounded-lg px-3 py-2 ${expired ? 'opacity-70' : ''}`}>
+                <div className="min-w-0">
+                  <div className="text-xs text-slate-200 truncate">{names[sid] || `${sid.slice(0, 8)}…`}</div>
+                  <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
+                    <span className="text-[10px] uppercase tracking-wider text-slate-500">{g.permission}</span>
+                    {'user_id' in g && <ShareExpiryBadge row={g} />}
+                  </div>
                 </div>
-                <button onClick={() => void revoke(g.agent_id)} className="text-slate-500 hover:text-red-400 p-1">
+                <button onClick={() => void revoke(sid)} aria-label={`Remove access for ${names[sid] || sid}`} className="text-slate-500 hover:text-red-400 p-1 shrink-0">
                   <Trash2 className="w-4 h-4" />
                 </button>
               </div>
-            ))
-          ) : (
-            users.length === 0 ? (
-              <div className="text-center text-xs text-slate-500 py-6">No user grants yet.</div>
-            ) : users.map((g) => (
-              <div key={g.id} className="flex items-center justify-between bg-slate-800/40 border border-slate-700/40 rounded-lg px-3 py-2">
-                <div>
-                  <div className="text-xs font-mono text-slate-300">{g.user_id.slice(0, 8)}…</div>
-                  <div className="text-[10px] uppercase tracking-wider text-slate-500">{g.permission}</div>
-                </div>
-                <button onClick={() => void revoke(g.user_id)} className="text-slate-500 hover:text-red-400 p-1">
-                  <Trash2 className="w-4 h-4" />
-                </button>
-              </div>
-            ))
-          )}
+            );
+          })}
         </div>
 
-        {/* Grant form */}
-        <div className="border-t border-slate-800 pt-4">
-          <div className="text-xs uppercase tracking-wider text-slate-400 mb-2">Add grant</div>
-          <div className="flex gap-2">
-            <input
-              className="flex-1 bg-slate-800/60 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-500 font-mono"
+        <div className="border-t border-slate-800 pt-4 space-y-2">
+          <div className="text-xs uppercase tracking-wider text-slate-400">{tab === 'agents' ? 'Let an agent search it' : 'Give a person access'}</div>
+          <div className="flex flex-wrap gap-2">
+            <SubjectPicker
+              kind={tab === 'agents' ? 'agent' : 'user'}
               value={newId}
-              onChange={(e) => setNewId(e.target.value)}
-              placeholder={tab === 'agents' ? 'agent UUID' : 'user UUID'}
+              onChange={setNewId}
+              exclude={rows.map(subjectOf)}
+              testId="grant-subject"
             />
             <select
               className="bg-slate-800/60 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100"
               value={newPerm}
               onChange={(e) => setNewPerm(e.target.value)}
+              aria-label="Permission"
+              data-testid="grant-permission"
             >
-              <option value="READ">READ</option>
-              <option value="WRITE">WRITE</option>
-              <option value="ADMIN">ADMIN</option>
+              <option value="READ">Read</option>
+              <option value="WRITE">Write</option>
+              <option value="ADMIN">Admin</option>
             </select>
             <button
               onClick={grant}
-              disabled={submitting || !newId.trim()}
+              disabled={submitting || !newId}
+              data-testid="grant-submit"
               className="px-3 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-medium rounded-lg text-sm disabled:opacity-50"
-            >Grant</button>
+            >{submitting ? 'Saving…' : 'Grant'}</button>
           </div>
+          <p className="text-[11px] text-slate-500">{COLLECTION_PERM_HELP[newPerm]}</p>
+          {tab === 'users' && <ShareExpiryInput value={expiry} onChange={setExpiry} testId="grant-expiry" />}
+        </div>
+      </div>
+    </ResponsiveModal>
+  );
+}
+
+// ─── Members Modal (per-project) ────────────────────────────────────
+
+interface ProjectMemberRow { id: string; user_id: string; role: string; granted_at: string | null }
+
+const PROJECT_ROLE_HELP: Record<string, string> = {
+  VIEW: 'Can read the knowledge bases in this project that are open to project members.',
+  EDIT: 'Can also change those knowledge bases.',
+  ADMIN: 'Can also add and remove members.',
+};
+
+function MembersModal({ project, onClose }: { project: KProject | null; onClose: () => void }) {
+  const [rows, setRows] = useState<ProjectMemberRow[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [newId, setNewId] = useState('');
+  const [role, setRole] = useState('VIEW');
+  const [busy, setBusy] = useState(false);
+  const { names } = useSubjectNames();
+
+  const refresh = async () => {
+    if (!project) return;
+    setLoading(true);
+    try {
+      const r = await apiFetch<ProjectMemberRow[]>(`/api/knowledge-projects/${project.id}/members`, { silent: true, throwOnError: false });
+      setRows(r.data || []);
+    } finally { setLoading(false); }
+  };
+
+  useEffect(() => {
+    if (project) { setNewId(''); setRole('VIEW'); void refresh(); }
+  }, [project?.id]);
+
+  const add = async () => {
+    if (!project || !newId) return;
+    setBusy(true);
+    try {
+      const r = await apiFetch(`/api/knowledge-projects/${project.id}/members`, {
+        method: 'POST', body: JSON.stringify({ user_id: newId, role }), throwOnError: false,
+      });
+      if (r.error) { toastError('Could not add member', r.error); return; }
+      toastSuccess('Member added', `${names[newId] || 'They'} joined ${project.name}`);
+      setNewId('');
+      await refresh();
+    } finally { setBusy(false); }
+  };
+
+  const remove = async (userId: string) => {
+    if (!project) return;
+    if (!window.confirm(`Remove ${names[userId] || 'this member'} from ${project.name}?`)) return;
+    const r = await apiFetch(`/api/knowledge-projects/${project.id}/members/${userId}`, { method: 'DELETE', throwOnError: false });
+    if (r.error) { toastError('Could not remove member', r.error); return; }
+    toastSuccess('Member removed');
+    await refresh();
+  };
+
+  return (
+    <ResponsiveModal open={project !== null} onClose={onClose} title={project ? `Members of ${project.name}` : 'Members'}>
+      <div className="space-y-4" data-testid="project-members-modal">
+        <p className="text-xs text-slate-400">Members can read the knowledge bases in this project that are open to project members. Private ones still need their own access.</p>
+        <div className="space-y-2 max-h-72 overflow-auto pr-1">
+          {loading ? (
+            <div className="flex justify-center py-6"><Loader2 className="w-5 h-5 animate-spin text-slate-500" /></div>
+          ) : rows.length === 0 ? (
+            <div className="text-center text-xs text-slate-500 py-6">No members yet. Only the creator and tenant admins can see this project.</div>
+          ) : rows.map((m) => (
+            <div key={m.id} data-testid="member-row" data-subject={m.user_id} className="flex items-center justify-between gap-2 bg-slate-800/40 border border-slate-700/40 rounded-lg px-3 py-2">
+              <div className="min-w-0">
+                <div className="text-xs text-slate-200 truncate">{names[m.user_id] || `${m.user_id.slice(0, 8)}…`}</div>
+                <div className="text-[10px] uppercase tracking-wider text-slate-500">{m.role}</div>
+              </div>
+              <button onClick={() => void remove(m.user_id)} aria-label={`Remove ${names[m.user_id] || m.user_id}`} className="text-slate-500 hover:text-red-400 p-1 shrink-0">
+                <Trash2 className="w-4 h-4" />
+              </button>
+            </div>
+          ))}
+        </div>
+        <div className="border-t border-slate-800 pt-4 space-y-2">
+          <div className="text-xs uppercase tracking-wider text-slate-400">Add a member</div>
+          <div className="flex flex-wrap gap-2">
+            <SubjectPicker kind="user" value={newId} onChange={setNewId} exclude={rows.map((m) => m.user_id)} testId="member-subject" />
+            <select value={role} onChange={(e) => setRole(e.target.value)} aria-label="Role" data-testid="member-role" className="bg-slate-800/60 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100">
+              <option value="VIEW">View</option>
+              <option value="EDIT">Edit</option>
+              <option value="ADMIN">Admin</option>
+            </select>
+            <button onClick={add} disabled={busy || !newId} data-testid="member-submit" className="px-3 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-medium rounded-lg text-sm disabled:opacity-50">
+              {busy ? 'Adding…' : 'Add'}
+            </button>
+          </div>
+          <p className="text-[11px] text-slate-500">{PROJECT_ROLE_HELP[role]}</p>
         </div>
       </div>
     </ResponsiveModal>
@@ -326,6 +433,7 @@ export default function KnowledgeProjectsPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [grantsFor, setGrantsFor] = useState<{ id: string; name: string } | null>(null);
+  const [membersFor, setMembersFor] = useState<KProject | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<KProject | null>(null);
   const [collections, setCollections] = useState<Record<string, KCollection[]>>({});
   const [created, setCreated] = useState<KProject | null>(null);
@@ -377,7 +485,7 @@ export default function KnowledgeProjectsPage() {
   };
 
   return (
-    <div className="p-8 max-w-7xl mx-auto">
+    <div className="p-4 md:p-8 max-w-7xl mx-auto">
       <PageHeader
         className="mb-6"
         back={{ href: '/knowledge', label: 'Back to all collections' }}
@@ -404,7 +512,7 @@ export default function KnowledgeProjectsPage() {
           onDismiss={() => setCreated(null)}
           steps={[
             { id: 'ontology', label: 'Define its ontology', hint: 'Say which kinds of things and links matter here.', icon: Brain, href: `/knowledge/projects/${created.id}/ontology` },
-            { id: 'kb', label: 'Open knowledge bases', hint: 'Create one and upload the documents.', icon: Database, href: '/knowledge' },
+            { id: 'kb', label: 'Add a knowledge base', hint: 'Create one in this project and upload the documents.', icon: Database, href: `/knowledge?new=1&project=${created.id}` },
           ]}
         />
       )}
@@ -449,14 +557,26 @@ export default function KnowledgeProjectsPage() {
                     </div>
                   </div>
                 </div>
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    onClick={(e) => { e.stopPropagation(); setMembersFor(p); }}
+                    onKeyDown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); setMembersFor(p); } }}
+                    className="inline-flex items-center gap-1 text-xs text-slate-300 hover:text-white"
+                    title="Who can see this project"
+                    data-testid="kp-members"
+                  >
+                    <Users className="w-3 h-3" /> <span className="hidden sm:inline">Members</span>
+                  </span>
                   <Link
                     href={`/knowledge/projects/${p.id}/ontology`}
                     onClick={(e) => e.stopPropagation()}
-                    className="hidden sm:inline-flex items-center gap-1 text-xs text-emerald-400 hover:text-emerald-300"
+                    className="inline-flex items-center gap-1 text-xs text-emerald-400 hover:text-emerald-300"
                     title="Open ontology editor"
+                    data-testid="kp-ontology"
                   >
-                    <Brain className="w-3 h-3" /> Ontology
+                    <Brain className="w-3 h-3" /> <span className="hidden sm:inline">Ontology</span>
                   </Link>
                   <button
                     onClick={(e) => { e.stopPropagation(); setConfirmDelete(p); }}
@@ -483,12 +603,12 @@ export default function KnowledgeProjectsPage() {
                         <div className="text-xs text-slate-500 py-3 text-center">Loading collections…</div>
                       ) : collections[p.id].length === 0 ? (
                         <div className="text-xs text-slate-500 py-3 text-center">
-                          No collections yet. Create one from the{' '}
-                          <Link href="/knowledge" className="text-emerald-400 hover:underline">Knowledge page</Link>.
+                          No collections yet.{' '}
+                          <Link href={`/knowledge?new=1&project=${p.id}`} className="text-emerald-400 hover:underline" data-testid="kp-add-kb">Create a knowledge base in this project</Link>.
                         </div>
                       ) : (
                         collections[p.id].map((c) => (
-                          <div key={c.id} className="flex items-center justify-between bg-slate-800/40 border border-slate-700/40 rounded-lg px-4 py-3">
+                          <div key={c.id} data-testid="kp-collection" data-name={c.name} className="flex flex-wrap items-center justify-between gap-2 bg-slate-800/40 border border-slate-700/40 rounded-lg px-4 py-3">
                             <div className="flex items-center gap-3 min-w-0">
                               <Database className="w-4 h-4 text-slate-400 shrink-0" />
                               <div className="min-w-0">
@@ -498,7 +618,7 @@ export default function KnowledgeProjectsPage() {
                                 </div>
                               </div>
                             </div>
-                            <div className="flex items-center gap-2 shrink-0">
+                            <div className="flex flex-wrap items-center gap-2">
                               <span className={`text-[10px] px-2 py-0.5 rounded uppercase tracking-wider ${visibilityColor(c.default_visibility)}`}>
                                 {c.default_visibility}
                               </span>
@@ -507,6 +627,7 @@ export default function KnowledgeProjectsPage() {
                               </span>
                               <button
                                 onClick={() => setGrantsFor({ id: c.id, name: c.name })}
+                                data-testid="kp-access"
                                 className="text-xs text-emerald-400 hover:text-emerald-300 inline-flex items-center gap-1"
                               >
                                 <Shield className="w-3 h-3" /> Access
@@ -517,7 +638,11 @@ export default function KnowledgeProjectsPage() {
                               >Open →</Link>
                             </div>
                           </div>
-                        ))
+                        )).concat(
+                          <Link key="add" href={`/knowledge?new=1&project=${p.id}`} className="block text-xs text-emerald-400 hover:underline pt-1" data-testid="kp-add-kb">
+                            + Create another knowledge base in this project
+                          </Link>,
+                        )
                       )}
                     </div>
                   </motion.div>
@@ -533,6 +658,8 @@ export default function KnowledgeProjectsPage() {
         onClose={() => setCreateOpen(false)}
         onCreated={(p) => { setCreated(p); mutate(); }}
       />
+
+      <MembersModal project={membersFor} onClose={() => setMembersFor(null)} />
 
       <GrantsModal
         collectionId={grantsFor?.id ?? null}

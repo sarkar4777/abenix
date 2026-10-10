@@ -90,6 +90,14 @@ class VectorSearchTool(BaseTool):
             except Exception:
                 continue
 
+        from engine.knowledge.document_acl import superseded_for_search
+
+        try:
+            old_versions = await superseded_for_search(list(self.kb_ids))
+        except Exception:
+            old_versions = set()
+        all_results = [r for r in all_results if r.get("doc_id") not in old_versions]
+
         if not all_results:
             return ToolResult(content="No relevant documents found.")
 

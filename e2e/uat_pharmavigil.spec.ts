@@ -7,6 +7,9 @@
  * category, disproportionality from the code asset and a priority from the ML
  * model — then a human signs it off.
  *
+ * Intake and review go through the PharmaVigil UI the way a reviewer does it.
+ * The API is only read, to assert what was persisted.
+ *
  * Run: BASE=http://localhost:3007 npx playwright test e2e/uat_pharmavigil.spec.ts
  */
 
@@ -92,10 +95,28 @@ test('pharmavigil: sample reports ship with the app', async ({ request }) => {
   }
 });
 
+test('pharmavigil: the intake form says what is wrong before filing', async ({ page }) => {
+  await page.goto(`${WEB}/cases/new`, { waitUntil: 'domcontentloaded' });
+  await expect(page.getByRole('heading', { name: 'New adverse event report' })).toBeVisible();
+  // the sample picker renders after hydration, typing before it would be reset
+  await expect(page.getByTestId('intake-sample')).toBeVisible({ timeout: 20_000 });
+  await page.getByTestId('intake-country').fill('g');
+  await expect(page.getByTestId('intake-country')).toHaveValue('G');
+  await page.getByTestId('intake-submit').click();
+  const alerts = page.getByRole('alert');
+  await expect(alerts.filter({ hasText: 'at least 10 characters' })).toBeVisible();
+  await expect(alerts.filter({ hasText: 'Name the suspect drug' })).toBeVisible();
+  await expect(alerts.filter({ hasText: 'two letter country code' })).toBeVisible();
+  // nothing was filed, the page did not move
+  expect(page.url()).toContain('/cases/new');
+  await page.goto(`${WEB}/cases/00000000-0000-0000-0000-000000000000`);
+  await expect(page.getByText('This case does not exist')).toBeVisible({ timeout: 15_000 });
+});
+
 test('pharmavigil: every view renders', async ({ page }) => {
   test.setTimeout(180_000);
   const sizes: number[] = [];
-  for (const route of ['/', '/signals']) {
+  for (const route of ['/', '/signals', '/cases/new']) {
     const resp = await page.goto(`${WEB}${route}`, { waitUntil: 'domcontentloaded' });
     expect(resp?.status(), `${route} HTTP`).toBeLessThan(400);
     await page.waitForLoadState('networkidle').catch(() => {});
@@ -108,26 +129,28 @@ test('pharmavigil: every view renders', async ({ page }) => {
   }
   // Identical sizes would mean routing is not really happening.
   expect(Array.from(new Set<number>(sizes)).length,
-    'both routes rendered the same thing').toBeGreaterThan(1);
+    'the routes rendered the same thing').toBeGreaterThan(1);
 });
 
-test('pharmavigil: file a report and assess it end to end', async ({ request }) => {
+test('pharmavigil: file a report in the UI and assess it end to end', async ({ page, request }) => {
   test.setTimeout(900_000);
 
-  const samples = await getData<any[]>(request, `${API}/api/pv/samples`);
-  const sample = samples!.find((s) => s.id === 'sample-rhabdo') || samples![0];
-
-  const created = await request.post(`${API}/api/pv/cases`, {
-    data: {
-      narrative: sample.narrative,
-      suspect_drug: sample.suspect_drug,
-      reporter_type: sample.reporter_type,
-      country: sample.country,
-    },
-  });
-  expect(created.status(), 'intake accepted').toBe(202);
-  const id = (await created.json()).data.id;
+  // Intake: the reviewer opens the form from the queue and files the report.
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(`${WEB}/`, { waitUntil: 'domcontentloaded' });
+  await page.getByTestId('new-case').click();
+  await expect(page).toHaveURL(/\/cases\/new$/);
+  await page.getByTestId('intake-sample').selectOption('sample-rhabdo');
+  await expect(page.getByTestId('intake-drug')).not.toHaveValue('');
+  const narrative = await page.getByTestId('intake-narrative').inputValue();
+  expect(narrative.length, 'sample prefilled the narrative').toBeGreaterThan(50);
+  await page.getByTestId('intake-narrative').fill(`${narrative}\nReported again by the pharmacist at follow-up.`);
+  await page.screenshot({ path: 'e2e/screenshots/pharmavigil/intake-1440.png', fullPage: true });
+  await page.getByTestId('intake-submit').click();
+  await page.waitForURL(/\/cases\/[0-9a-f-]{36}$/, { timeout: 30_000 });
+  const id = page.url().split('/').pop()!;
   console.log(`  case ${id}`);
+  await expect(page.getByText(/Assessment running|assessed/i).first()).toBeVisible({ timeout: 30_000 });
 
   // Poll the API rather than trusting the page, so this asserts persisted
   // state rather than optimistic UI.
@@ -197,15 +220,48 @@ test('pharmavigil: file a report and assess it end to end', async ({ request }) 
   // A real narrative, not a stub.
   expect((c.narrative_text || '').length, 'narrative too short to be real').toBeGreaterThan(200);
 
-  // The human gate: nothing is submitted without it.
-  const review = await request.post(`${API}/api/pv/cases/${id}/review`, {
-    data: { decision: 'approve', reviewer: 'uat.reviewer', notes: 'UAT' },
-  });
-  expect(review.ok(), 'review accepted').toBeTruthy();
-  const after = (await review.json()).data;
+  // The human gate, in the UI: the review form shows once the page polls the
+  // finished assessment, reject needs a reason, approve submits.
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await expect(page.getByTestId('review-reviewer')).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole('heading', { name: 'MedDRA coding' })).toBeVisible();
+  await page.screenshot({ path: 'e2e/screenshots/pharmavigil/assessed-1440.png', fullPage: true });
+  await page.getByTestId('review-reviewer').fill('uat.reviewer');
+  await page.getByTestId('review-reject').click();
+  await expect(page.getByTestId('review-message')).toContainText('Say why you reject');
+  await page.getByTestId('review-notes').fill('Checked against the source report');
+  await page.getByTestId('review-approve').click();
+  await expect(page.getByTestId('review-message')).toContainText('Approved and submitted', { timeout: 20_000 });
+  await expect(page.getByTestId('review-outcome')).toContainText('uat.reviewer chose approve');
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await expect(page.getByTestId('review-outcome')).toContainText('approve', { timeout: 20_000 });
+
+  const after = (await getData<Case>(request, `${API}/api/pv/cases/${id}`))!;
   expect(after.status, 'status after approval').toBe('submitted');
   expect(after.reviewed_by).toBe('uat.reviewer');
+  expect(after.review_notes).toBe('Checked against the source report');
   console.log(`  reviewed -> ${after.status}`);
+
+  // a decided case cannot be decided twice
+  const again = await request.post(`${API}/api/pv/cases/${id}/review`, {
+    data: { decision: 'reject', reviewer: 'someone.else', notes: 'late' },
+  });
+  expect(again.status(), 'second decision refused').toBe(409);
+
+  // the same journey has to work on a phone
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(`${WEB}/cases/${id}`, { waitUntil: 'domcontentloaded' });
+  await expect(page.getByTestId('review-outcome')).toBeVisible({ timeout: 20_000 });
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+  expect(overflow, 'case page scrolls sideways on a phone').toBeLessThanOrEqual(1);
+  await page.screenshot({ path: 'e2e/screenshots/pharmavigil/case-390.png', fullPage: true });
+  await page.goto(`${WEB}/cases/new`, { waitUntil: 'domcontentloaded' });
+  await page.screenshot({ path: 'e2e/screenshots/pharmavigil/intake-390.png', fullPage: true });
+  await page.goto(`${WEB}/`, { waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(1500);
+  const qOverflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+  expect(qOverflow, 'queue scrolls sideways on a phone').toBeLessThanOrEqual(1);
+  await page.screenshot({ path: 'e2e/screenshots/pharmavigil/queue-390.png', fullPage: true });
 });
 
 test('pharmavigil: disproportionality is arithmetic, and says so', async ({ request }) => {

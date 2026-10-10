@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import enum
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import (
     DateTime,
@@ -13,6 +13,8 @@ from sqlalchemy import (
     Index,
     String,
     UniqueConstraint,
+    func,
+    or_,
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -78,3 +80,16 @@ class ResourceShare(UUIDMixin, TenantMixin, TimestampMixin, Base):
         DateTime(timezone=True),
         nullable=True,
     )
+
+    @classmethod
+    def live(cls):
+        """WHERE clause for shares that still grant access."""
+        return or_(cls.expires_at.is_(None), cls.expires_at > func.now())
+
+    def is_expired(self, now: datetime | None = None) -> bool:
+        if self.expires_at is None:
+            return False
+        exp = self.expires_at
+        if exp.tzinfo is None:
+            exp = exp.replace(tzinfo=timezone.utc)
+        return exp <= (now or datetime.now(timezone.utc))

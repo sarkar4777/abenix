@@ -217,9 +217,13 @@ async def list_connections(
     if sort == "oldest":
         query = query.order_by(UserMCPConnection.created_at.asc())
     elif sort == "name":
-        query = query.order_by(UserMCPConnection.server_name.asc())
+        query = query.order_by(
+            UserMCPConnection.server_name.asc(), UserMCPConnection.id
+        )
     else:  # newest (default)
-        query = query.order_by(UserMCPConnection.created_at.desc())
+        query = query.order_by(
+            UserMCPConnection.created_at.desc(), UserMCPConnection.id
+        )
 
     # Count total before pagination
     count_base = select(UserMCPConnection).where(

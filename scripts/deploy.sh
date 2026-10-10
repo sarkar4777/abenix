@@ -15,15 +15,31 @@ FRESH="${FRESH:-false}"
 # 3000/8000 on the host.
 WEB_PORT="${WEB_PORT:-3000}"
 API_PORT="${API_PORT:-8000}"
-# Where the self-restarting port-forward wrappers record their PIDs, so
-# they can be stopped without relying on pattern matching.
-FORWARD_PIDFILE="${FORWARD_PIDFILE:-${TMPDIR:-/tmp}/abenix-forwards-${NAMESPACE}.pids}"
+NEO4J_PORT="${NEO4J_PORT:-7474}"
+PROMETHEUS_PORT="${PROMETHEUS_PORT:-9090}"
+GRAFANA_PORT="${GRAFANA_PORT:-3030}"
+LIVEKIT_PORT="${LIVEKIT_PORT:-7880}"
+# Dev catchers (Mailpit, webhook catcher, mock OIDC) on local deploys only
+DEV_CATCHERS="${DEV_CATCHERS:-true}"
+MAILPIT_PORT="${MAILPIT_PORT:-8025}"
+CATCHER_PORT="${CATCHER_PORT:-8091}"
+MOCK_OIDC_PORT="${MOCK_OIDC_PORT:-8090}"
 
 # ── Load .env for API keys (LLM providers need these for agent execution) ───
 if [ -f "${ROOT_DIR}/.env" ]; then
+  _shell_env="$(export -p)"
   set -a
   source "${ROOT_DIR}/.env"
   set +a
+  # what was set on the command line wins over .env
+  eval "${_shell_env}"
+  unset _shell_env
+fi
+# The browser bundle has the API address baked in, so a moved API port must reach the web build
+if [ "${API_PORT}" != "8000" ]; then
+  case "${NEXT_PUBLIC_API_URL:-}" in
+    ""|"http://localhost:8000") export NEXT_PUBLIC_API_URL="http://localhost:${API_PORT}" ;;
+  esac
 fi
 
 # Build --set flags for secrets from environment variables
@@ -49,6 +65,13 @@ _build_secrets_flags() {
   [ -n "${ENTSOE_API_KEY:-}" ]           && flags="${flags} --set secrets.entsoeApiKey=${ENTSOE_API_KEY}"
   [ -n "${EIA_API_KEY:-}" ]              && flags="${flags} --set secrets.eiaApiKey=${EIA_API_KEY}"
   [ -n "${CONTRACTIQ_JWT_SECRET:-}" ]    && flags="${flags} --set secrets.contractiqJwtSecret=${CONTRACTIQ_JWT_SECRET}"
+  [ -n "${GOOGLE_OIDC_CLIENT_ID:-}" ]        && flags="${flags} --set secrets.sso.googleClientId=${GOOGLE_OIDC_CLIENT_ID}"
+  [ -n "${GOOGLE_OIDC_CLIENT_SECRET:-}" ]    && flags="${flags} --set secrets.sso.googleClientSecret=${GOOGLE_OIDC_CLIENT_SECRET}"
+  [ -n "${GITHUB_OAUTH_CLIENT_ID:-}" ]       && flags="${flags} --set secrets.sso.githubClientId=${GITHUB_OAUTH_CLIENT_ID}"
+  [ -n "${GITHUB_OAUTH_CLIENT_SECRET:-}" ]   && flags="${flags} --set secrets.sso.githubClientSecret=${GITHUB_OAUTH_CLIENT_SECRET}"
+  [ -n "${MICROSOFT_OIDC_CLIENT_ID:-}" ]     && flags="${flags} --set secrets.sso.microsoftClientId=${MICROSOFT_OIDC_CLIENT_ID}"
+  [ -n "${MICROSOFT_OIDC_CLIENT_SECRET:-}" ] && flags="${flags} --set secrets.sso.microsoftClientSecret=${MICROSOFT_OIDC_CLIENT_SECRET}"
+  [ -n "${MICROSOFT_OIDC_TENANT:-}" ]        && flags="${flags} --set secrets.sso.microsoftTenant=${MICROSOFT_OIDC_TENANT}"
   echo "${flags}"
 }
 
@@ -70,7 +93,7 @@ usage() {
   echo "Usage: $0 {local|local-runtime|cloud|status|destroy|build|reload <svc>|forwards}"
   echo ""
   echo "Commands:"
-  echo "  local          Deploy to minikube — embedded execution (no runtime pod)"
+  echo "  local          Deploy to minikube with the agent runtime pods (values-local.yaml)"
   echo "  local-runtime  Deploy to minikube — separate runtime pod (test prod architecture)"
   echo "  cloud          Deploy to current kubectl context (production, remote runtime)"
   echo "  status         Check deployment health"
@@ -80,10 +103,16 @@ usage() {
   echo "                 core: api web worker agent-runtime edge-runtime"
   echo "                 apps: {contractiq,industrial-iot,resolveai,wingman,mideasttourism,pharmavigil}-{api,web}, claimsiq"
   echo "  forwards       Re-establish and verify all local port forwards"
+  echo "  pause-apps     Scale use-case apps to zero to free memory, data and images stay. APPS=contractiq,wingman picks some"
+  echo "  resume-apps    Bring paused apps back, same APPS selection"
   echo ""
   echo "Flags:"
   echo "  FRESH=true     Force destroy + recreate minikube from scratch"
   echo "  WEB_PORT=3100  Host port for the web UI (default 3000)"
+  echo "  API_PORT=8100  Host port for the API (default 8000)"
+  echo "                 also NEO4J_PORT, GRAFANA_PORT, PROMETHEUS_PORT, LIVEKIT_PORT"
+  echo "  DEV_CATCHERS=false  Skip Mailpit, the webhook catcher and mock OIDC on local"
+  echo "                 their ports: MAILPIT_PORT 8025, CATCHER_PORT 8091, MOCK_OIDC_PORT 8090"
   echo ""
   echo "The script is incremental — reuses running minikube, only rebuilds changed images."
   exit 1
@@ -115,6 +144,66 @@ wait_for_docker() {
   exit 1
 }
 
+# ── Minikube size ───────────────────────────────────────────────────────────
+# Measured requests: the core platform about 6 GiB, each use-case app about
+# 0.75 GiB. See docs/06-deployment/09-local-sizing.md.
+docker_total_mib() { docker info --format '{{.MemTotal}}' 2>/dev/null | awk '{printf "%d", $1/1048576}'; }
+docker_ncpu() { docker info --format '{{.NCPU}}' 2>/dev/null; }
+
+minikube_size() {
+  local n=${#SELECTED_APPS[@]}
+  MK_MEMORY="${MINIKUBE_MEMORY:-$((8192 + 768 * n))}"
+  MK_CPUS="${MINIKUBE_CPUS:-$([ "${n}" -ge 3 ] && echo 6 || echo 4)}"
+  MK_DOCKER_MEM="$(docker_total_mib)"
+  MK_DOCKER_CPUS="$(docker_ncpu)"
+  if [ -n "${MK_DOCKER_CPUS}" ] && [ "${MK_CPUS}" -gt "${MK_DOCKER_CPUS}" ]; then
+    warn "Docker has ${MK_DOCKER_CPUS} CPUs, so minikube gets ${MK_DOCKER_CPUS} instead of ${MK_CPUS}"
+    MK_CPUS="${MK_DOCKER_CPUS}"
+  fi
+}
+
+# Stops before anything is created when Docker cannot hold the chosen apps
+check_docker_room() {
+  [ -z "${MK_DOCKER_MEM}" ] && return 0
+  [ $((MK_MEMORY + 1024)) -le "${MK_DOCKER_MEM}" ] && return 0
+  if [ -n "${MINIKUBE_MEMORY:-}" ]; then
+    warn "Docker has ${MK_DOCKER_MEM} MiB and MINIKUBE_MEMORY asks for ${MINIKUBE_MEMORY} MiB, carrying on as asked"
+    return 0
+  fi
+  local need_gb=$(( (MK_MEMORY + 1024 + 1023) / 1024 + 1 ))
+  err "Docker has ${MK_DOCKER_MEM} MiB of memory. The core platform plus ${#SELECTED_APPS[@]} app(s) needs minikube at ${MK_MEMORY} MiB, and Docker needs about 1 GiB more than that."
+  err "Pick one and run the deploy again:"
+  err "  1. Give Docker more memory. Docker Desktop: Settings > Resources, at least ${need_gb} GB."
+  err "     Windows with WSL 2: set memory=${need_gb}GB under [wsl2] in %UserProfile%\.wslconfig, run 'wsl --shutdown', restart Docker."
+  local spare=$(( MK_DOCKER_MEM - 1024 - 8192 ))
+  if [ "${spare}" -ge 0 ]; then
+    local fits=$(( spare / 768 ))
+    err "  2. Deploy fewer apps. This Docker fits the core plus ${fits} app(s), for example APPS=none or APPS=contractiq."
+  else
+    err "  2. Even the core alone needs Docker at 10 GB, so option 1 is the way."
+  fi
+  err "  3. Start smaller anyway with MINIKUBE_MEMORY=<MiB>. Pods may then be evicted under load."
+  err "Sizes for each choice: docs/06-deployment/09-local-sizing.md"
+  exit 1
+}
+
+# A running cluster keeps its size, so say so when it is too small for this selection
+check_running_size() {
+  local profile="${MINIKUBE_PROFILE:-minikube}" have alloc
+  have=$(docker inspect "${profile}" --format '{{.HostConfig.Memory}}' 2>/dev/null | awk '{printf "%d", $1/1048576}')
+  if [ -z "${have}" ] || [ "${have}" -eq 0 ]; then return 0; fi
+  if [ "${have}" -lt $((MK_MEMORY - 256)) ]; then
+    warn "minikube has ${have} MiB, and the core plus ${#SELECTED_APPS[@]} app(s) want about ${MK_MEMORY} MiB."
+    warn "  Pods may be evicted or the node may stall under load. Either deploy fewer apps with APPS=..."
+    warn "  or recreate minikube larger with FRESH=true (this deletes the local cluster and its data)."
+  fi
+  alloc=$(kubectl get node "${profile}" -o jsonpath='{.status.allocatable.memory}' 2>/dev/null | awk '/Ki$/{printf "%d", $1/1024}')
+  if [ -n "${alloc}" ] && [ "${alloc}" -gt $((have + have / 10)) ]; then
+    warn "Kubernetes thinks minikube has ${alloc} MiB but the container has ${have} MiB, so it can book pods past what fits."
+    warn "  Clusters created by this script now reserve the difference. FRESH=true recreates it that way."
+  fi
+}
+
 # ── Ensure minikube is running (start only if needed) ────────────────────────
 ensure_minikube() {
   local host_status api_status
@@ -123,6 +212,8 @@ ensure_minikube() {
 
   if [ "${host_status}" = "Running" ] && [ "${api_status}" = "Running" ]; then
     ok "Minikube already running (host + apiserver healthy)"
+    minikube_size
+    check_running_size
   else
     # If host is running but apiserver is dead, the cluster is broken — delete it
     if [ "${host_status}" = "Running" ] && [ "${api_status}" != "Running" ]; then
@@ -132,13 +223,22 @@ ensure_minikube() {
       sleep 3
     fi
 
-    log "Starting minikube (4 CPUs, 8GB RAM, 30GB disk)..."
     wait_for_docker
+    minikube_size
+    check_docker_room
+    # with the docker driver the kubelet sees all of Docker's memory, so reserve what minikube does not have
+    local reserved=() kr=""
+    local spare_mem=$(( ${MK_DOCKER_MEM:-0} - MK_MEMORY )) spare_cpu=$(( ${MK_DOCKER_CPUS:-0} - MK_CPUS ))
+    [ "${spare_mem}" -gt 0 ] && kr="memory=${spare_mem}Mi"
+    [ "${spare_cpu}" -gt 0 ] && kr="${kr:+${kr},}cpu=${spare_cpu}"
+    [ -n "${kr}" ] && reserved=(--extra-config="kubelet.kube-reserved=${kr}")
+    log "Starting minikube (${MK_CPUS} CPUs, ${MK_MEMORY} MiB RAM, for the core plus ${#SELECTED_APPS[@]} app(s))..."
+    log "  the first start downloads the node image and can sit quiet for 2 to 5 minutes"
 
     local start_log
     start_log=$(mktemp)
     set +e
-    minikube start --driver=docker --cpus=4 --memory=8192 --disk-size=30g >"${start_log}" 2>&1
+    minikube start --driver=docker --cpus="${MK_CPUS}" --memory="${MK_MEMORY}" --disk-size=30g ${reserved[@]+"${reserved[@]}"} >"${start_log}" 2>&1
     local rc=$?
     set -e
     tail -5 "${start_log}"
@@ -179,10 +279,13 @@ ensure_keda() {
   log "Installing KEDA (event-driven autoscaler)..."
   helm repo add kedacore https://kedacore.github.io/charts &>/dev/null || true
   helm repo update &>/dev/null || true
-  if helm install keda kedacore/keda \
+  # upgrade --install so a run that timed out is picked up again, not refused
+  if helm upgrade --install keda kedacore/keda \
       --namespace keda --create-namespace \
-      --timeout 5m --wait 2>&1 | tail -3; then
+      --timeout 10m --wait 2>&1 | tail -3; then
     ok "KEDA installed"
+  elif kubectl get crd scaledobjects.keda.sh &>/dev/null; then
+    warn "KEDA is slow to report ready, its CRDs are in place and it usually settles on its own"
   else
     warn "KEDA install failed — ScaledObjects will not be created"
     return 0
@@ -241,6 +344,15 @@ ensure_infra_images() {
       warn "infra/docker/Dockerfile.postgres-pgvector missing — skipping pgvector build"
     fi
   fi
+  if [ "${DEV_CATCHERS}" = "true" ]; then
+    local img
+    for img in axllent/mailpit:v1.21 python:3.12-alpine ghcr.io/navikt/mock-oauth2-server:2.1.10; do
+      if ! docker image inspect "${img}" &>/dev/null; then
+        log "Pulling ${img} (dev catcher)..."
+        docker pull "${img}" 2>&1 | tail -1 || warn "${img} pull failed, that dev catcher will not start"
+      fi
+    done
+  fi
   ok "Infrastructure images ready"
 }
 
@@ -255,6 +367,22 @@ web_build_args() { # web_build_args <svc>, fills BUILD_ARGS
   done
   return 0
 }
+
+# A first build runs for many minutes without output, so say it is still going.
+_HEARTBEAT_PID=""
+_heartbeat_start() { # _heartbeat_start <what>
+  local what="$1"
+  ( m=0; while sleep 60; do m=$((m + 1)); echo -e "${CYAN}[deploy]${NC}   still ${what}, ${m} min so far"; done ) &
+  _HEARTBEAT_PID=$!
+}
+_heartbeat_stop() {
+  if [ -n "${_HEARTBEAT_PID}" ]; then
+    kill "${_HEARTBEAT_PID}" 2>/dev/null || true
+    wait "${_HEARTBEAT_PID}" 2>/dev/null || true
+  fi
+  _HEARTBEAT_PID=""
+}
+trap '_heartbeat_stop' EXIT
 
 # ── Build app images (only if code changed) ──────────────────────────────────
 # Build one core service image. Shared by build_images and `reload`, so a
@@ -283,6 +411,7 @@ build_core_service() {
 
   log "Building ${svc}..."
   web_build_args "${svc}"
+  _heartbeat_start "building ${svc}"
   # heavy images build on the host daemon, so the build does not starve the cluster inside minikube
   local host_build=false
   case " ${MINIKUBE_HOST_BUILD:-web} " in *" ${svc} "*) [ -n "${MINIKUBE_ACTIVE_DOCKERD:-}" ] && host_build=true ;; esac
@@ -291,19 +420,23 @@ build_core_service() {
     log "${svc}: building on the host, then loading into minikube"
     if ! (set -o pipefail; "${hostenv[@]}" docker build -t "${image}" -t "${registry}/${svc}:latest" \
         ${BUILD_ARGS[@]+"${BUILD_ARGS[@]}"} -f "${ROOT_DIR}/${dockerfile}" "${ctx}" 2>&1 | tail -5); then
+      _heartbeat_stop
       err "${svc}: image build failed, the running image was left as it is"
       return 1
     fi
     # minikube image load keeps a tag it already has, so a rebuild at the same SHA never landed
     if ! (set -o pipefail; "${hostenv[@]}" docker save "${image}" "${registry}/${svc}:latest" | docker load | tail -2); then
+      _heartbeat_stop
       err "${svc}: could not load the image into minikube"
       return 1
     fi
   elif ! (set -o pipefail; docker build -t "${image}" -t "${registry}/${svc}:latest" \
       ${BUILD_ARGS[@]+"${BUILD_ARGS[@]}"} -f "${ROOT_DIR}/${dockerfile}" "${ctx}" 2>&1 | tail -3); then
+    _heartbeat_stop
     err "${svc}: image build failed, the running image was left as it is"
     return 1
   fi
+  _heartbeat_stop
   ok "${svc}: built"
 
   if [ "${push}" = "true" ]; then
@@ -342,6 +475,16 @@ _should_build_app() { # _should_build_app <registry-key>
   app_selected "$1"
 }
 
+# An app whose image does not build is left out, the platform and the other apps still deploy
+FAILED_APPS=()
+_skip_app() { # _skip_app <registry-key>
+  FAILED_APPS+=("$1")
+  local keep=() k
+  for k in ${SELECTED_APPS[@]+"${SELECTED_APPS[@]}"}; do [ "${k}" = "$1" ] || keep+=("${k}"); done
+  SELECTED_APPS=(${keep[@]+"${keep[@]}"})
+  warn "$1 is left out of this deploy because its image did not build. The platform and the other apps carry on."
+}
+
 # Builds one app image and stops the deploy with the build's own error when it
 # fails. A pipe into tail used to swallow the failure and print "built" anyway.
 _build_app_image() { # _build_app_image <name> <dockerfile> <context> <tag> [<tag> ...]
@@ -352,7 +495,9 @@ _build_app_image() { # _build_app_image <name> <dockerfile> <context> <tag> [<ta
   log="$(mktemp)"
   # a stalled build step (seen in vaadinBuildFrontend) must fail, not hang the deploy
   local limit="${APP_BUILD_TIMEOUT:-1800}" rc=0
+  _heartbeat_start "building ${name}"
   timeout "${limit}" docker build "${tags[@]}" -f "${df}" "${ctx}" >"${log}" 2>&1 || rc=$?
+  _heartbeat_stop
   if [ "${rc}" -eq 124 ]; then
     err "${name}: build did not finish within ${limit}s and was stopped — last 25 lines:"
     tail -25 "${log}" | sed 's/^/      /'
@@ -373,7 +518,12 @@ _build_app_image() { # _build_app_image <name> <dockerfile> <context> <tag> [<ta
 build_images() {
   # A tool shipped without declaring its configuration would be missing from
   # the admin screen. Cheap, so it runs before any image is built.
-  if ! python "${ROOT_DIR}/scripts/check-tool-config.py" >/dev/null 2>&1; then
+  # a contributor lint, quiet when the host python lacks the runtime's packages
+  local py="" lint_out=""
+  command -v python3 >/dev/null 2>&1 && python3 -c 'import sys' >/dev/null 2>&1 && py=python3
+  [ -z "${py}" ] && command -v python >/dev/null 2>&1 && py=python
+  [ -n "${py}" ] && lint_out="$("${py}" "${ROOT_DIR}/scripts/check-tool-config.py" 2>&1 || true)"
+  if printf '%s' "${lint_out}" | grep -qE '^[1-9][0-9]* problems?'; then
     warn "scripts/check-tool-config.py reports problems — run it to see which tools read the environment directly"
   fi
   local registry="${1:-localhost:5000/abenix}"
@@ -412,7 +562,7 @@ build_images() {
 
       log "Building contractiq-${ciq}..."
       _build_app_image "contractiq-${ciq}" "${ciq_dockerfile}" "${ROOT_DIR}/contractiq/${ciq}" \
-        "${ciq_image}" "${registry}/contractiq-${ciq}:latest" || return 1
+        "${ciq_image}" "${registry}/contractiq-${ciq}:latest" || { _skip_app contractiq; break; }
 
       if [ "${push}" = "true" ]; then
         docker push "${ciq_image}" 2>&1 | tail -1
@@ -429,7 +579,7 @@ build_images() {
       [ ! -f "${df}" ] && { warn "No Dockerfile for industrial-iot/${part}"; continue; }
       log "Building industrial-iot-${part}..."
       _build_app_image "industrial-iot-${part}" "${df}" "${ROOT_DIR}/industrial-iot/${part}" \
-        "${img}" "${registry}/industrial-iot-${part}:latest" || return 1
+        "${img}" "${registry}/industrial-iot-${part}:latest" || { _skip_app industrial-iot; break; }
       if [ "${push}" = "true" ]; then docker push "${img}" 2>&1 | tail -1; fi
     done
   fi
@@ -443,7 +593,7 @@ build_images() {
       [ ! -f "${df}" ] && { warn "No Dockerfile for resolveai/${part}"; continue; }
       log "Building resolveai-${part}..."
       _build_app_image "resolveai-${part}" "${df}" "${ROOT_DIR}/resolveai/${part}" \
-        "${img}" "${registry}/resolveai-${part}:latest" || return 1
+        "${img}" "${registry}/resolveai-${part}:latest" || { _skip_app resolveai; break; }
       if [ "${push}" = "true" ]; then docker push "${img}" 2>&1 | tail -1; fi
     done
   fi
@@ -457,7 +607,7 @@ build_images() {
       [ ! -f "${pv_df}" ] && { warn "No Dockerfile for pharmavigil/${part}"; continue; }
       log "Building pharmavigil-${part}..."
       _build_app_image "pharmavigil-${part}" "${pv_df}" "${ROOT_DIR}/pharmavigil/${part}" \
-        "${pv_img}" "${registry}/pharmavigil-${part}:latest" || return 1
+        "${pv_img}" "${registry}/pharmavigil-${part}:latest" || { _skip_app pharmavigil; break; }
       if [ "${push}" = "true" ]; then docker push "${pv_img}" 2>&1 | tail -1; fi
     done
   fi
@@ -491,7 +641,8 @@ build_images() {
             -f "${sdf}" "${sctx}" >"${slog}" 2>&1; then
           err "${app}-${part}: build FAILED — last 25 lines:"
           tail -25 "${slog}" | sed 's/^/      /'
-          return 1
+          _skip_app "${app}"
+          break
         fi
         ok "${app}-${part}: built"
         if [ "${push}" = "true" ]; then docker push "${simg}" 2>&1 | tail -1; fi
@@ -510,9 +661,12 @@ build_images() {
       warn "No Dockerfile for claimsiq"
     else
       log "Building claimsiq..."
-      _build_app_image "claimsiq" "${df}" "${ROOT_DIR}/claimsiq" \
-        "${img}" "${registry}/claimsiq:latest" || return 1
-      if [ "${push}" = "true" ]; then docker push "${img}" 2>&1 | tail -1; fi
+      if _build_app_image "claimsiq" "${df}" "${ROOT_DIR}/claimsiq" \
+          "${img}" "${registry}/claimsiq:latest"; then
+        if [ "${push}" = "true" ]; then docker push "${img}" 2>&1 | tail -1; fi
+      else
+        _skip_app claimsiq
+      fi
     fi
   fi
 
@@ -521,6 +675,28 @@ build_images() {
   # function's return status and abort the whole deploy after the images
   # were built but before helm ran.
   return 0
+}
+
+# Value for one key of an app secret: the environment wins, then what the
+# cluster already holds, never the manifest placeholder. Read it before the
+# manifest apply, whose placeholder Secret would otherwise wipe a minted key
+# and make every deploy rotate it.
+_kept_secret() { # _kept_secret <secret> <key> <value from env>
+  local v="${3:-}"
+  if [ -z "${v}" ] || [ "${v}" = "REPLACE_AT_DEPLOY_TIME" ] || [ "${v}" = "placeholder" ]; then
+    v="$(kubectl get secret "$1" -n "${NAMESPACE}" -o jsonpath="{.data.$2}" 2>/dev/null | base64 -d 2>/dev/null || true)"
+  fi
+  case "${v}" in REPLACE_AT_DEPLOY_TIME|placeholder) v="" ;; esac
+  printf '%s' "${v}"
+}
+
+# A missing app key is minted by seed-standalone-keys.sh once the apps are up.
+_note_key() { # _note_key <ENV_NAME> <value>
+  if [ -z "$2" ]; then
+    log "$1 not set yet, it is minted after the apps deploy"
+  else
+    log "$1 kept (${2:0:8}...)"
+  fi
 }
 
 # ── Deploy ContractIQ as k8s manifests (after Abenix is running) ─────────
@@ -533,13 +709,12 @@ deploy_contractiq() {
   step "Deploying ContractIQ to namespace ${NAMESPACE}"
 
   # Inject secrets from .env if available
-  local ciq_key="${CONTRACTIQ_ABENIX_API_KEY:-}"
-  local ciq_jwt="${CONTRACTIQ_JWT_SECRET:-contractiq-dev-secret-please-change}"
-  local anth_key="${ANTHROPIC_API_KEY:-}"
-
-  if [ -z "${ciq_key}" ]; then
-    warn "CONTRACTIQ_ABENIX_API_KEY not set — chat will fail until you set it"
-  fi
+  local ciq_key ciq_jwt anth_key
+  ciq_key="$(_kept_secret contractiq-secrets CONTRACTIQ_ABENIX_API_KEY "${CONTRACTIQ_ABENIX_API_KEY:-}")"
+  ciq_jwt="$(_kept_secret contractiq-secrets CONTRACTIQ_JWT_SECRET "${CONTRACTIQ_JWT_SECRET:-}")"
+  [ -z "${ciq_jwt}" ] && ciq_jwt="contractiq-dev-secret-please-change"
+  anth_key="$(_kept_secret contractiq-secrets ANTHROPIC_API_KEY "${ANTHROPIC_API_KEY:-}")"
+  _note_key CONTRACTIQ_ABENIX_API_KEY "${ciq_key}"
 
   # Apply manifests with secret substitution
   sed \
@@ -571,8 +746,9 @@ deploy_industrial_iot() {
     return 0
   fi
   step "Deploying Industrial-IoT to namespace ${NAMESPACE}"
-  local iot_key="${INDUSTRIALIOT_ABENIX_API_KEY:-}"
-  [ -z "${iot_key}" ] && warn "INDUSTRIALIOT_ABENIX_API_KEY not set — pipeline calls will 503"
+  local iot_key
+  iot_key="$(_kept_secret industrial-iot-secrets INDUSTRIALIOT_ABENIX_API_KEY "${INDUSTRIALIOT_ABENIX_API_KEY:-}")"
+  _note_key INDUSTRIALIOT_ABENIX_API_KEY "${iot_key}"
 
   # Web-tier shared secret that gates the standalone API's proxy
   # passthroughs (/api/code-assets, /api/agents, /api/connectors). Reuse
@@ -609,8 +785,9 @@ deploy_resolveai() {
     return 0
   fi
   step "Deploying ResolveAI to namespace ${NAMESPACE}"
-  local ra_key="${RESOLVEAI_ABENIX_API_KEY:-}"
-  [ -z "${ra_key}" ] && warn "RESOLVEAI_ABENIX_API_KEY not set — pipeline calls will 503"
+  local ra_key
+  ra_key="$(_kept_secret resolveai-secrets RESOLVEAI_ABENIX_API_KEY "${RESOLVEAI_ABENIX_API_KEY:-}")"
+  _note_key RESOLVEAI_ABENIX_API_KEY "${ra_key}"
 
   kubectl apply -f "${ROOT_DIR}/resolveai/k8s/resolveai.yaml" 2>&1 | tail -10
   kubectl create secret generic resolveai-secrets \
@@ -632,8 +809,9 @@ deploy_pharmavigil() {
     return 0
   fi
   step "Deploying PharmaVigil to namespace ${NAMESPACE}"
-  local pv_key="${PHARMAVIGIL_ABENIX_API_KEY:-}"
-  [ -z "${pv_key}" ] && warn "PHARMAVIGIL_ABENIX_API_KEY not set — assessments will 401"
+  local pv_key
+  pv_key="$(_kept_secret pharmavigil-secrets PHARMAVIGIL_ABENIX_API_KEY "${PHARMAVIGIL_ABENIX_API_KEY:-}")"
+  _note_key PHARMAVIGIL_ABENIX_API_KEY "${pv_key}"
 
   kubectl apply -f "${ROOT_DIR}/pharmavigil/k8s/pharmavigil.yaml" 2>&1 | tail -10
   kubectl create secret generic pharmavigil-secrets \
@@ -656,13 +834,18 @@ deploy_mideasttourism() {
     return 0
   fi
   step "Deploying Mideast Tourism to namespace ${NAMESPACE}"
-  local st_key="${MIDEASTTOURISM_ABENIX_API_KEY:-}"
-  [ -z "${st_key}" ] && warn "MIDEASTTOURISM_ABENIX_API_KEY not set — agent calls will 401"
+  local st_key st_jwt
+  st_key="$(_kept_secret mideasttourism-secrets MIDEASTTOURISM_ABENIX_API_KEY "${MIDEASTTOURISM_ABENIX_API_KEY:-}")"
+  _note_key MIDEASTTOURISM_ABENIX_API_KEY "${st_key}"
+  # sessions survive a redeploy only if the signing secret stays put
+  st_jwt="$(_kept_secret mideasttourism-secrets MIDEASTTOURISM_JWT_SECRET "${MIDEASTTOURISM_JWT_SECRET:-}")"
+  [ -z "${st_jwt}" ] && st_jwt="$(python -c 'import secrets; print(secrets.token_hex(32))')"
 
   kubectl apply -f "${ROOT_DIR}/mideasttourism/k8s/mideasttourism.yaml" 2>&1 | tail -10
   kubectl create secret generic mideasttourism-secrets \
     --namespace="${NAMESPACE}" \
     --from-literal=MIDEASTTOURISM_ABENIX_API_KEY="${st_key}" \
+    --from-literal=MIDEASTTOURISM_JWT_SECRET="${st_jwt}" \
     --dry-run=client -o yaml | kubectl apply -f - 2>&1 | tail -3
   # envFrom secrets are only read at pod start, so a freshly patched key
   # needs a restart or the pod keeps the manifest placeholder.
@@ -683,10 +866,11 @@ deploy_wingman() {
     return 0
   fi
   step "Deploying Wingman to namespace ${NAMESPACE}"
-  local wm_key="${WINGMAN_ABENIX_API_KEY:-}"
-  [ -z "${wm_key}" ] && warn "WINGMAN_ABENIX_API_KEY not set — agent calls will 401"
+  local wm_key ais_key
+  wm_key="$(_kept_secret wingman-secrets WINGMAN_ABENIX_API_KEY "${WINGMAN_ABENIX_API_KEY:-}")"
+  _note_key WINGMAN_ABENIX_API_KEY "${wm_key}"
   # Live AIS is optional; the rest of Wingman runs without it.
-  local ais_key="${AISSTREAM_API_KEY:-}"
+  ais_key="$(_kept_secret wingman-secrets AISSTREAM_API_KEY "${AISSTREAM_API_KEY:-}")"
   [ -z "${ais_key}" ] && warn "AISSTREAM_API_KEY not set — Operations Watch live-AIS disabled"
 
   kubectl apply -f "${ROOT_DIR}/wingman/k8s/wingman.yaml" 2>&1 | tail -10
@@ -712,8 +896,9 @@ deploy_claimsiq() {
     return 0
   fi
   step "Deploying ClaimsIQ to namespace ${NAMESPACE}"
-  local cq_key="${CLAIMSIQ_ABENIX_API_KEY:-}"
-  [ -z "${cq_key}" ] && warn "CLAIMSIQ_ABENIX_API_KEY not set — pipeline calls will 401"
+  local cq_key
+  cq_key="$(_kept_secret claimsiq-secrets CLAIMSIQ_ABENIX_API_KEY "${CLAIMSIQ_ABENIX_API_KEY:-}")"
+  _note_key CLAIMSIQ_ABENIX_API_KEY "${cq_key}"
 
   kubectl apply -f "${ROOT_DIR}/claimsiq/k8s/claimsiq.yaml" 2>&1 | tail -10
   kubectl create secret generic claimsiq-secrets \
@@ -757,7 +942,8 @@ wait_for_pods() {
   local start=$SECONDS
   while true; do
     local not_ready total_pods
-    not_ready=$(kubectl get pods -n "${NAMESPACE}" --no-headers 2>/dev/null | grep -cv "Running\|Completed" || echo 0)
+    # cron job pods come and go, a failed reaper run is not a deploy problem
+    not_ready=$(kubectl get pods -n "${NAMESPACE}" -l '!job-name' --no-headers 2>/dev/null | grep -cv "Running\|Completed" || echo 0)
     not_ready=$(echo "${not_ready}" | tr -d '[:space:]')
     total_pods=$(kubectl get pods -n "${NAMESPACE}" --no-headers 2>/dev/null | wc -l)
     total_pods=$(echo "${total_pods}" | tr -d '[:space:]')
@@ -770,7 +956,11 @@ wait_for_pods() {
 
     if [ "${elapsed}" -ge "${timeout}" ]; then
       warn "Some pods not ready after ${timeout}s:"
-      kubectl get pods -n "${NAMESPACE}" --no-headers 2>/dev/null | grep -v "Running\|Completed" | sed 's/^/      /'
+      kubectl get pods -n "${NAMESPACE}" -l '!job-name' --no-headers 2>/dev/null | grep -v "Running\|Completed" | sed 's/^/      /'
+      if kubectl get events -n "${NAMESPACE}" --field-selector reason=FailedScheduling 2>/dev/null | grep -q Insufficient; then
+        warn "Some pods could not be placed because minikube is out of memory or CPU."
+        warn "  Deploy fewer apps with APPS=..., or recreate minikube larger. See docs/06-deployment/09-local-sizing.md"
+      fi
       return 1
     fi
 
@@ -790,7 +980,8 @@ wait_for_pods() {
 roll_changed_images() {
   local ctx
   ctx="$(kubectl config current-context 2>/dev/null || true)"
-  case "${ctx}" in *minikube*) ;; *) return 0 ;; esac
+  # a named profile (minikube -p x) gives the context that name, not "minikube"
+  case "${ctx}" in *minikube*|"${MINIKUBE_PROFILE:-minikube}") ;; *) return 0 ;; esac
 
   # Read ids from the daemon that holds these images.
   eval "$(minikube docker-env 2>/dev/null)" || return 0
@@ -871,6 +1062,19 @@ ensure_jwt_keys() {
     ]" &>/dev/null || true
 
   ok "JWT keys generated and stored in secret"
+
+  # pods started before the patch have no keys, and the runtime then cannot sign agent-to-agent calls
+  local d rolled=()
+  while read -r d refs; do
+    case " ${refs} " in *" abenix-secrets "*) rolled+=("${d}") ;; esac
+  done < <(kubectl get deploy -n "${NAMESPACE}"     -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.spec.template.spec.containers[*].envFrom[*].secretRef.name}{"
+"}{end}' 2>/dev/null)
+  [ "${#rolled[@]}" -eq 0 ] && return 0
+  log "Restarting ${#rolled[@]} services so they read the new keys: ${rolled[*]}"
+  for d in "${rolled[@]}"; do kubectl rollout restart "deploy/${d}" -n "${NAMESPACE}" &>/dev/null || true; done
+  for d in "${rolled[@]}"; do
+    kubectl rollout status "deploy/${d}" -n "${NAMESPACE}" --timeout=240s &>/dev/null       || warn "${d} did not finish restarting, it may still lack the JWT keys"
+  done
 }
 
 # ── Database init ────────────────────────────────────────────────────────────
@@ -950,7 +1154,7 @@ run_migrations() {
   if [ -n "${catalogue}" ] && [ "${catalogue}" -gt 0 ] 2>/dev/null; then
     ok "Migrations applied — ${catalogue} models in the pricing catalogue"
   else
-    warn "Model pricing catalogue is empty after alembic — every model picker will fall back to its hardcoded list"
+    log "Model pricing catalogue is empty for now, the seed step below fills it"
   fi
 }
 
@@ -1098,7 +1302,8 @@ PY
 )
   case "${out}" in
     OK*)      ok "${out#OK }" ;;
-    MISSING*) warn "${out#MISSING } tool credential(s) are not set. Those agents answer with the key they need until an admin adds it under Admin -> Tool Configuration."
+    MISSING*) local first="${out%%$'\n'*}"
+              log "${first#MISSING } optional data-provider key(s) are not set. Only the sample agents listed use them, and they say which key they need until an admin adds it under Admin -> Tool Configuration."
               printf '%s\n' "${out}" | sed -n '2,40p' | while IFS= read -r line; do log "  ${line}"; done ;;
     *)        log "credential summary unavailable: ${out:-no output}" ;;
   esac
@@ -1126,7 +1331,8 @@ verify_ml_models_shared() {
       log "ML model volume check: no model files yet"
       return 0
     fi
-    if MSYS_NO_PATHCONV=1 kubectl exec -n "${NAMESPACE}" "${rt_pod}" -- sh -c "test -f '${sample}'" 2>/dev/null; then
+    # no MSYS_NO_PATHCONV here, it hides a Git Bash style KUBECONFIG from kubectl and the check hits another cluster
+    if kubectl exec -n "${NAMESPACE}" "${rt_pod}" -- sh -c "test -f '${sample}'" 2>/dev/null; then
       ok "ML models: the runtime reads the files the API stores"
       return 0
     fi
@@ -1224,7 +1430,7 @@ deploy_livekit() {
       LIVEKIT_URL="ws://livekit-server.${NAMESPACE}.svc.cluster.local:7880" \
       LIVEKIT_API_KEY=devkey \
       LIVEKIT_API_SECRET=secret \
-      LIVEKIT_PUBLIC_URL="ws://localhost:7880" \
+      LIVEKIT_PUBLIC_URL="ws://localhost:${LIVEKIT_PORT}" \
       LIVEKIT_MEET_URL="https://meet.livekit.io" \
       2>&1 | tail -2
     log "Rolling API to pick up LiveKit env..."
@@ -1232,42 +1438,71 @@ deploy_livekit() {
   else
     log "LIVEKIT_URL already set on the deployment (${existing_url}) — leaving it alone"
   fi
-  ok "LiveKit ready: in-cluster signaling at livekit-server:7880, browser via NodePort 30880 (port-forward to :7880)"
+  ok "LiveKit ready: in-cluster signaling at livekit-server:7880, browser via port-forward to :${LIVEKIT_PORT}"
 }
 
 # ── Port forwarding ──────────────────────────────────────────────────────────
-# Kill every port forward for this namespace, wrapper loops included, and
-# verify they are gone. `pkill` on the kubectl child alone is not enough: the
+# Forwards are pinned to the kube context they were started for, so a second
+# cluster on the same machine keeps its own forwards and its own PID file.
+_kube_context() {
+  kubectl config current-context 2>/dev/null || echo default
+}
+
+_forward_pidfile() {
+  if [ -n "${FORWARD_PIDFILE:-}" ]; then
+    echo "${FORWARD_PIDFILE}"
+    return 0
+  fi
+  echo "${TMPDIR:-/tmp}/abenix-forwards-${NAMESPACE}-$(_kube_context | tr -c 'A-Za-z0-9_.\n-' '_').pids"
+}
+
+# Kill this cluster's port forwards, wrapper loops included. Forwards from an
+# older script carry no --context, those go only when they hold one of the
+# ports passed in. `pkill` on the kubectl child alone is not enough: the
 # `while true` wrapper simply starts another one.
 kill_port_forwards() {
-  local killed=0
+  local ports="${1:-}" killed=0 pidfile ctx
+  pidfile="$(_forward_pidfile)"
+  ctx="$(_kube_context)"
 
-  # Wrapper loops first, by recorded PID. Killing the kubectl child alone is
-  # useless: the wrapper restarts it two seconds later.
-  if [ -f "${FORWARD_PIDFILE}" ]; then
+  if [ -f "${pidfile}" ]; then
     while read -r pid; do
       [ -z "${pid}" ] && continue
       if kill "${pid}" 2>/dev/null; then
         killed=$((killed + 1))
       fi
-    done < "${FORWARD_PIDFILE}"
-    : > "${FORWARD_PIDFILE}"
+    done < "${pidfile}"
+    : > "${pidfile}"
   fi
 
-  # Then the kubectl children those wrappers spawned, and anything a previous
-  # run left behind. MSYS pkill/pgrep cannot see these detached processes at
-  # all, so on Windows ask PowerShell, which can read their command lines.
-  local orphan
-  for orphan in $(ps -ef 2>/dev/null | awk '/kubectl/ && /port-forward/ {print $2}'); do
-    kill "${orphan}" 2>/dev/null || true
-  done
-  pkill -f "kubectl port-forward.*${NAMESPACE}" 2>/dev/null || true
+  # MSYS pkill/pgrep cannot see these detached processes at all, so on
+  # Windows ask PowerShell, which can read their command lines.
   if command -v powershell.exe >/dev/null 2>&1; then
     powershell.exe -NoProfile -Command "
+      \$ports = '${ports}'.Split(' ', [StringSplitOptions]::RemoveEmptyEntries)
       Get-CimInstance Win32_Process -Filter \"Name='bash.exe' OR Name='kubectl.exe'\" |
-        Where-Object { \$_.CommandLine -like '*port-forward*' -and \$_.CommandLine -like '*${NAMESPACE}*' } |
+        Where-Object {
+          \$c = \$_.CommandLine
+          if (\$c -like '*--context ${ctx} port-forward -n ${NAMESPACE} *') { return \$true }
+          if (\$c -like '*--context*' -or \$c -notlike '*port-forward -n ${NAMESPACE} svc/*') { return \$false }
+          foreach (\$p in \$ports) { if (\$c -like \"* \${p}:*\") { return \$true } }
+          return \$false
+        } |
         ForEach-Object { try { Stop-Process -Id \$_.ProcessId -Force -ErrorAction Stop } catch {} }
     " >/dev/null 2>&1 || true
+  else
+    local pid args p
+    while read -r pid args; do
+      case "${args}" in
+        *"--context ${ctx} port-forward -n ${NAMESPACE} "*) kill "${pid}" 2>/dev/null || true ;;
+        *--context*) ;;
+        *"port-forward -n ${NAMESPACE} svc/"*)
+          for p in ${ports}; do
+            case "${args}" in *" ${p}:"*) kill "${pid}" 2>/dev/null || true ;; esac
+          done
+          ;;
+      esac
+    done < <(ps -eo pid=,args= 2>/dev/null | grep 'port-forward' | grep -v grep || true)
   fi
   sleep 2
   [ "${killed}" -gt 0 ] && log "stopped ${killed} port-forward wrapper(s)"
@@ -1289,18 +1524,26 @@ port_squatter() {
 # Start a self-restarting port forward that reconnects if the connection drops
 start_persistent_forward() {
   local svc="$1" local_port="$2" remote_port="$3"
-  local ns="${NAMESPACE}"
+  local ns="${NAMESPACE}" ctx pidfile
+  ctx="$(_kube_context)"
+  pidfile="$(_forward_pidfile)"
   # observability re-requests forwards that setup_port_forwards already started
   case " ${_FORWARDED:-} " in *" ${svc}:${local_port} "*) return 0 ;; esac
   # A busy port makes kubectl exit immediately and the wrapper spin for ever,
   # while something else answers on the port. That looked healthy to the
   # verifier and served a different app's 404s to every test.
+  # a forward stopped a moment ago can hold its port for a few seconds on Windows
+  local tries=0
+  while curl -s -o /dev/null --max-time 2 "http://localhost:${local_port}/" 2>/dev/null && [ "${tries}" -lt 6 ]; do
+    tries=$((tries + 1))
+    sleep 1
+  done
   if curl -s -o /dev/null --max-time 2 "http://localhost:${local_port}/" 2>/dev/null; then
     err "port ${local_port} is already taken by $(port_squatter "${local_port}") — ${svc} will NOT be forwarded"
-    err "  free it, or re-run with a different port (WEB_PORT / API_PORT)"
+    err "  free it, or re-run with a different port (WEB_PORT, API_PORT, NEO4J_PORT, GRAFANA_PORT, PROMETHEUS_PORT, MAILPIT_PORT, CATCHER_PORT, MOCK_OIDC_PORT)"
     return 1
   fi
-  nohup bash -c "echo \$\$ >> '${FORWARD_PIDFILE}'; while true; do kubectl port-forward -n ${ns} svc/${svc} ${local_port}:${remote_port} 2>/dev/null; sleep 2; done" &>/dev/null &
+  nohup bash -c "echo \$\$ >> '${pidfile}'; while true; do kubectl --context ${ctx} port-forward -n ${ns} svc/${svc} ${local_port}:${remote_port} 2>/dev/null; sleep 2; done" &>/dev/null &
   _FORWARDED="${_FORWARDED:-} ${svc}:${local_port}"
 }
 
@@ -1308,73 +1551,51 @@ setup_port_forwards() {
   local with_runtime="${1:-false}"
   step "Setting up port forwarding"
 
-  # Kill any existing port forwards from previous runs, wrappers included.
-  kill_port_forwards
-  _FORWARDED=""
-
-  # Start persistent (auto-reconnecting) port forwards
-  start_persistent_forward "${RELEASE_NAME}-web" "${WEB_PORT}" 3000 || true
-  start_persistent_forward "${RELEASE_NAME}-api" "${API_PORT}" 8000 || true
-  start_persistent_forward "${RELEASE_NAME}-neo4j" 7474 7474 || true
-
+  # Work out every forward first, so only the ports this cluster uses get freed.
+  local plan=() line svc lport rport ports=""
+  _plan() { kubectl -n "${NAMESPACE}" get svc "$1" &>/dev/null && plan+=("$1 $2 $3"); return 0; }
+  plan+=("${RELEASE_NAME}-web ${WEB_PORT} 3000" "${RELEASE_NAME}-api ${API_PORT} 8000")
+  plan+=("${RELEASE_NAME}-neo4j ${NEO4J_PORT} 7474")
   # Standalone apps — each on its own port so the Use Cases dropdown
   # in the core UI can deep-link to them at localhost:<port>.
-  if kubectl -n "${NAMESPACE}" get svc contractiq-web &>/dev/null; then
-    start_persistent_forward "contractiq-web" 3001 3001 || true
-    start_persistent_forward "contractiq-api" 8001 8001 || true
-  fi
-  if kubectl -n "${NAMESPACE}" get svc mideasttourism-web &>/dev/null; then
-    start_persistent_forward "mideasttourism-web" 3002 3002 || true
-    start_persistent_forward "mideasttourism-api" 8002 8002 || true
-  fi
-  if kubectl -n "${NAMESPACE}" get svc industrial-iot-web &>/dev/null; then
-    start_persistent_forward "industrial-iot-web" 3003 3003 || true
-    start_persistent_forward "industrial-iot-api" 8003 8003 || true
-  fi
-  if kubectl -n "${NAMESPACE}" get svc resolveai-web &>/dev/null; then
-    start_persistent_forward "resolveai-web" 3004 3004 || true
-    start_persistent_forward "resolveai-api" 8004 8004 || true
-  fi
-  if kubectl -n "${NAMESPACE}" get svc wingman-web &>/dev/null; then
-    start_persistent_forward "wingman-web" 3006 3006 || true
-    start_persistent_forward "wingman-api" 8006 8006 || true
-  fi
-  if kubectl -n "${NAMESPACE}" get svc pharmavigil-web &>/dev/null; then
-    start_persistent_forward "pharmavigil-web" 3007 3007 || true
-    start_persistent_forward "pharmavigil-api" 8007 8007 || true
-  fi
+  _plan contractiq-web 3001 3001;     _plan contractiq-api 8001 8001
+  _plan mideasttourism-web 3002 3002; _plan mideasttourism-api 8002 8002
+  _plan industrial-iot-web 3003 3003; _plan industrial-iot-api 8003 8003
+  _plan resolveai-web 3004 3004;      _plan resolveai-api 8004 8004
+  _plan wingman-web 3006 3006;        _plan wingman-api 8006 8006
+  _plan pharmavigil-web 3007 3007;    _plan pharmavigil-api 8007 8007
   # ClaimsIQ is a single Spring Boot + Vaadin container — no api/web split.
-  if kubectl -n "${NAMESPACE}" get svc claimsiq &>/dev/null; then
-    start_persistent_forward "claimsiq" 3005 3005 || true
-  fi
-
-  # LiveKit signaling — enables the browser to connect to in-cluster
-  # LiveKit at ws://localhost:7880 (matches LIVEKIT_PUBLIC_URL).
-  if kubectl -n "${NAMESPACE}" get svc livekit-server &>/dev/null; then
-    start_persistent_forward "livekit-server" 7880 7880 || true
-  fi
-
-  # Observability. These used to be started only by the observability deploy
-  # step, with a bare nohup outside the managed set, so kill_port_forwards
-  # killed them and nothing ever brought them back.
-  if kubectl -n "${NAMESPACE}" get svc "${RELEASE_NAME}-prometheus" &>/dev/null; then
-    start_persistent_forward "${RELEASE_NAME}-prometheus" 9090 9090 || true
-  fi
-  if kubectl -n "${NAMESPACE}" get svc "${RELEASE_NAME}-grafana" &>/dev/null; then
-    start_persistent_forward "${RELEASE_NAME}-grafana" 3030 3000 || true
-  fi
-
+  _plan claimsiq 3005 3005
+  # LiveKit signaling for the browser, matches LIVEKIT_PUBLIC_URL
+  _plan livekit-server "${LIVEKIT_PORT}" 7880
+  _plan "${RELEASE_NAME}-prometheus" "${PROMETHEUS_PORT}" 9090
+  _plan "${RELEASE_NAME}-grafana" "${GRAFANA_PORT}" 3000
+  # Dev catchers, present only when devCatchers.enabled. The mock OIDC port
+  # must match devCatchers.mockOidc.publicUrl, the browser signs in there.
+  _plan "${RELEASE_NAME}-mailpit" "${MAILPIT_PORT}" 8025
+  _plan "${RELEASE_NAME}-webhook-catcher" "${CATCHER_PORT}" 8080
+  _plan "${RELEASE_NAME}-mock-oidc" "${MOCK_OIDC_PORT}" 8080
   if [ "${with_runtime}" = "true" ]; then
-    start_persistent_forward "${RELEASE_NAME}-agent-runtime" 8001 8001 || true
+    plan+=("${RELEASE_NAME}-agent-runtime 8001 8001")
   fi
+  for line in "${plan[@]}"; do
+    read -r svc lport rport <<< "${line}"
+    ports="${ports} ${lport}"
+  done
 
-  # Wait for services to be reachable
+  kill_port_forwards "${ports}"
+  _FORWARDED=""
+  for line in "${plan[@]}"; do
+    read -r svc lport rport <<< "${line}"
+    start_persistent_forward "${svc}" "${lport}" "${rport}" || true
+  done
+
   log "Waiting for services to be reachable..."
   local ready=false
   for i in $(seq 1 30); do
     local api_ok=false web_ok=false
-    curl -sf --max-time 3 http://localhost:8000/api/health >/dev/null 2>&1 && api_ok=true
-    curl -sf --max-time 3 http://localhost:3000 -o /dev/null 2>&1 && web_ok=true
+    curl -sf --max-time 3 "http://localhost:${API_PORT}/api/health" >/dev/null 2>&1 && api_ok=true
+    curl -sf --max-time 3 "http://localhost:${WEB_PORT}" -o /dev/null 2>&1 && web_ok=true
 
     if [ "${api_ok}" = true ] && [ "${web_ok}" = true ]; then
       ready=true
@@ -1383,26 +1604,27 @@ setup_port_forwards() {
     sleep 2
   done
 
+  local summary="${WEB_PORT} (web), ${API_PORT} (api), ${NEO4J_PORT} (neo4j)"
+  [ "${with_runtime}" = "true" ] && summary="${summary}, 8001 (runtime)"
   if [ "${ready}" = true ]; then
-    if [ "${with_runtime}" = "true" ]; then
-      ok "All services reachable — ports: ${WEB_PORT} (web), ${API_PORT} (api), 8001 (runtime), 7474 (neo4j)"
-    else
-      ok "All services reachable — ports: ${WEB_PORT} (web), ${API_PORT} (api), 7474 (neo4j)"
-    fi
+    ok "All services reachable — ports: ${summary}"
   else
     warn "Some services may not be reachable yet — port forwards are running in background"
-    if [ "${with_runtime}" = "true" ]; then
-      warn "Ports: ${WEB_PORT} (web), ${API_PORT} (api), 8001 (runtime), 7474 (neo4j)"
-    else
-      warn "Ports: ${WEB_PORT} (web), ${API_PORT} (api), 7474 (neo4j)"
-    fi
+    warn "Ports: ${summary}"
   fi
 }
 
-# LOCAL — Minikube with embedded execution (no runtime pod)
+# LOCAL — Minikube, runtime mode comes from values-local.yaml
 # Observability stack — Prometheus + Grafana + auto-loaded dashboards.
 # Idempotent: re-runs are safe and refresh the dashboards if their JSON
 # changed on disk.
+# the Grafana admin password as the running pod reads it
+grafana_admin_password() {
+  kubectl get secret abenix-grafana-admin -n "${NAMESPACE}" \
+    -o jsonpath='{.data.admin-password}' 2>/dev/null | base64 -d 2>/dev/null \
+    || echo "see secret abenix-grafana-admin"
+}
+
 install_observability_stack() {
   log "Installing observability stack (Prometheus + Grafana)..."
   local manifests_dir
@@ -1433,6 +1655,9 @@ install_observability_stack() {
   fi
 
   kubectl apply -f "${manifests_dir}/prometheus.yaml" -n "${NAMESPACE}" >/dev/null
+  kubectl get secret abenix-grafana-admin -n "${NAMESPACE}" >/dev/null 2>&1 \
+    || kubectl create secret generic abenix-grafana-admin -n "${NAMESPACE}" \
+         --from-literal=admin-password="${GRAFANA_ADMIN_PASSWORD:-abenix-admin}" >/dev/null
   kubectl apply -f "${manifests_dir}/grafana.yaml"    -n "${NAMESPACE}" >/dev/null
 
   # Roll Grafana so it picks up the latest dashboard ConfigMap. The
@@ -1454,10 +1679,10 @@ install_observability_stack() {
     || warn "Grafana did not become Available within 120s; check logs"
 
   # Managed forwards, so `deploy.sh forwards` restores them like every other.
-  start_persistent_forward "${RELEASE_NAME}-prometheus" 9090 9090 || true
-  start_persistent_forward "${RELEASE_NAME}-grafana" 3030 3000 || true
+  start_persistent_forward "${RELEASE_NAME}-prometheus" "${PROMETHEUS_PORT}" 9090 || true
+  start_persistent_forward "${RELEASE_NAME}-grafana" "${GRAFANA_PORT}" 3000 || true
   sleep 1
-  ok "Observability port forwards: prometheus→9090, grafana→3030"
+  ok "Observability port forwards: prometheus→${PROMETHEUS_PORT}, grafana→${GRAFANA_PORT}"
 }
 
 
@@ -1542,7 +1767,8 @@ deploy_local() {
   select_apps
   log "Use-case apps: $(describe_selection)"
 
-  step "Deploying Abenix to minikube (embedded mode)"
+  step "Deploying Abenix to minikube"
+  log "First run builds every image and takes 45 to 90 minutes, later runs reuse the cache"
 
   # Force fresh if requested
   if [ "${FRESH}" = "true" ]; then
@@ -1571,8 +1797,8 @@ deploy_local() {
     --namespace "${NAMESPACE}" --timeout 5m --wait=false 2>&1 | tail -3 \
     || warn "mosquitto helm install failed"
   helm upgrade --install abenix-timescaledb "${ROOT_DIR}/infra/helm/timescaledb" \
-    --namespace "${NAMESPACE}" --timeout 5m --wait=false 2>&1 | tail -3 \
-    || warn "timescaledb helm install failed"
+    --namespace "${NAMESPACE}" --timeout 10m --wait=false 2>&1 | tail -3 \
+    || warn "timescaledb is still running its schema job, check it with: kubectl -n ${NAMESPACE} get jobs"
   ok "Streaming + tsdb infra installed"
 
   step "Installing/upgrading Helm release '${RELEASE_NAME}'"
@@ -1590,6 +1816,10 @@ deploy_local() {
     --set "redis.image.pullPolicy=IfNotPresent" \
     --set "scaling.agentRuntimeImage.tag=${IMAGE_TAG}" \
     --set "corsOrigins[0]=http://localhost:${WEB_PORT}" \
+    --set "web.env.NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:${API_PORT}}" \
+    --set "frontendUrl=http://localhost:${WEB_PORT}" \
+    --set "publicApiUrl=http://localhost:${API_PORT}" \
+    --set "devCatchers.enabled=${DEV_CATCHERS}" \
     $(_build_secrets_flags) \
     --timeout 10m \
     --wait=false \
@@ -1637,12 +1867,20 @@ deploy_local() {
   app_selected pharmavigil    && { deploy_pharmavigil     || warn "PharmaVigil deployment failed (non-fatal)"; }
   app_selected claimsiq       && { deploy_claimsiq        || warn "ClaimsIQ deployment failed (non-fatal)"; }
   [ "${#SELECTED_APPS[@]}" -eq 0 ] && log "No use-case apps selected — core platform only."
+  if [ "${#FAILED_APPS[@]}" -gt 0 ]; then
+    warn "Left out because their images did not build: ${FAILED_APPS[*]}"
+    warn "  The build output is above. Add them later with: APPS=$(IFS=,; echo "${FAILED_APPS[*]}") bash scripts/deploy.sh local"
+  fi
 
   # After the apps deploy, not before: each manifest recreates its own
   # *-secrets from the environment and would overwrite a freshly minted key.
-  if [ -x "${ROOT_DIR}/scripts/seed-standalone-keys.sh" ]; then
+  if [ -x "${ROOT_DIR}/scripts/seed-standalone-keys.sh" ] && [ "${#SELECTED_APPS[@]}" -gt 0 ]; then
     step "Seeding standalone app API keys"
-    NAMESPACE="${NAMESPACE}" bash "${ROOT_DIR}/scripts/seed-standalone-keys.sh" 2>&1 | tail -14       || warn "standalone key seed failed — apps will 401 against the platform"
+    local seed_app
+    for seed_app in "${SELECTED_APPS[@]}"; do
+      NAMESPACE="${NAMESPACE}" bash "${ROOT_DIR}/scripts/seed-standalone-keys.sh" "${seed_app}" 2>&1 | tail -6 \
+        || CORE_FAILURES+=("${seed_app} has no working Abenix API key, rerun: bash scripts/seed-standalone-keys.sh ${seed_app}")
+    done
   fi
 
   setup_port_forwards "false"
@@ -1670,24 +1908,35 @@ deploy_local() {
 
   echo ""
   echo -e "${GREEN}================================================================${NC}"
-  echo -e "${GREEN}  Abenix + ContractIQ on minikube${NC}"
+  echo -e "${GREEN}  Abenix on minikube${NC}"
   echo -e "${GREEN}================================================================${NC}"
   echo ""
-  echo -e "  ${CYAN}Abenix Web${NC}    http://localhost:${WEB_PORT}"
+  echo -e "  ${CYAN}Abenix Web${NC}        http://localhost:${WEB_PORT}"
   echo -e "  ${CYAN}Sign in${NC}           admin@abenix.dev / Admin123456"
-  echo -e "  ${CYAN}AI model${NC}          set a key under Admin, Tool Configuration, or run bash scripts/sync-claude-subscription.sh"
-  echo -e "  ${CYAN}ContractIQ Web${NC}    http://localhost:3001"
-  echo -e "  ${CYAN}Mideast Tourism${NC}  http://localhost:3002"
-  echo -e "  ${CYAN}Industrial IoT${NC}   http://localhost:3003"
-  echo -e "  ${CYAN}ResolveAI${NC}        http://localhost:3004"
-  echo -e "  ${CYAN}ClaimsIQ${NC}         http://localhost:3005"
-  echo -e "  ${CYAN}Wingman${NC}          http://localhost:3006"
-  echo -e "  ${CYAN}Abenix API${NC}    http://localhost:${API_PORT}/docs"
-  echo -e "  ${CYAN}ContractIQ API${NC}    http://localhost:8001/api/health"
-  echo -e "  ${CYAN}Neo4j Browser${NC}    http://localhost:7474"
+  if [ -n "${ANTHROPIC_API_KEY:-}${OPENAI_API_KEY:-}${GOOGLE_API_KEY:-}${CLAUDE_SUBSCRIPTION_TOKEN:-}" ]; then
+    echo -e "  ${CYAN}AI model${NC}          key taken from .env"
+  else
+    local sync_prefix=""
+    [ "${API_PORT}" != "8000" ] && sync_prefix="API_PORT=${API_PORT} "
+    echo -e "  ${YELLOW}AI model${NC}          none yet, agents cannot answer until you add one"
+    echo -e "                    add a key under Admin, Tool Configuration, or with a Claude subscription run:"
+    echo -e "                    ${sync_prefix}bash scripts/sync-claude-subscription.sh"
+  fi
+  local i
+  for i in "${!APP_REGISTRY[@]}"; do
+    app_selected "$(app_key "${i}")" || continue
+    echo -e "  ${CYAN}$(printf '%-17s' "$(app_label "${i}")")${NC} http://localhost:$(app_ports "${i}" | cut -d/ -f1)"
+  done
+  echo -e "  ${CYAN}Abenix API${NC}        http://localhost:${API_PORT}/docs"
+  echo -e "  ${CYAN}Neo4j Browser${NC}     http://localhost:${NEO4J_PORT}"
   if [[ "${OBSERVABILITY:-true}" == "true" ]]; then
-    echo -e "  ${CYAN}Grafana${NC}           http://localhost:3030  (admin / abenix-admin)"
-    echo -e "  ${CYAN}Prometheus${NC}        http://localhost:9090"
+    echo -e "  ${CYAN}Grafana${NC}           http://localhost:${GRAFANA_PORT}  (admin / $(grafana_admin_password))"
+    echo -e "  ${CYAN}Prometheus${NC}        http://localhost:${PROMETHEUS_PORT}"
+  fi
+  if [ "${DEV_CATCHERS}" = "true" ]; then
+    echo -e "  ${CYAN}Mailpit${NC}           http://localhost:${MAILPIT_PORT}  (every email the platform sends)"
+    echo -e "  ${CYAN}Webhook catcher${NC}   http://localhost:${CATCHER_PORT}  (Slack posts to http://abenix-webhook-catcher:8080/<any path>)"
+    echo -e "  ${CYAN}Mock OIDC${NC}         http://localhost:${MOCK_OIDC_PORT}/default  (issuer for Settings, Single sign-on)"
   fi
   echo ""
   echo -e "  ${YELLOW}Mode:${NC}            $(kubectl -n "${NAMESPACE}" get cm abenix-config -o jsonpath="{.data.RUNTIME_MODE}" 2>/dev/null || echo unknown) runtime"
@@ -1742,6 +1991,7 @@ deploy_local_runtime() {
     --set "redis.image.pullPolicy=IfNotPresent" \
     --set "scaling.agentRuntimeImage.tag=${IMAGE_TAG}" \
     --set "corsOrigins[0]=http://localhost:${WEB_PORT}" \
+    --set "web.env.NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:${API_PORT}}" \
     $(_build_secrets_flags) \
     --timeout 10m \
     --wait=false \
@@ -1765,10 +2015,10 @@ deploy_local_runtime() {
   echo -e "${GREEN}  Abenix on minikube (production-like with runtime pod)${NC}"
   echo -e "${GREEN}================================================================${NC}"
   echo ""
-  echo -e "  ${CYAN}Web App${NC}          http://localhost:3000"
-  echo -e "  ${CYAN}API Docs${NC}         http://localhost:8000/docs"
+  echo -e "  ${CYAN}Web App${NC}          http://localhost:${WEB_PORT}"
+  echo -e "  ${CYAN}API Docs${NC}         http://localhost:${API_PORT}/docs"
   echo -e "  ${CYAN}Runtime Health${NC}   http://localhost:8001/health"
-  echo -e "  ${CYAN}Neo4j Browser${NC}    http://localhost:7474"
+  echo -e "  ${CYAN}Neo4j Browser${NC}    http://localhost:${NEO4J_PORT}"
   echo ""
   echo -e "  ${YELLOW}Mode:${NC}            ${BOLD}REMOTE${NC} (API delegates to runtime pod via HTTP)"
   echo -e "  ${YELLOW}Namespace:${NC}       ${NAMESPACE}"
@@ -1857,13 +2107,13 @@ deploy_status() {
   echo -e "  RUNTIME_MODE: ${CYAN}${mode}${NC}"
 
   echo -e "\n${BOLD}Health checks:${NC}"
-  echo -n "  API:     " && curl -s --max-time 3 http://localhost:8000/api/health 2>/dev/null || echo "not reachable"
+  echo -n "  API:     " && curl -s --max-time 3 "http://localhost:${API_PORT}/api/health" 2>/dev/null || echo "not reachable"
   echo ""
-  echo -n "  Web:     " && curl -s --max-time 3 http://localhost:3000 -o /dev/null -w "HTTP %{http_code}" 2>/dev/null || echo "not reachable"
+  echo -n "  Web:     " && curl -s --max-time 3 "http://localhost:${WEB_PORT}" -o /dev/null -w "HTTP %{http_code}" 2>/dev/null || echo "not reachable"
   echo ""
   echo -n "  Runtime: " && curl -s --max-time 3 http://localhost:8001/health 2>/dev/null || echo "not reachable (may be in embedded mode)"
   echo ""
-  echo -n "  Neo4j:   " && curl -s --max-time 3 http://localhost:7474 -o /dev/null -w "HTTP %{http_code}" 2>/dev/null || echo "not reachable"
+  echo -n "  Neo4j:   " && curl -s --max-time 3 "http://localhost:${NEO4J_PORT}" -o /dev/null -w "HTTP %{http_code}" 2>/dev/null || echo "not reachable"
   echo ""
 }
 
@@ -1872,8 +2122,7 @@ deploy_destroy() {
   step "Destroying Abenix deployment"
 
   # Kill persistent port forward loops and kubectl port-forwards
-  kill_port_forwards
-  pkill -f "port-forward.*${RELEASE_NAME}" 2>/dev/null || true
+  kill_port_forwards "${WEB_PORT} ${API_PORT} ${NEO4J_PORT}"
 
   if helm status "${RELEASE_NAME}" -n "${NAMESPACE}" &>/dev/null; then
     helm uninstall "${RELEASE_NAME}" -n "${NAMESPACE}" --wait 2>/dev/null || true
@@ -1900,7 +2149,7 @@ deploy_build() {
   check_prereqs
 
   local registry="${REGISTRY:-localhost:5000/abenix}"
-  if minikube status --format='{{.Host}}' 2>/dev/null | grep -q "Running"; then
+  if { minikube status --format='{{.Host}}' 2>/dev/null || true; } | grep -q "Running"; then
     eval "$(minikube docker-env)"
   fi
   build_images "${registry}" "false"
@@ -1912,7 +2161,7 @@ deploy_build() {
 # get them all back without a full redeploy.
 deploy_forwards() {
   check_prereqs
-  if ! minikube status --format='{{.Host}}' 2>/dev/null | grep -q "Running"; then
+  if ! { minikube status --format='{{.Host}}' 2>/dev/null || true; } | grep -q "Running"; then
     err "minikube is not running — use '$0 local' first"
     exit 1
   fi
@@ -1928,7 +2177,10 @@ deploy_forwards() {
     "claimsiq:3005"
     "wingman-web:3006" "wingman-api:8006"
     "pharmavigil-web:3007" "pharmavigil-api:8007"
-    "abenix-prometheus:9090" "abenix-grafana:3030"
+    "abenix-neo4j:${NEO4J_PORT}"
+    "abenix-prometheus:${PROMETHEUS_PORT}" "abenix-grafana:${GRAFANA_PORT}"
+    "abenix-mailpit:${MAILPIT_PORT}" "abenix-webhook-catcher:${CATCHER_PORT}"
+    "abenix-mock-oidc:${MOCK_OIDC_PORT}"
   )
   local bad=0
   for pair in "${pairs[@]}"; do
@@ -2051,7 +2303,7 @@ deploy_reload() {
 
   check_prereqs
   wait_for_docker
-  if ! minikube status --format='{{.Host}}' 2>/dev/null | grep -q "Running"; then
+  if ! { minikube status --format='{{.Host}}' 2>/dev/null || true; } | grep -q "Running"; then
     err "minikube is not running — use '$0 local' first"
     exit 1
   fi
@@ -2089,6 +2341,15 @@ deploy_reload() {
     fi
     kubectl -n "${NAMESPACE}" rollout restart deployment -l "app.kubernetes.io/name=${svc}"
     rollout_or_explain "${svc}" deployment -l "app.kubernetes.io/name=${svc}" || return 1
+    # the cognify worker runs the worker image under the umbrella chart's labels
+    if [ "${svc}" = "worker" ]; then
+      local cw
+      for cw in $(kubectl -n "${NAMESPACE}" get deploy -l "app.kubernetes.io/component=cognify-worker" -o name 2>/dev/null); do
+        kubectl -n "${NAMESPACE}" set image "${cw}" "cognify-worker=${registry}/worker:${IMAGE_TAG}" >/dev/null
+        kubectl -n "${NAMESPACE}" rollout restart "${cw}"
+        rollout_or_explain "cognify-worker" "${cw}" || return 1
+      done
+    fi
     # the new API image may carry migrations the database has not seen yet
     if [ "${svc}" = "api" ]; then
       run_migrations || warn "migrations did not complete, check the API pod"
@@ -2126,6 +2387,22 @@ deploy_reload() {
 }
 
 # MAIN
+# Use-case apps scaled down or back up, the platform is untouched
+apps_scale() { # apps_scale <replicas>
+  local want="$1" app d n=0
+  select_apps
+  for app in ${SELECTED_APPS[@]+"${SELECTED_APPS[@]}"}; do
+    for d in $(kubectl get deploy -n "${NAMESPACE}" -o name 2>/dev/null | grep -E "^deployment.apps/${app}(-api|-web)?$"); do
+      kubectl scale "${d}" -n "${NAMESPACE}" --replicas="${want}" >/dev/null && n=$((n + 1))
+    done
+  done
+  if [ "${want}" -eq 0 ]; then
+    ok "Paused ${n} app deployments. Bring them back with: bash scripts/deploy.sh resume-apps"
+  else
+    ok "Resumed ${n} app deployments. Run bash scripts/deploy.sh forwards once they are up"
+  fi
+}
+
 case "${1:-}" in
   local)          deploy_local         ;;
   local-runtime)  deploy_local_runtime ;;
@@ -2135,6 +2412,8 @@ case "${1:-}" in
   build)          deploy_build         ;;
   reload)         deploy_reload "${2:-}" ;;
   forwards)       deploy_forwards      ;;
+  pause-apps)     apps_scale 0         ;;
+  resume-apps)    apps_scale 1         ;;
   observability)  install_observability_stack ;;
   *)              usage                ;;
 esac

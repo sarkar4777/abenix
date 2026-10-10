@@ -1,17 +1,17 @@
 # Data model overview
 
-> 113 platform tables in one Postgres database. 111 are SQLAlchemy models under [`packages/db/models/`](../../packages/db/models/), two more are raw SQL. This page covers the conventions, how tables get created, the top-level ERD and a list of every table.
+> 119 platform tables in one Postgres database. 117 are SQLAlchemy models under [`packages/db/models/`](../../packages/db/models/), two more have no model (`chunks` and `model_availability_events`). This page covers the conventions, how tables get created, the top-level ERD and a list of every table.
 
 ---
 
 ## Conventions
 
-1. **`id UUID PRIMARY KEY`** from `UUIDMixin`. The exceptions are `event_outbox` and `decision_evaluations` (bigint identity, the evaluation also carries a `public_id` uuid), `execution_config_snapshots` (keyed by `config_hash`), `platform_settings` (keyed by `key`), `tenant_tool_credentials` (`tenant_id` + `key`), `cognify_configs` (`tenant_id`), `retention_policies` (`tenant_id` + `source_table`) and `tool_runtime_config` (`slug`).
-2. **`tenant_id`** from `TenantMixin`, a foreign key to `tenants.id`, indexed. Every table that holds tenant data has it. `kill_switches.tenant_id` is nullable on purpose, NULL means every tenant. `tool_runtime_config` and `platform_settings` are platform-wide.
+1. **`id UUID PRIMARY KEY`**, mostly from `UUIDMixin`. The exceptions are `event_outbox` and `decision_evaluations` (autoincrement bigint, the evaluation also carries a unique `public_id` uuid), `execution_config_snapshots` (keyed by `config_hash`), `platform_settings` (`key`), `tenant_tool_credentials` (`tenant_id` + `key`), `cognify_configs` (`tenant_id`), `retention_policies` (`tenant_id` + `source_table`), `tool_runtime_config` (`slug`) and `model_availability` (`model`).
+2. **`tenant_id`** from `TenantMixin`, a foreign key to `tenants.id`, indexed. Top-level tables carry it. Child tables such as `agent_revisions`, `documents`, `messages` and `atlas_nodes` reach the tenant through their parent. A few tables declare `tenant_id` by hand without the foreign key, for example `event_outbox` and `decision_evaluations`. `kill_switches.tenant_id` is nullable on purpose, NULL means every tenant. `tool_runtime_config`, `platform_settings`, `llm_model_pricing` and `model_availability` are platform-wide.
 3. **`created_at` / `updated_at`** from `TimestampMixin`, both `TIMESTAMPTZ` with `server_default now()`. Not every table uses the mixin. Append-only tables such as `activity_logs`, `executions` and `eval_results` carry only `created_at`.
 4. **JSONB for flexible fields.** `model_config` (mapped as `model_config_`), `payload`, `provenance`, `details`, `assertions`, `content`. Shape is validated at the API, not by the database.
 5. **Soft references.** Many foreign keys are nullable with `ON DELETE SET NULL`, so history survives a deleted user or agent. Child rows that mean nothing alone (`decision_versions`, `eval_cases`, `source_snapshots`) use `ON DELETE CASCADE`.
-6. **Immutability by trigger, not convention.** `activity_logs` refuses updates and deletes except the one write that links a row into the audit chain. `source_snapshots` refuses all updates. See [05-governance-decisions](05-governance-decisions.md) and [06-evals-sources-events](06-evals-sources-events.md).
+6. **Immutability by trigger, not convention.** `activity_logs` refuses updates and deletes except the one write that links a row into the audit chain, and a session that sets `abenix.audit_maintenance = on`. `source_snapshots` refuses all updates. See [05-governance-decisions](05-governance-decisions.md) and [06-evals-sources-events](06-evals-sources-events.md).
 
 ---
 
@@ -21,11 +21,11 @@ There are three paths, and a table can be touched by more than one.
 
 | Path | What it covers |
 |---|---|
-| Alembic migrations in [`packages/db/alembic/versions/`](../../packages/db/alembic/versions/) | 62 revision files. `deploy-azure.sh` runs `alembic upgrade heads` after checking the graph with `scripts/verify-alembic-graph.sh` |
-| `Base.metadata.create_all` in the API startup hook ([`apps/api/app/main.py`](../../apps/api/app/main.py)) | Any model with no migration. About half the tables, for example `agent_triggers`, `activity_logs`, `tool_invocations`, `webhooks` |
-| Raw SQL in the same startup hook | `chunks` (pgvector store) and a short list of idempotent `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` statements for agent scaling columns and per-provider cost columns, run under advisory lock `776601` |
+| Alembic migrations in [`packages/db/alembic/versions/`](../../packages/db/alembic/versions/) | 69 revision files. `scripts/deploy-azure.sh` runs `alembic upgrade heads`. [`scripts/verify-alembic-graph.sh`](../../scripts/verify-alembic-graph.sh) checks the graph |
+| `Base.metadata.create_all` in the API startup hook ([`apps/api/app/main.py`](../../apps/api/app/main.py)) | Any model with no migration. About a third of the tables, for example `agent_triggers`, `activity_logs`, `tool_invocations`, `webhooks` |
+| Raw SQL in the same startup hook | Idempotent `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` statements for the agent scaling columns, `daily_budget_usd`, the per-provider cost columns and `executions.trace_id`, plus `CREATE TABLE IF NOT EXISTS platform_settings`. One pod runs them, under advisory lock `776601`. The `chunks` pgvector store is created after that in its own transaction |
 
-Because `create_all` can build a new table before its migration runs, the 2.5 migrations check `has_table` and existing columns before every step.
+Because `create_all` can build a new table before its migration runs, the migrations from 2.5 on check `has_table` and existing columns before every step.
 
 ---
 
@@ -33,38 +33,41 @@ Because `create_all` can build a new table before its migration runs, the 2.5 mi
 
 ```mermaid
 erDiagram
-  TENANT ||--o{ USER : "has"
-  TENANT ||--o{ AGENT : "owns"
-  TENANT ||--o{ KNOWLEDGE_COLLECTION : "owns"
-  TENANT ||--o{ ML_MODEL : "owns"
-  TENANT ||--o{ CODE_ASSET : "owns"
-  TENANT ||--o{ DECISION_MODEL : "owns"
-  TENANT ||--o{ WATCH_SOURCE : "owns"
-  USER ||--o{ AGENT : "creates"
-  USER ||--o{ RESOURCE_SHARE : "shares"
-  AGENT ||--o{ AGENT_REVISION : "history"
-  AGENT ||--o{ EXECUTION : "produces"
-  AGENT ||--o{ EVAL_SUITE : "tested by"
-  EXECUTION ||--o{ APPROVAL : "may require"
-  EXECUTION }o--|| EXECUTION_CONFIG_SNAPSHOT : "ran with"
-  EXECUTION ||--o{ ML_MODEL_INVOCATION : "logs"
-  EXECUTION ||--o{ CODE_ASSET_INVOCATION : "logs"
-  EXECUTION ||--o{ KB_QUERY_INVOCATION : "logs"
-  KNOWLEDGE_COLLECTION ||--o{ DOCUMENT : "ingests"
-  DOCUMENT ||--o{ CHUNK : "splits into"
-  ATLAS_GRAPH ||--o{ ATLAS_NODE : "owns"
-  ATLAS_NODE ||--o{ ATLAS_EDGE : "links"
-  ML_MODEL ||--o{ ML_MODEL_DEPLOYMENT : "deploys"
-  DECISION_MODEL ||--o{ DECISION_VERSION : "versions"
-  WATCH_SOURCE ||--o{ SOURCE_SNAPSHOT : "fetches"
-  PERMISSION_SET ||--o{ PERMISSION_ASSIGNMENT : "granted by"
-  RESOURCE_SHARE }o..|| AGENT : "may target"
-  RESOURCE_SHARE }o..|| KNOWLEDGE_COLLECTION : "may target"
-  RESOURCE_SHARE }o..|| ML_MODEL : "may target"
-  RESOURCE_SHARE }o..|| CODE_ASSET : "may target"
+  tenants ||--o{ users : "has"
+  tenants ||--o{ agents : "owns"
+  tenants ||--o{ knowledge_collections : "owns"
+  tenants ||--o{ ml_models : "owns"
+  tenants ||--o{ code_assets : "owns"
+  tenants ||--o{ decision_models : "owns"
+  tenants ||--o{ watch_sources : "owns"
+  users ||--o{ agents : "creates"
+  users ||--o{ resource_shares : "shares"
+  agents ||--o{ agent_revisions : "history"
+  agents ||--o{ executions : "produces"
+  agents ||--o{ eval_suites : "tested by"
+  agents ||--o{ autonomy_grants : "earns"
+  agents ||--o{ lesson_clusters : "learns from"
+  lesson_clusters ||--o{ improvement_proposals : "fixed by"
+  executions ||--o{ approvals : "may require"
+  executions }o..|| execution_config_snapshots : "ran with"
+  executions ||--o{ ml_model_invocations : "logs"
+  executions ||--o{ code_asset_invocations : "logs"
+  executions ||--o{ kb_query_invocations : "logs"
+  knowledge_collections ||--o{ documents : "ingests"
+  documents ||--o{ chunks : "splits into"
+  atlas_graphs ||--o{ atlas_nodes : "owns"
+  atlas_nodes ||--o{ atlas_edges : "links"
+  ml_models ||--o{ ml_model_deployments : "deploys"
+  decision_models ||--o{ decision_versions : "versions"
+  watch_sources ||--o{ source_snapshots : "fetches"
+  permission_sets ||--o{ permission_assignments : "granted by"
+  resource_shares }o..|| agents : "may target"
+  resource_shares }o..|| knowledge_collections : "may target"
+  resource_shares }o..|| ml_models : "may target"
+  resource_shares }o..|| code_assets : "may target"
 ```
 
-Dotted lines are polymorphic, `resource_shares.resource_type` + `resource_id` rather than a hard foreign key. A pipeline is an `agents` row whose `model_config.mode` is `pipeline`, so it has no table of its own. Approval sign-offs are a JSONB array on `approvals`, not a child table.
+Dotted lines have no foreign key. A share points at its target through `resource_shares.resource_type` + `resource_id`, and a run names its snapshot in `executions.provenance->>'config_hash'`. A pipeline is an `agents` row whose `model_config.mode` is `pipeline`, so it has no table of its own. Approval sign-offs are a JSONB array on `approvals`, not a child table.
 
 ---
 
@@ -83,7 +86,7 @@ Grouped by area. The source column is the model file under `packages/db/models/`
 | `api_keys` | `api_key.py` | Hashed keys with prefix, scopes, monthly token and cost caps | this page |
 | `subject_policies` | `subject_policy.py` | Rules for an acting subject under one API key, used by actAs | this page |
 | `resource_shares` | `resource_share.py` | Polymorphic per-user share with `VIEW` / `EXECUTE` / `EDIT` | [04](04-resource-shares.md) |
-| `agent_shares` | `agent_share.py` | Older agent-only share table. The agent share routes now write `resource_shares` | [04](04-resource-shares.md) |
+| `agent_shares` | `agent_share.py` | Older agent-only share table. The agent share routes now write `resource_shares` | [04](04-resource-shares.md#the-older-agent_shares-table) |
 | `permission_sets` | `governance.py` | Named bundle of capability keys | [05](05-governance-decisions.md) |
 | `permission_assignments` | `governance.py` | Which user holds which permission set | [05](05-governance-decisions.md) |
 | `activity_logs` | `activity_log.py` | Append-only audit log, hash-chained per tenant | [05](05-governance-decisions.md) |
@@ -137,8 +140,9 @@ Grouped by area. The source column is the model file under `packages/db/models/`
 | `reference_sets` | `decision.py` | Named value lists used by rules | [05](05-governance-decisions.md) |
 | `reference_set_versions` | `decision.py` | Every past version of a reference set | [05](05-governance-decisions.md) |
 | `decision_evaluations` | `decision.py` | Persisted, reproducible evaluations | [05](05-governance-decisions.md) |
-| `moderation_policies` | `moderation_policy.py` | Per-tenant moderation rules and thresholds, `fail_closed` flag | this page |
-| `moderation_events` | `moderation_policy.py` | One row per moderation verdict, content stored as SHA-256 plus preview | this page |
+| `moderation_policies` | `moderation_policy.py` | Per-tenant moderation rules and thresholds, `fail_closed` flag, hold timeout | [moderation gate](../02-runtime/13-moderation-gate.md#the-policy) |
+| `moderation_events` | `moderation_policy.py` | One row per moderation verdict, content stored as SHA-256 plus preview | [moderation gate](../02-runtime/13-moderation-gate.md#what-we-keep-and-for-how-long) |
+| `moderation_reviews` | `moderation_policy.py` | Content a hold policy stopped, waiting for or carrying a reviewer's decision | [moderation gate](../02-runtime/13-moderation-gate.md#hold-for-review) |
 
 ### Earned autonomy
 
@@ -147,7 +151,16 @@ Grouped by area. The source column is the model file under `packages/db/models/`
 | `action_types` | `autonomy.py` | A kind of action: tool, argument match, world model, outcome probe, limits key, ladder policy | [08](08-autonomy.md) |
 | `autonomy_grants` | `autonomy.py` | One agent's level (0 to 4) for one action type, with scope, ceiling and state | [08](08-autonomy.md) |
 | `autonomy_changes` | `autonomy.py` | Append-only level history with the evidence at the time | [08](08-autonomy.md) |
-| `agent_actions` | `autonomy.py` | The action ledger: every effect call or SDK proposal, its prediction, decision, outcome and score | [08](08-autonomy.md) |
+| `agent_actions` | `autonomy.py` | The action ledger. Every effect call or SDK proposal, its prediction, decision, outcome and score | [08](08-autonomy.md) |
+
+### Self-improvement
+
+| Table | Source | What it holds | Page |
+|---|---|---|---|
+| `feedback` | `improvement.py` | Thumbs up or down on a run or chat message, with an optional correction | [09](09-self-improvement.md) |
+| `lessons` | `improvement.py` | One captured signal, such as a thumbs down, a failed run, drift or a failed eval case | [09](09-self-improvement.md) |
+| `lesson_clusters` | `improvement.py` | Lessons grouped per agent, with severity, trend and state | [09](09-self-improvement.md) |
+| `improvement_proposals` | `improvement.py` | One drafted change per group, with its proof, approval and watch period | [09](09-self-improvement.md) |
 
 ### Evals, sources, events
 
@@ -183,7 +196,7 @@ Grouped by area. The source column is the model file under `packages/db/models/`
 | `edge_gateways` | `edge_gateway.py` | Remote edge runtime pods and their deployed agents | [07](07-tools-and-operations.md) |
 | `llm_model_pricing` | `llm_pricing.py` | Per-model price, capabilities, fallback chain, deprecation | [07](07-tools-and-operations.md) |
 | `model_availability` | `llm_pricing.py` | Health status per model | [07](07-tools-and-operations.md) |
-| `model_availability_events` | raw SQL in migration `a8b9c0d1e2f3` | Status transitions per model, no ORM model | [07](07-tools-and-operations.md) |
+| `model_availability_events` | migration `a8b9c0d1e2f3` only | Status transitions per model, written with raw SQL, no ORM model | [07](07-tools-and-operations.md) |
 | `portfolio_schemas` | `portfolio_schema.py` | Dynamic record schemas for the portfolio tool | [07](07-tools-and-operations.md) |
 | `pf_<tenant>_<domain>` | none, made at runtime | Rows imported from a spreadsheet for one portfolio schema, scoped by `owner_id` | [07](07-tools-and-operations.md) |
 | `archive_runs` | `archive.py` | One archive or restore run per table and tenant | [07](07-tools-and-operations.md) |
@@ -229,7 +242,7 @@ Early migrations (`i9d0e1f2g3h4`, `j0e1f2g3h4i5` and the tenant backfills) creat
 
 ---
 
-## The 2.5 migration chain
+## Migrations from 2.5 on
 
 ```mermaid
 flowchart LR
@@ -251,9 +264,16 @@ flowchart LR
   EO --> AR[20a44346bdda<br/>approval returns]
   AR --> SW[25f2dd065d53<br/>source watch]
   SW --> EV[9465d37a97f1<br/>eval suites]
+  EV --> GP[6f7e442a4250<br/>gdpr affected count]
+  GP --> QL[09519dee709f<br/>queue lease]
+  QL --> PC[p3rs0na0vec1<br/>persona chunks]
+  PC --> AU[auton0my0001<br/>earned autonomy]
+  AU --> TP[trig0prov01<br/>trigger provenance]
+  TP --> MR[modrev00001<br/>moderation review]
+  MR --> SI[selfimp0001<br/>self-improvement]
 ```
 
-`9465d37a97f1` is the single head. An older merge, `z9y8x7w6v5u4`, joins the pre-2.0 branches.
+`selfimp0001` is the single head. An older merge, `z9y8x7w6v5u4`, joins the pre-2.0 branches.
 
 | Revision | Adds |
 |---|---|
@@ -272,16 +292,24 @@ flowchart LR
 | `20a44346bdda_approval_returns_escalation` | `returned` value on the `approval_status` enum, `approvals.escalated_at` |
 | `25f2dd065d53_source_watch` | `watch_sources`, `source_snapshots`, `source_changes`, the snapshot immutability trigger |
 | `9465d37a97f1_eval_suites` | `eval_suites`, `eval_cases`, `eval_runs`, `eval_results` |
+| `6f7e442a4250_gdpr_purge_affected_count` | `gdpr_purge_log.affected_count` |
+| `09519dee709f_execution_queue_lease` | `executions.runner_id`, `lease_expires_at`, `delivery_attempts` |
+| `p3rs0na0vec1_persona_chunks_pgvector` | `persona_chunks`, and `content`, `last_error`, `embedding_model` on `persona_items` |
+| `auton0my0001_earned_autonomy` | `action_types`, `autonomy_grants`, `autonomy_changes`, `agent_actions` |
+| `trig0prov01_execution_trigger_provenance` | `executions.trigger_id` (foreign key to `agent_triggers`, `ON DELETE SET NULL`), `trigger_kind`, `trigger_name` |
+| `modrev00001_moderation_review_inbox` | `moderation_reviews`, the `hold` action and `held` outcome enum values, `moderation_policies.hold_timeout_minutes` and `hold_timeout_action` |
+| `selfimp0001_governed_self_improvement` | `feedback`, `lessons`, `lesson_clusters`, `improvement_proposals`, `eval_cases.state` and `source_lesson_id`, `agent_revisions.source` and `proposal_id`, time indexes the lesson harvest reads |
 
 ---
 
 ## Where to dig next
 
-- [01-agents](01-agents.md) — agents, revisions, the `model_config` blob
-- [02-executions](02-executions.md) — executions, provenance, invocations, DLQ
-- [03-knowledge](03-knowledge.md) — collections, documents, Cognify, Atlas
-- [04-resource-shares](04-resource-shares.md) — the polymorphic share table
-- [05-governance-decisions](05-governance-decisions.md) — capabilities, risk tiers, kill switches, audit chain, approvals, decisions
-- [06-evals-sources-events](06-evals-sources-events.md) — eval suites, Source Watch, the outbox and webhooks
-- [07-tools-and-operations](07-tools-and-operations.md) — tool credentials and config, code assets, MCP, models, archives
-- [08-autonomy](08-autonomy.md) — action types, grants, level history and the action ledger
+- [01-agents](01-agents.md): agents, revisions, the `model_config` blob
+- [02-executions](02-executions.md): executions, provenance, invocations, DLQ
+- [03-knowledge](03-knowledge.md): collections, documents, Cognify, Atlas, memory
+- [04-resource-shares](04-resource-shares.md): the polymorphic share table
+- [05-governance-decisions](05-governance-decisions.md): capabilities, risk tiers, kill switches, audit chain, approvals, decisions
+- [06-evals-sources-events](06-evals-sources-events.md): eval suites, Source Watch, the outbox and webhooks
+- [07-tools-and-operations](07-tools-and-operations.md): tool credentials and config, code assets, MCP, models, archives
+- [08-autonomy](08-autonomy.md): action types, grants, level history and the action ledger
+- [09-self-improvement](09-self-improvement.md): feedback, lessons, lesson groups and improvement proposals

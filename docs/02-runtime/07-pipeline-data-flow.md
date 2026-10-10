@@ -1,352 +1,287 @@
 # Pipeline data flow
 
-> How does one pipeline node send a value to another, when does an upstream output get materialised vs templated, and what exactly is in scope when a child pipeline runs inside a parent. The pipelines doc covers shape. This page covers wire format and scoping.
+> How one pipeline node passes a value to another, which values are kept structured and which become text, and what a nested pipeline can see. [01-pipelines](01-pipelines.md) covers the shape. This page covers wire format and scope.
 
 ---
 
 ## Three ways to pass data between nodes
 
-The engine in [`apps/agent-runtime/engine/pipeline.py`](../../apps/agent-runtime/engine/pipeline.py) supports three communication shapes. Each has a different scope rule.
+The engine is [`apps/agent-runtime/engine/pipeline.py`](../../apps/agent-runtime/engine/pipeline.py).
 
-### 1. Implicit upstream — via `depends_on` only
+### 1. A template that names the node
 
 ```yaml
 - id: fetch
-  tool: http_get
-  arguments: { url: "https://api.example.com/orders" }
+  tool_name: http_client
+  arguments: { method: GET, url: "https://api.example.com/orders" }
 
-- id: count
-  tool: jq
-  depends_on: [fetch]
+- id: summarise
+  tool_name: llm_call
   arguments:
-    expression: "length"
-    data: "{{fetch}}"
+    prompt: "Summarise these orders: {{fetch.body}}"
 ```
 
-`{{fetch}}` resolves to the full output of the `fetch` node — its tool result object, structured. `{{fetch.body}}` would resolve to just the body. Dot-paths drill into nested JSON.
+`{{fetch}}` is the whole output of `fetch`. `{{fetch.body}}` is one field, and dot paths go deeper. A template that names another node adds that node to `depends_on` when the pipeline is parsed, so `summarise` waits for `fetch` without listing it. Listing it yourself is still easier to read.
 
-A template that names another step adds that step to `depends_on` when the pipeline is parsed, so `{{some_node.x}}` always waits for `some_node`. Listing the dependency yourself is still clearer to read.
-
-### 2. Explicit `input_mappings`
+### 2. `input_mappings`
 
 ```yaml
 - id: classify
-  tool: llm_complete
+  tool_name: llm_call
   depends_on: [fetch]
   arguments:
-    model: "claude-haiku-4-5"
-    prompt: "Classify this order: {payload}"
+    prompt: "Classify this order"
   input_mappings:
     payload:
       source_node: fetch
       source_field: body.line_items
 ```
 
-`input_mappings` pipes a specific field from a source node into a specific argument key. Internally:
+`input_mappings` copies one field of a source node into one argument. It runs first, in `_resolve_inputs`:
 
 ```python
-# pipeline.py:339-389
+# pipeline.py, _resolve_inputs
 def _resolve_inputs(node, node_outputs):
     resolved = dict(node.arguments)
     for arg_name, mapping in node.input_mappings.items():
         source_output = node_outputs.get(mapping.source_node)
         if source_output is None:
-            continue                                 # source not run yet — skip
+            continue
         value = _extract_field(source_output, mapping.source_field)
         if value is not None:
             resolved[arg_name] = value
     return resolved
 ```
 
-The mapped value **overrides** the default in `arguments`. If you wrote `arguments: { payload: "fallback" }` and a mapping for `payload`, the mapping wins when the source ran.
+A mapped value overrides the same key in `arguments` when the source ran.
 
-### 3. Template strings — `{{node.field}}` substitution
+### 3. Template strings
 
-This is the most-used form. Template substitution runs *after* input_mappings and merges into the same `resolved` dict. The implementation has two important branches.
+Templates are resolved after `input_mappings`, by `_resolve_templates`, through nested dicts and lists. There are two cases:
 
 ```python
-# pipeline.py:339-389 (paraphrased)
+# pipeline.py, _resolve_templates (shortened)
 whole = pattern.fullmatch(value)
 if whole is not None:
-    # "{{plan.actions}}" — whole-value template
-    # Returns the extracted object unchanged (list/dict stays structured)
-    resolved[key] = _extract_field(node_outputs[whole_node], whole_field)
-else:
-    # "prefix {{x.y}} suffix" — embedded template
-    # Each match is replaced by str() or json.dumps() depending on type
-    resolved[key] = pattern.sub(_replacer, value)
+    # "{{plan.actions}}" keeps the extracted object, a list stays a list
+    return extracted
+# "prefix {{x.y}} suffix": each match becomes str(), or JSON for a list or dict
+return pattern.sub(_replacer, value)
 ```
 
-The whole-value vs embedded distinction matters. **`arguments.payload: "{{plan.actions}}"`** delivers the structured list `[{"id": 1}, …]` to the next tool. **`arguments.payload: "actions are {{plan.actions}}"`** delivers the *string* `"actions are [{\"id\": 1}, ...]"` because it has to interpolate inside a wider string.
+`payload: "{{plan.actions}}"` delivers the list `[{"id": 1}, …]`. `payload: "actions are {{plan.actions}}"` delivers the string `actions are [{"id": 1}, …]`.
 
-A step can be named by its id or by its label. The builder gives steps generated ids like `step_1790931980212_b8m3`, so a step labelled `score` is reached with `{{score.response}}`. Labels are lowercased and anything that is not a letter, digit or underscore becomes `_`, so `Exposure Check` is `{{exposure_check.response}}`. A label only works when it is unique in the pipeline, and an id always wins over a label with the same text. The validator applies the same rule, so an unknown name is still an error.
+A step can be named by its id or by its label in `arguments`, `context` and `input_mappings`. The builder gives steps ids like `step_1790931980212_b8m3`, so a step labelled `score` is reached with `{{score.response}}`. Labels are lowercased and every run of characters that is not a letter, digit or underscore becomes `_`, so `Exposure Check` is `{{exposure_check.response}}`. A label works only when it is unique, and an id always wins over a label with the same text. Elsewhere (`input`, `output`, `condition`, `required_if`) use ids.
 
-Before a tool runs, the engine turns text into the types the tool declares, one level deep. Pipeline inputs and many step outputs arrive as text, so `"36"` reaching a `number` argument becomes `36`, `"6"` reaching an `integer` becomes `6`, `"true"` becomes `true`, a JSON object in text becomes an object, and `"33.8, 34.6, 35.1"` or `"[33.8, 34.6]"` reaching a list of numbers becomes `[33.8, 34.6, 35.1]`. Text that does not convert cleanly, like `"front month"` for a number or `"6.5"` for an integer, is passed through unchanged so the tool reports it. This is what lets a string input such as `gas_closes` feed `realized_vol_calc.prices` directly.
+Before a tool runs, the engine converts text arguments to the types the tool's input schema declares, one level deep (`_coerce_to_schema`). `"36"` reaching a `number` becomes `36`, `"true"` reaching a `boolean` becomes `true`, a JSON object in text becomes an object, and `"33.8, 34.6"` or `"[33.8, 34.6]"` reaching a list of numbers becomes `[33.8, 34.6]`. Text that does not convert cleanly is passed through so the tool reports it.
 
-If a template references a node that has not run (skipped by a condition, or upstream failed), the value resolves to the literal string `[not available]`. Downstream tools see a string, not `None`. This is intentional — it surfaces the gap as a visible value the LLM can reason about rather than failing silently with a null.
+A template whose node did not run, or whose field does not exist, resolves to the string `[not available]`. The next tool sees that text, not `None`.
 
 ---
 
-## Topological scheduling — what runs in parallel
+## Layers: what runs in parallel
 
-The engine sorts the DAG into layers. Every node in a layer runs concurrently. The next layer waits for the current one to finish.
+`_topological_sort` sorts the DAG into layers. Every node in a layer runs at the same time under `asyncio.gather`, and the next layer waits for the whole layer.
 
-```python
-# pipeline.py:286-318
-def _topological_sort(nodes):
-    in_degree = {n.id: 0 for n in nodes}
-    adjacency = {n.id: [] for n in nodes}
-    for node in nodes:
-        for dep in node.depends_on:
-            adjacency[dep].append(node.id)
-            in_degree[node.id] += 1
-    layers = []
-    queue = [nid for nid, deg in in_degree.items() if deg == 0]
-    while queue:
-        layers.append(sorted(queue))    # sort for determinism
-        next_queue = []
-        for nid in queue:
-            for child in adjacency[nid]:
-                in_degree[child] -= 1
-                if in_degree[child] == 0:
-                    next_queue.append(child)
-        queue = next_queue
-    return layers
-```
-
-Two important consequences.
-
-- Cycles are caught here, not at runtime — the engine raises `ValueError("Cycle detected in pipeline DAG")` before any node runs.
-- Within a layer, execution order is sorted by node ID for determinism. This is a debugging convenience — re-running a deterministic pipeline twice gives byte-identical SSE traces, so a regression can be diffed.
-
-The maximum width of any layer is bounded by `pipeline.max_concurrency` (default unlimited, but capped at 20 in practice by the runtime's own semaphore on `asyncio.gather`).
+- Each layer's list is sorted by node id, but the nodes run concurrently, so the order of events within a layer is not fixed.
+- There is no concurrency cap within a layer. Only `for_each` limits its items with `max_concurrency`.
+- A cycle fails the run before any node runs, with "Cycle detected in pipeline DAG. Nodes in cycle: {…}" on every node. The set lists every node that could not be scheduled, including nodes downstream of the cycle. `POST /api/pipelines/validate` catches cycles before a run.
 
 ---
 
-## Conditions — gating downstream nodes
-
-A node can carry a condition that gates whether it runs.
+## Conditions
 
 ```yaml
 - id: classify
-  tool: llm_complete
-  depends_on: [fetch]
-  arguments: { ... }
+  tool_name: llm_call
+  arguments: { prompt: "Rate the priority of: {{context.message}}" }
 
-- id: notify_slack
-  tool: slack_send
+- id: notify
+  tool_name: email_sender
   depends_on: [classify]
   condition:
     source_node: classify
     field: priority
     operator: eq
     value: "high"
+  arguments: { to: "ops@example.com", subject: "High priority", body: "{{context.message}}" }
 ```
 
-Operators (defined in `NodeCondition`, [pipeline.py:21-59](../../apps/agent-runtime/engine/pipeline.py)): `eq`, `neq`, `gt`, `lt`, `gte`, `lte`, `contains`, `not_contains`, `in`, `not_in`.
+Operators are `eq`, `neq`, `gt`, `lt`, `gte`, `lte`, `contains`, `not_contains`, `in` and `not_in` (`NodeCondition`). A false condition skips the node.
 
-A condition that evaluates to false skips the node. Skipped nodes propagate — every downstream node that depended on a skipped node also skips, unless it depends on a sibling that succeeded.
-
-This makes "branch and merge" possible without a special node type — just connect two siblings to a downstream merge node, both gated by complementary conditions, and the merge sees exactly one of them with the other resolving to `[not available]`.
+A node skipped by its condition does not skip its dependents. They still run and see `[not available]` for its fields. Only a skip caused by an upstream failure is passed on. That lets two siblings with opposite conditions feed one downstream node, which sees one real value and one `[not available]`.
 
 ---
 
-## Switch — explicit N-way branching
-
-When a node should route to *one of many* downstream nodes by value, use a switch.
+## Switch
 
 ```yaml
 - id: router
-  tool: noop
+  tool_name: "__switch__"
+  depends_on: [classify]
   switch:
     source_node: classify
     field: category
     cases:
-      - { operator: eq, value: "refund",  target_node: refund_path }
+      - { operator: eq, value: "refund", target_node: refund_path }
       - { operator: eq, value: "complaint", target_node: complaint_path }
-      - { operator: contains, value: "urgent", target_node: escalate_path }
     default_node: ack_path
+- id: refund_path
+  tool_name: llm_call
+  depends_on: [router]
+  arguments: { prompt: "Draft a refund reply" }
 ```
 
-Only the target node activates. Other case targets are auto-skipped *with their entire downstream subgraph*. This is one of the few places the engine walks the DAG twice — once to mark deactivated branches, once to schedule the active ones.
+The switch must use `tool_name: "__switch__"`. Targets must `depends_on` the switch. A target that was not activated is skipped, but its own dependents still run and see `[not available]`. See [Switch and merge](01-pipelines.md#switch-and-merge).
 
 ---
 
-## forEach — iterating over an upstream list
+## for_each
 
 ```yaml
-- id: process_each_order
+- id: score_each
+  tool_name: agent_step
+  arguments:
+    agent_slug: clause-risk-analyzer
   for_each:
-    source_node: fetch
-    source_field: body.orders
-    item_variable: order
+    source_node: extract
+    source_field: clauses
+    item_variable: input_message
     max_concurrency: 5
-  body:
-    - id: enrich
-      tool: db_lookup
-      arguments: { id: "{{order.id}}" }
-    - id: score
-      tool: ml_predict
-      depends_on: [enrich]
-      arguments: { features: "{{enrich.features}}" }
 ```
 
-The body is a *sub-pipeline*. Every iteration runs an independent execution of the body with `order` bound to the current item. `max_concurrency` is per-iteration (default 10). The iteration outputs are collected as a list at `{{process_each_order.results}}` for downstream consumers.
-
-Scope inside the body — every node *in the body* sees `{{order.*}}`. Nodes *outside* the body do not. The body's outputs (the `results` list) are scoped to the parent. There is no leak in either direction.
+`for_each` reruns this one node once per item of `source_node.source_field`. The item goes into the argument named by `item_variable` and is not visible to templates. `max_concurrency` (default 10) is how many items run at once. The output is the plain list of item outputs, read as `{{score_each}}`. A node where some items failed ends `partial`.
 
 ---
 
-## while — repeat a body until a flag flips
+## while_loop
 
 ```yaml
 - id: poll_until_ready
   while_loop:
     condition: { source_node: status_check, field: ready, operator: eq, value: false }
-    body_nodes: [status_check, sleep]
-    max_iterations: 50
+    body_nodes: [status_check, pause]
+    max_iterations: 20
 ```
 
-Re-executes the named body nodes until the condition becomes false or `max_iterations` is hit (hard cap of 50). Each iteration's outputs replace the previous iteration's outputs — only the last iteration is visible downstream.
-
-This is useful for polling, retries with state, and "wait for an external resource". For anything more complex (multi-step state machine) you usually want a pipeline of pipelines instead.
+While the condition holds, the body nodes run in order, one after another. The loop stops when the condition turns false or after `max_iterations` (default 50). Each pass overwrites the body nodes' outputs, so later nodes see the last pass. The loop node's own output is `{iterations, last_output}`.
 
 ---
 
-## Error handling — `on_error`
+## Errors and retries
 
-Every node has an `on_error` setting.
-
-| Value | Effect |
+| `on_error` | Effect |
 |---|---|
-| `stop` (default) | Pipeline fails. Failed node's error is on the result. Skipped downstream nodes are listed. |
-| `continue` | Node is marked failed, but the pipeline keeps going. Downstream nodes that depended on this node see `[not available]` for its outputs. |
-| `error_branch` | Re-routes to a named `error_branch_node`. Useful for self-healing flows that try a recovery agent on failure. |
+| `stop` (default) | The node fails and its dependents are skipped. Other branches keep running. The run ends `partial`, or `failed` if nothing completed |
+| `continue` | The node goes on the execution path and not into `failed_nodes`. Its dependents are still skipped with "Dependency '<id>' failed" today |
+| `error_branch` | The node named in `error_branch_node` runs after the layer and can read `__error_from_<id>` |
 
 ```yaml
 - id: external_fetch
-  tool: http_get
-  arguments: { url: "https://flaky.example.com/data" }
+  tool_name: http_client
+  arguments: { method: GET, url: "https://flaky.example.com/data" }
   max_retries: 3
   retry_delay_ms: 2000
   on_error: error_branch
   error_branch_node: fallback_fetch
 ```
 
-Retry logic is per-node. `max_retries: 3` means up to 3 *additional* attempts after the first, so 4 total. Backoff is `retry_delay_ms` linear by default. The adaptive-retry strategy in [`apps/agent-runtime/engine/adaptive_retry.py`](../../apps/agent-runtime/engine/adaptive_retry.py) is opt-in per-node (`retry_strategy: "adaptive"`) and switches the delay to exponential with jitter on tool-class errors.
+`max_retries: 3` means up to 3 more attempts after the first. Backoff is exponential, `retry_delay_ms × 2^attempt`. [`engine/adaptive_retry.py`](../../apps/agent-runtime/engine/adaptive_retry.py) exists but the pipeline engine does not use it.
 
 ---
 
-## Merge — recombining branches
-
-When two upstream branches need to feed one downstream node, you can merge them explicitly.
+## Merge
 
 ```yaml
 - id: combine
+  tool_name: "__merge__"
+  depends_on: [path_a, path_b]
   merge:
-    mode: append           # or "zip" or "join"
-    join_field: order_id   # required when mode == "join"
+    mode: append
     source_nodes: [path_a, path_b]
 ```
 
-| Mode | Semantics |
+| Mode | Output |
 |---|---|
-| `append` | Output is the list `[output_a, output_b]`. |
-| `zip` | If both outputs are lists of equal length, output is the list of pairs. |
-| `join` | Both outputs are lists of objects. Output is the inner-join keyed on `join_field`. |
+| `append` | One flat list. A list output is spread in, skipped sources are dropped |
+| `zip` | When every source is a list, `[{0: a0, 1: b0}, …]` up to the shortest list. Otherwise the list of source outputs |
+| `join` | Lists of objects joined on `join_field`, keeping only items whose key appears in every source |
 
-For simple combines, a downstream node that just references `{{path_a.x}}` and `{{path_b.y}}` in its arguments is usually cleaner than a merge node.
+For a simple combine, one node that references `{{path_a.x}}` and `{{path_b.y}}` is often clearer than a merge node.
 
 ---
 
-## Agent steps — calling an LLM as a node
-
-A node with `type: agent` and `agent_slug` runs an `agent_step` — a thin wrapper that:
-
-1. Looks up the agent's system prompt, tools, model from `agents` table.
-2. Builds an `ExecutionContext` from the resolved arguments.
-3. Runs one full ReAct loop in-process.
-4. Returns the agent's structured output as the node output.
+## Agent nodes
 
 ```yaml
 - id: classify_intent
   type: agent
   agent_slug: contractiq-intent-classifier
-  arguments:
-    text: "{{fetch.body.content}}"
+  input: "{{fetch.body.content}}"
 ```
 
-The `agent_step` invocation produces an output of shape `{"response": "<json>", "cost": <float>, "model": "<str>"}`. The engine auto-unwraps `response` so downstream nodes see the parsed JSON directly without having to do `{{classify_intent.response.priority}}`. They write `{{classify_intent.priority}}`.
+The engine looks up the agent by slug and passes its system prompt, model, tools, `max_iterations` and temperature to `agent_step`, which runs a full agent loop in-process. `input` becomes the message. With no message set, the run's own message is used.
 
-This is one of two ways to compose agents (the other is `invoke_agent` from inside another agent — see [06-agent-to-agent](06-agent-to-agent.md)).
+`agent_step` returns `{response, model, input_tokens, output_tokens, cost, duration_ms, tool_calls_count, iterations}`. Templates look through the `response` wrapper, so `{{classify_intent.priority}}` reads a field of the agent's JSON answer.
+
+The other way to compose agents is `invoke_agent` from inside an agent, see [06-agent-to-agent](06-agent-to-agent.md).
 
 ---
 
-## Structured-output nodes — assemble without a tool
-
-The `structured_output: true` flag turns a node into a pure assembly step.
+## Structured nodes
 
 ```yaml
 - id: final_report
-  structured_output: true
-  depends_on: [enrich, score, flag]
-  arguments:
+  type: structured
+  depends_on: [enrich, score]
+  output:
     customer_id: "{{enrich.customer_id}}"
     risk_score: "{{score.value}}"
-    flags: "{{flag.results}}"
-    timestamp: "{{ now }}"
 ```
 
-No tool call. The node template-resolves its `arguments` and returns the dict. This lets a pipeline declare its final shape without a dummy `noop` tool. The engine returns this node's output as `pipeline.final_output` if it has no children.
+`type: structured` with an `output` (or `fields`) map, or `tool_name: "__structured__"` with `arguments`, makes a node that calls no tool. It resolves the templates and returns the dict, parsing values that look like JSON. Like any node, it is the run's final output only if it is the last node to complete.
 
 ---
 
-## Nested pipelines and scope
+## Nested pipelines
 
-A pipeline node can itself be `type: pipeline` and point at another pipeline by slug. The semantics:
+There is no `type: pipeline`. Nest with the `sub_pipeline` tool:
 
-- The child pipeline runs its own topological sort.
-- The child's `{{context.*}}` namespace includes the *parent's* node outputs that were explicitly passed as inputs. Nothing else from the parent is visible.
-- The child's outputs are returned as a single dict, available to parent downstream nodes as `{{<child_node_id>.*}}`.
+```yaml
+- id: child
+  tool_name: sub_pipeline
+  arguments:
+    nodes:
+      - { id: a, tool_name: current_time }
+    context: { region: "{{context.region}}" }
+    timeout_seconds: 60
+```
 
-There is no auto-inheritance of variables across nesting levels. If a deeply nested grandchild needs a value from the root, every layer in between has to forward it explicitly. This is verbose but unambiguous — the alternative (variable bleed through scopes) is the source of most pipeline-debugging pain in other engines.
-
-Recursion is allowed but has no automatic depth cap. The runtime's per-execution iteration budget bounds it indirectly. A pipeline that calls itself without a base case will burn the budget and fail with an iteration-limit error.
-
----
-
-## How a pipeline communicates with the world
-
-The pipeline executor itself does not own I/O. Every external interaction is a tool call. The full inventory of "talks to the outside world" tools at the time of writing:
-
-- `http_get` / `http_post` — generic HTTP, used for almost everything
-- `kb_search` — vector search against a knowledge base
-- `db_query` — Postgres read (tenant-scoped, no writes from here)
-- `slack_send`, `email_send` — outbound notifications
-- `code_runner` — sandboxed multi-language script
-- `invoke_agent` — call another agent (see [06-agent-to-agent](06-agent-to-agent.md))
-- the ~120 first-party data tools (eia, yahoo_finance, opensanctions, …)
-
-Every tool call goes through the same registry and the same sandbox. Whether a node calls `eia_open_data` directly or asks an agent to call it, the call ends up at the same Python implementation. The pipeline DAG just lets you skip the LLM when you do not need its judgement.
+The child sees only the `context` you pass. `timeout_seconds` defaults to 60, range 5 to 300. The node's output is the child's serialized result (`status`, `final_output`, `node_results`, …).
 
 ---
 
-## Common pipeline mistakes
+## Talking to the outside world
 
-1. **Template without dependency.** `{{x.y}}` does not auto-add `x` to `depends_on`. The engine will not warn — your value will be `[not available]` at runtime.
-2. **Whole-value vs embedded confusion.** `"{{plan}}"` and `" {{plan}}"` (note leading space) deliver different types. If you wanted a structured value, do not pad it.
-3. **Cycles.** Caught by the topological sort *at load time*. The error message lists the nodes in the cycle.
-4. **forEach concurrency leaks.** Setting `max_concurrency: 100` will not actually parallelise that much — the runtime pod's HTTP client pool is the next bottleneck. Tune both together.
-5. **Mutating arguments inside a tool.** The `resolved` dict is passed by reference to the tool implementation. A tool that mutates it has changed the recorded `resolved_arguments` on the node result. Treat the dict as read-only.
+The engine owns no I/O. Every external call is a tool call through the same registry an agent uses. Common ones in pipelines: `http_client`, `knowledge_search`, `database_query` and `database_writer`, `email_sender`, `code_executor` and `sandboxed_job`, `invoke_agent`, and data tools such as `eia_open_data`, `yahoo_finance` and `pep_screening`. The full list is in [02-tools](02-tools.md).
+
+---
+
+## Common mistakes
+
+1. **Whole-value vs embedded.** `"{{plan}}"` and `" {{plan}}"` (leading space) deliver different types. Do not pad a template that should stay structured.
+2. **A label the engine does not alias.** Labels work in `arguments`, `context` and `input_mappings` only. In `input` or a condition, use the id.
+3. **`for_each` concurrency.** The ad-hoc execute schema caps `max_concurrency` at 50, and a high value moves the bottleneck to the tool or the provider behind it.
+4. **Tool names.** A node that names a tool not in `model_config.tools` fails with "Unknown tool", or the `/api/pipelines` routes refuse the run.
 
 ---
 
 ## See also
 
-- [01-pipelines](01-pipelines.md) — the high-level shape, lifecycle, and node types
-- [02-tools](02-tools.md) — the tool framework that pipeline nodes call
-- [06-agent-to-agent](06-agent-to-agent.md) — when to fan out from inside an agent instead
-- [04-streaming-tracing](04-streaming-tracing.md) — events that pipelines emit
+- [01-pipelines](01-pipelines.md) for node types, fields and run records
+- [02-tools](02-tools.md) for the tool framework that nodes call
+- [06-agent-to-agent](06-agent-to-agent.md) for fanning out from inside an agent
+- [04-streaming-tracing](04-streaming-tracing.md) for the events a pipeline emits
 
 ---
 
@@ -354,10 +289,10 @@ Every tool call goes through the same registry and the same sandbox. Whether a n
 
 | What | Where |
 |---|---|
-| **Pipeline executor + topo sort** | [`apps/agent-runtime/engine/pipeline.py`](../../apps/agent-runtime/engine/pipeline.py) — `_topological_sort` at line 286, `_resolve_inputs` around line 339, main `execute_pipeline` loop at line 466 |
-| **NodeCondition operators** | same file — search for `class NodeCondition` |
-| **Adaptive retry** | [`apps/agent-runtime/engine/adaptive_retry.py`](../../apps/agent-runtime/engine/adaptive_retry.py) |
-| **Pipeline schema (validation)** | [`apps/api/app/schemas/pipelines.py`](../../apps/api/app/schemas/pipelines.py) |
+| **Pipeline executor** | [`apps/agent-runtime/engine/pipeline.py`](../../apps/agent-runtime/engine/pipeline.py) — `_topological_sort`, `_resolve_inputs`, `_resolve_templates`, `_coerce_to_schema`, `PipelineExecutor._execute_governed`, `alias_labels_to_ids` |
+| **Conditions** | same file, `NodeCondition` |
+| **Nested pipelines** | [`apps/agent-runtime/engine/tools/sub_pipeline.py`](../../apps/agent-runtime/engine/tools/sub_pipeline.py) |
+| **Pipeline schema** | [`apps/api/app/schemas/pipelines.py`](../../apps/api/app/schemas/pipelines.py) |
 | **Tests** | [`apps/agent-runtime/tests/test_pipeline.py`](../../apps/agent-runtime/tests/test_pipeline.py), [`test_tool_chaining.py`](../../apps/agent-runtime/tests/test_tool_chaining.py) |
-| **Builder canvas (visual editor)** | [`apps/web/src/app/(app)/builder/page.tsx`](../../apps/web/src/app/(app)/builder/page.tsx) — see [05-ui/01-builder-canvas](../05-ui/01-builder-canvas.md) |
-| **Healing + drift on pipeline runs** | [10-pipeline-healing-drift](10-pipeline-healing-drift.md) |
+| **Builder canvas** | [`apps/web/src/app/(app)/builder/page.tsx`](../../apps/web/src/app/(app)/builder/page.tsx), see [05-ui/01-builder-canvas](../05-ui/01-builder-canvas.md) |
+| **Healing and drift** | [10-pipeline-healing-drift](10-pipeline-healing-drift.md) |

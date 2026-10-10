@@ -19,7 +19,7 @@
       "gridPos": { "h": 5, "w": 24, "x": 0, "y": 0 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [{
-        "expr": "sum by (pool) (rate(abenix_execution_duration_seconds_count[1h]) * 3600)",
+        "expr": "sum by (pool) (increase(abenix_execution_duration_seconds_count[1h]))",
         "legendFormat": "{{pool}}",
         "refId": "A"
       }],
@@ -33,7 +33,7 @@
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 5 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [{
-        "expr": "abenix_queue_depth{pool=~\".+\"}",
+        "expr": "max by (pool) (abenix_queue_depth{pool=~\".+\"})",
         "legendFormat": "{{pool}}",
         "refId": "A"
       }],
@@ -68,23 +68,22 @@
     {
       "id": 5,
       "type": "timeseries",
-      "title": "Circuit breaker state — by provider",
+      "title": "LLM errors — by provider (10m)",
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 13 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [
-        { "expr": "increase(abenix_circuit_breaker_trips_total[10m])", "legendFormat": "trips {{provider}}", "refId": "A" },
-        { "expr": "rate(abenix_circuit_breaker_failfast_total[5m])", "legendFormat": "fail-fast {{provider}}", "refId": "B" }
+        { "expr": "sum by (provider, error_type) (increase(abenix_llm_errors_total[10m]))", "legendFormat": "{{provider}} {{error_type}}", "refId": "A" }
       ],
       "fieldConfig": { "defaults": { "unit": "short" } }
     },
     {
       "id": 6,
       "type": "table",
-      "title": "Token spend — by tenant (1h)",
+      "title": "Token spend — by provider and model (1h)",
       "gridPos": { "h": 8, "w": 24, "x": 0, "y": 21 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [{
-        "expr": "sort_desc(sum by (tenant_id, provider, model) (rate(abenix_llm_cost_usd_total[1h]) * 3600))",
+        "expr": "sort_desc(sum by (provider, model) (increase(abenix_llm_cost_usd_provider_total[1h])))",
         "format": "table",
         "instant": true,
         "refId": "A"

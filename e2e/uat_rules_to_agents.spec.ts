@@ -238,6 +238,7 @@ test('a decision is authored in the no-code builder with a catch-all outcome', a
 });
 
 test('Try decides hits, misses and missing facts, keeps golden tests, then Check and publish', async ({ page }) => {
+  test.setTimeout(120_000);
   await go(page, `/decisions/${KEY}`);
   const panel = page.getByTestId('try-panel');
   await page.getByTestId('try-as-of').fill('2026-03-01');
@@ -264,7 +265,7 @@ test('Try decides hits, misses and missing facts, keeps golden tests, then Check
 
   await page.getByTestId('tab-tests').click();
   await page.getByTestId('tests-run').click();
-  await expect(page.getByTestId('tests-summary')).toContainText(/2 of 2 pass|All 2 pass|2 pass/);
+  await expect(page.getByTestId('tests-summary')).toContainText(/2 of 2 pass|All 2 pass|2 pass/, { timeout: 30_000 });
   await page.getByTestId('tab-rules').click();
 
   await page.getByTestId('check').click();

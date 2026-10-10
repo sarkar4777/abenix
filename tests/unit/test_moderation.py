@@ -402,3 +402,111 @@ async def test_gate_fires_event_sink_with_decision_metadata():
     assert captured["execution_id"] == "exec-123"
     assert isinstance(captured["decision"], ModerationDecision)
     assert "harmless" in captured["content_preview"]
+
+
+def _sentence_provider(bad_word: str, category: str = "violence"):
+    """Flags `category` on any input, or any list item, containing bad_word."""
+
+    def _one(text: str) -> dict:
+        hit = bad_word in text
+        return {
+            "flagged": hit,
+            "categories": {category: hit},
+            "category_scores": {category: 0.95 if hit else 0.01},
+        }
+
+    async def fake(content, model="omni-moderation-latest"):
+        items = content if isinstance(content, list) else [content]
+        return {"results": [_one(t) for t in items]}
+
+    return fake
+
+
+@pytest.mark.asyncio
+async def test_provider_category_redact_masks_the_offending_sentence():
+    from engine.moderation_client import event_provider_response
+
+    text = "The weather is fine. I will hurt them badly. See you soon."
+    with patch("engine.moderation_client._call_openai", new=_sentence_provider("hurt")):
+        decision = await evaluate(
+            text,
+            category_actions={"violence": ACTION_REDACT},
+            default_action=ACTION_BLOCK,
+            redaction_mask="[X]",
+        )
+    assert decision.outcome == "redacted"
+    out = decision.redacted_content
+    assert out is not None and "hurt" not in out and "[X]" in out
+    assert out.startswith("The weather is fine.") and out.endswith("See you soon.")
+    pr = event_provider_response(decision)
+    assert pr["_masked_spans"] and pr["_masked_spans"][0]["category"] == "violence"
+
+
+@pytest.mark.asyncio
+async def test_provider_category_redact_masks_everything_when_unlocatable():
+    with patch("engine.moderation_client._call_openai", new=_sentence_provider("hurt")):
+        decision = await evaluate(
+            "hurt",
+            category_actions={"violence": ACTION_REDACT},
+            redaction_mask="[X]",
+        )
+    assert decision.redacted_content == "[X]"
+
+
+@pytest.mark.asyncio
+async def test_gate_passes_the_masked_provider_redaction_onward():
+    seen: list[dict] = []
+    cfg = GateConfig(
+        category_actions={"violence": ACTION_REDACT},
+        default_action=ACTION_BLOCK,
+        redaction_mask="[X]",
+        event_sink=lambda **kw: seen.append(kw),
+    )
+    with patch("engine.moderation_client._call_openai", new=_sentence_provider("hurt")):
+        out, decision = await check(
+            "Hello there. I will hurt them.", source="post_llm", config=cfg
+        )
+    assert "hurt" not in out and "[X]" in out and out.startswith("Hello there.")
+    assert "hurt" not in seen[0]["content_preview"]
+
+
+def test_provider_field_is_deprecated():
+    import json as _json
+
+    from app.routers.moderation import _provider_problem
+
+    assert _provider_problem({}) is None
+    assert _provider_problem({"provider": "OpenAI"}) is None
+    resp = _provider_problem({"provider": "azure"})
+    assert resp.status_code == 400
+    assert _json.loads(resp.body)["error"]["error_code"] == "provider_deprecated"
+
+
+def test_policy_dict_no_longer_returns_provider():
+    import uuid as _uuid
+    from types import SimpleNamespace
+
+    from app.routers.moderation import _policy_dict
+
+    p = SimpleNamespace(
+        id=_uuid.uuid4(),
+        tenant_id=_uuid.uuid4(),
+        name="p",
+        description=None,
+        is_active=True,
+        pre_llm=True,
+        post_llm=True,
+        on_tool_output=False,
+        provider="openai",
+        provider_model="omni-moderation-latest",
+        thresholds={},
+        default_threshold=0.5,
+        category_actions={},
+        default_action="block",
+        custom_patterns=[],
+        redaction_mask="X",
+        fail_closed=False,
+        created_at=None,
+        updated_at=None,
+    )
+    assert "provider" not in _policy_dict(p)

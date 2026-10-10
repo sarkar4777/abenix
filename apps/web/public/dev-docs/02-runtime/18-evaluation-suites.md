@@ -148,7 +148,7 @@ Each tier policy has `require_eval_pass`. Platform defaults:
 
 A tenant changes it under **Admin -> Risk & Controls -> Tier policies**.
 
-When the agent's tier requires it, publishing checks every suite of that agent with `gating: true`. For each one it takes the latest `completed` run without a model override whose `config_hash` matches the agent's current hash, a SHA-256 of the system prompt and the model config. It is the same hash [run provenance](00-agent-execution.md#provenance) stamps on every execution.
+When the agent's tier requires it, publishing checks every suite of that agent with `gating: true`. For each one it takes the latest `completed` run without a model override whose `config_hash` matches the agent's current hash, a SHA-256 of the system prompt and the model config. It is the same hash [run provenance](00-agent-execution.md#run-provenance) stamps on every execution.
 
 | Suite state | When |
 |---|---|

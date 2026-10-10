@@ -4,7 +4,7 @@ Source: [`packages/db/models/autonomy.py`](../../packages/db/models/autonomy.py)
 
 Migration: [`auton0my0001_earned_autonomy`](../../packages/db/alembic/versions/auton0my0001_earned_autonomy.py), down revision `p3rs0na0vec1`. Every step checks `has_table` and existing indexes first, because the API's `create_all` can build the tables before the migration runs.
 
-Runtime behaviour is in [02-runtime/21-earned-autonomy](../02-runtime/21-earned-autonomy.md).
+Runtime behaviour is in [02-runtime/21-earned-autonomy](../02-runtime/21-earned-autonomy.md). Routes are under `/api/autonomy`.
 
 ---
 
@@ -27,7 +27,7 @@ Dotted lines are soft. `limits_decision_key` names a decision by key, and the le
 
 ## `action_types`
 
-One per kind of action per tenant. `UNIQUE (tenant_id, key)`.
+One per kind of action per tenant. Unique `(tenant_id, key)` (`uq_action_type_key`).
 
 | Column | Type | Notes |
 |---|---|---|
@@ -38,17 +38,17 @@ One per kind of action per tenant. `UNIQUE (tenant_id, key)`.
 | `effect` | jsonb | Copy of the tool's `Effect` at enrol time |
 | `world_model` | jsonb | `{kind, ref, metric, inputs, band, horizon_s, timeout_s}`. Kinds `agent_stated`, `decision`, `ml_model`, `none` |
 | `outcome_probe` | jsonb | `{kind, after_s, tool, arguments, path, metric}`. Kinds `tool`, `manual`, `api`, `none` |
-| `limits_decision_key` | varchar(160) | Decision model key, NULL for no limits |
+| `limits_decision_key` | varchar(160) | Decision model key, NULL for no limits. No foreign key |
 | `max_band_width` | float | Widest honest band relative to the value. 0.5 means the band may be half the value |
-| `reversible` | bool | |
+| `reversible` | bool | Default false |
 | `ceiling` | int | Optional cap for every grant of this type |
-| `policy` | jsonb | Ladder threshold overrides plus `approval_expires_s`. See the ladder defaults |
+| `policy` | jsonb | Ladder threshold overrides plus `approval_expires_s` (60 seconds to 30 days) |
 | `is_sample` | bool | True for the sample plant |
 | `created_by` | uuid | `ON DELETE SET NULL` |
 
 ## `autonomy_grants`
 
-One agent's level for one action type. `UNIQUE (tenant_id, agent_id, action_type_id, scope_hash)`.
+One agent's level for one action type. Unique `(tenant_id, agent_id, action_type_id, scope_hash)` (`uq_autonomy_grant_scope`).
 
 | Column | Type | Notes |
 |---|---|---|
@@ -56,13 +56,13 @@ One agent's level for one action type. `UNIQUE (tenant_id, agent_id, action_type
 | `action_type_id` | uuid | `ON DELETE CASCADE`, indexed |
 | `scope` | jsonb | `{"param": "site", "equals": "A"}`, `glob` or `in`. NULL means everywhere |
 | `scope_hash` | varchar(64) | Hash of `scope`, empty for none. Lets one agent hold a scoped and an unscoped grant |
-| `level` | int | 0 to 4 |
-| `ceiling` | int | Default 4. Only ever lowered through the API |
-| `state` | varchar(16) | `active`, `paused`, `removed`. Paused caps the level at 2. Removed is unenrolled with history kept |
+| `level` | int | 0 to 4, default 1 |
+| `ceiling` | int | Default 4. The API never raises it above the current effective ceiling |
+| `state` | varchar(16) | `active` (default), `paused`, `removed`. Paused caps the level at 2. Removed is unenrolled with history kept |
 | `level_since` | timestamptz | Reset on every level change |
 | `approval_id` | uuid | The pending or last promotion approval |
-| `granted_by` | uuid | Who approved the current level. Gets the owner notifications |
-| `agent_config_hash` | varchar(64) | Agent config hash when the level was granted. A different hash at run time caps the level at 2 |
+| `granted_by` | uuid | Who approved the current level. Gets the owner notifications. `ON DELETE SET NULL` |
+| `agent_config_hash` | varchar(64) | Agent config hash when the level was granted. A different hash at run time caps the level at 2. The grant and type ceilings also cap it |
 | `reason` | text | |
 | `attention` | text | One sentence for the overview, for example "Ready to move to Asks first" |
 | `recommended_level` | int | The level an `autonomy.recommended` event was last sent for, so it fires once |
@@ -75,22 +75,22 @@ Append only. One row per level change and per world model change.
 | Column | Type | Notes |
 |---|---|---|
 | `grant_id` | uuid | `ON DELETE CASCADE`. Index on `(grant_id, created_at)` |
-| `tenant_id` | uuid | Indexed |
+| `tenant_id` | uuid | Nullable, indexed, no foreign key |
 | `from_level` / `to_level` | int | Equal when the row only marks a world model change |
-| `actor_type` | varchar(16) | `user` or `system` |
+| `actor_type` | varchar(16) | `user` or `system` (default) |
 | `actor_id` | uuid | NULL for system |
 | `reason` | text | Plain sentence |
 | `evidence` | jsonb | The numbers at the time: scored, held, accuracy, agreement, executed, rejected, unknown, harm, days at level, config hash |
 
 ## `agent_actions`
 
-The ledger. One row per effect tool call or SDK proposal. Server defaults on every column so the runtime can insert with plain SQL over asyncpg.
+The ledger. One row per effect tool call or SDK proposal. The id and most non-null columns have server defaults, so the runtime can insert with plain SQL over asyncpg.
 
 | Column | Type | Notes |
 |---|---|---|
 | `id` | uuid | `gen_random_uuid()` default |
 | `execution_id` / `tool_call_id` | uuid / varchar(120) | Partial unique index `uq_agent_actions_call` when both are set, so a retried call writes once |
-| `agent_id` / `agent_name` / `agent_config_hash` / `user_id` | | Who acted and on which revision |
+| `agent_id` / `agent_name` / `agent_config_hash` / `user_id` | | Who acted and on which revision. `agent_id` is indexed |
 | `action_type_id` / `grant_id` | uuid | NULL for unmanaged calls |
 | `tool_name` | varchar(160) | |
 | `level_at_time` | int | Level that applied to this call |
@@ -111,9 +111,10 @@ The ledger. One row per effect tool call or SDK proposal. Server defaults on eve
 | `outcome_attempts` | int | Failed tool probe attempts, unknown after 3 |
 | `score` | jsonb | `{within_band, band_ok, agreement, harm}` |
 | `harm` / `harm_note` | bool / text | |
+| `events_sent` | varchar(40) | Comma list of events already emitted for the row (`proposed`, `executed`), so the event sweep sends each one once |
 | `created_at` | timestamptz | |
 
-Indexes: `(tenant_id, grant_id, created_at)` for the grant page and stats, `(tenant_id, status)` for reviews and counts, `(outcome_status, outcome_due_at)` for the scheduler.
+Indexes: `ix_agent_actions_grant` on `(tenant_id, grant_id, created_at)` for the grant page and stats, `ix_agent_actions_status` on `(tenant_id, status)` for reviews and counts, `ix_agent_actions_outcome_due` on `(outcome_status, outcome_due_at)` for the scheduler.
 
 ### Status by path
 
@@ -124,4 +125,4 @@ Indexes: `(tenant_id, grant_id, created_at)` for the grant page and stats, `(ten
 | Asks first | `pending`, then `approved` or `edited`, then `executed` or `failed`. Or `rejected`, `expired` |
 | Acts within limits, Acts and reports | `approved` then `executed` or `failed` |
 | Off, limits breach, tier block | `blocked` |
-| SDK proposal | `recorded`, then as above. `POST /actions/{id}/executed` moves `approved` or `edited` to `executed` or `failed` |
+| SDK proposal | `recorded`, then as above. `POST /api/autonomy/actions/{id}/executed` moves `approved` or `edited` to `executed` or `failed` |

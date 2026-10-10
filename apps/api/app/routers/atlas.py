@@ -171,6 +171,7 @@ async def _share_for(
                 ResourceShare.resource_type == ATLAS_KIND,
                 ResourceShare.resource_id == graph_id,
                 ResourceShare.shared_with_user_id == user.id,
+                ResourceShare.live(),
             )
         )
     ).scalar_one_or_none()
@@ -285,6 +286,7 @@ async def list_graphs(
             select(ResourceShare.resource_id, ResourceShare.permission).where(
                 ResourceShare.resource_type == ATLAS_KIND,
                 ResourceShare.shared_with_user_id == user.id,
+                ResourceShare.live(),
             )
         )
     ).all()

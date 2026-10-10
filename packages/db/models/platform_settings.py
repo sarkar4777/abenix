@@ -9,16 +9,18 @@ from sqlalchemy import DateTime, ForeignKey, String, Text, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
-from .base import Base
+from models.base import Base
 
 
 class PlatformSetting(Base):
     __tablename__ = "platform_settings"
 
     key: Mapped[str] = mapped_column(String(128), primary_key=True)
-    value: Mapped[str] = mapped_column(Text, default="")
-    description: Mapped[str] = mapped_column(Text, default="")
-    category: Mapped[str] = mapped_column(String(64), default="general", index=True)
+    value: Mapped[str] = mapped_column(Text, default="", server_default="")
+    description: Mapped[str] = mapped_column(Text, default="", server_default="")
+    category: Mapped[str] = mapped_column(
+        String(64), default="general", server_default="general", index=True
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )

@@ -86,8 +86,13 @@ def _no_web_base(monkeypatch):
 
 @pytest.fixture
 def tokens():
-    with patch.object(auth, "create_access_token", lambda *a: "access"), patch.object(
-        auth, "create_refresh_token", lambda *a: "refresh"
+    pair = {
+        "access_token": "access",
+        "refresh_token": "refresh",
+        "token_type": "bearer",
+    }
+    with patch.object(
+        auth.sessions, "sign_in", AsyncMock(return_value=pair)
     ), patch.object(auth, "log_action", AsyncMock()):
         yield
 

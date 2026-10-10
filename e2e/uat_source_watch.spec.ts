@@ -10,6 +10,7 @@
  * CHANGING_URL=http://host:8088/uuid and SOURCE_WATCH_ALLOW_PRIVATE_TARGETS=1 on the API.
  */
 import { test, expect, type Page } from '@playwright/test';
+import { openFromSidebar } from './helpers/sidebar';
 
 const BASE = process.env.BASE || 'http://localhost:3100';
 const API = process.env.API || 'http://localhost:8000';
@@ -76,7 +77,7 @@ test('Source Watch is in the sidebar and explains itself when empty', async ({ p
   await login(page);
   await cleanUp(page);
   await visit(page, '/dashboard');
-  await page.getByRole('link', { name: 'Source Watch' }).click();
+  await openFromSidebar(page, '/sources');
   await expect(page.getByRole('heading', { name: 'Source Watch' })).toBeVisible();
   const empty = page.getByTestId('sources-empty');
   if (await empty.isVisible()) await expect(empty).toContainText('Nothing is being watched yet');

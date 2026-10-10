@@ -129,12 +129,18 @@ def _serialize_kb(
     user: User | None = None,
     names: dict[uuid.UUID, str] | None = None,
     can_edit: bool | None = None,
+    hidden_doc_ids: set[uuid.UUID] | None = None,
 ) -> dict[str, Any]:
     chunk_count, total_size, degraded_doc_count = _kb_rollups(kb)
     docs: list[dict[str, Any]] = []
     if include_docs:
+        hidden = hidden_doc_ids or set()
         try:
-            docs = [_serialize_doc(d) for d in kb.documents]
+            docs = [
+                _serialize_doc(d)
+                for d in kb.documents
+                if d.is_current is not False and d.id not in hidden
+            ]
         except Exception:
             pass
     raw_status = kb.status.value if isinstance(kb.status, KBStatus) else kb.status
@@ -222,6 +228,16 @@ def _serialize_doc(d: Document) -> dict[str, Any]:
         # Populated for FAILED + DEGRADED — UI tooltip on the yellow/red
         # icon. None for healthy docs.
         "error_message": getattr(d, "error_message", None),
+        "version_number": getattr(d, "version_number", None) or 1,
+        "is_current": getattr(d, "is_current", True) is not False,
+        "parent_document_id": (
+            str(d.parent_document_id)
+            if getattr(d, "parent_document_id", None)
+            else None
+        ),
+        "superseded_by": (
+            str(d.superseded_by) if getattr(d, "superseded_by", None) else None
+        ),
         "created_at": d.created_at.isoformat() if d.created_at else None,
     }
 
@@ -273,9 +289,9 @@ async def list_knowledge_bases(
     if sort == "oldest":
         query = query.order_by(KnowledgeBase.created_at.asc())
     elif sort == "name":
-        query = query.order_by(KnowledgeBase.name.asc())
+        query = query.order_by(KnowledgeBase.name.asc(), KnowledgeBase.id)
     else:  # newest (default)
-        query = query.order_by(KnowledgeBase.created_at.desc())
+        query = query.order_by(KnowledgeBase.created_at.desc(), KnowledgeBase.id)
 
     # Count total before pagination
     count_base = select(KnowledgeBase).where(KnowledgeBase.tenant_id == user.tenant_id)
@@ -343,6 +359,7 @@ async def list_knowledge_bases(
                 ).where(
                     UserCollectionGrant.collection_id.in_(kb_ids),
                     UserCollectionGrant.user_id == user.id,
+                    UserCollectionGrant.live(),
                 )
             )
         ).all()
@@ -509,8 +526,16 @@ async def get_knowledge_base(
     kb = result.scalar_one_or_none()
     if not kb or not await user_can_access_collection(db, user=user, kb=kb):
         return error("Knowledge base not found", 404)
+    from app.services.document_access import hidden_document_ids
+
+    hidden = await hidden_document_ids(db, user, [kb_id])
     return success(
-        _serialize_kb(kb, include_docs=True, **(await _owner_context(db, kb, user)))
+        _serialize_kb(
+            kb,
+            include_docs=True,
+            hidden_doc_ids=hidden,
+            **(await _owner_context(db, kb, user)),
+        )
     )
 
 
@@ -735,6 +760,7 @@ async def upload_document(
 @router.get("/{kb_id}/documents")
 async def list_documents(
     kb_id: uuid.UUID,
+    include_history: bool = False,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
@@ -750,12 +776,14 @@ async def list_documents(
 
     from app.services.document_access import hidden_document_ids
 
+    # superseded versions stay out of the list, editors can ask for history
+    if include_history and not await user_can_edit_collection(db, user=user, kb=kb):
+        return error("Only people who can edit this collection can view history", 403)
     hidden = await hidden_document_ids(db, user, [kb_id])
-    result = await db.execute(
-        select(Document)
-        .where(Document.kb_id == kb_id)
-        .order_by(Document.created_at.desc())
-    )
+    q = select(Document).where(Document.kb_id == kb_id)
+    if not include_history:
+        q = q.where(Document.is_current.is_(True))
+    result = await db.execute(q.order_by(Document.created_at.desc()))
     docs = [d for d in result.scalars().all() if d.id not in hidden]
     data = [_serialize_doc(d) for d in docs]
     return success(data, meta={"count": len(data), "hidden": len(hidden)})

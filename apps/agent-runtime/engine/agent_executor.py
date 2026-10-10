@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import os
 import time
@@ -18,6 +19,7 @@ from engine.metrics import (
     tool_execution_duration_seconds,
 )
 from engine.moderation_gate import (
+    DLPBlocked,
     GateConfig,
     ModerationBlocked,
     ModerationHeld,
@@ -33,10 +35,10 @@ logger = logging.getLogger(__name__)
 
 def _provider_key(model: str) -> str:
     """Classify model id into a provider bucket for cost splitting."""
-    m = (model or "").lower()
-    if m.startswith("claude"):
+    m = (model or "").lower().split("/")[-1]
+    if m.startswith(("claude", "anthropic.", "us.anthropic.")):
         return "anthropic"
-    if m.startswith("gpt") or m.startswith("o1") or m.startswith("chatgpt"):
+    if m.startswith(("gpt", "o1", "o3", "o4", "chatgpt")):
         return "openai"
     if m.startswith("gemini"):
         return "google"
@@ -72,6 +74,8 @@ def _moderation_block_text(mb: Any, subject: str) -> str:
     """
     if isinstance(mb, ModerationHeld):
         return held_message(mb.source, mb.timeout_minutes, mb.timeout_action)
+    if isinstance(mb, DLPBlocked):
+        return mb.message
     decision = getattr(mb, "decision", None)
     cats = list(getattr(decision, "triggered_categories", None) or [])
     if cats:
@@ -357,6 +361,42 @@ class ExecutionResult:
         return [t.to_dict() for t in self.node_traces]
 
 
+def _tools_as_text(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Messages with tool calls and results written out as text, for a turn that offers no tools."""
+    out: list[dict[str, Any]] = []
+    for m in messages:
+        content = m.get("content")
+        if not isinstance(content, list):
+            out.append(m)
+            continue
+        parts: list[str] = []
+        for b in content:
+            if not isinstance(b, dict):
+                continue
+            kind = b.get("type")
+            if kind == "text" and b.get("text"):
+                parts.append(str(b["text"]))
+            elif kind == "tool_use":
+                args = json.dumps(b.get("input"), default=str)[:2000]
+                parts.append(f"[called {b.get('name')} with {args}]")
+            elif kind == "tool_result":
+                body = b.get("content")
+                if isinstance(body, list):
+                    body = " ".join(
+                        str(x.get("text", "")) for x in body if isinstance(x, dict)
+                    )
+                parts.append(f"[tool result: {str(body)[:6000]}]")
+        merged = {**m, "content": "\n".join(parts) or "(no content)"}
+        if out and out[-1].get("role") == merged.get("role"):
+            out[-1] = {
+                **out[-1],
+                "content": f"{out[-1]['content']}\n{merged['content']}",
+            }
+        else:
+            out.append(merged)
+    return out
+
+
 class AgentExecutor:
     def __init__(
         self,
@@ -474,7 +514,8 @@ class AgentExecutor:
             "gathered, in the format you were asked for. Say plainly what you "
             "could not establish."
         )
-        msgs = list(messages)
+        # tools are not offered on this turn, so earlier calls go in as plain text
+        msgs = _tools_as_text(messages)
         last = msgs[-1] if msgs else None
         if last and last.get("role") == "user":
             content = last.get("content")
@@ -491,7 +532,7 @@ class AgentExecutor:
             resp = await self.llm_router.complete(
                 messages=msgs,
                 system=self.system_prompt or None,
-                tools=tools if tools else None,
+                tools=None,
                 model=self.model,
                 temperature=self.temperature,
                 max_tokens=self.max_tokens,
@@ -539,15 +580,17 @@ class AgentExecutor:
 
     async def _governance_refusal(self) -> dict[str, Any] | None:
         """Kill switches and the tier's model list, checked before any token is spent."""
-        await governance.ensure_fresh()
+        # a switch set a moment ago must stop the very next run, so the start reads a fresh list
+        await governance.ensure_fresh(max_age=1.0)
         tenant = str(getattr(self, "tenant_id", "") or "")
         try:
             governance.check(tenant, "agent", str(self.agent_id or "*"))
             governance.check(tenant, "model", str(self.model or "*"))
         except governance.Stopped as s:
+            name = str(getattr(self, "agent_name", "") or "")
             return {
                 "code": "KILL_SWITCH",
-                "message": s.message(),
+                "message": s.message(name if s.scope == "agent" else ""),
                 "scope": s.scope,
                 "target": s.target,
             }
@@ -676,7 +719,8 @@ class AgentExecutor:
         node_counter += 1
 
         # replies that depend on earlier turns stay out of the shared cache
-        if self.cache and not self.history:
+        # a cached reply would skip the output check, so a guarded run never reads it
+        if self.cache and not self.history and not guards_output(self.moderation_gate):
             cache_result = await self.cache.check(
                 model=self.model,
                 messages=messages,
@@ -1314,6 +1358,7 @@ class AgentExecutor:
         total_input = 0
         total_output = 0
         total_cost = 0.0
+        stream_provider_costs: dict[str, float] = {}
         effective_model: str | None = None
         effective_fallback_reason: str | None = None
 
@@ -1366,6 +1411,7 @@ class AgentExecutor:
                         "input_tokens": total_input,
                         "output_tokens": total_output,
                         "cost": round(total_cost, 6),
+                        "provider_costs": dict(stream_provider_costs),
                         "duration_ms": duration,
                         "model": self.model,
                         "error": "Execution timed out",
@@ -1411,6 +1457,10 @@ class AgentExecutor:
             total_input += done_data.get("input_tokens", 0)
             total_output += done_data.get("output_tokens", 0)
             total_cost += done_data.get("cost", 0.0)
+            _sp = _provider_key(done_data.get("model") or self.model)
+            stream_provider_costs[_sp] = stream_provider_costs.get(_sp, 0.0) + float(
+                done_data.get("cost", 0.0) or 0.0
+            )
 
             # Remember which model actually served this turn. Without this the
             # streaming path reported self.model no matter what the router
@@ -1458,7 +1508,7 @@ class AgentExecutor:
                         moderation_decisions_total.labels(
                             source="post_llm", outcome=_mod_post.outcome
                         ).inc()
-                        if _mod_post.outcome == "redacted" and _checked != full_text:
+                        if _checked != full_text:
                             full_text = _checked
                             _post_redacted = True
                             yield ExecutionEvent(
@@ -1468,7 +1518,11 @@ class AgentExecutor:
                                     "outcome": "redacted",
                                     "categories": list(_mod_post.triggered_categories),
                                     "content": full_text,
-                                    "message": "The answer was redacted by the moderation policy.",
+                                    "message": (
+                                        "The answer was redacted by the moderation policy."
+                                        if _mod_post.outcome == "redacted"
+                                        else "Personal data in the answer was masked by your data protection setting."
+                                    ),
                                 },
                             )
                     except ModerationBlocked as mb:
@@ -1484,7 +1538,11 @@ class AgentExecutor:
                                     "source": "post_llm",
                                     "outcome": "blocked",
                                     "content": _moderation_block_text(mb, "Response"),
-                                    "message": "The answer was blocked by the moderation policy.",
+                                    "message": (
+                                        mb.message
+                                        if isinstance(mb, DLPBlocked)
+                                        else "The answer was blocked by the moderation policy."
+                                    ),
                                 }
                             ),
                         )
@@ -1495,6 +1553,7 @@ class AgentExecutor:
                                 "input_tokens": total_input,
                                 "output_tokens": total_output,
                                 "cost": round(total_cost, 6),
+                                "provider_costs": dict(stream_provider_costs),
                                 "duration_ms": duration,
                                 "model": self.model,
                                 "effective_model": effective_model or self.model,
@@ -1533,6 +1592,7 @@ class AgentExecutor:
                     "input_tokens": total_input,
                     "output_tokens": total_output,
                     "cost": round(total_cost, 6),
+                    "provider_costs": dict(stream_provider_costs),
                     "duration_ms": duration,
                     "model": self.model,
                     # What actually ran, so the API can persist model_used
@@ -1732,6 +1792,15 @@ class AgentExecutor:
                     },
                 )
                 break
+        else:
+            # out of steps: answer from what was gathered rather than end on a tool call
+            if not self._grounding_violated(all_tool_calls):
+                final = await self._final_answer(messages, tools)
+                if final is not None:
+                    total_input += final.input_tokens
+                    total_output += final.output_tokens
+                    total_cost += final.cost
+                    yield ExecutionEvent(event="token", data=final.content)
 
         duration = int((time.monotonic() - start) * 1000)
         agent_execution_duration_seconds.observe(duration / 1000)
@@ -1742,6 +1811,7 @@ class AgentExecutor:
             "input_tokens": total_input,
             "output_tokens": total_output,
             "cost": round(total_cost, 6),
+            "provider_costs": dict(stream_provider_costs),
             "duration_ms": duration,
             "model": self.model,
             # Same contract as the early-return payload above, so the API
@@ -2115,6 +2185,7 @@ def _ensure_tool_classes() -> None:
     )
     # Store context tool factories (need constructor args)
     from engine.tools.ml_model_tool import MLModelTool
+    from engine.tools.ml_model_register import MLModelRegisterTool
     from engine.tools.meeting_join import MeetingJoinTool
     from engine.tools.meeting_listen import MeetingListenTool
     from engine.tools.meeting_speak import MeetingSpeakTool
@@ -2151,6 +2222,7 @@ def _ensure_tool_classes() -> None:
             "human_approval": HumanApprovalTool,
             "approval_gate": ApprovalGateTool,
             "ml_model": MLModelTool,
+            "ml_model_register": MLModelRegisterTool,
             "sandboxed_job": SandboxedJobTool,
             "code_asset": CodeAssetTool,
             "meeting_join": MeetingJoinTool,
@@ -2399,6 +2471,16 @@ def build_tool_registry(
             user_id=str(user_id or ""),
             user_role=user_role,
             delegation_depth=delegation_depth,
+        )
+    MLRegisterCls = _CONTEXT_TOOL_FACTORIES.get("ml_model_register")
+    if MLRegisterCls:
+        # the model is owned by whoever started the run
+        context_tools["ml_model_register"] = lambda: MLRegisterCls(
+            tenant_id=str(tenant_id or ""),
+            execution_id=str(execution_id or ""),
+            agent_id=str(agent_id or ""),
+            user_id=str(user_id or ""),
+            user_role=user_role,
         )
 
     from engine.tools.agent_step import AgentStepTool as _AgentStep

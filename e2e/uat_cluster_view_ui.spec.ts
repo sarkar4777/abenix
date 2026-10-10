@@ -130,7 +130,12 @@ test('opening a pod shows its events and its log tail', async ({ page }) => {
   const logs = drawer.getByTestId('pod-logs');
   await expect(logs).toBeVisible({ timeout: 30_000 });
   // the api writes a line per request, so a real tail has many lines and no escaped newlines
-  await expect.poll(async () => Number(await logs.getAttribute('data-lines')), { timeout: 30_000 }).toBeGreaterThan(5);
+  // a pod that only just started has a short tail, so refresh like a person would until it fills
+  await expect.poll(async () => {
+    const n = Number(await logs.getAttribute('data-lines'));
+    if (n <= 5) await drawer.getByTestId('pod-logs-refresh').click().catch(() => {});
+    return n;
+  }, { timeout: 90_000, intervals: [5_000] }).toBeGreaterThan(5);
   await expect(logs).not.toContainText(String.fromCharCode(92) + 'n2026-');
   await expect(logs).not.toContainText(String.fromCharCode(27));
   await drawer.getByTestId('pod-logs-lines').selectOption('100');

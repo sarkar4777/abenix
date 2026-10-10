@@ -213,3 +213,25 @@ KB_QUERY_DURATION_SECONDS = _safe_metric(
     ["kb_collection_id"],
     buckets=(0.05, 0.1, 0.25, 0.5, 1, 2, 5),
 )
+
+# Read by the pool ScaledObject p95 trigger and the Scaling Ops dashboard
+EXECUTION_DURATION_SECONDS = _safe_metric(
+    Histogram,
+    "abenix_execution_duration_seconds",
+    "Queued execution wall-clock time, per runtime pool",
+    ["pool", "status"],
+    buckets=(0.5, 1, 2, 5, 10, 20, 30, 60, 90, 120, 300, 600, 1800),
+)
+QUEUE_DEPTH = _safe_gauge(
+    "abenix_queue_depth",
+    "Pending items in agent queue per pool",
+    ["pool"],
+)
+
+
+def observe_execution(pool: str, status: str, duration_ms: int | None) -> None:
+    if duration_ms is None or duration_ms < 0:
+        return
+    EXECUTION_DURATION_SECONDS.labels(pool=pool or "default", status=status).observe(
+        duration_ms / 1000
+    )

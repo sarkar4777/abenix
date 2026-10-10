@@ -19,6 +19,7 @@ import {
   Plus,
   Scale,
   Search,
+  Star,
   Trash2,
   Wrench,
 } from 'lucide-react';
@@ -121,6 +122,7 @@ export default function AgentsPage() {
 
   // Used to bucket the "My Agents" tab count against the active session.
   const { data: perms } = useApi<{ user_id: string; is_admin?: boolean }>('/api/me/permissions');
+  const { data: starred } = useApi<{ agent_id: string; agent_name: string }[]>('/api/agents/favorites');
   const currentUserId = perms?.user_id ?? null;
   const [deleting, setDeleting] = useState<Agent | null>(null);
   const canDelete = (a: Agent) => a.agent_type !== 'oob' && (!!perms?.is_admin || (!!currentUserId && a.creator_id === currentUserId));
@@ -188,6 +190,17 @@ export default function AgentsPage() {
         docSlug="08-howto/02-add-an-agent"
         storageKey="agents"
       />
+
+      {starred && starred.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2" data-testid="agents-starred">
+          <span className="inline-flex items-center gap-1 text-xs text-amber-300"><Star className="w-3.5 h-3.5 fill-current" /> Starred</span>
+          {starred.map((f) => (
+            <a key={f.agent_id} href={`/agents/${f.agent_id}/info`} data-testid="agents-starred-item" className="text-xs px-2.5 py-1 rounded-full border border-amber-500/30 bg-amber-500/5 text-amber-200 hover:bg-amber-500/15 max-w-[220px] truncate">
+              {f.agent_name}
+            </a>
+          ))}
+        </div>
+      )}
 
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div className="flex bg-slate-800/50 rounded-lg p-1 border border-slate-700/50 overflow-x-auto">

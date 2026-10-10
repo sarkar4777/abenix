@@ -686,31 +686,37 @@ async def deliver_due(limit: int = 100) -> int:
     return len(rows)
 
 
-async def dispatch_once() -> None:
+async def dispatch_once() -> dict[str, int] | None:
     from app.core.deps import async_session
 
     try:
         async with async_session() as db:
-            await fan_out(db)
-        await deliver_due()
+            queued = await fan_out(db)
+        delivered = await deliver_due()
+        return {"queued": int(queued or 0), "delivered": int(delivered or 0)}
     except Exception:
         logger.exception("event dispatch failed")
+        return None
 
 
-async def prune(days_delivered: int = 30, days_outbox: int = 7) -> None:
+async def prune(days_delivered: int = 30, days_outbox: int = 7) -> dict[str, int]:
     from app.core.deps import async_session
 
     async with async_session() as db:
-        await db.execute(
+        deliveries = await db.execute(
             text(
                 "DELETE FROM webhook_deliveries WHERE status='delivered' AND created_at < now() - make_interval(days => :d)"
             ),
             {"d": days_delivered},
         )
-        await db.execute(
+        events = await db.execute(
             text(
                 "DELETE FROM event_outbox WHERE dispatched_at IS NOT NULL AND dispatched_at < now() - make_interval(days => :d)"
             ),
             {"d": days_outbox},
         )
         await db.commit()
+    return {
+        "deliveries": int(getattr(deliveries, "rowcount", 0) or 0),
+        "events": int(getattr(events, "rowcount", 0) or 0),
+    }

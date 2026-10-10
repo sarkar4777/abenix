@@ -40,6 +40,7 @@ public final class Abenix implements AutoCloseable {
     private final ImprovementsClient improvements;
     private final LessonsClient lessons;
     private final FeedbackClient feedback;
+    private final HttpKit kit;
 
     private Abenix(Builder b) {
         this.baseUrl = stripTrailingSlash(Objects.requireNonNull(b.baseUrl, "baseUrl"));
@@ -55,6 +56,7 @@ public final class Abenix implements AutoCloseable {
             .version(HttpClient.Version.HTTP_1_1)      // SSE is happier on 1.1
             .build();
         HttpKit kit = new HttpKit(this.baseUrl, this.apiKey, this.http, this.defaultActingSubject, this.timeout);
+        this.kit = kit;
         this.approvals = new ApprovalsClient(this.baseUrl, this.apiKey, this.http, this.defaultActingSubject, this.timeout);
         this.agents = new AgentsClient(kit);
         this.tools = new ToolsClient(kit);
@@ -99,6 +101,18 @@ public final class Abenix implements AutoCloseable {
     /** Thumbs up or down on an answer. */
     public FeedbackClient feedback() { return feedback; }
 
+    /** The user this key acts as, as {@code {user: {...}}}. */
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> me() {
+        return JSON.convertValue(kit.dataOrRoot(kit.getJson("/api/me", null)), Map.class);
+    }
+
+    /** The key's user, role and capabilities, such as approvals.sign. */
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> permissions() {
+        return JSON.convertValue(kit.dataOrRoot(kit.getJson("/api/me/permissions", null)), Map.class);
+    }
+
     // ─────────────────────────── Public verbs ───────────────────────────
 
     public ExecutionResult execute(String slugOrId, String message) {
@@ -126,8 +140,7 @@ public final class Abenix implements AutoCloseable {
             throw new AbenixException("submit(" + slugOrId + ") failed: " + e.getMessage(), e);
         }
         if (resp.statusCode() >= 400) {
-            throw new AbenixException("submit(" + slugOrId + ") HTTP " + resp.statusCode()
-                + " — " + truncate(resp.body(), 400));
+            throw HttpKit.error("submit(" + slugOrId + ")", resp.statusCode(), resp.body());
         }
         JsonNode root = parse(resp.body());
         JsonNode data = root.has("data") ? root.get("data") : root;
@@ -245,8 +258,7 @@ public final class Abenix implements AutoCloseable {
             throw new AbenixException("execute(" + slugOrId + ") failed: " + e.getMessage(), e);
         }
         if (resp.statusCode() >= 400) {
-            throw new AbenixException("execute(" + slugOrId + ") HTTP " + resp.statusCode()
-                + " — " + truncate(resp.body(), 400));
+            throw HttpKit.error("execute(" + slugOrId + ")", resp.statusCode(), resp.body());
         }
         JsonNode root = parse(resp.body());
         JsonNode data = root.has("data") ? root.get("data") : root;

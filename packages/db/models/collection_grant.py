@@ -13,6 +13,7 @@ from sqlalchemy import (
     Index,
     UniqueConstraint,
     func,
+    or_,
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -124,3 +125,8 @@ class UserCollectionGrant(UUIDMixin, Base):
         DateTime(timezone=True),
         nullable=True,
     )
+
+    @classmethod
+    def live(cls):
+        """WHERE clause for grants that have not expired."""
+        return or_(cls.expires_at.is_(None), cls.expires_at > func.now())

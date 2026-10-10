@@ -10,7 +10,7 @@
 # ──────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 NS="abenix"
 
 G='\033[0;32m' Y='\033[1;33m' R='\033[0;31m' C='\033[0;36m' B='\033[1m' N='\033[0m'
@@ -98,6 +98,10 @@ echo -e "\n${G}Abenix — Demo Startup${N}\n"
 echo -e "${B}1. Minikube${N}"
 if minikube status --format='{{.APIServer}}' 2>/dev/null | grep -q Running; then
   ok "Already running"
+elif ! docker inspect minikube >/dev/null 2>&1; then
+  # a bare minikube start would create a 2 GB cluster that cannot hold the platform
+  err "No minikube cluster yet. Create it with: bash scripts/deploy.sh local"
+  exit 1
 else
   log "Starting minikube..."
   minikube start 2>&1 | tail -2

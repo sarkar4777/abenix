@@ -2,6 +2,14 @@
 
 > How an agent earns the right to act on its own, one action type at a time, from measured evidence. Every consequential tool call is declared, predicted, gated, executed, observed and scored, and the score moves the agent up or down a five step ladder. For setting it up see [08-howto/13-earned-autonomy](../08-howto/13-earned-autonomy.md). Tables are in [04-data-model/08-autonomy](../04-data-model/08-autonomy.md).
 
+## In short
+
+- An agent starts at **Watching** for an action type: it says what it would do and nothing runs. People say whether they agree.
+- Agreement and correct predictions move it up the ladder: Watching, Asks first, Acts within limits, Acts and reports. A person who did not build the agent signs each promotion.
+- Harm, falling accuracy or a change to the agent drops it back at once, with no approval needed.
+- Kill switches, limits models and risk tier ceilings apply at every level.
+- The UI is `/autonomy` (sidebar **Autonomy** under Monitor, needs `autonomy.view`). Each grant has its own page at `/autonomy/{grantId}`. Asks-first approvals and promotions show on `/approvals`.
+
 ---
 
 ## Where it lives

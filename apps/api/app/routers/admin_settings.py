@@ -338,6 +338,10 @@ async def update_setting(
         key,
         "<redacted>" if key in SECRET_KEYS else value[:80],
     )
+    if key.startswith("llm."):
+        from app.services.model_availability import schedule_reprobe
+
+        schedule_reprobe()
     return success({"key": key, "value": mask(key, value), "updated_by": str(user.id)})
 
 
@@ -358,15 +362,11 @@ async def subscription_status(
     ).fetchall()
     stored = {str(k): (v or "") for k, v in rows}
     token = await _subscription_token(db)
-    enabled = str(stored.get("llm.subscription.enabled", "false")).strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
-    exclusive = str(
-        stored.get("llm.subscription.exclusive", "true")
-    ).strip().lower() in {"1", "true", "yes", "on"}
+    from engine.claude_subscription import subscription_state
+
+    state = subscription_state(stored, token or "")
+    enabled = bool(state["enabled"])
+    exclusive = bool(state["exclusive"])
     return success(
         {
             "enabled": enabled,
@@ -377,10 +377,7 @@ async def subscription_status(
                 else ("environment" if token else None)
             ),
             "token_masked": mask("llm.subscription.token", token),
-            "default_model": (
-                stored.get("llm.subscription.default_model") or ""
-            ).strip()
-            or DEFAULTS["llm.subscription.default_model"]["value"],
+            "default_model": state["default_model"],
             "exclusive": exclusive,
             "active": enabled and bool(token),
             "billing": "flat-rate subscription — LLM calls record tokens at $0 marginal cost",
@@ -424,6 +421,9 @@ async def verify_subscription(
         text_out = "".join(
             b.text for b in resp.content if getattr(b, "type", "") == "text"
         )
+        from app.services.model_availability import schedule_reprobe
+
+        schedule_reprobe()
         return success(
             {
                 "ok": True,

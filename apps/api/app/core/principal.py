@@ -130,7 +130,8 @@ async def _from_jwt(token: str) -> Principal:
     sub = payload.get("sub")
     if not sub or payload.get("type") != "access":
         raise _denied()
-    k = f"u:{sub}"
+    sid = payload.get("sid")
+    k = f"u:{sub}:{sid}" if sid else f"u:{sub}"
     p = _get(k)
     if p:
         return p
@@ -142,13 +143,20 @@ async def _from_jwt(token: str) -> Principal:
         p = _get(k)
         if p:
             return p
+        if sid:
+            return await _load_user(k, uid, sid)
         return await _load_user(k, uid)
 
 
-async def _load_user(k: str, uid: uuid.UUID) -> Principal:
+async def _load_user(k: str, uid: uuid.UUID, sid: str | None = None) -> Principal:
     from models.user import User
 
     async with async_session() as db:
+        if sid:
+            from app.core import sessions
+
+            if not await sessions.is_live(db, sid, uid):
+                raise _denied()
         u = (
             await db.execute(
                 select(User).where(User.id == uid, User.is_active.is_(True))

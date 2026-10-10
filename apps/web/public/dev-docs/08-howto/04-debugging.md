@@ -10,9 +10,9 @@ When something's wrong:
 1. **Get the `execution_id`** from the UI (URL or trace panel) or from the user.
 2. **Open `/executions/{id}`** — status, `failure_code`, `error_message`, tool calls and node results.
 3. **Click "View Trace"** to jump to Grafana Tempo, when traces are exported (see [04-observability](../06-deployment/04-observability.md#traces)).
-4. **Read the pod logs** if neither helps.
+4. **Read the logs** if neither helps. On a cluster, `kubectl -n abenix logs` (below). With `dev-local.sh`, `.local-logs/` holds `abenix-api.log`, `abenix-web.log`, `celery.log` and `consumer.log`, and `bash scripts/dev-local.sh --status` shows which process is down.
 
-If you don't have the execution_id, query Postgres:
+If you don't have the execution_id, filter `/executions` by agent and status, or open `/alerts` for failed runs grouped by cause. From Postgres:
 ```sql
 SELECT id, status, failure_code, error_message, created_at
 FROM executions
@@ -22,12 +22,23 @@ ORDER BY created_at DESC LIMIT 10;
 ```
 
 Execution status is one of `running`, `completed`, `failed` or `cancelled`.
-`failure_code` comes from `apps/api/app/core/failure_codes.py`, for example
-`LLM_RATE_LIMIT`, `LLM_PROVIDER_ERROR`, `LLM_INVALID_RESPONSE`, `LLM_AUTH_ERROR`,
-`CONFIG_UNKNOWN_MODEL`, `SANDBOX_TIMEOUT`, `SANDBOX_OOM`, `TOOL_ERROR`,
-`TOOL_NOT_FOUND`, `MODERATION_BLOCKED`, `KILL_SWITCH`, `MODEL_NOT_ALLOWED`,
-`BUDGET_EXCEEDED`, `INFRA_CRASH`, `INFRA_AUTH_ERROR` and `STALE_SWEEP`. The
-`/alerts` page groups failures by it.
+`failure_code` is set by `classify_exception()` in
+`apps/api/app/core/failure_codes.py`, which matches the error text against an
+ordered list of patterns. The first match wins:
+
+| Group | Codes |
+|---|---|
+| Sweeper | `STALE_SWEEP` |
+| Configuration | `CONFIG_UNKNOWN_MODEL`, `MODEL_NOT_ALLOWED` |
+| LLM provider | `LLM_RATE_LIMIT`, `LLM_PROVIDER_ERROR`, `LLM_INVALID_RESPONSE`, `LLM_AUTH_ERROR` |
+| Sandbox | `SANDBOX_OOM`, `SANDBOX_TIMEOUT`, `SANDBOX_NONZERO_EXIT`, `SANDBOX_IMAGE_BLOCKED` |
+| Governance | `MODERATION_BLOCKED`, `KILL_SWITCH`, `BUDGET_EXCEEDED`, `RATE_LIMITED` |
+| Tools | `TOOL_NOT_FOUND`, `TOOL_ERROR` |
+| Infrastructure | `INFRA_CRASH`, `INFRA_AUTH_ERROR` |
+| No match | `UNKNOWN_ERROR` |
+
+The `/alerts` page groups failed runs by code, with a plain label for each, so
+a burst of one cause shows as one row.
 
 ---
 
@@ -41,6 +52,7 @@ downstream pipeline node fails to parse it. Sometimes `failure_code` is
 - Read `output_message` on the execution row. Is the schema realistic? 5 to 10 fields hold up, 30+ gets brittle.
 - Tighten the system prompt — "Output STRICT JSON only, no prose, no fences."
 - Add an example output to the prompt.
+- Declare an `output_schema` on the agent. The runtime checks the reply against it and asks the model once to correct a mismatch, see [02-add-an-agent](02-add-an-agent.md#fields).
 
 > **Trap** — the example output in the prompt is read by the LLM as "what good looks like." If your example numbers are stale, the LLM will produce stale numbers. Use `<placeholder>` syntax for time-dependent values.
 
@@ -64,7 +76,7 @@ downstream pipeline node fails to parse it. Sometimes `failure_code` is
 **Cause**: the pod running it died mid-run (OOM or eviction), or a pipeline node hung.
 
 **Fix**:
-- Check for restarts: `kubectl -n abenix get pods -l app.kubernetes.io/name=agent-runtime` and `kubectl -n abenix describe pod <pod>`.
+- Check for restarts: `kubectl -n abenix get pods -l app.kubernetes.io/name=agent-runtime` and `kubectl -n abenix describe pod <pod>`. With `dev-local.sh` the NATS consumer runs the agents, so read `.local-logs/consumer.log`.
 - Wait. The API scheduler's stale sweeper runs every 5 minutes and marks runs still `running` after `STALE_EXECUTION_MAX_MINUTES` (default 10) as `failed` with `failure_code=STALE_SWEEP`. The `abenix_stale_sweeps_total` metric counts them.
 - A pipeline is cut off at the `pipeline.timeout_seconds` setting (default 300) with `SANDBOX_TIMEOUT`, see [platform settings](../09-reference/04-platform-settings.md#execution-limits).
 
@@ -113,7 +125,7 @@ downstream pipeline node fails to parse it. Sometimes `failure_code` is
 
 **Fix**:
 - Browser DevTools → Network → the request → response body.
-- Backend logs: `kubectl -n abenix logs -l app.kubernetes.io/name=api -f --tail=200`, or `logs/abenix-api.log` with `dev-local.sh`.
+- Backend logs: `kubectl -n abenix logs -l app.kubernetes.io/name=api -f --tail=200`, or `.local-logs/abenix-api.log` with `dev-local.sh`.
 - Every API response carries `X-Request-ID`. Grep the logs for it.
 
 If the response had `error_code` but the toast did not show it, the catch
@@ -187,7 +199,7 @@ See [approvals](../02-runtime/05-approvals-hitl.md).
 **Symptom**: the connection fails to register, or its tools never appear.
 
 **Fix**:
-- `400 host '<yours>' not in MCP_ALLOWED_HOSTS` means the host is not allowed. Add it to `mcpAllowedHosts` in the Helm values, see [env vars](../09-reference/01-env-vars.md#mcp-servers).
+- A 400 that reads "That address cannot be used. `<host>` is not on this workspace's list of approved MCP hosts" means the host is not allowed. Add it to `mcpAllowedHosts` in the Helm values, which becomes `MCP_ALLOWED_HOSTS`, see [env vars](../09-reference/01-env-vars.md#mcp-servers). Without that list, hosts that resolve to localhost or inside the cluster are refused.
 - For a remote server, test reachability from inside the API pod: `kubectl -n abenix exec deploy/abenix-api -- curl -sS <endpoint>`.
 - Check the API logs around the register call for the handshake error.
 

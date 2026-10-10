@@ -383,7 +383,7 @@ test.describe('Settings', () => {
   test('Profile: change full name via UI → save → reload → persists', async ({ page }) => {
     test.setTimeout(90_000);
     await gotoOk(page, '/settings/profile', 1500);
-    const nameField = page.locator('input').filter({ hasNotText: /password|email/i }).first();
+    const nameField = page.locator('#profile-name');
     await expect(nameField).toBeVisible({ timeout: 10_000 });
     const original = await nameField.inputValue();
     const newName = `${original.split(' [uat')[0]} [uat ${RUN_TAG.slice(-6)}]`;
@@ -395,10 +395,10 @@ test.describe('Settings', () => {
     await page.reload({ waitUntil: 'domcontentloaded' });
     await page.waitForLoadState('networkidle').catch(() => {});
     await page.waitForTimeout(1500);
-    const reloaded = await page.locator('input').first().inputValue();
+    const reloaded = await page.locator('#profile-name').inputValue();
     expect(reloaded, 'profile name persisted').toContain(RUN_TAG.slice(-6));
     // Restore (best-effort)
-    await page.locator('input').first().fill(original);
+    await page.locator('#profile-name').fill(original);
     const save2 = page.getByRole('button', { name: /save changes|save/i }).first();
     if (await save2.isVisible().catch(() => false)) await save2.click().catch(() => {});
   });

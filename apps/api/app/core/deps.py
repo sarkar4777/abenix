@@ -255,12 +255,25 @@ async def get_current_user(
     except ValueError:
         raise _auth_error()
 
+    sid = payload.get("sid")
+    if sid:
+        from app.core import sessions
+
+        # signed out or revoked from another device
+        if not await sessions.is_live(db, sid, user_id):
+            raise _auth_error()
+
     result = await db.execute(
         select(User).where(User.id == user_id, User.is_active.is_(True))
     )
     user = result.scalar_one_or_none()
     if not user:
         raise _auth_error()
+    if sid:
+        user._session_id = sid  # type: ignore[attr-defined]
+        from app.core import sessions
+
+        await sessions.touch(sid)
     return user
 
 

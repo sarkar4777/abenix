@@ -81,6 +81,16 @@ def _emit_sandbox_metrics(
         pass
 
 
+# a Secret holds at most 1 MiB
+MAX_FILES_BYTES = 950 * 1024
+
+
+def _valid_file_name(name: str) -> bool:
+    import re
+
+    return bool(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}", str(name)))
+
+
 def _valid_env_name(k: str) -> bool:
     return bool(re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", str(k)))
 
@@ -276,6 +286,28 @@ class SandboxedJobTool(BaseTool):
             stdin_str = arguments.get("stdin") or ""
             stdin_b = stdin_str.encode("utf-8") if stdin_str else b""
 
+        # files land read-only under /in, env vars cap at 128 KB each and stdin never reaches a k8s pod
+        files: dict[str, bytes] = {}
+        for fname, b64 in (arguments.get("files_b64") or {}).items():
+            if not _valid_file_name(fname):
+                return ToolResult(content=f"bad file name: {fname}", is_error=True)
+            try:
+                import base64 as _b64
+
+                files[str(fname)] = _b64.b64decode(b64)
+            except Exception:
+                return ToolResult(
+                    content=f"files_b64[{fname}] is not valid base64", is_error=True
+                )
+        if sum(len(v) for v in files.values()) > MAX_FILES_BYTES:
+            return ToolResult(
+                content=(
+                    f"The files for this run are over {MAX_FILES_BYTES // 1024} KB. "
+                    "Keep the code asset warm (min_warm in abenix-runner.json) so large inputs go to its runner."
+                ),
+                is_error=True,
+            )
+
         if _in_cluster():
             logger.info("sandboxed_job: using kubernetes backend")
             return await _run_k8s(
@@ -287,6 +319,7 @@ class SandboxedJobTool(BaseTool):
                 network=want_network,
                 env=env_vars,
                 stdin=stdin_b,
+                files=files,
             )
         logger.info("sandboxed_job: using docker backend")
         return await _run_docker(
@@ -298,6 +331,7 @@ class SandboxedJobTool(BaseTool):
             network=want_network,
             env=env_vars,
             stdin=stdin_b,
+            files=files,
         )
 
 
@@ -311,6 +345,43 @@ async def _run_docker(
     network: bool,
     env: dict[str, str],
     stdin: bytes,
+    files: dict[str, bytes] | None = None,
+) -> ToolResult:
+    import shutil
+    import tempfile
+
+    in_dir = tempfile.mkdtemp(prefix="sjob-in-") if files else ""
+    try:
+        for fname, data in (files or {}).items():
+            with open(os.path.join(in_dir, fname), "wb") as fh:
+                fh.write(data)
+        return await _run_docker_inner(
+            image=image,
+            command=command,
+            timeout=timeout,
+            memory_mb=memory_mb,
+            cpu=cpu,
+            network=network,
+            env=env,
+            stdin=stdin,
+            mount=["-v", f"{in_dir}:/in:ro"] if in_dir else [],
+        )
+    finally:
+        if in_dir:
+            shutil.rmtree(in_dir, ignore_errors=True)
+
+
+async def _run_docker_inner(
+    *,
+    image: str,
+    command: str,
+    timeout: int,
+    memory_mb: int,
+    cpu: float,
+    network: bool,
+    env: dict[str, str],
+    stdin: bytes,
+    mount: list[str],
 ) -> ToolResult:
     net_arg = [] if network else ["--network", "none"]
     env_args: list[str] = []
@@ -334,6 +405,7 @@ async def _run_docker(
         str(cpu),
         *net_arg,
         *env_args,
+        *mount,
         image,
         "sh",
         "-c",
@@ -417,6 +489,7 @@ async def _run_k8s(
     network: bool,
     env: dict[str, str],
     stdin: str,
+    files: dict[str, bytes] | None = None,
 ) -> ToolResult:
     # Local import so the tool loads even when the k8s package isn't installed
     # on a docker-only developer machine.
@@ -465,6 +538,11 @@ async def _run_k8s(
         # Writable scratch space so read-only FS doesn't break most tools.
         volume_mounts=[
             client.V1VolumeMount(name="tmp", mount_path="/tmp"),
+            *(
+                [client.V1VolumeMount(name="in", mount_path="/in", read_only=True)]
+                if files
+                else []
+            ),
         ],
         stdin=bool(stdin),
         stdin_once=bool(stdin),
@@ -477,7 +555,19 @@ async def _run_k8s(
         volumes=[
             client.V1Volume(
                 name="tmp", empty_dir=client.V1EmptyDirVolumeSource(size_limit="64Mi")
-            )
+            ),
+            *(
+                [
+                    client.V1Volume(
+                        name="in",
+                        secret=client.V1SecretVolumeSource(
+                            secret_name=f"{job_name}-in"
+                        ),
+                    )
+                ]
+                if files
+                else []
+            ),
         ],
         automount_service_account_token=False,
         enable_service_links=False,
@@ -526,9 +616,37 @@ async def _run_k8s(
 
     # Submit
     try:
-        batch.create_namespaced_job(namespace=namespace, body=job)
+        created = batch.create_namespaced_job(namespace=namespace, body=job)
     except Exception as e:
         return ToolResult(content=f"k8s job submission failed: {e}", is_error=True)
+    if files:
+        # owned by the job, so it goes when the job's TTL removes the job
+        import base64 as _b64
+
+        try:
+            core.create_namespaced_secret(
+                namespace=namespace,
+                body=client.V1Secret(
+                    metadata=client.V1ObjectMeta(
+                        name=f"{job_name}-in",
+                        labels={"app": "sandboxed-job"},
+                        owner_references=[
+                            client.V1OwnerReference(
+                                api_version="batch/v1",
+                                kind="Job",
+                                name=job_name,
+                                uid=created.metadata.uid,
+                            )
+                        ],
+                    ),
+                    data={k: _b64.b64encode(v).decode() for k, v in files.items()},
+                ),
+            )
+        except Exception as e:
+            _delete_job()
+            return ToolResult(
+                content=f"could not hand the run its input files: {e}", is_error=True
+            )
 
     # Poll for the pod, then for completion. Loop is bounded by timeout+30s.
     deadline = time.monotonic() + timeout + 30

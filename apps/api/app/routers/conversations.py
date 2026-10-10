@@ -154,7 +154,7 @@ async def list_conversations(
     total = count_result.scalar() or 0
 
     result = await db.execute(
-        base.order_by(Conversation.updated_at.desc())
+        base.order_by(Conversation.updated_at.desc(), Conversation.id)
         .offset((page - 1) * per_page)
         .limit(per_page)
     )
@@ -398,9 +398,19 @@ async def send_turn(
 
     started = datetime.now(timezone.utc)
     try:
+        # Run the agent as the caller. A local deploy has no platform key, so
+        # every SDK chat.send died on a 401 calling itself without one.
+        caller_key = (request.headers.get("x-api-key") or "").strip()
+        caller_bearer = (request.headers.get("authorization") or "").strip()
         async with Abenix(
-            api_key=api_key, base_url=api_base, act_as=subject, timeout=300.0
+            api_key=caller_key or api_key,
+            base_url=api_base,
+            act_as=subject,
+            timeout=300.0,
         ) as forge:
+            if not (caller_key or api_key) and caller_bearer:
+                forge.http.headers.pop("X-API-Key", None)
+                forge.http.headers["Authorization"] = caller_bearer
             result = await forge.execute(agent_slug, composed)
         assistant = Message(
             id=uuid.uuid4(),

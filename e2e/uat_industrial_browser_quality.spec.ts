@@ -15,8 +15,8 @@ import * as path from 'path';
  * parent AgentForge platform at :3000. We grade what is actually shipped
  * and clearly mark requested surfaces that do not exist as NOT_TESTED.
  */
-const BASE = process.env.BASE || 'http://localhost:3003';
-const API  = process.env.API  || 'http://localhost:8003';
+const BASE = process.env.IIOT_BASE || 'http://localhost:3003';
+const API  = process.env.IIOT_API  || 'http://localhost:8003';
 const SHOTS = path.resolve(__dirname, 'screenshots', 'industrial');
 fs.mkdirSync(SHOTS, { recursive: true });
 const shot = (p: any, name: string) => p.screenshot({ path: path.join(SHOTS, name), fullPage: true });

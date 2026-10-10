@@ -100,7 +100,11 @@ from models.document_grant import (
 )
 from models.cognify_config import CognifyConfig, CognifyConflict
 from models.gdpr_purge_log import GDPRPurgeLog
-from models.llm_pricing import LLMModelPricing, ModelAvailability
+from models.llm_pricing import (
+    LLMModelPricing,
+    ModelAvailability,
+    ModelAvailabilityEvent,
+)
 from models.tenant_tool_credential import TenantToolCredential
 from models.decision import (
     DecisionEvaluation,
@@ -127,6 +131,21 @@ from models.improvement import (
     Lesson,
     LessonCluster,
 )
+from models.atlas import AtlasEdge, AtlasGraph, AtlasNode, AtlasNodeKind, AtlasSnapshot
+from models.edge_gateway import EdgeGateway
+from models.memory_palace import (
+    HallType,
+    MemoryDrawer,
+    MemoryEntity,
+    MemoryHall,
+    MemoryRelation,
+    MemoryRoom,
+    MemoryWing,
+)
+from models.platform_settings import PlatformSetting
+from models.portfolio_schema import PortfolioSchema
+from models.subject_policy import SubjectPolicy
+from models.user_session import UserSession
 
 __all__ = [
     "Base",
@@ -137,6 +156,7 @@ __all__ = [
     "TenantPlan",
     "User",
     "UserRole",
+    "UserSession",
     "Agent",
     "AgentStatus",
     "AgentType",
@@ -246,6 +266,7 @@ __all__ = [
     "GDPRPurgeLog",
     "LLMModelPricing",
     "ModelAvailability",
+    "ModelAvailabilityEvent",
     "TenantToolCredential",
     "PermissionSet",
     "PermissionAssignment",
@@ -274,4 +295,20 @@ __all__ = [
     "Lesson",
     "LessonCluster",
     "ImprovementProposal",
+    "AtlasGraph",
+    "AtlasNode",
+    "AtlasNodeKind",
+    "AtlasEdge",
+    "AtlasSnapshot",
+    "EdgeGateway",
+    "HallType",
+    "MemoryWing",
+    "MemoryHall",
+    "MemoryRoom",
+    "MemoryDrawer",
+    "MemoryEntity",
+    "MemoryRelation",
+    "PlatformSetting",
+    "PortfolioSchema",
+    "SubjectPolicy",
 ]

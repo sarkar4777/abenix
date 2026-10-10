@@ -5,8 +5,18 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import Boolean, DateTime, Index, Integer, Numeric, String, Text, func
-from sqlalchemy.dialects.postgresql import ARRAY, JSONB
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    Index,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    func,
+    text,
+)
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from models.base import Base, UUIDMixin
@@ -98,4 +108,22 @@ class ModelAvailability(Base):
         DateTime(timezone=True),
         server_default=func.now(),
         onupdate=func.now(),
+    )
+
+
+class ModelAvailabilityEvent(Base):
+    """Each status change of a model, written by the availability probe and admin overrides."""
+
+    __tablename__ = "model_availability_events"
+    __table_args__ = (Index("ix_model_availability_events_model_at", "model", "at"),)
+
+    id: Mapped[Any] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    model: Mapped[str] = mapped_column(String(128), nullable=False)
+    from_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    to_status: Mapped[str] = mapped_column(String(32), nullable=False)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
     )

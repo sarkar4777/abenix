@@ -228,7 +228,7 @@ test.describe('Abenix · UAT', () => {
   // ─── Agents queue + detail ──────────────────────────────────────────
   test('Agents list renders + open one → detail tabs render', async ({ page }) => {
     await openPopulatedAgentTab(page);
-    const link = page.locator('a[href^="/agents/"]').first();
+    const link = page.locator('main a[href^="/agents/"]:not([href^="/agents/manage"])').first();
     const present = await link.isVisible({ timeout: 15_000 }).catch(() => false);
     if (!present) {
       test.skip(true, 'no agents in this tenant');
@@ -243,7 +243,7 @@ test.describe('Abenix · UAT', () => {
   // ─── Sharing — Agent Info page exposes Share button ─────────────────
   test('Agent Info page shows Share button', async ({ page }) => {
     await openPopulatedAgentTab(page);
-    const link = page.locator('a[href^="/agents/"]').first();
+    const link = page.locator('main a[href^="/agents/"]:not([href^="/agents/manage"])').first();
     if (!(await link.isVisible({ timeout: 15_000 }).catch(() => false))) {
       test.skip(true, 'no agents in this tenant');
     }
@@ -292,16 +292,18 @@ test.describe('Abenix · UAT', () => {
   });
 
   // ─── Use Cases dropdown surfaces standalone apps ────────────────────
-  test('Use Cases dropdown surfaces all 6 standalone apps', async ({ page }) => {
+  test('Use Cases dropdown lists every app the API resolves', async ({ page }) => {
     await gotoOk(page, '/dashboard', { settle: 600 });
-    // Open the Use Cases nav button.
-    const trigger = page.getByRole('button', { name: /use cases|use-cases/i }).first();
-    if (await trigger.isVisible().catch(() => false)) {
-      await trigger.click();
-      await page.waitForTimeout(400);
-      const text = (await page.textContent('body')) || '';
-      expect(text).toMatch(/ContractIQ|ResolveAI|Mideast Tourism|OracleNet|ClaimsIQ|Industrial IoT/i);
-    }
+    const apps: Array<{ key: string; label: string }> = await page
+      .evaluate(async (api) => {
+        const r = await fetch(`${api}/api/use-cases`, { headers: { Authorization: `Bearer ${localStorage.getItem('access_token')}` } });
+        return (await r.json()).data;
+      }, API);
+    expect(apps.length, 'use cases configured').toBeGreaterThan(0);
+    const trigger = page.getByRole('button', { name: /use cases/i }).first();
+    await expect(trigger).toBeVisible({ timeout: 10_000 });
+    await trigger.click();
+    for (const a of apps) await expect(page.getByTestId(`use-case-${a.key}`)).toContainText(a.label);
   });
 
   // ─── Console-error sweep ────────────────────────────────────────────

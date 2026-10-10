@@ -1,12 +1,22 @@
 {
   "name": "@abenix/react",
-  "version": "1.0.0",
-  "description": "Abenix React SDK — embeddable agent chat component",
-  "main": "dist/AgentChat.js",
-  "types": "dist/AgentChat.d.ts",
+  "version": "2.5.5",
+  "description": "Abenix React SDK, an embeddable agent chat component and the useAgentStream hook",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
   "files": ["dist"],
   "scripts": {
     "build": "tsc"
+  },
+  "dependencies": {
+    "@abenix/sdk": "^2.5.5"
   },
   "peerDependencies": {
     "react": ">=18.0.0",

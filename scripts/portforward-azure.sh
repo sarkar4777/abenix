@@ -237,6 +237,10 @@ print_urls() {
   done
   echo ""
   echo -e "${B}Featured pages${N}"
+  local GRAFANA_PW
+  GRAFANA_PW=$(kubectl get secret abenix-grafana-admin -n "${NAMESPACE}" \
+    -o jsonpath='{.data.admin-password}' 2>/dev/null | base64 -d 2>/dev/null)
+  [ -n "${GRAFANA_PW}" ] || GRAFANA_PW="see secret abenix-grafana-admin"
   cat <<URLS
   Abenix
     Dashboard           http://localhost:3000/dashboard
@@ -298,7 +302,7 @@ print_urls() {
     Health              http://localhost:3005/actuator/health
 
   Observability
-    Grafana             http://localhost:3010    (admin / admin)
+    Grafana             http://localhost:3010    (admin / ${GRAFANA_PW})
     Tempo (raw API)     http://localhost:3200/api/search
     Prometheus          http://localhost:9090/graph
 URLS

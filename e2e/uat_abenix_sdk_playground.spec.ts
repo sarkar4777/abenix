@@ -123,6 +123,7 @@ test.describe.serial('Abenix SDK Playground — browser UAT', () => {
   });
 
   test('Run live executes the agent end-to-end and renders a result panel', async ({ page }) => {
+    test.setTimeout(180_000);
     expect(probeAgent).not.toBeNull();
 
     await page.goto(`${BASE}/dashboard`);

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Sync docs/ into apps/web/public/dev-docs/ so the in-app viewer at /dev-docs
+# Sync docs/ into apps/web/public/dev-docs/ so the in-app viewer at /docs
 # serves the same content GitHub does. Run after any edit under docs/.
 #
 # Usage: bash scripts/sync-dev-docs.sh

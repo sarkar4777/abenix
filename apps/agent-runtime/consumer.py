@@ -28,6 +28,9 @@ sys.path.insert(0, str(_REPO / "apps" / "api"))
 sys.path.insert(0, str(_REPO / "packages" / "db"))
 sys.path.insert(0, str(_HERE))
 
+from engine import log_redaction  # noqa: E402
+
+log_redaction.install()
 
 _engine = None
 _session_factory = None
@@ -286,9 +289,13 @@ async def _load_moderation_gate(
                 .limit(1)
             )
             policy = res.scalars().first()
+            from engine.dlp import load_tenant_policy
+            from engine.moderation_gate import with_dlp
+
+            dlp_policy = await load_tenant_policy(db, tenant_id)
             if policy is None:
-                return None
-            return GateConfig(
+                return with_dlp(None, dlp_policy, tenant_id)
+            gate = GateConfig(
                 policy_id=str(policy.id),
                 tenant_id=str(policy.tenant_id),
                 user_id="",
@@ -315,6 +322,7 @@ async def _load_moderation_gate(
                     getattr(policy, "hold_timeout_action", "reject") or "reject"
                 ),
             )
+            return with_dlp(gate, dlp_policy, tenant_id)
     except Exception as e:
         logger.warning("could not load moderation gate for tenant %s: %s", tenant_id, e)
         return None
@@ -642,6 +650,9 @@ def _pipeline_tool_calls(node_results: dict[str, Any] | None) -> list[dict[str, 
         preview = nr.get("output")
         if not isinstance(preview, str):
             preview = json.dumps(preview, default=str) if preview is not None else ""
+        # a failed node has no output, its error is what the reader needs
+        if not preview and nr.get("status") == "failed":
+            preview = str(nr.get("error") or "")
         entry = {
             "name": nr["tool_name"],
             "node_id": nid,
@@ -660,6 +671,37 @@ def _pipeline_tool_calls(node_results: dict[str, Any] | None) -> list[dict[str, 
             entry["autonomy"] = auto
         out.append(entry)
     return out
+
+
+def _classify_text(text: str | None) -> str:
+    """Failure code for an error we only have as text."""
+    try:
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "api"))
+        from app.core.failure_codes import classify_exception  # type: ignore
+
+        return classify_exception(RuntimeError(text or ""))
+    except Exception:
+        return "UNKNOWN_ERROR"
+
+
+async def _dead_letter_quietly(
+    execution_id: str, reason: str, failure_code: str, payload: dict[str, Any]
+) -> None:
+    """Park a failed run in the DLQ so an admin can replay it once the cause is fixed."""
+    try:
+        from dead_letters import dead_letter  # type: ignore
+
+        async with (await _get_session_factory())() as _db:
+            await dead_letter(
+                _db,
+                execution_id,
+                reason=reason[:2000],
+                failure_code=failure_code,
+                payload=payload,
+            )
+            await _db.commit()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("dead letter write failed for %s: %s", execution_id, exc)
 
 
 async def _mark_done(
@@ -682,10 +724,15 @@ async def _mark_done(
     trigger_id: str | None = None,
     risk_tier: str | None = None,
     risk_reasons: list[dict[str, Any]] | None = None,
+    provider_costs: dict[str, float] | None = None,
 ) -> None:
     from datetime import datetime, timezone
     from sqlalchemy import select, update
-    from models.execution import Execution, ExecutionStatus  # type: ignore
+    from models.execution import (  # type: ignore
+        Execution,
+        ExecutionStatus,
+        provider_cost_values,
+    )
 
     Session = await _get_session_factory()
 
@@ -707,6 +754,8 @@ async def _mark_done(
     # which reads as "never recorded" rather than "free".
     if cost is not None:
         values["cost"] = round(float(cost), 6)
+        # a Core update skips the ORM hook that fills these
+        values.update(provider_cost_values(provider_costs, cost, model_used))
     if tool_calls is not None:
         values["tool_calls"] = tool_calls
     if node_results is not None:
@@ -778,6 +827,16 @@ async def _mark_done(
             .values(**values)
         )
         await db.commit()
+    try:
+        from engine.metrics import observe_execution
+
+        observe_execution(
+            os.environ.get("RUNTIME_POOL", "default"),
+            "completed" if target_status == ExecutionStatus.COMPLETED else "failed",
+            values.get("duration_ms"),
+        )
+    except Exception as e:
+        logger.debug("consumer: duration metric skipped: %s", e)
     if target_status == ExecutionStatus.FAILED and row is not None:
         _capture_failed(execution_id, row, output, error, values.get("failure_code"))
     try:
@@ -811,7 +870,7 @@ def _capture_failed(
 async def _write_trigger_outcome_fallback(
     Session: Any, status: str, trigger_id: str
 ) -> None:
-    """Same columns write_trigger_outcome touches, for the slim runtime image."""
+    """Stamp last_status and last_run_at, the same columns write_trigger_outcome touches."""
     from datetime import datetime, timezone
     from sqlalchemy import text
 
@@ -857,7 +916,7 @@ async def _after_terminal(
     try:
         from app.services.execution_hooks import record_terminal_by_id as record
     except Exception:
-        # Runtime image ships without app.services, the scheduler backlog scan covers it
+        # an image built without execution_hooks.py, the scheduler backlog scan covers it
         logger.debug("consumer: execution_hooks unavailable for %s", execution_id)
     if record is not None:
         try:
@@ -868,16 +927,9 @@ async def _after_terminal(
         trigger_id = await _trigger_of(Session, execution_id)
     if not trigger_id:
         return
-    writer = None
+    # the owner's failure notice comes from the API's run announcer
     try:
-        from app.routers.triggers import write_trigger_outcome as writer
-    except Exception:
-        writer = None
-    try:
-        if writer is not None:
-            await writer(Session, execution_id, status, error, trigger_id=trigger_id)
-        else:
-            await _write_trigger_outcome_fallback(Session, status, trigger_id)
+        await _write_trigger_outcome_fallback(Session, status, trigger_id)
     except Exception as e:
         logger.warning("consumer: trigger %s outcome write failed: %s", trigger_id, e)
 
@@ -992,13 +1044,17 @@ async def _run_one(payload: dict) -> None:
             from engine.pipeline import (
                 PipelineExecutor,
                 parse_pipeline_nodes,
+                pipeline_provider_costs,
+                pipeline_timed_out,
                 serialize_pipeline_result,
             )
             from engine.agent_executor import build_tool_registry
 
             _labels: dict[str, str] = {}
+            _statuses: dict[str, str] = {}
 
             async def on_node_start(node_id: str, tool_name: str) -> None:
+                _statuses[node_id] = "running"
                 await _publish(
                     execution_id,
                     {
@@ -1017,6 +1073,7 @@ async def _run_one(payload: dict) -> None:
                 error_message: str | None = None,
                 error_type: str | None = None,
             ) -> None:
+                _statuses[node_id] = status
                 evt: dict[str, Any] = {
                     "event": "node_complete",
                     "node_id": node_id,
@@ -1087,15 +1144,26 @@ async def _run_one(payload: dict) -> None:
                 and v.get("name")
                 and v.get("default") not in (None, "")
             }
-            result = await executor.execute(
-                nodes,
-                {
-                    "user_message": message,
-                    "__execution_id": execution_id,
-                    **_defaults,
-                    **context,
-                },
-            )
+            from engine.pipeline import build_run_context
+
+            _statuses.update({n.id: "pending" for n in nodes})
+            try:
+                result = await asyncio.wait_for(
+                    executor.execute(
+                        nodes,
+                        build_run_context(
+                            message, execution_id, defaults=_defaults, context=context
+                        ),
+                    ),
+                    # the engine checks its budget between layers, this catches a step that hangs
+                    timeout=executor.timeout_seconds + 5,
+                )
+            except asyncio.TimeoutError:
+                result = pipeline_timed_out(executor.timeout_seconds, _statuses)
+                await _publish(
+                    execution_id,
+                    {"event": "error", "error": result.node_errors["pipeline"]},
+                )
             serialized = serialize_pipeline_result(result)
             final_text = ""
             # Generic post-process for pipeline final_output: same logic as
@@ -1119,6 +1187,14 @@ async def _run_one(payload: dict) -> None:
             except Exception as _e:
                 logger.warning("pipeline post_process skipped: %s", _e)
 
+            try:
+                from engine.dlp import apply_to_pipeline_result
+
+                async with (await _get_session_factory())() as _dlp_db:
+                    await apply_to_pipeline_result(_dlp_db, tenant_id, result)
+            except Exception as _e:
+                logger.warning("pipeline dlp skipped: %s", _e)
+
             if result.final_output:
                 # 50 KB cap matches the DB output_message column.
                 final_text = (
@@ -1140,7 +1216,9 @@ async def _run_one(payload: dict) -> None:
                     if (nr.get("status") == "failed") and nr.get("error"):
                         node_errs.append(f"{nid}: {nr['error']}")
                 err_text = (
-                    "; ".join(node_errs) or f"failed nodes: {','.join(failed_nodes)}"
+                    result.node_errors.get("pipeline")
+                    or "; ".join(node_errs)
+                    or f"failed nodes: {','.join(failed_nodes)}"
                 )[:2000]
 
             await _mark_done(
@@ -1170,6 +1248,7 @@ async def _run_one(payload: dict) -> None:
                 trigger_id=trigger_id,
                 risk_tier=serialized.get("risk_tier") or None,
                 risk_reasons=serialized.get("risk_reasons") or None,
+                provider_costs=pipeline_provider_costs(result),
             )
             # failed steps spent real money, so quotas are debited either way
             await _update_usage_counters(
@@ -1400,7 +1479,8 @@ async def _run_one(payload: dict) -> None:
                 duration_ms=int(_last_done.get("duration_ms", 0)),
                 model=_last_done.get("model", loaded["model_cfg"].get("model", "")),
             )
-            output = result.output or str(result)
+            # never the namespace repr, that put tool arguments in the answer
+            output = result.output or ""
 
             # Generic post-process: if the agent's model_config declares an
             # output_schema, validate + normalize obvious enum drift before
@@ -1473,6 +1553,7 @@ async def _run_one(payload: dict) -> None:
             }
             # a done payload carrying an error is a failed run, not a completed one
             _rt_error = _last_done.get("error")
+            _dlq_after = False
             _final_status = "completed"
             _final_error: str | None = None
             _final_code: str | None = None
@@ -1504,6 +1585,8 @@ async def _run_one(payload: dict) -> None:
                 _final_code = _last_done.get("failure_code") or (
                     "SANDBOX_TIMEOUT" if "timed out" in str(_rt_error).lower() else None
                 )
+                # a platform or config failure, an admin can fix the cause and replay it
+                _dlq_after = True
             await _mark_done(
                 execution_id,
                 _final_status,
@@ -1522,7 +1605,21 @@ async def _run_one(payload: dict) -> None:
                 trigger_id=trigger_id,
                 risk_tier=_last_done.get("risk_tier") or None,
                 risk_reasons=_last_done.get("risk_reasons") or None,
+                provider_costs=_last_done.get("provider_costs"),
             )
+            if _dlq_after:
+                await _dead_letter_quietly(
+                    execution_id,
+                    _final_error or "",
+                    _final_code or _classify_text(_final_error),
+                    {
+                        "message": message,
+                        "context": context,
+                        "is_pipeline": is_pipeline,
+                        "api_key_id": api_key_id,
+                        "runtime_pool": os.environ.get("RUNTIME_POOL", ""),
+                    },
+                )
             # Debit api_keys / users counters — the inline path does this
             # via app.core.usage.update_user_usage; queue-routed runs need
             # the same write or customer quotas silently never enforce.
@@ -1583,7 +1680,7 @@ async def _run_one(payload: dict) -> None:
         except Exception:
             pass
         try:
-            from app.services.dlq import dead_letter  # type: ignore
+            from dead_letters import dead_letter  # type: ignore
 
             async with (await _get_session_factory())() as _db:
                 await dead_letter(
@@ -1757,6 +1854,8 @@ async def main() -> None:
     in_flight: set[asyncio.Task[Any]] = set()
     logger.info("consumer: concurrency cap = %d", max_concurrency)
 
+    depth_task = asyncio.create_task(_report_queue_depth(backend, pool, stop))
+
     try:
         async for qm in backend.stream(pool):
             if stop.is_set():
@@ -1777,9 +1876,26 @@ async def main() -> None:
         raise
     finally:
         health_task.cancel()
+        depth_task.cancel()
         try:
             await health_task
         except (asyncio.CancelledError, Exception):
+            pass
+
+
+async def _report_queue_depth(backend: Any, pool: str, stop: asyncio.Event) -> None:
+    from engine.metrics import QUEUE_DEPTH
+
+    while not stop.is_set():
+        try:
+            pending = await backend.pending(pool)
+            if pending is not None:
+                QUEUE_DEPTH.labels(pool=pool).set(pending)
+        except Exception as e:
+            logger.debug("consumer: queue depth read failed: %s", e)
+        try:
+            await asyncio.wait_for(stop.wait(), timeout=15)
+        except asyncio.TimeoutError:
             pass
 
 

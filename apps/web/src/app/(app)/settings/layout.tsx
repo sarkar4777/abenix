@@ -9,6 +9,7 @@ import {
   Coins,
   CreditCard,
   Eye,
+  Building2,
   Key,
   Lock,
   Plug,
@@ -19,8 +20,9 @@ import {
 } from 'lucide-react';
 import { holds, useMyPermissions } from '@/lib/capabilities';
 import { usePlatformFeatures } from '@/hooks/usePlatformFeatures';
+import { useAuth } from '@/contexts/AuthContext';
 
-const NAV_ITEMS: { label: string; icon: typeof User; href: string; capability?: string; monetization?: boolean }[] = [
+const NAV_ITEMS: { label: string; icon: typeof User; href: string; capability?: string; monetization?: boolean; adminOnly?: boolean }[] = [
   { label: 'Profile', icon: User, href: '/settings/profile' },
   { label: 'API Keys', icon: Key, href: '/settings/api-keys' },
   { label: 'Billing', icon: CreditCard, href: '/settings/billing', monetization: true },
@@ -29,6 +31,7 @@ const NAV_ITEMS: { label: string; icon: typeof User; href: string; capability?: 
   { label: 'Notifications', icon: Bell, href: '/settings/notifications' },
   { label: 'Observability', icon: Activity, href: '/settings/observability' },
   { label: 'Security', icon: Lock, href: '/settings/security' },
+  { label: 'Single sign-on', icon: Building2, href: '/settings/sso', adminOnly: true },
   { label: 'Data & DLP', icon: Shield, href: '/settings/data' },
   { label: 'Privacy & GDPR', icon: Eye, href: '/settings/privacy' },
   { label: 'Events', icon: Webhook, href: '/settings/webhooks', capability: 'events.manage' },
@@ -45,8 +48,12 @@ export default function SettingsLayout({
   const router = useRouter();
   const { perms } = useMyPermissions();
   const { monetization } = usePlatformFeatures();
+  const { user } = useAuth();
   const items = NAV_ITEMS.filter(
-    (item) => (!item.capability || holds(perms?.capabilities, item.capability)) && (!item.monetization || monetization),
+    (item) =>
+      (!item.capability || holds(perms?.capabilities, item.capability)) &&
+      (!item.monetization || monetization) &&
+      (!item.adminOnly || user?.role === 'admin'),
   );
   const current =
     items.find((item) => pathname === item.href || pathname.startsWith(`${item.href}/`))?.href ??

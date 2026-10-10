@@ -18,7 +18,7 @@ import * as path from 'path';
  * Fixtures used:
  *   • e2e/fixtures/uat_kb_doc.pdf       — 1-page PDF with marker phrase
  *   • e2e/fixtures/uat_python_app.zip   — Python add-server project
- *   • e2e/fixtures/uat_ml_model.pkl     — pickled stub model
+ *   • e2e/fixtures/uat_ml_model.pkl     — tiny sklearn LinearRegression
  *   • e2e/fixtures/mcp_server/          — in-cluster MCP server
  *
  * The MCP fixture must be deployed before this spec runs — see
@@ -644,15 +644,15 @@ test.describe('Industrial · Persistence', () => {
 
   test('Notifications: PUT settings persists through GET', async () => {
     const before = await api<any>('/api/settings/notifications');
-    // Endpoint takes the full NotificationSettingsRequest schema —
-    // execution_complete/execution_failed/weekly_report/billing_alerts/team_updates/marketing.
-    const flipped = !before.weekly_report;
+    // weekly_report and marketing were dropped, they never had a sender
+    expect(typeof before.team_updates, 'team_updates toggle present').toBe('boolean');
+    const flipped = !before.team_updates;
     await api('/api/settings/notifications', {
       method: 'PUT',
-      body: JSON.stringify({ ...before, weekly_report: flipped }),
+      body: JSON.stringify({ ...before, team_updates: flipped }),
     });
     const after = await api<any>('/api/settings/notifications');
-    expect(after.weekly_report, 'flipped value persisted').toBe(flipped);
+    expect(after.team_updates, 'flipped value persisted').toBe(flipped);
     // Restore.
     await api('/api/settings/notifications', {
       method: 'PUT', body: JSON.stringify(before),
@@ -741,7 +741,7 @@ test.describe('Industrial · ML model', () => {
     fd.append('file', new Blob([buf], { type: 'application/octet-stream' }), 'uat_ml_model.pkl');
     fd.append('metadata', JSON.stringify({
       name: `${RUN_TAG}-model`,
-      description: 'industrial UAT — pickled stub',
+      description: 'industrial UAT — tiny sklearn model',
       framework: 'sklearn',
     }));
     const up = await fetch(`${API}/api/ml-models`, {

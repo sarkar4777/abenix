@@ -218,9 +218,21 @@ async def test_wrong_feature_count_is_422_and_counted(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_prediction_is_counted_as_an_invocation(tmp_path):
+async def test_prediction_is_counted_as_an_invocation(tmp_path, monkeypatch):
+    import asyncio
+    from contextlib import asynccontextmanager
+
+    from app.core import deps
+
     model = _model(tmp_path)
     db = FakeSession(model, None)
+
+    @asynccontextmanager
+    async def _same_session():
+        yield db
+
+    # the success path logs in the background on its own session
+    monkeypatch.setattr(deps, "async_session", _same_session)
     resp = await mm.predict(
         model.id,
         {"input_data": {"features": [5.1, 3.5, 1.4, 0.2]}},
@@ -228,6 +240,7 @@ async def test_prediction_is_counted_as_an_invocation(tmp_path):
         db=db,
     )
     assert resp.status_code == 200
+    await asyncio.gather(*list(mm._BACKGROUND))
     data = _body(resp)["data"]
     assert data["predicted_class"] == "setosa" and data["source"] == "local"
     (inv,) = db.added

@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.core.config import settings
+from engine.claude_subscription import DEFAULT_SUBSCRIPTION_MODEL
 
 logger = logging.getLogger(__name__)
 
@@ -122,11 +123,8 @@ DEFAULTS: dict[str, dict[str, Any]] = {
         "description": "Subscription OAuth token. Generate with `claude setup-token` and paste it here. Stored server-side and never returned to the browser.",
     },
     "llm.subscription.default_model": {
-        # Haiku, not Opus. Exclusive mode pins every request to this model, and
-        # one pipeline can fan out to a dozen sub-agents, so the tightest-limited
-        # model is the worst default — a fresh install 429s on its first
-        # pipeline. Raise it deliberately once you know your plan's headroom.
-        "value": "claude-haiku-4-5",
+        # same constant the runtime falls back to
+        "value": DEFAULT_SUBSCRIPTION_MODEL,
         "category": "claude_subscription",
         "description": "Claude model the subscription serves, and the target for requests that name a non-Claude model while exclusive mode is on. Defaults to Haiku for rate-limit headroom under fan-out.",
     },

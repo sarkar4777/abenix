@@ -52,9 +52,12 @@ class Stopped(Exception):
         self.target = target
         self.reason = reason
 
-    def message(self) -> str:
+    def message(self, label: str = "") -> str:
+        # a name reads better than an id when the caller knows it
         what = (
-            "Everything" if self.scope == "all" else f"The {self.scope} {self.target}"
+            "Everything"
+            if self.scope == "all"
+            else f"The {self.scope} {label or self.target}"
         )
         why = f" Reason given: {self.reason.rstrip('. ')}." if self.reason else ""
         return f"{what} is stopped by a kill switch.{why} An admin can resume it under Admin, Risk and Controls."
@@ -197,14 +200,20 @@ async def _refresh(force: bool) -> None:
         _loaded_at = time.monotonic()
 
 
-async def ensure_fresh(force: bool = False) -> None:
-    """Serve the snapshot and refresh it behind the caller. Only a first load or an invalidate waits."""
+async def ensure_fresh(force: bool = False, max_age: float | None = None) -> None:
+    """Serve the snapshot and refresh it behind the caller. A first load, an invalidate or a stale snapshot waits.
+
+    max_age makes the caller wait for a snapshot no older than that, used where a run starts.
+    """
     global _lock, _bg
+    if max_age is not None and time.monotonic() - _loaded_at > max_age:
+        force = True
     if not force and time.monotonic() - _loaded_at < _ttl:
         return
     if _lock is None:
         _lock = asyncio.Lock()
-    if not force and _loaded_at:
+    # a busy pod refreshes behind the caller, an idle one must not act on a switch list older than two TTLs
+    if not force and _loaded_at and time.monotonic() - _loaded_at < 2 * _ttl:
         if not _lock.locked() and (_bg is None or _bg.done()):
             _bg = asyncio.create_task(_refresh(False))
         return

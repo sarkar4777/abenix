@@ -1178,6 +1178,14 @@ Respond ONLY with JSON: {{"score": 1-10, "issues": ["issue1", "issue2"], "sugges
             except Exception:
                 pass  # Auto-repair is best-effort.
 
+        # the generator cannot see which providers are configured, so the model is ours to pick
+        from app.routers.llm_models import default_agent_model
+
+        default_model = await default_agent_model(db)
+        config["model"] = default_model
+        if isinstance(config.get("model_config"), dict):
+            config["model_config"]["model"] = default_model
+
         return success(
             {
                 **config,

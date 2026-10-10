@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import uuid
 from dataclasses import dataclass, field
-from typing import Callable
+from typing import Any, Callable
 
 from engine.moderation_client import (
     ACTION_ALLOW,
@@ -52,6 +52,11 @@ class GateConfig:
     agent_id: str = ""
     # content hash -> review id, messages a reviewer already released, each usable once
     released: dict = field(default_factory=dict)
+    # False when the tenant has no active policy and the gate only carries DLP
+    moderation: bool = True
+    # the tenant's settings.dlp mode on agent input and output, "" when scanning is off
+    dlp_mode: str = ""
+    dlp_custom_patterns: dict = field(default_factory=dict)
 
 
 class ModerationBlocked(Exception):
@@ -64,6 +69,20 @@ class ModerationBlocked(Exception):
         super().__init__(
             f"Moderation blocked ({source}): {decision.reason or 'policy_triggered'}"
         )
+
+
+class DLPBlocked(ModerationBlocked):
+    """The tenant DLP setting is block and the text holds personal data."""
+
+    def __init__(self, message: str, source: str, kinds: list[str]):
+        decision = ModerationDecision(
+            outcome="blocked",
+            action=ACTION_BLOCK,
+            reason="dlp",
+            triggered_categories=[f"dlp:{k}" for k in kinds],
+        )
+        super().__init__(decision, source=source, content_preview="")
+        self.message = message
 
 
 class ModerationHeld(ModerationBlocked):
@@ -88,9 +107,25 @@ class ModerationHeld(ModerationBlocked):
 _WITHHOLDING = (ACTION_HOLD, ACTION_BLOCK, ACTION_REDACT)
 
 
+def with_dlp(gate: GateConfig | None, policy: Any, tenant_id: str) -> GateConfig | None:
+    """Carry the tenant DLP mode on the gate, a DLP-only gate when no policy is active."""
+    mode = getattr(policy, "mode", "") if policy is not None else ""
+    if mode not in ("mask", "block"):
+        return gate
+    if gate is None:
+        gate = GateConfig(tenant_id=str(tenant_id), moderation=False)
+    gate.dlp_mode = mode
+    gate.dlp_custom_patterns = dict(getattr(policy, "custom_patterns", None) or {})
+    return gate
+
+
 def guards_output(config: GateConfig | None) -> bool:
     """True when the reply must be buffered until the post-LLM check decides."""
-    if config is None or not config.post_llm:
+    if config is None:
+        return False
+    if config.dlp_mode in ("mask", "block"):
+        return True
+    if not config.moderation or not config.post_llm:
         return False
     if config.fail_closed or config.default_action in _WITHHOLDING:
         return True
@@ -118,6 +153,40 @@ async def check(
     """Run the gate. Return (possibly-redacted-content, decision)."""
     if config is None:
         return content, ModerationDecision(outcome="allowed", action=ACTION_ALLOW)
+    if config.moderation:
+        content, decision = await _moderate(
+            content, source=source, config=config, execution_id=execution_id
+        )
+    else:
+        decision = ModerationDecision(outcome="allowed", action=ACTION_ALLOW)
+    if source in ("pre_llm", "post_llm"):
+        content = apply_dlp(content, source=source, config=config)
+    return content, decision
+
+
+def apply_dlp(content: str, *, source: str, config: GateConfig | None) -> str:
+    """Mask or refuse personal data per the tenant DLP mode."""
+    if config is None or config.dlp_mode not in ("mask", "block"):
+        return content
+    from engine.dlp import DLPPolicy, apply
+
+    policy = DLPPolicy(
+        mode=config.dlp_mode, custom_patterns=dict(config.dlp_custom_patterns or {})
+    )
+    out, blocked, result = apply(content, policy, source=source)
+    if blocked:
+        kinds = list(dict.fromkeys(f["type"] for f in result.findings))
+        raise DLPBlocked(blocked, source=source, kinds=kinds)
+    return out
+
+
+async def _moderate(
+    content: str,
+    *,
+    source: str,
+    config: GateConfig,
+    execution_id: str = "",
+) -> tuple[str, ModerationDecision]:
 
     # Skip this hook if the policy says "don't check here".
     if source == "pre_llm" and not config.pre_llm:

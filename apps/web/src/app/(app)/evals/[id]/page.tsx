@@ -505,7 +505,7 @@ function SettingsTab({ suite, canManage, onChanged }: { suite: SuiteDetail; canM
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [confirm, setConfirm] = useState(false);
   const set = <K extends keyof typeof form>(k: K, v: (typeof form)[K]) => setForm((f) => ({ ...f, [k]: v }));
-  const custom = form.schedule_cron && !SCHEDULES.some((s) => s.cron === form.schedule_cron);
+  const [customCron, setCustomCron] = useState(() => !!suite.schedule_cron && !SCHEDULES.some((s) => s.cron === suite.schedule_cron));
 
   async function save() {
     setBusy(true);
@@ -546,12 +546,26 @@ function SettingsTab({ suite, canManage, onChanged }: { suite: SuiteDetail; canM
       <div className="grid gap-4 md:grid-cols-2">
         <div>
           <label htmlFor="ss-cron" className="block text-sm font-medium text-slate-200 mb-1.5">Schedule</label>
-          <select id="ss-cron" value={custom ? '__custom' : form.schedule_cron ?? ''} onChange={(e) => set('schedule_cron', e.target.value === '__custom' ? form.schedule_cron || '0 6 * * *' : e.target.value || null)} disabled={dis} className="w-full bg-slate-950 border border-slate-700 rounded-md px-3 py-2 text-sm text-white">
+          <select
+            id="ss-cron"
+            value={customCron ? '__custom' : form.schedule_cron ?? ''}
+            onChange={(e) => {
+              const v = e.target.value;
+              setCustomCron(v === '__custom');
+              if (v !== '__custom') set('schedule_cron', v || null);
+            }}
+            disabled={dis}
+            className="w-full bg-slate-950 border border-slate-700 rounded-md px-3 py-2 text-sm text-white"
+            data-testid="eval-settings-schedule"
+          >
             {SCHEDULES.map((s) => <option key={s.label} value={s.cron ?? ''}>{s.label}</option>)}
             <option value="__custom">Custom cron…</option>
           </select>
-          {(custom || form.schedule_cron === '__custom') && (
-            <input value={form.schedule_cron || ''} onChange={(e) => set('schedule_cron', e.target.value)} disabled={dis} className="mt-2 w-full bg-slate-950 border border-slate-700 rounded-md px-3 py-2 text-sm text-white font-mono" placeholder="0 6 * * 1" aria-label="Cron expression" />
+          {customCron && (
+            <>
+              <input value={form.schedule_cron || ''} onChange={(e) => set('schedule_cron', e.target.value)} disabled={dis} className="mt-2 w-full bg-slate-950 border border-slate-700 rounded-md px-3 py-2 text-sm text-white font-mono" placeholder="0 6 * * 1" aria-label="Cron expression" data-testid="eval-settings-cron" />
+              <p className="mt-1 text-xs text-slate-500">Five fields in UTC: minute hour day month weekday. 0 6 * * 1 is Mondays at 06:00.</p>
+            </>
           )}
           {suite.next_run_at && <p className="mt-1 text-xs text-slate-500">Next run {new Date(suite.next_run_at).toLocaleString()}.</p>}
         </div>

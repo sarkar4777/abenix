@@ -14,11 +14,12 @@
 #
 # Usage:
 #   bash scripts/sync-claude-subscription.sh
+#   API_PORT=8100 bash scripts/sync-claude-subscription.sh
 #   API_URL=http://localhost:8000 bash scripts/sync-claude-subscription.sh
 
 set -euo pipefail
 
-API_URL="${API_URL:-http://localhost:8000}"
+API_URL="${API_URL:-http://localhost:${API_PORT:-8000}}"
 ADMIN_EMAIL="${ADMIN_EMAIL:-admin@abenix.dev}"
 ADMIN_PASSWORD="${ADMIN_PASSWORD:-Admin123456}"
 CRED_FILE="${CLAUDE_CREDENTIALS_FILE:-${HOME}/.claude/.credentials.json}"
@@ -35,11 +36,21 @@ if [ ! -f "${CRED_FILE}" ]; then
   exit 1
 fi
 
+PY_BIN=""
+for c in python3 python; do
+  if "${c}" -c 'import sys' >/dev/null 2>&1; then PY_BIN="${c}"; break; fi
+done
+if [ -z "${PY_BIN}" ]; then
+  err "Python 3 is needed to read the credential file, install it and re-run"
+  exit 1
+fi
+
 log "Reading ${CRED_FILE}"
+log "Platform API ${API_URL}"
 
 # Everything that touches the token stays inside python so it never reaches the
 # shell's argv, environment, or this script's output.
-python - "${CRED_FILE}" "${API_URL}" "${ADMIN_EMAIL}" "${ADMIN_PASSWORD}" <<'PY'
+PYTHONIOENCODING=utf-8 "${PY_BIN}" - "${CRED_FILE}" "${API_URL}" "${ADMIN_EMAIL}" "${ADMIN_PASSWORD}" <<'PY'
 import datetime
 import io
 import json
@@ -92,7 +103,12 @@ def call(path, payload=None, method=None, bearer=None):
             return e.code, {"error": {"message": raw[:300]}}
 
 
-status, body = call("/api/auth/login", {"email": email, "password": password})
+try:
+    status, body = call("/api/auth/login", {"email": email, "password": password})
+except urllib.error.URLError as e:
+    print(f"  [err] cannot reach the platform at {api_url}: {e.reason}", file=sys.stderr)
+    print("  [err] is the deploy finished and the API forward up? Try: bash scripts/deploy.sh forwards", file=sys.stderr)
+    raise SystemExit(1)
 if status != 200:
     print(f"  [err] platform login failed: HTTP {status}", file=sys.stderr)
     raise SystemExit(1)

@@ -3,6 +3,7 @@
 Admin verbs for the enterprise ingest workflow:
 
   POST   /api/knowledge/{kb_id}/documents/{doc_id}/replace   versioning
+  GET    /api/knowledge/{kb_id}/documents/{doc_id}/versions  history, editors only
   GET    /api/knowledge/{kb_id}/reembed                      model + job progress
   POST   /api/knowledge/{kb_id}/reembed                      embed-model swap
   GET    /api/knowledge/cognify-config                       per-tenant config
@@ -51,6 +52,18 @@ class ReplaceDocumentRequest(BaseModel):
     new_file_size: int = Field(ge=0)
 
 
+def _owned_storage_url(url: str, tenant_id: Any, kb_id: Any) -> bool:
+    """The new file must sit under this tenant's and this collection's own prefix."""
+    norm = url.replace("\\", "/")
+    if ".." in norm.split("/"):
+        return False
+    # object storage keys are {tenant}/kb/{kb}/..., the dev fallback is {upload_dir}/{tenant}/{kb}/...
+    return (
+        f"/{tenant_id}/kb/{kb_id}/" in f"/{norm}"
+        or f"/{tenant_id}/{kb_id}/" in f"/{norm}"
+    )
+
+
 @router.post("/{kb_id}/documents/{doc_id}/replace")
 async def replace_document(
     kb_id: uuid.UUID,
@@ -60,6 +73,27 @@ async def replace_document(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> Any:
+    from app.services.kb_access import (
+        user_can_access_collection,
+        user_can_edit_collection,
+    )
+
+    kb = (
+        await db.execute(
+            select(KnowledgeBase).where(
+                KnowledgeBase.id == kb_id, KnowledgeBase.tenant_id == user.tenant_id
+            )
+        )
+    ).scalar_one_or_none()
+    if kb is None or not await user_can_access_collection(db, user=user, kb=kb):
+        return error("Document not found", 404)
+    if not await user_can_edit_collection(db, user=user, kb=kb):
+        return error("You don't have permission to edit this collection", 403)
+    if not _owned_storage_url(body.new_storage_url, user.tenant_id, kb_id):
+        return error(
+            "The new file must be uploaded to this collection first. Upload it, then replace with that file.",
+            400,
+        )
     res = await db.execute(
         select(Document).where(
             Document.id == doc_id,
@@ -99,6 +133,18 @@ async def replace_document(
         request,
     )
     await db.commit()
+    # the new version is processed like any upload, otherwise it never gets chunks
+    from app.routers.knowledge import _dispatch_processing
+
+    _dispatch_processing(
+        doc_id=str(new.id),
+        kb_id=str(kb_id),
+        file_path=new.storage_url,
+        filename=new.filename,
+        file_type=new.file_type,
+        chunk_size=kb.chunk_size,
+        chunk_overlap=kb.chunk_overlap,
+    )
     return success(
         {
             "id": str(new.id),
@@ -110,6 +156,56 @@ async def replace_document(
         },
         status_code=201,
     )
+
+
+@router.get("/{kb_id}/documents/{doc_id}/versions")
+async def document_versions(
+    kb_id: uuid.UUID,
+    doc_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Any:
+    """Full version history of one document, oldest first. Editors only."""
+    from app.routers.knowledge import _serialize_doc
+    from app.services.kb_access import (
+        user_can_access_collection,
+        user_can_edit_collection,
+    )
+
+    kb = (
+        await db.execute(
+            select(KnowledgeBase).where(
+                KnowledgeBase.id == kb_id, KnowledgeBase.tenant_id == user.tenant_id
+            )
+        )
+    ).scalar_one_or_none()
+    if kb is None or not await user_can_access_collection(db, user=user, kb=kb):
+        return error("Document not found", 404)
+    if not await user_can_edit_collection(db, user=user, kb=kb):
+        return error("Only people who can edit this collection can view history", 403)
+    doc = (
+        await db.execute(
+            select(Document).where(Document.id == doc_id, Document.kb_id == kb_id)
+        )
+    ).scalar_one_or_none()
+    if doc is None:
+        return error("Document not found", 404)
+    root = doc.parent_document_id or doc.id
+    rows = (
+        (
+            await db.execute(
+                select(Document)
+                .where(
+                    Document.kb_id == kb_id,
+                    (Document.id == root) | (Document.parent_document_id == root),
+                )
+                .order_by(Document.version_number.asc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return success([_serialize_doc(d) for d in rows])
 
 
 class ReembedRequest(BaseModel):
@@ -273,7 +369,9 @@ async def get_cognify_config(
             "conflict_action": cfg.conflict_action,
             "max_parallel_docs": cfg.max_parallel_docs,
             "daily_budget_usd": (
-                float(cfg.daily_budget_usd) if cfg.daily_budget_usd else None
+                float(cfg.daily_budget_usd)
+                if cfg.daily_budget_usd is not None
+                else None
             ),
             "updated_at": cfg.updated_at.isoformat() if cfg.updated_at else None,
         }

@@ -1,6 +1,7 @@
 'use client';
 
 import { NAV_ROUTE_LABELS } from '@/components/layout/Sidebar';
+import { OPEN_PALETTE_EVENT } from '@/components/ui/CommandPalette';
 import { useEffect, useRef, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -21,6 +22,7 @@ import {
   LogOut,
   Menu,
   Moon,
+  Search,
   Settings,
   ShieldAlert,
   ShieldCheck,
@@ -433,10 +435,22 @@ export default function TopBar() {
       </div>
 
       <div className="flex items-center gap-2">
+        <button
+          onClick={() => window.dispatchEvent(new Event(OPEN_PALETTE_EVENT))}
+          className="flex items-center gap-2 h-9 px-2 sm:px-3 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800/50 border border-transparent sm:border-slate-700/60 transition-colors"
+          aria-label="Search (Ctrl K)"
+          title="Search pages, agents and runs (Ctrl K)"
+          data-testid="open-search"
+        >
+          <Search className="w-[18px] h-[18px]" />
+          <span className="hidden lg:inline text-xs">Search</span>
+          <kbd className="hidden lg:inline rounded border border-slate-600 bg-slate-700/50 px-1 text-[10px]">Ctrl K</kbd>
+        </button>
         <CognifyIndicator />
         <div className="relative" ref={panelRef}>
           <button
             onClick={togglePanel}
+            aria-label="Notifications"
             className="relative w-9 h-9 flex items-center justify-center rounded-lg text-slate-400 hover:text-white hover:bg-slate-800/50 transition-colors"
           >
             <Bell className="w-[18px] h-[18px]" />

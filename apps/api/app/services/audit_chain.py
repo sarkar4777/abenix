@@ -420,18 +420,21 @@ async def _notify_admins(db: AsyncSession, tenant_id: Any, res: dict[str, Any]) 
         logger.exception("could not notify admins about the audit chain")
 
 
-async def run_nightly_verify() -> None:
+async def run_nightly_verify() -> dict[str, int] | None:
     from app.core.scheduler import advisory_lock
 
     try:
         async with advisory_lock(CHAIN_LOCK_KEY + 1) as held:
             if not held:
-                return
+                return None
             results = await verify_all()
+            broken = sum(1 for r in results if not r["ok"])
             logger.info(
                 "audit chain verified for %d tenants, %d broken",
                 len(results),
-                sum(1 for r in results if not r["ok"]),
+                broken,
             )
+            return {"tenants": len(results), "broken": broken}
     except Exception:
         logger.exception("nightly audit verification failed")
+        return None

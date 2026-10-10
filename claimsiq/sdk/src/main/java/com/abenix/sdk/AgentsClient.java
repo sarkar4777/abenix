@@ -38,6 +38,22 @@ public final class AgentsClient {
         return null;
     }
 
+    /** Exact lookup by slug, null when there is no such agent. */
+    public Map<String, Object> bySlug(String slug) {
+        try {
+            return asMap(kit.dataOrRoot(kit.getJson(
+                "/api/agents/by-slug/" + java.net.URLEncoder.encode(slug, java.nio.charset.StandardCharsets.UTF_8), null)));
+        } catch (AbenixException e) {
+            if (e.status() == 404) return null;
+            throw e;
+        }
+    }
+
+    /** Create an agent or pipeline. Takes the same fields as POST /api/agents, including model_config. */
+    public Map<String, Object> create(Map<String, Object> body) {
+        return asMap(kit.dataOrRoot(kit.postJson("/api/agents", body, null)));
+    }
+
     private static List<Map<String, Object>> asListOfMap(JsonNode n) {
         List<Map<String, Object>> out = new ArrayList<>();
         if (n != null && n.isArray()) {

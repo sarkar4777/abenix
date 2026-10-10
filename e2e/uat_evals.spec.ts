@@ -8,6 +8,7 @@
  * LLM credential (Claude Haiku 4.5 by default, override with EVAL_MODEL). Set SKIP_LIVE_LLM=1 to skip them.
  */
 import { test, expect, type Page } from '@playwright/test';
+import { openFromSidebar } from './helpers/sidebar';
 
 const BASE = process.env.BASE || 'http://localhost:3100';
 const API = process.env.API || 'http://localhost:8000';
@@ -114,9 +115,7 @@ test.afterAll(async ({ browser }) => {
 test('a gating suite is created from the sidebar and blocks publishing before it has run', async ({ page }) => {
   await login(page);
   await visit(page, '/dashboard');
-  const group = page.getByRole('button', { name: /run & test/i });
-  if ((await group.getAttribute('aria-expanded')) === 'false') await group.click();
-  await page.getByRole('link', { name: 'Evaluations' }).click();
+  await openFromSidebar(page, '/evals');
   await expect(page.getByRole('heading', { name: 'Evaluations' })).toBeVisible();
 
   await page.getByTestId('eval-new-suite').click();
@@ -166,8 +165,9 @@ test('a run executes every case, shows reasons per case and still blocks publish
   await page.getByTestId('eval-run-now').click();
   await expect(page.getByTestId('eval-active-run')).toBeVisible();
   const run = await waitForRun(page, before);
-  expect(run.status).toBe('completed');
-  expect(run.passed).toBe(1);
+  const why = JSON.stringify((await api(page, 'GET', `/api/evals/runs/${run.id}`)).json?.data?.results, null, 1)?.slice(0, 3000);
+  expect(run.status, why).toBe('completed');
+  expect(run.passed, why).toBe(1);
   expect(run.threshold_met).toBe(false);
 
   await visit(page, `/evals/runs/${run.id}`);

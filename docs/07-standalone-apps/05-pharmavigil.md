@@ -2,8 +2,25 @@
 
 > Adverse-event intake, MedDRA coding, seriousness and causality assessment,
 > disproportionality signal detection and regulatory narrative generation.
-> Nine nodes, seven agents, one code asset pair and one ML model.
+> Nine nodes, eight agents, two code assets and one ML model.
 > Ports 3007 (web) and 8007 (api).
+
+---
+
+## Layout
+
+```
+pharmavigil/
+  api/          FastAPI on :8007. app/routers/ (cases, signals, health, _deps),
+                app/core/, test-data/ (sample reports, background counts), sdk/
+  web/          Next.js on :3007. Pages: /, /cases/[id], /signals
+  code-assets/  meddra-coder, disproportionality
+  aimodels/     triage_prioritiser.pkl + meta.json + build script
+  k8s/          pharmavigil.yaml (pharmavigil-api ClusterIP, pharmavigil-web NodePort 30307)
+  start.sh      local dev launcher
+```
+
+The agents and the pipeline are seeded from `packages/db/seeds/agents/pv_*.yaml`. The API key is `PHARMAVIGIL_ABENIX_API_KEY`.
 
 ---
 
@@ -172,7 +189,7 @@ follows the shape of published guidance and is not a substitute for it.
 Through the SDK, always. There is no direct HTTP to the platform anywhere in
 this codebase — `get_sdk()` in [`_deps.py`](../../pharmavigil/api/app/routers/_deps.py)
 is the only construction site, and `sync-sdks.sh --check` keeps this app's
-vendored copy byte-identical to the six others.
+vendored copy byte-identical to the canonical SDK in `packages/sdk/python`.
 
 Two timeouts matter and they are not the same number:
 

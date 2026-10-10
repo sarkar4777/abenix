@@ -802,6 +802,7 @@ def _test_json(t: DecisionTest) -> dict[str, Any]:
         "facts": t.facts,
         "expected_outcome": t.expected_outcome,
         "expected": t.expected,
+        "match": t.match_mode or "exact",
         "as_of": t.as_of,
         "updated_at": _iso(t.updated_at),
     }
@@ -1044,6 +1045,20 @@ async def propose(
     )
     await db.commit()
     await db.refresh(v)
+    if v.approval_id:
+        # signers hear about it the way every other approval request reaches them
+        try:
+            from app.routers.approvals import _notify_pending
+
+            approval = await db.get(Approval, v.approval_id)
+            if approval is not None:
+                await _notify_pending(db, approval, requester=user)
+        except Exception as e:  # noqa: BLE001
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "decision approval notification failed: %s", e
+            )
     return success({**_version_full(v, user), "approvals_needed": need})
 
 
@@ -1680,6 +1695,8 @@ class TestBody(BaseModel):
     facts: dict[str, Any] = Field(default_factory=dict)
     expected_outcome: str = "decided"
     expected: Any = None
+    # exact or subset, left as it is on an update that does not send it
+    match: str | None = None
     as_of: str | None = None
 
 
@@ -1707,6 +1724,15 @@ def _check_test(body: TestBody) -> str | None:
         )
     if body.as_of and not A.DATE_RE.match(body.as_of):
         return "Use a date like 2026-01-01 for as_of."
+    if body.match is not None and body.match not in V.MATCH_MODES:
+        return "match must be exact or subset"
+    if (
+        body.match == "subset"
+        and body.expected_outcome == "decided"
+        and body.expected is not None
+        and not isinstance(body.expected, dict)
+    ):
+        return "A subset match needs the expected result as a JSON object."
     return None
 
 
@@ -1730,6 +1756,7 @@ async def add_test(
         facts=body.facts,
         expected_outcome=body.expected_outcome,
         expected=body.expected,
+        match_mode=body.match or "exact",
         as_of=body.as_of,
         created_by=user.id,
     )
@@ -1761,6 +1788,8 @@ async def update_test(
         body.expected,
         body.as_of,
     )
+    if body.match is not None:
+        t.match_mode = body.match
     await db.commit()
     await db.refresh(t)
     return success(_test_json(t))

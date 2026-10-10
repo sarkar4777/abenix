@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { BrainCircuit, Loader2, AlertTriangle, Sparkles } from 'lucide-react';
 import { authFetch } from '../lib/authFetch';
 import { PageExplainer } from '@/components/PageExplainer';
@@ -15,40 +15,95 @@ const KNOWN_MODELS: ModelDef[] = [
   { name: 'price_fairvalue_power_hubs', family: 'BayesianRidge', sample_features: { ttf_eur_mwh: 36, eua_eur_t: 85, residual_load_gw: 52, wind_capf: 0.22, solar_capf: 0.18, hydro_reservoir_pct: 60, hour_of_day_idx: 14 } },
 ];
 
-type ShapResult = {
+const EXPLAIN_LIMIT_MS = 60_000;
+
+type Contribution = { feature: string; value: number; baseline: number; contribution: number };
+type Step = { feature: string; contribution: number; start: number; end: number };
+
+type Explanation = {
   ok?: boolean;
   method?: string;
+  target?: string;
   model_name?: string;
-  execution_id?: string;
   prediction?: number;
-  feature_columns?: string[];
-  contributions?: { feature: string; value: number }[];
-  error?: string;
+  base_value?: number;
+  baseline_source?: string;
+  contributions?: Contribution[];
+  waterfall?: Step[];
 };
+
+const METHOD_LABELS: Record<string, string> = {
+  linear: 'exact, coefficient times distance from baseline',
+  'linear-shap': 'exact, linear SHAP',
+  'tree-shap': 'tree SHAP',
+  'exact-shapley': 'Shapley values over every feature mix',
+  'sampled-shapley': 'Shapley values, sampled',
+};
+
+function baselineLabel(source?: string): string {
+  if (!source) return 'unknown';
+  if (source === 'zeros') return 'zero for every feature, the model has no stored training averages';
+  if (source.startsWith('request')) return 'the values you sent';
+  return 'the training averages';
+}
+
+const fmt = (n?: number) => (typeof n === 'number' && Number.isFinite(n) ? n.toFixed(3) : 'n/a');
+
+// top steps by size, the rest folded into one so the waterfall still ends at the prediction
+function foldSteps(steps: Step[], keep = 10): Step[] {
+  if (steps.length <= keep) return steps;
+  const head = steps.slice(0, keep);
+  const rest = steps.slice(keep);
+  const sum = rest.reduce((a, s) => a + s.contribution, 0);
+  return [...head, { feature: `${rest.length} other features`, contribution: sum, start: rest[0].start, end: rest[0].start + sum }];
+}
 
 export default function WorkbenchPage() {
   const [modelIdx, setModelIdx] = useState(0);
   const [features, setFeatures] = useState<Record<string, number>>(KNOWN_MODELS[0].sample_features);
-  const [result, setResult] = useState<ShapResult | null>(null);
+  const [result, setResult] = useState<Explanation | null>(null);
   const [loading, setLoading] = useState(false);
+  const [runError, setRunError] = useState<string | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     setFeatures(KNOWN_MODELS[modelIdx].sample_features);
     setResult(null);
+    setRunError(null);
   }, [modelIdx]);
+
+  useEffect(() => () => abortRef.current?.abort(), []);
 
   const run = async () => {
     setLoading(true);
+    setResult(null);
+    setRunError(null);
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
+    const limit = setTimeout(() => ctrl.abort(), EXPLAIN_LIMIT_MS);
     try {
       const res = await authFetch('/api/contractiq/workbench/explain', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ model_name: KNOWN_MODELS[modelIdx].name, feature_vector: features }),
+        signal: ctrl.signal,
       });
-      setResult(await res.json());
+      const body = await res.json().catch(() => null);
+      if (!res.ok || !body?.ok) {
+        const detail = typeof body?.detail === 'string' ? body.detail : body?.error;
+        setRunError(detail || `The explainer returned HTTP ${res.status}.`);
+      } else {
+        setResult(body);
+      }
     } catch (e: any) {
-      setResult({ ok: false, error: String(e) });
+      if (ctrl.signal.aborted) {
+        setRunError('No answer after a minute. Run it again, and if it still hangs check that the model is ready on the Abenix ML Models page.');
+      } else {
+        setRunError(`Could not reach the ContractIQ API: ${e?.message || e}`);
+      }
     } finally {
+      clearTimeout(limit);
+      abortRef.current = null;
       setLoading(false);
     }
   };
@@ -58,6 +113,13 @@ export default function WorkbenchPage() {
   };
 
   const active = KNOWN_MODELS[modelIdx];
+  const steps = foldSteps(result?.waterfall ?? []);
+  const base = result?.base_value ?? 0;
+  const points = [base, result?.prediction ?? base, ...steps.flatMap((s) => [s.start, s.end])];
+  const lo = Math.min(...points);
+  const span = Math.max(...points) - lo || 1;
+  const pct = (v: number) => ((v - lo) / span) * 100;
+  const values = new Map((result?.contributions ?? []).map((c) => [c.feature, c]));
 
   return (
     <div className="min-h-screen text-slate-200 p-8 max-w-[1400px] mx-auto">
@@ -67,8 +129,8 @@ export default function WorkbenchPage() {
           <h1 className="text-3xl font-bold text-white">Analyst Workbench</h1>
         </div>
         <p className="text-slate-400 max-w-3xl">
-          Per-prediction explainability. Routes the (model, feature_vector) to the <span className="font-mono">shap_explainer</span> code-asset
-          hosted in Abenix. Falls back to <span className="font-mono">ml_model.explain()</span> when SHAP is unavailable. Sample feature vector — edit before relying on the explanation.
+          Per-prediction explainability. Abenix scores the feature vector with the registered model and splits the gap between the
+          baseline and the prediction across the features. Sample feature vector, edit it before relying on the explanation.
         </p>
         <PageExplainer routeKey="workbench" />
       </header>
@@ -127,71 +189,66 @@ export default function WorkbenchPage() {
           </div>
 
           <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-6">
-            {result?.ok && (
-              <h3 className="text-sm font-semibold text-white mb-3 flex items-center gap-1.5"><Sparkles className="w-3.5 h-3.5 text-amber-400" /> SHAP contributions</h3>
-            )}
-            {result?.ok === false && (
-              <h3 className="text-sm font-semibold text-white mb-3 flex items-center gap-1.5"><AlertTriangle className="w-3.5 h-3.5 text-amber-400" /> Raw feature magnitudes (fallback)</h3>
-            )}
-            {result === null && !loading && (
+            {result === null && !loading && !runError && (
               <p className="text-xs text-slate-500">Click Run Explain to score the current feature vector.</p>
             )}
-            {result?.ok === false && (
-              <div className="rounded-lg border border-amber-700/50 bg-amber-900/20 p-4 mb-3 flex items-start gap-3">
-                <AlertTriangle className="w-5 h-5 text-amber-400 flex-shrink-0 mt-0.5" />
+            {loading && (
+              <div data-testid="explain-progress" role="status" className="flex items-center gap-3 text-xs text-slate-300">
+                <Loader2 className="w-4 h-4 animate-spin text-emerald-400 flex-shrink-0" />
+                <p>Scoring the feature vector and its baseline in Abenix</p>
+              </div>
+            )}
+            {runError && !loading && (
+              <div data-testid="explain-error" role="alert" className="rounded-lg border border-rose-700/50 bg-rose-900/20 p-4 flex items-start gap-3">
+                <AlertTriangle className="w-5 h-5 text-rose-400 flex-shrink-0 mt-0.5" />
                 <div className="text-sm">
-                  <p className="font-semibold text-amber-200">Real SHAP unavailable, falling back to raw feature magnitudes. These are NOT attributions.</p>
-                  {result.error && (
-                    <p className="text-amber-300/80 text-xs mt-1 font-mono">{result.error}</p>
-                  )}
-                  {typeof result.prediction === 'number' && (
-                    <p className="text-amber-200/90 text-xs mt-2">
-                      Prediction (real, from ml-predict) <span className="font-mono text-white">{result.prediction.toFixed(3)}</span>
-                    </p>
-                  )}
+                  <p className="font-semibold text-rose-200">The explainer could not explain this prediction</p>
+                  <p className="text-rose-300/80 text-xs mt-1 font-mono">{runError}</p>
                 </div>
               </div>
             )}
-            {result?.ok === false && (result.contributions ?? []).length > 0 && (
-              <div className="space-y-2.5">
-                {(result.contributions ?? []).slice(0, 10).map(c => {
-                  const pos = c.value >= 0;
-                  const mag = Math.min(100, Math.abs(c.value) * 25);
-                  return (
-                    <div key={c.feature}>
-                      <div className="flex items-baseline justify-between mb-1">
-                        <span className="text-xs font-mono text-slate-300">{c.feature}</span>
-                        <span className="text-xs font-mono text-slate-400">{pos ? '+' : ''}{c.value.toFixed(3)}</span>
-                      </div>
-                      <div className="h-1.5 bg-slate-800 rounded overflow-hidden">
-                        <div className="h-full bg-slate-500/60" style={{ width: `${mag}%` }} />
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-            {result?.ok && (
+            {result && !loading && (
               <>
-                <p className="text-xs text-slate-500 mb-3">
-                  Method <span className="font-mono text-emerald-300">{result.method}</span> · prediction <span className="font-mono text-white">{result.prediction?.toFixed(3)}</span>
+                <h3 className="text-sm font-semibold text-white mb-1 flex items-center gap-1.5"><Sparkles className="w-3.5 h-3.5 text-emerald-400" /> Feature contributions</h3>
+                <p className="text-xs text-slate-500 mb-4">
+                  Explains the {result.target || 'prediction'} · method <span className="font-mono text-emerald-300">{result.method}</span>
+                  {result.method && METHOD_LABELS[result.method] ? ` (${METHOD_LABELS[result.method]})` : ''} · baseline is {baselineLabel(result.baseline_source)}
                 </p>
-                <div className="space-y-2.5">
-                  {(result.contributions ?? []).slice(0, 10).map(c => {
-                    const pos = c.value >= 0;
-                    const mag = Math.min(100, Math.abs(c.value) * 25);
+                <div className="grid grid-cols-2 gap-3 mb-5">
+                  <div className="rounded-md border border-slate-800 bg-slate-950/40 p-3">
+                    <p className="text-[10px] uppercase tracking-wider text-slate-500">Baseline value</p>
+                    <p className="font-mono text-white text-lg">{fmt(result.base_value)}</p>
+                  </div>
+                  <div className="rounded-md border border-slate-800 bg-slate-950/40 p-3">
+                    <p className="text-[10px] uppercase tracking-wider text-slate-500">Prediction</p>
+                    <p data-testid="explain-prediction" className="font-mono text-white text-lg">{fmt(result.prediction)}</p>
+                  </div>
+                </div>
+                <div className="space-y-2.5" data-testid="explain-waterfall">
+                  {steps.map((s) => {
+                    const pos = s.contribution >= 0;
+                    const c = values.get(s.feature);
                     return (
-                      <div key={c.feature}>
-                        <div className="flex items-baseline justify-between mb-1">
-                          <span className="text-xs font-mono text-slate-300">{c.feature}</span>
-                          <span className={`text-xs font-mono ${pos ? 'text-emerald-400' : 'text-rose-400'}`}>{pos ? '+' : ''}{c.value.toFixed(3)}</span>
+                      <div key={s.feature}>
+                        <div className="flex items-baseline justify-between mb-1 gap-3">
+                          <span className="text-xs font-mono text-slate-300 truncate">
+                            {s.feature}
+                            {c && <span className="text-slate-500"> = {fmt(c.value)} (baseline {fmt(c.baseline)})</span>}
+                          </span>
+                          <span className={`text-xs font-mono ${pos ? 'text-emerald-400' : 'text-rose-400'}`}>{pos ? '+' : ''}{s.contribution.toFixed(3)}</span>
                         </div>
-                        <div className="h-1.5 bg-slate-800 rounded overflow-hidden">
-                          <div className={`h-full ${pos ? 'bg-emerald-500/70' : 'bg-rose-500/70'}`} style={{ width: `${mag}%` }} />
+                        <div className="relative h-2 bg-slate-800 rounded">
+                          <div
+                            className={`absolute h-full rounded ${pos ? 'bg-emerald-500/70' : 'bg-rose-500/70'}`}
+                            style={{ left: `${pct(Math.min(s.start, s.end))}%`, width: `${Math.max(0.5, (Math.abs(s.contribution) / span) * 100)}%` }}
+                          />
                         </div>
                       </div>
                     );
                   })}
+                  {steps.length === 0 && (
+                    <p className="text-xs text-slate-500">The model returned no per-feature contributions for this input.</p>
+                  )}
                 </div>
               </>
             )}

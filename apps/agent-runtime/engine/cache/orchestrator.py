@@ -12,6 +12,19 @@ from engine.cache.prompt_optimizer import PromptCacheOptimizer
 from engine.cache.semantic_cache import SemanticCache
 from engine.metrics import cache_hits, cache_misses  # noqa: F401
 
+
+def _count(metric: Any, **labels: str) -> None:
+    # inside the API the API's metric of the same name wins, and it carries tenant_id
+    names = getattr(metric, "_labelnames", ())
+    try:
+        if names:
+            metric.labels(**{k: labels.get(k, "") for k in names}).inc()
+        else:
+            metric.inc()
+    except Exception:
+        pass
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -52,7 +65,7 @@ class CacheOrchestrator:
                 model, messages, tools, temperature, tenant_id
             )
             if cached is not None:
-                cache_hits.labels(layer="exact").inc()
+                _count(cache_hits, layer="exact", tenant_id=tenant_id)
                 return CacheResult(hit=True, layer="exact", response=cached)
 
         if self.semantic and agent_id:
@@ -62,7 +75,7 @@ class CacheOrchestrator:
                     last_user_msg, agent_id, tenant_id=tenant_id
                 )
                 if cached is not None:
-                    cache_hits.labels(layer="semantic").inc()
+                    _count(cache_hits, layer="semantic", tenant_id=tenant_id)
                     return CacheResult(hit=True, layer="semantic", response=cached)
 
         if self.prompt_optimizer and model.startswith("claude"):
@@ -72,10 +85,10 @@ class CacheOrchestrator:
                 tools=tools,
                 rag_context=rag_context,
             )
-            cache_hits.labels(layer="prompt").inc()
+            _count(cache_hits, layer="prompt", tenant_id=tenant_id)
             return CacheResult(hit=False, layer="prompt", optimized_kwargs=optimized)
 
-        cache_misses.inc()
+        _count(cache_misses, tenant_id=tenant_id)
         return CacheResult(hit=False, layer="none")
 
     async def store(

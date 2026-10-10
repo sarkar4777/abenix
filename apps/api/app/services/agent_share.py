@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sys
 import uuid
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +18,7 @@ from app.core.permissions import (  # noqa: E402
     can_access_agent,
     is_admin,
     is_platform_agent,
+    share_expiry_fields,
 )
 from models.agent import Agent, AgentStatus, AgentType  # noqa: E402
 from models.marketplace import Subscription  # noqa: E402
@@ -157,10 +159,12 @@ async def upsert_agent_share(
     target: User,
     permission: SharePermission,
     shared_by: User,
+    expires_at: datetime | None = None,
 ) -> tuple[ResourceShare, bool]:
     existing = await get_agent_share(db, agent.id, target.id)
     if existing:
         existing.permission = permission
+        existing.expires_at = expires_at
         await db.commit()
         await db.refresh(existing)
         return existing, False
@@ -172,6 +176,7 @@ async def upsert_agent_share(
         shared_with_email=target.email,
         permission=permission,
         shared_by=shared_by.id,
+        expires_at=expires_at,
     )
     db.add(share)
     await db.commit()
@@ -204,4 +209,5 @@ def serialize_agent_share(s: ResourceShare) -> dict[str, Any]:
         "permission": PERMISSION_TO_API.get(raw, raw.lower()),
         "shared_by": str(s.shared_by),
         "created_at": s.created_at.isoformat() if s.created_at else None,
+        **share_expiry_fields(getattr(s, "expires_at", None)),
     }

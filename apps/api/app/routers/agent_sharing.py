@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, get_db
 from app.core.notifications import create_notification
+from app.core.permissions import parse_share_expiry
 from app.core.responses import error, success
 from app.services.agent_share import (
     AGENT_KIND,
@@ -66,6 +67,9 @@ async def share_agent(
         return error("permission must be view, execute, or edit", 400)
     if not email:
         return error("email is required", 400)
+    expires_at, exp_err = parse_share_expiry(body.get("expires_at"))
+    if exp_err:
+        return error(exp_err, 400)
 
     target_result = await db.execute(
         select(User).where(
@@ -80,7 +84,12 @@ async def share_agent(
         return error("You cannot share an agent with yourself", 400)
 
     share, created = await upsert_agent_share(
-        db, agent=agent, target=target_user, permission=permission, shared_by=user
+        db,
+        agent=agent,
+        target=target_user,
+        permission=permission,
+        shared_by=user,
+        expires_at=expires_at,
     )
 
     if created:
@@ -174,6 +183,7 @@ async def shared_with_me(
         .where(
             ResourceShare.resource_type == AGENT_KIND,
             ResourceShare.shared_with_user_id == user.id,
+            ResourceShare.live(),
             Agent.tenant_id == user.tenant_id,
             Agent.status != AgentStatus.ARCHIVED,
         )

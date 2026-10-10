@@ -326,7 +326,7 @@ def _run_alembic_stamp_heads() -> None:
 
 
 def _bootstrap_sync(url: str) -> int:
-    from sqlalchemy import create_engine, inspect
+    from sqlalchemy import create_engine, inspect, text
 
     import models  # noqa: F401  — registers every table on Base.metadata
     from models.base import Base
@@ -335,7 +335,7 @@ def _bootstrap_sync(url: str) -> int:
     with engine.begin() as conn:
         if _alembic_version_exists_sync(conn):
             # an abandoned transaction would hold the locks the upgrade needs
-            _report_leaked(conn.exec_driver_sql(LEAKED_TXN_SQL).scalar())
+            _report_leaked(conn.execute(text(LEAKED_TXN_SQL)).scalar())
             _heal_alembic_version_sync(conn)
             print(
                 "[bootstrap] alembic_version table present — "
@@ -411,6 +411,92 @@ async def _bootstrap_async(url: str) -> int:
     return 2  # caller stamps once asyncio.run has returned
 
 
+def migration_trigger_sql() -> dict[str, list[str]]:
+    """Every trigger the migrations create, with the statements that build it, read from the migrations themselves."""
+    import ast
+    import re
+
+    stmts_by_file: list[list[str]] = []
+    for f in sorted((ROOT / "alembic" / "versions").glob("*.py")):
+        tree = ast.parse(f.read_text(encoding="utf-8"))
+        up = next(
+            (
+                n
+                for n in tree.body
+                if isinstance(n, ast.FunctionDef) and n.name == "upgrade"
+            ),
+            None,
+        )
+        if up is None:
+            continue
+        found: list[str] = []
+        for node in ast.walk(up):
+            if not (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "execute"
+                and node.args
+            ):
+                continue
+            arg = node.args[0]
+            if isinstance(arg, ast.Call) and arg.args:
+                arg = arg.args[0]
+            if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+                found.append(arg.value)
+        stmts_by_file.append(found)
+    out: dict[str, list[str]] = {}
+    for found in stmts_by_file:
+        for sql in found:
+            m = re.search(r"CREATE TRIGGER\s+(\w+)", sql)
+            if not m:
+                continue
+            name = m.group(1)
+            # the function it calls, any drop before it, then the trigger itself
+            out[name] = [
+                s
+                for s in found
+                if re.search(rf"(FUNCTION|TRIGGER)\s+(IF EXISTS\s+)?{name}\b", s)
+            ]
+    return out
+
+
+def _heal_missing_triggers_sync(conn) -> list[str]:
+    """Create triggers a stamped bootstrap skipped. create_all only makes tables."""
+    from sqlalchemy import text
+
+    present = {
+        r[0]
+        for r in conn.execute(
+            text("SELECT tgname FROM pg_trigger WHERE NOT tgisinternal")
+        )
+    }
+    made = []
+    for name, stmts in migration_trigger_sql().items():
+        if name in present:
+            continue
+        for sql in stmts:
+            conn.execute(text(sql))
+        made.append(name)
+    return made
+
+
+def _heal_missing_tables_sync(conn) -> list[str]:
+    """Create ORM tables a stamped bootstrap skipped, after every migration has run."""
+    from sqlalchemy import inspect
+
+    import models  # noqa: F401  — registers every table on Base.metadata
+    from models.base import Base
+
+    present = set(inspect(conn).get_table_names())
+    missing = [t for t in Base.metadata.sorted_tables if t.name not in present]
+    if missing:
+        _create_missing_enums_sync(conn)
+        Base.metadata.create_all(bind=conn, tables=missing)
+    return [t.name for t in missing] + [
+        f"trigger {n}" for n in _heal_missing_triggers_sync(conn)
+    ]
+
+
 def verify_heads() -> int:
     """Fail when the database is not at every migration head, so a no-op upgrade cannot pass."""
     from alembic.config import Config
@@ -444,6 +530,22 @@ def verify_heads() -> int:
         )
         return 1
     print(f"[bootstrap] database is at every head: {sorted(heads)}")
+    if mode == "sync":
+        with create_engine(url).begin() as conn:
+            healed = _heal_missing_tables_sync(conn)
+    else:
+
+        async def _heal() -> list[str]:
+            engine = create_async_engine(url)
+            try:
+                async with engine.begin() as conn:
+                    return await conn.run_sync(_heal_missing_tables_sync)
+            finally:
+                await engine.dispose()
+
+        healed = asyncio.run(_heal())
+    if healed:
+        print(f"[bootstrap] created what a stamped install had skipped: {healed}")
     return 0
 
 

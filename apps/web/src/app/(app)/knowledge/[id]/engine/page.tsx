@@ -80,6 +80,7 @@ export default function KnowledgeEnginePage() {
   const [agentGrants, setAgentGrants] = useState<AgentGrant[]>([]);
   const [loading, setLoading] = useState(true);
   const [cognifying, setCognifying] = useState(false);
+  const [cognifyError, setCognifyError] = useState<string | null>(null);
 
   // Terminal vs running — any job not in complete/failed is still running.
   // We surface the running one as a sticky banner + disable the Run button
@@ -153,13 +154,20 @@ export default function KnowledgeEnginePage() {
   // Trigger cognify
   const triggerCognify = async () => {
     setCognifying(true);
+    setCognifyError(null);
     try {
-      await fetch(`${API_URL}/api/knowledge-engines/${kbId}/cognify`, {
+      const res = await fetch(`${API_URL}/api/knowledge-engines/${kbId}/cognify`, {
         method: 'POST', headers, body: JSON.stringify({}),
       });
+      if (!res.ok) {
+        const b = await res.json().catch(() => null);
+        setCognifyError(b?.error?.message || `Cognify did not start (HTTP ${res.status})`);
+      }
       // Poll initial state; the running-job effect above keeps refreshing.
       await loadData();
-    } catch { /* ignore */ }
+    } catch {
+      setCognifyError('Cognify did not start. Check your connection and try again.');
+    }
     setCognifying(false);
   };
 
@@ -259,6 +267,10 @@ export default function KnowledgeEnginePage() {
           </button>
         }
       />
+
+      {cognifyError && (
+        <p role="alert" data-testid="cognify-error" className="text-xs text-red-300 border border-red-500/30 bg-red-500/5 rounded-lg px-3 py-2">{cognifyError}</p>
+      )}
 
       {/* Running Cognify job banner — live progress while the background
           cognify-worker extracts entities. Without this, users clicked
@@ -526,7 +538,8 @@ export default function KnowledgeEnginePage() {
           </h3>
           <div className="space-y-2">
             {jobs.map((job) => (
-              <div key={job.id} className="flex items-center gap-3 bg-slate-900/30 rounded-lg px-3 py-2 text-xs">
+              <div key={job.id} data-testid="cognify-job" data-status={job.status} className="bg-slate-900/30 rounded-lg px-3 py-2 text-xs">
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                 {job.status === 'complete' ? (
                   <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
                 ) : job.status === 'failed' ? (
@@ -546,6 +559,10 @@ export default function KnowledgeEnginePage() {
                   <span className="text-slate-500">${job.cost_usd.toFixed(4)}</span>
                 )}
                 <span className="text-slate-600">{new Date(job.created_at).toLocaleDateString()}</span>
+              </div>
+              {job.error_message && (
+                <p className="mt-1 text-[11px] text-red-300 break-words" data-testid="cognify-job-error">{job.error_message}</p>
+              )}
               </div>
             ))}
           </div>

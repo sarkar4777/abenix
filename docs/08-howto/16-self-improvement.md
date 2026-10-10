@@ -34,6 +34,8 @@ Pressing **Try it on the sample agent** again after a loop has finished puts the
 
 ## 2. Propose a fix for a real agent
 
+Lessons come from thumbs and corrections under answers, "This was wrong because" on a run's page, the SDK, and on their own from failed runs, drift, failing evals and autonomy reviews. See [where lessons come from](../02-runtime/22-lessons-and-improvements.md#where-lessons-come-from).
+
 - Wait for lessons to group on the agent's **Improvements** tab, or let a group reach 5 lessons (or high severity) and a fix is proposed on its own.
 - Accept the suggested test cases you agree with first. Accepted cases are what the proof holds every fix to.
 - Press **Propose a fix** on the group. One small change is drafted: examples, a few edited sentences, one tool setting, one tool, or a model switch the risk tier allows. Pipelines get a patch from the Pipeline Surgeon. Limits, risk tier, autonomy, credentials and sharing are never touched.
@@ -67,7 +69,7 @@ A release is watched for 7 days or 200 runs, whichever comes first. The release 
 
 - The meter at the top of the Improvements page shows proofs and tokens used today and how many proposals are in line. When the day's budget is spent, new proposals wait with a plain note and start the next day.
 - An admin sets the budget and margins in the tenant settings under `improvements` (see the runtime doc). Per agent overrides go under `improvements.agents.<agent_id>`.
-- **Admin -> Risk and Controls -> Kill switches -> Agent improvements** stops all proposing and proving for the tenant. Releases in their watch keep being watched.
+- **Admin -> Risk & Controls -> Kill switches -> Agent improvements** stops all proposing and proving for the tenant. Releases in their watch keep being watched.
 
 ## 7. From a standalone app
 

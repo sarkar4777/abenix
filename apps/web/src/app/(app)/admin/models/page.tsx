@@ -3,11 +3,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   Brain, Cpu, RefreshCw, AlertTriangle, Cloud, Sparkles,
-  CheckCircle2, XCircle, Loader2, Trash2, Play,
+  CheckCircle2, XCircle, Loader2, Trash2, Play, Pencil,
 } from 'lucide-react';
 import { apiFetch } from '@/lib/api-client';
 import { toastSuccess, toastError } from '@/stores/toastStore';
 import PageHeader from '@/components/layout/PageHeader';
+import ResponsiveModal from '@/components/ui/ResponsiveModal';
 import { AccessGate } from '@/components/layout/NoAccess';
 
 interface MLModel {
@@ -95,6 +96,7 @@ function AdminModelsPage() {
   const [err, setErr] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [editing, setEditing] = useState<MLModel | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -169,7 +171,7 @@ function AdminModelsPage() {
   }
 
   return (
-    <div className="max-w-6xl mx-auto p-6" data-testid="admin-models">
+    <div className="max-w-6xl mx-auto p-4 md:p-6" data-testid="admin-models">
       <PageHeader
         className="mb-6"
         title="Models"
@@ -236,8 +238,8 @@ function AdminModelsPage() {
         <h2 className="text-sm font-semibold text-slate-200 mb-2 flex items-center gap-2">
           <Brain className="w-4 h-4 text-amber-300" /> ML Models
         </h2>
-        <div className="rounded-xl border border-slate-700/60 bg-slate-900/40 overflow-hidden">
-          <table className="w-full text-xs">
+        <div className="rounded-xl border border-slate-700/60 bg-slate-900/40 overflow-x-auto">
+          <table className="w-full min-w-[760px] text-xs">
             <thead className="bg-slate-900/60 text-slate-400">
               <tr>
                 <th className="text-left px-3 py-2 font-medium">Name</th>
@@ -310,6 +312,13 @@ function AdminModelsPage() {
                         >
                           View
                         </a>
+                        <button
+                          onClick={() => setEditing(m)}
+                          className="px-2 py-1 rounded border border-slate-700/60 bg-slate-900/40 text-slate-300 hover:bg-slate-800/60 text-[10px] inline-flex items-center gap-1"
+                          data-testid={`ml-edit-${m.name}`}
+                        >
+                          <Pencil className="w-3 h-3" /> Edit
+                        </button>
                         {!deployed && m.status === 'ready' && (
                           <button
                             onClick={() => deployModel(m.id)}
@@ -346,8 +355,8 @@ function AdminModelsPage() {
         <h2 className="text-sm font-semibold text-slate-200 mb-2 flex items-center gap-2">
           <Sparkles className="w-4 h-4 text-cyan-300" /> LLM Catalog
         </h2>
-        <div className="rounded-xl border border-slate-700/60 bg-slate-900/40 overflow-hidden">
-          <table className="w-full text-xs">
+        <div className="rounded-xl border border-slate-700/60 bg-slate-900/40 overflow-x-auto">
+          <table className="w-full min-w-[760px] text-xs">
             <thead className="bg-slate-900/60 text-slate-400">
               <tr>
                 <th className="text-left px-3 py-2 font-medium">Model</th>
@@ -416,12 +425,60 @@ function AdminModelsPage() {
         </div>
       </section>
 
+      <EditModelModal model={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); setRefreshKey((k) => k + 1); }} />
+
       <p className="text-[11px] text-slate-500 mt-3">
         ML models from <code className="text-cyan-300">/api/ml-models</code>; LLM catalog from <code className="text-cyan-300">/api/llm-models</code>.
         Edit pricing in <a className="text-cyan-300 hover:underline" href="/admin/llm-pricing">LLM Pricing</a>;
         change defaults in <a className="text-cyan-300 hover:underline" href="/admin/llm-settings">Model Selection</a>.
       </p>
     </div>
+  );
+}
+
+function EditModelModal({ model, onClose, onSaved }: { model: MLModel | null; onClose: () => void; onSaved: () => void }) {
+  const [description, setDescription] = useState('');
+  const [tags, setTags] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState('');
+  useEffect(() => {
+    if (model) { setDescription(model.description || ''); setTags((model.tags || []).join(', ')); setErr(''); }
+  }, [model]);
+  const save = async () => {
+    if (!model) return;
+    setSaving(true); setErr('');
+    const r = await apiFetch(`/api/ml-models/${model.id}`, {
+      method: 'PUT',
+      throwOnError: false,
+      body: JSON.stringify({ description: description.trim(), tags: tags.split(',').map((t) => t.trim()).filter(Boolean) }),
+    });
+    setSaving(false);
+    if (r.error) { setErr(r.error); return; }
+    toastSuccess('Model updated', `${model.name} v${model.version}`);
+    onSaved();
+  };
+  return (
+    <ResponsiveModal open={model !== null} onClose={onClose} title={model ? `Edit ${model.name} v${model.version}` : 'Edit model'} maxWidth="max-w-md">
+      <div className="space-y-3" data-testid="ml-edit-modal">
+        <label className="block text-xs text-slate-400">
+          Description
+          <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={3} maxLength={2000} data-testid="ml-edit-description"
+            className="mt-1 w-full px-3 py-2 bg-slate-800/50 border border-slate-700 rounded-lg text-sm text-white focus:outline-none focus:border-cyan-500" />
+        </label>
+        <label className="block text-xs text-slate-400">
+          Tags, separated by commas
+          <input value={tags} onChange={(e) => setTags(e.target.value)} data-testid="ml-edit-tags" placeholder="fraud, tabular"
+            className="mt-1 w-full px-3 py-2 bg-slate-800/50 border border-slate-700 rounded-lg text-sm text-white focus:outline-none focus:border-cyan-500" />
+        </label>
+        {err && <p role="alert" className="text-xs text-red-400">{err}</p>}
+        <div className="flex justify-end gap-2 pt-1">
+          <button onClick={onClose} className="px-4 py-2 text-sm text-slate-400 hover:text-white">Cancel</button>
+          <button onClick={save} disabled={saving} data-testid="ml-edit-save" className="flex items-center gap-2 px-4 py-2 bg-cyan-500/20 border border-cyan-500/40 text-cyan-300 text-sm rounded-lg hover:bg-cyan-500/30 disabled:opacity-50">
+            {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />} Save
+          </button>
+        </div>
+      </div>
+    </ResponsiveModal>
   );
 }
 

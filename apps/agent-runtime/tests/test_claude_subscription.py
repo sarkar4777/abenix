@@ -235,3 +235,46 @@ def test_effort_maps_from_temperature():
     assert _effort_for_temperature(0.2) == "low"
     assert _effort_for_temperature(0.5) == "medium"
     assert _effort_for_temperature(1.0) == "high"
+
+
+def test_state_is_the_single_source_for_defaults():
+    from engine.claude_subscription import (
+        DEFAULT_SUBSCRIPTION_MODEL,
+        subscription_state,
+    )
+
+    # env token with no stored rows counts as on, everywhere
+    s = subscription_state({}, "sk-ant-oat-real")
+    assert s == {
+        "enabled": True,
+        "default_model": DEFAULT_SUBSCRIPTION_MODEL,
+        "exclusive": True,
+    }
+    assert subscription_state({}, "")["enabled"] is False
+    off = subscription_state(
+        {
+            "llm.subscription.enabled": "false",
+            "llm.subscription.exclusive": "false",
+            "llm.subscription.default_model": "claude-sonnet-5",
+        },
+        "sk-ant-oat-real",
+    )
+    assert off == {
+        "enabled": False,
+        "default_model": "claude-sonnet-5",
+        "exclusive": False,
+    }
+
+
+def test_api_default_matches_runtime():
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "api"))
+    from app.core.platform_settings import DEFAULTS
+    from engine.claude_subscription import DEFAULT_SUBSCRIPTION_MODEL
+
+    assert (
+        DEFAULTS["llm.subscription.default_model"]["value"]
+        == DEFAULT_SUBSCRIPTION_MODEL
+    )

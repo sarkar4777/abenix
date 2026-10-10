@@ -7,7 +7,6 @@ import hashlib
 import json
 import logging
 import os
-import shlex
 import time
 from pathlib import Path
 from typing import Any
@@ -402,12 +401,12 @@ class CodeAssetTool(BaseTool):
                 bash = (
                     "set -e; "
                     "mkdir -p /tmp/app; "
-                    'printf "%s" "$_ASSET_TGZ_B64" | base64 -d > /tmp/asset.tgz; '
+                    "cp /in/asset.tgz /tmp/asset.tgz; "
                     # The cache tarball was rolled from /tmp and contains
                     # `app/`, so it extracts to /tmp/app — but the entrypoint
                     # has to RUN from /tmp/app, not /tmp.
                     "cd /tmp && tar -xzf /tmp/asset.tgz; "
-                    'printf "%s" "$_ASSET_INPUT_B64" | base64 -d > /tmp/input.json; '
+                    "cp /in/input.json /tmp/input.json; "
                     "cd /tmp/app; "
                     f"{run_wrapped}"
                 )
@@ -420,7 +419,7 @@ class CodeAssetTool(BaseTool):
                 bash = (
                     "set -e; "
                     "mkdir -p /tmp/app; "
-                    'printf "%s" "$_ASSET_TGZ_B64" | base64 -d > /tmp/asset.tgz; '
+                    "cp /in/asset.tgz /tmp/asset.tgz; "
                     "cd /tmp/app && tar -xzf /tmp/asset.tgz; "
                     f"{{ {build_cmd}; }} 1>&2; "
                     # Snapshot from /tmp so we pick up both the source tree
@@ -433,14 +432,14 @@ class CodeAssetTool(BaseTool):
                     # died with "python: can't open file '/tmp/main.py'".
                     "( cd /tmp && tar -czf - --ignore-failed-read app bin 2>/dev/null | base64 ) >&2; "
                     "echo '___BUILD_CACHE_END___' >&2; "
-                    'printf "%s" "$_ASSET_INPUT_B64" | base64 -d > /tmp/input.json; '
+                    "cp /in/input.json /tmp/input.json; "
                     # Be explicit rather than relying on the cwd surviving.
                     "cd /tmp/app; "
                     f"{run_wrapped}"
                 )
 
-            run_env["_ASSET_TGZ_B64"] = asset_tgz_b64
-            run_env["_ASSET_INPUT_B64"] = input_b64
+            # files, not env vars, so an input over 128 KB still runs
+            run_files = {"asset.tgz": asset_tgz_b64, "input.json": input_b64}
 
             sandbox = SandboxedJobTool(
                 tenant_id=self._tenant_id, redis_url=self._redis_url
@@ -454,6 +453,7 @@ class CodeAssetTool(BaseTool):
                     "cpu_limit": 2.0,
                     "network": want_network,
                     "env": run_env,
+                    "files_b64": run_files,
                 }
             )
 
@@ -543,6 +543,7 @@ class CodeAssetTool(BaseTool):
 
             run_env["_DL_URL"] = download_url
             run_env["_DL_AUTH"] = auth_header
+            run_files = {"input.json": input_b64}
 
             # A bootstrap that ends in a newline closed a heredoc, so the next
             # command starts on a fresh line rather than after a semicolon.
@@ -552,7 +553,7 @@ class CodeAssetTool(BaseTool):
                 "mkdir -p /tmp/app; "
                 f"{boot}{boot_sep}"
                 "cd /tmp/app; "
-                f"echo {shlex.quote(input_b64)} | base64 -d > /tmp/input.json; "
+                "cp /in/input.json /tmp/input.json; "
                 f"{{ {build_cmd}; }} 1>&2; "
                 f"cat /tmp/input.json | {{ {run_cmd}; }}"
             )
@@ -571,6 +572,7 @@ class CodeAssetTool(BaseTool):
                     "cpu_limit": 2.0,
                     "network": want_network,
                     "env": run_env,
+                    "files_b64": run_files,
                 }
             )
 
@@ -599,7 +601,14 @@ class CodeAssetTool(BaseTool):
             or sandbox_result.metadata.get("logs")
             or ""
         )
-        logger.info("code_asset: raw stdout (%d bytes): %s", len(stdout), stdout[:1000])
+        from engine.log_redaction import content_logging_enabled
+
+        if content_logging_enabled():
+            logger.info(
+                "code_asset: raw stdout (%d bytes): %s", len(stdout), stdout[:1000]
+            )
+        else:
+            logger.info("code_asset: raw stdout (%d bytes)", len(stdout))
 
         # Extract what's between our explicit output sentinels — this is
         # the ONLY content the asset itself wrote to stdout after running.
@@ -825,6 +834,14 @@ def _note_last_test(
     t.add_done_callback(_BG.discard)
 
 
+def _bounded_json(value: Any, limit: int = 20_000) -> str:
+    """JSON for a jsonb column, replaced by a size note when too big, since a cut string is not JSON."""
+    text = json.dumps(value, default=str)
+    if len(text) <= limit:
+        return text
+    return json.dumps({"truncated": True, "size": len(text)})
+
+
 async def _record_last_test(
     db_url: str,
     asset_id: str,
@@ -852,13 +869,32 @@ async def _record_last_test(
                 ),
                 {
                     "aid": asset_id,
-                    "inp": json.dumps(input_payload)[:20_000],
-                    "out": json.dumps(output)[:20_000],
+                    "inp": _bounded_json(input_payload),
+                    "out": _bounded_json(output),
                     "ok": ok,
                 },
             )
     except Exception as e:
         logger.debug("code_asset record_last_test failed: %s", e)
+
+
+_VALIDATORS: dict[str, Any] = {}
+
+
+def _validator(schema: dict[str, Any]) -> Any:
+    """One checked, compiled validator per schema. jsonschema.validate re-checks the schema on every call."""
+    import jsonschema  # type: ignore
+
+    key = json.dumps(schema, sort_keys=True, default=str)
+    v = _VALIDATORS.get(key)
+    if v is None:
+        cls = jsonschema.validators.validator_for(schema)
+        cls.check_schema(schema)
+        v = cls(schema)
+        if len(_VALIDATORS) > 256:
+            _VALIDATORS.clear()
+        _VALIDATORS[key] = v
+    return v
 
 
 def _validate_against_schema(payload: Any, schema: dict[str, Any]) -> str:
@@ -870,7 +906,11 @@ def _validate_against_schema(payload: Any, schema: dict[str, Any]) -> str:
         import jsonschema  # type: ignore
 
         try:
-            jsonschema.validate(payload, schema)
+            err = jsonschema.exceptions.best_match(
+                _validator(schema).iter_errors(payload)
+            )
+            if err is not None:
+                raise err
             return ""
         except jsonschema.ValidationError as e:
             # e.message on its own is clearer than the default string
@@ -904,13 +944,18 @@ def _validate_against_schema(payload: Any, schema: dict[str, Any]) -> str:
     return ""
 
 
+# set once we know the database has no per-asset secrets table
+_NO_SECRETS_TABLE = False
+
+
 async def _collect_secrets(
     db_url: str,
     tenant_id: str,
     asset_id: str,
 ) -> dict[str, str]:
     """Load per-asset secrets and return them as a {KEY: value} dict"""
-    if not db_url:
+    global _NO_SECRETS_TABLE
+    if not db_url or _NO_SECRETS_TABLE:
         return {}
     try:
         from sqlalchemy import text as sql_text
@@ -920,6 +965,13 @@ async def _collect_secrets(
         engine = _engine(db_url)
         rows: list[tuple[str, bytes, bytes]] = []
         async with engine.begin() as conn:
+            # no migration creates this table, so look once instead of failing every call
+            exists = (
+                await conn.execute(sql_text("SELECT to_regclass('code_asset_secrets')"))
+            ).scalar()
+            if exists is None:
+                _NO_SECRETS_TABLE = True
+                return {}
             try:
                 r = await conn.execute(
                     sql_text(

@@ -1,6 +1,6 @@
 # State machines
 
-> The long-lived things in this platform each carry a status column with a small set of legal values. Knowing them is how you debug "why is this execution stuck on running" with confidence. This page collects them in one place, taken from the enums and the code that moves between them.
+> The long-lived things in this platform each carry a status column with a small set of legal values. Knowing them is how you debug "why is this execution stuck on running". This page collects them in one place, taken from the enums and the code that moves between them.
 
 ---
 
@@ -33,9 +33,9 @@ A run never goes back to `running`. Replays create a new row with `parent_execut
 1. **The runtime finishes.** The queue consumer, or the API on the inline path, writes the terminal status, output, tokens, cost, `risk_tier`, `risk_reasons`, `failure_code`, `tool_calls`, `node_results` and `execution_trace` in one update. See [00-agent-execution](00-agent-execution.md).
 2. **The runtime raises.** The row is failed with `classify_exception(e)` as the code, and a `dead_letter_executions` row is written for replay.
 3. **The client goes away.** A streaming run on the inline path whose client disconnects is failed with `CLIENT_DISCONNECTED`, if it is still `running`.
-4. **The stale sweep.** Every 5 minutes the API scheduler job `sweep_stale_executions`, on one replica at a time through an advisory lock, finds `running` rows older than `STALE_EXECUTION_MAX_MINUTES` (default 10) by `created_at`. Rows whose execution has a `hitl:waiting:<id>` key in Redis are skipped, because they are waiting on an approval gate. The rest are failed with `STALE_SWEEP` and the owners are notified. If the Redis lookup fails, the sweep skips that tick.
+4. **The stale sweep.** Every 5 minutes the API scheduler job `sweep_stale_executions`, on one replica at a time through an advisory lock, finds `running` rows older than `STALE_EXECUTION_MAX_MINUTES` (default 10) by `created_at` whose runtime lease has lapsed or was never set. Rows whose execution has a `hitl:waiting:<id>` key in Redis are skipped, because they are waiting on an approval gate. The rest are failed with `STALE_SWEEP` and the owners are notified. If the Redis lookup fails, the sweep skips that tick.
 
-So the longest a dead run shows as `running` is about the max age plus the 5 minute interval, unless it was waiting on a gate.
+So the longest a dead run shows as `running` is about the max age plus the 5 minute interval, unless it was waiting on a gate. A run whose pod is alive and renewing its lease is never swept, however old it is.
 
 Every update that moves `status` to `completed` or `failed` fires the `executions_emit_event` trigger, which writes `execution.completed` or `execution.failed` to the event outbox. See [19-outbound-events](19-outbound-events.md).
 
@@ -62,11 +62,12 @@ Derived from an error message by `classify_exception` in [`apps/api/app/core/fai
 
 | failure_code | Matches |
 |---|---|
-| `STALE_SWEEP` | "stuck in running", "owning process likely crashed" |
-| `CONFIG_UNKNOWN_MODEL` | "unknown model", "unrecognised model" |
-| `LLM_RATE_LIMIT` | "rate limit", "429", "too many" |
+| `STALE_SWEEP` | "stuck in running", "sweep … backfill", "owning process likely crashed" |
+| `CONFIG_UNKNOWN_MODEL` | "unknown model", "unrecognised model", "unrecognized model" |
+| `RATE_LIMITED` | Our own limits: `RATE_LIMITED`, "by its rate limit" (per-agent `rate_limit_qps`), "rate limit (per-…" (tool gate), "rate limit … user", "too many requests from", "over its limits". Checked before the provider rule, whose bare "rate limit" would match these too |
+| `LLM_RATE_LIMIT` | "rate limit", "429", "too many", from the provider |
 | `LLM_PROVIDER_ERROR` | Anthropic, OpenAI or Gemini error or exception |
-| `LLM_INVALID_RESPONSE` | JSON decode errors, "invalid response" |
+| `LLM_INVALID_RESPONSE` | JSON decode errors, "invalid response", "expecting value" |
 | `SANDBOX_OOM` | "oom kill", "memory limit exceeded" |
 | `SANDBOX_TIMEOUT` | "deadline exceeded", "timeout", "timed out" |
 | `SANDBOX_NONZERO_EXIT` | "exit code 1" and up, "non-zero exit" |
@@ -77,16 +78,17 @@ Derived from an error message by `classify_exception` in [`apps/api/app/core/fai
 | `TOOL_NOT_FOUND` | "tool not found", "unknown tool" |
 | `TOOL_ERROR` | "ToolError", "tool error", "tool exception" |
 | `BUDGET_EXCEEDED` | "budget", "quota", "insufficient credit", "spending limit". The daily caps set it directly on runs they refuse |
-| `RATE_LIMITED` | "rate limit user", "too many requests" |
 | `INFRA_CRASH` | "connection refused", "connection reset", "broken pipe", "server disconnect" |
 | `LLM_AUTH_ERROR` | "authentication_error", "oauth access token", invalid or revoked API key |
 | `INFRA_AUTH_ERROR` | "unauthorized", "forbidden", "401", "403" |
 
-Anything else is `UNKNOWN_ERROR`. Every terminal outcome increments `abenix_executions_failed_total{failure_code}` or the completed counter.
+The text matched is `<ExceptionClassName>: <message>`, lowercased, so class names such as `ToolError` count too. Anything else is `UNKNOWN_ERROR`.
+
+Every terminal outcome increments `abenix_execution_outcomes_total` and `abenix_executions_completed_total{status=success|failed}`. Failures also increment `abenix_executions_failed_total{failure_code}`, with `UNKNOWN` when the code is empty.
 
 ### Cost columns
 
-`cost`, `anthropic_cost`, `openai_cost`, `google_cost` and `other_cost` are written on the terminal update. While a run is going they hold their defaults, so a "spend this hour" view only counts finished runs. A long run adds its whole cost when it ends. A cost of 0 is written as 0, so NULL means it was never recorded.
+`cost` is written on the terminal update. The per-provider columns `anthropic_cost`, `openai_cost`, `google_cost` and `other_cost` are written with it. An agent run splits by the model each LLM call used, a pipeline by each step's model. A writer that sets only the total gets it filed under the provider of `model_used`, through an ORM hook on `Execution`. While a run is going they hold their defaults, so a "spend this hour" view only counts finished runs. A long run adds its whole cost when it ends. A cost of 0 is written as 0, so NULL means it was never recorded.
 
 ---
 
@@ -198,7 +200,7 @@ See [10-pipeline-healing-drift](10-pipeline-healing-drift.md).
 
 ## Dead letters
 
-`dead_letter_executions` ([`packages/db/models/dead_letter.py`](../../packages/db/models/dead_letter.py)) has no status enum. A row is written once per execution when the runtime raises, with `failure_code`, `error_message` and the original input. `POST /api/admin/dlq/{id}/replay` dispatches a new execution, bumps `replay_count`, sets `replay_execution_id`, and sets `resolved` once the replay was dispatched.
+`dead_letter_executions` ([`packages/db/models/dead_letter.py`](../../packages/db/models/dead_letter.py)) has no status enum. A row is written once per execution when the runtime raises, or when a queued agent run ends with a platform error such as an unknown model, with `failure_code`, `error_message` and the original input. Moderation blocks, grounding violations and missing required tools are not dead-lettered, a replay would fail the same way. The replay runs on the agent as it is now, so fix the cause first. `POST /api/admin/dlq/{id}/replay` dispatches a new execution, bumps `replay_count`, sets `replay_execution_id`, and sets `resolved` once the replay was dispatched.
 
 ---
 
@@ -279,7 +281,7 @@ No. Create a new approval. The old row stays as history.
 Look at `execution_trace.pipeline_status`. `partial` means some nodes completed. `node_results` has each node's error.
 
 **Q: An execution has been `running` for an hour. What now?**
-Check Redis for `hitl:waiting:<id>`. If it is there the run is waiting on an approval, see `/approvals`. If not, the sweeper should have failed it after 10 to 15 minutes, so check that the API scheduler is running.
+Check Redis for `hitl:waiting:<id>`. If it is there the run is waiting on an approval, see `/approvals`. If not, check `lease_expires_at`. A live lease means a runtime pod still owns the run. Otherwise the sweeper should fail it within about 10 to 15 minutes, so check that the API scheduler is running.
 
 **Q: Two clients sent the same `Idempotency-Key` at the same time. Which wins?**
 The first insert wins. The second sees no cached response yet and runs too. Only a retry after the first run returned gets the cached response.

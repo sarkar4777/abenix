@@ -133,7 +133,7 @@ pipeline_config:
       label: "2b. Lookup live BNEF cost coefficients"
       arguments:
         operation: get
-        feed_key: bnef-offshore-wind-capex-per-mw
+        feed_id: bnef-offshore-wind-capex-per-mw
         max_age_seconds: 86400
       depends_on:
         - configure_scenarios

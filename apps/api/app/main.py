@@ -165,6 +165,7 @@ app.add_middleware(
         "X-Request-ID",
         "X-API-Key",
         "X-CIQ-Key",
+        "X-Abenix-Subject",
         "If-Match",
         "If-None-Match",
     ],
@@ -262,6 +263,11 @@ app.include_router(auth.router)
 from app.routers import sso as _sso_router
 
 app.include_router(_sso_router.router)
+from app.routers import sso_oidc as _sso_oidc_router
+from app.routers import two_factor as _two_factor_router
+
+app.include_router(_sso_oidc_router.router)
+app.include_router(_two_factor_router.router)
 from app.routers import (
     document_grants as _doc_grants_mod,
     knowledge_v2 as _kb_v2_mod,
@@ -388,11 +394,13 @@ from app.routers import (
     connectors as connectors_router,
     approvals as approvals_router,
     admin_dlq as admin_dlq_router,
+    admin_jobs as admin_jobs_router,
 )
 
 app.include_router(connectors_router.router)
 app.include_router(approvals_router.router)
 app.include_router(admin_dlq_router.router)
+app.include_router(admin_jobs_router.router)
 
 from app.routers import search as search_router, admin_cluster as admin_cluster_router
 from app.routers import admin_alerts as admin_alerts_router
@@ -433,6 +441,9 @@ app.include_router(inbox_router.router)
 async def on_startup():
     """Create any missing database tables from SQLAlchemy models."""
     from app.core.deps import engine as db_engine
+    from app.core.secret_storage import check_at_startup
+
+    check_at_startup()
 
     import sys
     from pathlib import Path

@@ -67,7 +67,8 @@ final class MockServer implements AutoCloseable {
             byte[] body = readBody(ex);
             Map<String, String> headers = new HashMap<>();
             ex.getRequestHeaders().forEach((k, v) -> headers.put(k, String.join(",", v)));
-            log.add(new Recorded(ex.getRequestMethod(), fullPath, headers, new String(body, StandardCharsets.UTF_8)));
+            log.add(new Recorded(ex.getRequestMethod(), fullPath, headers, new String(body, StandardCharsets.UTF_8),
+                ex.getRequestURI().getRawQuery()));
 
             Route r = matched == null ? null : routes.get(matched);
             if (r == null) {
@@ -92,5 +93,5 @@ final class MockServer implements AutoCloseable {
     }
 
     record Route(int status, String contentType, String body) {}
-    record Recorded(String method, String path, Map<String, String> headers, String body) {}
+    record Recorded(String method, String path, Map<String, String> headers, String body, String query) {}
 }

@@ -32,7 +32,10 @@ _KEY_EXCLUSIVE = "llm.subscription.exclusive"
 # Env fallbacks so a headless install can run without touching the UI.
 _ENV_TOKEN = ("CLAUDE_SUBSCRIPTION_TOKEN", "ANTHROPIC_AUTH_TOKEN")
 
-DEFAULT_SUBSCRIPTION_MODEL = "claude-opus-5"
+# The one default for the runtime, the admin page and the model pickers. Haiku
+# because exclusive mode pins every call to it and one pipeline can fan out to a
+# dozen sub-agents, so the tightest-limited model 429s a fresh install.
+DEFAULT_SUBSCRIPTION_MODEL = "claude-haiku-4-5"
 
 # Requests naming a non-Claude model get remapped onto a Claude tier of
 # roughly comparable standing so an exclusive subscription can serve them.
@@ -163,6 +166,25 @@ def _env_token() -> str:
     return ""
 
 
+def subscription_state(rows: dict[str, str], token: str) -> dict[str, object]:
+    """enabled, default_model and exclusive from the stored rows.
+
+    The API's admin page and model pickers call this too, so what they show is
+    what the runtime does.
+    """
+    # An env-only install has no settings row, so a bare env token is opt-in. A stored row wins.
+    if _KEY_ENABLED in rows:
+        enabled = _truthy(rows[_KEY_ENABLED])
+    else:
+        enabled = _is_real_token(token)
+    return {
+        "enabled": enabled,
+        "default_model": str(rows.get(_KEY_MODEL) or "").strip()
+        or DEFAULT_SUBSCRIPTION_MODEL,
+        "exclusive": _truthy(rows[_KEY_EXCLUSIVE]) if _KEY_EXCLUSIVE in rows else True,
+    }
+
+
 def get_config(refresh: bool = False) -> SubscriptionConfig:
     """Current subscription config, cached for 30s."""
     global _CACHE, _CACHE_AT
@@ -172,23 +194,7 @@ def get_config(refresh: bool = False) -> SubscriptionConfig:
 
     rows = _read_settings()
     token = rows.get(_KEY_TOKEN, "").strip() or _env_token()
-    # An env-only install has no settings row, so treat a bare env token as
-    # opt-in. A stored row always wins.
-    if _KEY_ENABLED in rows:
-        enabled = _truthy(rows[_KEY_ENABLED])
-    else:
-        enabled = _is_real_token(token)
-
-    cfg = SubscriptionConfig(
-        enabled=enabled,
-        token=token,
-        default_model=rows.get(_KEY_MODEL, "").strip() or DEFAULT_SUBSCRIPTION_MODEL,
-        exclusive=(
-            _truthy(rows.get(_KEY_EXCLUSIVE, "true"))
-            if _KEY_EXCLUSIVE in rows
-            else True
-        ),
-    )
+    cfg = SubscriptionConfig(token=token, **subscription_state(rows, token))
     _CACHE = cfg
     _CACHE_AT = now
     return cfg

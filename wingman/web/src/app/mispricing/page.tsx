@@ -113,6 +113,13 @@ interface ScanResponse {
 }
 
 const TERMINAL = new Set(['completed', 'succeeded', 'failed', 'error', 'cancelled']);
+// the extractor makes ~25 tool calls, give it room before calling the poll dead
+const SCAN_POLL_LIMIT_MS = 10 * 60_000;
+
+interface ScanError {
+  message: string;
+  executionId?: string | null;
+}
 
 const FEATURE_LABELS: Record<string, string> = {
   origin_spot_z: 'Origin spot z',
@@ -149,6 +156,7 @@ export default function MispricingPage() {
   const [activeExecution, setActiveExecution] = useState<string | null>(null);
   const [gateOpened, setGateOpened] = useState<string | null>(null);
   const [gateError, setGateError] = useState<string | null>(null);
+  const [scanError, setScanError] = useState<ScanError | null>(null);
   const pollers = useRef<Record<string, ReturnType<typeof setInterval>>>({});
 
   useEffect(() => {
@@ -192,6 +200,7 @@ export default function MispricingPage() {
     setRunning(false);
     setActiveExecution(null);
     setMeta(null);
+    setScanError(null);
     setGateOpened(null);
     loadCached(selectedId, { resetIfMissing: true }).then(() => { if (cancelled) return; });
     const poll = setInterval(() => {
@@ -204,18 +213,26 @@ export default function MispricingPage() {
 
   const runScan = async () => {
     if (!selectedId) return;
+    const corridorId = selectedId;
     setRunning(true);
-    setMeta(null);
+    setScanError(null);
     setGateError(null);
+    const fail = (message: string, executionId?: string | null) => {
+      setScanError({ message, executionId });
+      setRunning(false);
+    };
     try {
-      const r = await fetch(`/api/wingman/mispricing/${selectedId}/scan`, {
+      const r = await fetch(`/api/wingman/mispricing/${corridorId}/scan`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({}),
       });
-      const j = await r.json();
-      const execId = j?.data?.execution_id;
-      if (!execId) { setRunning(false); return; }
+      const j = await r.json().catch(() => ({}));
+      const execId: string | undefined = j?.data?.execution_id;
+      if (!r.ok || !execId) {
+        fail(j?.detail || j?.error || `The scan could not start (HTTP ${r.status}).`);
+        return;
+      }
       setActiveExecution(execId);
       registerExecution({
         pageId: 'mispricing',
@@ -224,24 +241,41 @@ export default function MispricingPage() {
         title: corridors.find((c) => c.id === selectedId)?.label || selectedId || 'mispricing',
         subjectId: selectedId || undefined,
       });
+      const startedAt = Date.now();
+      const stop = () => {
+        clearInterval(t);
+        delete pollers.current[execId];
+      };
       const t = setInterval(async () => {
+        if (Date.now() - startedAt > SCAN_POLL_LIMIT_MS) {
+          stop();
+          fail('No result after 10 minutes. The run may still finish in Abenix, check its trace.', execId);
+          return;
+        }
         try {
           const rr = await fetch(`/api/wingman/mispricing-result/${execId}`);
           const jj = await rr.json();
           const data: ScanResponse | undefined = jj?.data;
           if (!data) return;
           if (TERMINAL.has((data.status || '').toLowerCase())) {
-            setMeta(data);
-            setScan(data.scan || null);
-            setRunning(false);
-            clearInterval(t);
-            delete pollers.current[execId];
+            stop();
+            if (data.scan) {
+              setMeta(data);
+              setScan(data.scan);
+              setRunning(false);
+              // the drawer covers the gate button, close it once the result is on the page
+              setActiveExecution(null);
+              loadCached(corridorId, { resetIfMissing: false });
+            } else {
+              // keep the last good scan on screen and leave the trace open
+              fail(data.error_message || `The scan ended with status ${data.status}.`, execId);
+            }
           }
         } catch { /* keep polling */ }
       }, 2500);
       pollers.current[execId] = t;
-    } catch {
-      setRunning(false);
+    } catch (e: any) {
+      fail(e?.message ? `Could not reach the Wingman API: ${e.message}` : 'Could not reach the Wingman API.');
     }
   };
 
@@ -332,11 +366,22 @@ export default function MispricingPage() {
         </div>
       </section>
 
-      {meta?.status?.toLowerCase() === 'failed' && (
-        <div className="mb-4 border border-rose-500/30 bg-rose-500/5 rounded-lg p-3 text-[11px] text-rose-200">
-          <div className="font-semibold mb-1 uppercase tracking-wider text-[10px]">Scan failed</div>
-          <div className="font-mono break-words text-rose-100/80 leading-relaxed">
-            {meta.error_message || 'No error detail returned by the platform.'}
+      {scanError && (
+        <div
+          role="alert"
+          data-testid="mispricing-scan-error"
+          className="mb-4 border border-rose-500/30 bg-rose-500/5 rounded-lg p-3 text-[11px] text-rose-200"
+        >
+          <div className="flex items-center gap-1.5 font-semibold mb-1 uppercase tracking-wider text-[10px]">
+            <AlertTriangle className="w-3.5 h-3.5" /> Scan did not produce a result
+          </div>
+          <div className="font-mono break-words text-rose-100/80 leading-relaxed">{scanError.message}</div>
+          <div className="mt-2 text-rose-100/70 leading-relaxed">
+            {scan ? 'The last good scan stays on screen. ' : ''}
+            Click Score to run it again.
+            {scanError.executionId
+              ? ` If it fails again, open run #${scanError.executionId.slice(0, 8)} in the live trace or in Abenix Executions to see which step failed.`
+              : ' If it fails again, check that the Wingman API is up and its Abenix key is set.'}
           </div>
         </div>
       )}
@@ -891,6 +936,47 @@ function DriversList({ drivers }: { drivers: Driver[] }) {
   );
 }
 
+// follows the gate after it opens, so the trader sees the desk's decision here
+function GateStatus({ approvalId }: { approvalId: string }) {
+  const [status, setStatus] = useState<string>('pending');
+  const [by, setBy] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    const tick = async () => {
+      try {
+        const r = await fetch(`/api/wingman/approvals/${approvalId}`);
+        if (!r.ok) return;
+        const row = (await r.json())?.data || {};
+        if (!live) return;
+        setStatus(row.status || 'pending');
+        const last = Array.isArray(row.signoffs) && row.signoffs.length ? row.signoffs[row.signoffs.length - 1] : null;
+        setBy(last?.user_email || null);
+      } catch {
+        /* keep the last known state */
+      }
+    };
+    void tick();
+    const t = setInterval(() => { if (status === 'pending') void tick(); }, 4000);
+    return () => { live = false; clearInterval(t); };
+  }, [approvalId, status]);
+  const tone = status === 'approved' ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-200'
+    : status === 'pending' ? 'border-cyan-500/40 bg-cyan-500/10 text-cyan-200'
+    : 'border-rose-500/40 bg-rose-500/10 text-rose-200';
+  return (
+    <div className="flex flex-col items-end gap-1">
+      <div className={`px-3 py-1.5 rounded-lg border text-[11px] font-semibold flex items-center gap-1.5 ${tone}`}
+        data-testid="trade-gate-opened" data-status={status}>
+        <ShieldCheck className="w-3.5 h-3.5" /> Gate #{approvalId.slice(0, 8)} {status}{by && status !== 'pending' ? ` by ${by}` : ''}
+      </div>
+      {status === 'pending' && (
+        <a href="/approvals" className="text-[10px] text-cyan-300 hover:underline" data-testid="trade-gate-review">
+          Review it in Approvals
+        </a>
+      )}
+    </div>
+  );
+}
+
 function TradeCardPanel({
   trade, verdict, direction, gateOpened, gateError, onOpenGate,
 }: {
@@ -927,9 +1013,7 @@ function TradeCardPanel({
               <ShieldCheck className="w-3.5 h-3.5" /> Open approval gate
             </button>
           ) : (
-            <div className="px-3 py-1.5 rounded-lg border border-emerald-500/40 bg-emerald-500/10 text-emerald-200 text-[11px] font-semibold flex items-center gap-1.5" data-testid="trade-gate-opened">
-              <ShieldCheck className="w-3.5 h-3.5" /> Gate #{String(gateOpened).slice(0, 8)} pending
-            </div>
+            <GateStatus approvalId={gateOpened} />
           )}
           {gateError && (
             <div className="text-[10px] text-rose-300 flex items-center gap-1"><AlertTriangle className="w-3 h-3" /> {gateError}</div>

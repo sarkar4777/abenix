@@ -12,6 +12,10 @@ from fastapi.responses import JSONResponse, StreamingResponse
 logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO").upper())
 logger = logging.getLogger("agent-runtime")
 
+from engine import log_redaction  # noqa: E402
+
+log_redaction.install()
+
 app = FastAPI(title="Abenix Runtime", version="0.1.0")
 
 
@@ -81,6 +85,9 @@ async def _build_runtime_gate(body: dict):
             redaction_mask=str(gate_dict.get("redaction_mask") or "█████"),
             fail_closed=bool(gate_dict.get("fail_closed", False)),
             event_sink=None,  # events persist on the API side after the run
+            moderation=bool(gate_dict.get("moderation", True)),
+            dlp_mode=str(gate_dict.get("dlp_mode") or ""),
+            dlp_custom_patterns=dict(gate_dict.get("dlp_custom_patterns") or {}),
         )
     except Exception as e:
         logger.warning("could not rehydrate moderation gate from payload: %s", e)

@@ -101,11 +101,15 @@ test.describe.serial('Wingman browser quality UAT', () => {
     const run = page.getByTestId('run-mispricing-scan');
     await expect(run).toBeVisible({ timeout: 10_000 });
 
-    // Capture scan response.
-    const respP = page.waitForResponse(
-      (r) => /scan|mispricing/i.test(r.url()) && r.request().method() === 'POST' && r.status() < 500,
-      { timeout: 200_000 },
-    ).catch(() => null);
+    // The scan POST only returns an execution id, the numbers arrive on the
+    // result poll. Keep the last result that carries them.
+    let scan: any = null;
+    page.on('response', async (r) => {
+      if (!/\/api\/wingman\/mispricing(-result\/|\/[^/]+\/cached)/.test(r.url()) || r.status() >= 400) return;
+      const j = await r.json().catch(() => null);
+      const d = j?.data?.scan ?? j?.data ?? j;
+      if (d && (d.fair_value_spread_usd_mt !== undefined || d.fair_value !== undefined)) scan = d;
+    });
 
     await run.click();
     await page.waitForTimeout(1000);
@@ -120,14 +124,7 @@ test.describe.serial('Wingman browser quality UAT', () => {
     const cardText = (await tradeCard.innerText().catch(() => '')) || '';
     const bodyText = (await page.evaluate(() => document.body.innerText || '')) || '';
 
-    // Capture scan from network too.
-    const resp = await respP;
-    let scan: any = null;
-    if (resp) {
-      const j = await resp.json().catch(() => null);
-      scan = j?.data || j;
-      console.log('Mispricing scan keys:', scan ? Object.keys(scan).join(',') : '(none)');
-    }
+    console.log('Mispricing scan keys:', scan ? Object.keys(scan).join(',') : '(none)');
 
     // Look for fair_value as a number anywhere on the page.
     const fairMatch = bodyText.match(/fair[ -]?value[^0-9-]{0,30}(-?\d[\d.,]*)/i);
@@ -153,32 +150,21 @@ test.describe.serial('Wingman browser quality UAT', () => {
     }
   });
 
-  test('4. compliance lens: submit fictional order and verify rule citation', async ({ page }) => {
-    // /compliance route does not exist in the public wingman UI.
-    // Visit it anyway and check whether the page renders or 404s.
-    const resp = await page.goto(`${BASE}/compliance`, { waitUntil: 'domcontentloaded' }).catch(() => null);
-    await shot(page, 'compliance-attempt');
-    const status = resp?.status() ?? 0;
-    console.log('compliance status =', status);
-    // If 404, document explicitly and fail-soft (the route simply does not exist in the deployed UI).
-    if (status === 404) {
-      test.fail(true, 'Compliance Lens UI route /compliance does not exist in current Wingman build');
-      return;
-    }
-    // If it loads, look for a counterparty input + amount input + submit.
-    const cpInput = page.locator('input[name*="counterparty" i], input[placeholder*="counterparty" i]').first();
-    const amtInput = page.locator('input[name*="amount" i], input[placeholder*="amount" i], input[type="number"]').first();
-    if (!(await cpInput.isVisible().catch(() => false)) || !(await amtInput.isVisible().catch(() => false))) {
-      test.fail(true, 'Compliance Lens form not found on /compliance page');
-      return;
-    }
-    await cpInput.fill('RuralPower Co');
-    await amtInput.fill('5000000');
-    const submit = page.getByRole('button', { name: /submit|run|check|validate/i }).first();
-    await submit.click();
-    await page.waitForTimeout(8000);
+  test('4. compliance lens: /compliance lands on the mispricing lens and checks the trade card', async ({ page }) => {
+    // /compliance is a same-origin redirect to /mispricing#compliance now, the
+    // check runs on the trade card the scan proposes rather than a form.
+    await page.goto(`${BASE}/compliance`, { waitUntil: 'domcontentloaded' });
+    await expect(page).toHaveURL(/\/mispricing#compliance$/);
+    const run = page.getByTestId('run-mispricing-scan');
+    await expect(run).toBeVisible({ timeout: 20_000 });
+    await run.click();
+    await expect(page.getByTestId('trade-card')).toBeVisible({ timeout: 180_000 });
+    const panel = page.getByTestId('compliance-panel');
+    await expect(panel).toBeVisible({ timeout: 30_000 });
+    await expect(panel).not.toContainText('Validating', { timeout: 150_000 });
     await shot(page, 'compliance-result');
-    const txt = await page.evaluate(() => document.body.innerText || '');
-    expect(/Regulation|Sanction|OFAC|rule|policy/i.test(txt), 'compliance output must cite a rule/regulation').toBeTruthy();
+    const txt = await panel.innerText();
+    expect(/ALLOWED|WARN|BLOCK/.test(txt), 'compliance gives a verdict').toBeTruthy();
+    expect(/Regulation|Sanction|OFAC|rule|policy|limit/i.test(txt), 'compliance output must cite a rule').toBeTruthy();
   });
 });

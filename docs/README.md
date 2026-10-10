@@ -1,8 +1,10 @@
 # Abenix Developer Documentation
 
-> A complete reference for architects and developers who want to understand the Abenix platform, extend it, add features, debug it, or build on top of its SDK.
+> The reference for architects and developers who want to understand the Abenix platform, extend it, debug it, or build on top of its SDK.
 
-These docs are written to be read **two ways**: on GitHub (the markdown renders Mermaid diagrams natively) or inside the app at `/docs` (which adds a sidebar, in-page anchors and full-text search). The app serves a copy from `apps/web/public/dev-docs/`, refreshed by `scripts/sync-dev-docs.sh`, which `scripts/check-before-push.sh` runs along with a check that every page here is in `manifest.json`.
+**New here? Start with [How Abenix fits together](00-how-abenix-fits-together.md).** It names the core objects, the roles, every word the app uses, and a first path per role.
+
+These docs read the same on GitHub (Mermaid diagrams render natively) and inside the app at `/docs` (with a sidebar and full-text search). The app serves a copy from `apps/web/public/dev-docs/`, refreshed by `scripts/sync-dev-docs.sh`. `scripts/check-doc-links.py` fails CI when a link breaks or a page here is missing from `manifest.json`.
 
 ---
 
@@ -10,6 +12,7 @@ These docs are written to be read **two ways**: on GitHub (the markdown renders 
 
 | If you're … | Start here |
 |---|---|
+| **New to Abenix**, any role | [00-how-abenix-fits-together](00-how-abenix-fits-together.md) |
 | **A new architect** trying to understand the whole system | [01-architecture/00-overview](01-architecture/00-overview.md) |
 | **A backend developer** adding a feature | [02-runtime/00-agent-execution](02-runtime/00-agent-execution.md) |
 | **A frontend developer** adding a page | [05-ui/00-app-shell](05-ui/00-app-shell.md) |
@@ -24,10 +27,17 @@ These docs are written to be read **two ways**: on GitHub (the markdown renders 
 | **You're adding business rules an agent must follow** | [08-howto/09-decisions](08-howto/09-decisions.md) |
 | **You're setting risk tiers, sign-off or kill switches** | [01-architecture/07-governance](01-architecture/07-governance.md) |
 | **You're testing agent quality before release** | [08-howto/10-evals](08-howto/10-evals.md) |
+| **You're letting an agent act on its own** | [08-howto/13-earned-autonomy](08-howto/13-earned-autonomy.md) |
+| **You're letting an agent learn from feedback** | [08-howto/16-self-improvement](08-howto/16-self-improvement.md) |
+| **You're adding a page or changing navigation** | [08-howto/03-add-a-page](08-howto/03-add-a-page.md) and [05-ui/00-app-shell](05-ui/00-app-shell.md) |
 
 ---
 
 ## Table of contents
+
+### Start here
+
+- [How Abenix fits together](00-how-abenix-fits-together.md): core objects, roles, where to start, glossary of UI words
 
 ### 1. Architecture
 The big picture — what services exist, how they communicate, what guarantees they offer.
@@ -66,6 +76,8 @@ How an agent runs end-to-end, what a tool is, how pipelines work, how agents tal
 - [19 — Outbound events + webhooks](02-runtime/19-outbound-events.md)
 - [20 — Decision service (resolution, evaluation, recording)](02-runtime/20-decision-service.md)
 - [21 — Earned autonomy (levels, gate, scoring, ladder)](02-runtime/21-earned-autonomy.md)
+- [22 — Lessons and improvements (feedback, lessons, groups, suggested cases)](02-runtime/22-lessons-and-improvements.md)
+- [23 — Governed self-improvement (propose, prove, approve, watch)](02-runtime/23-governed-self-improvement.md)
 
 ### 3. SDK
 The polyglot client surface — how external apps and standalone verticals talk to the platform.
@@ -87,6 +99,7 @@ The shape of the database and how it maps to the runtime concepts.
 - [06 — Evals, sources and events](04-data-model/06-evals-sources-events.md)
 - [07 — Tools, models, integrations, archives](04-data-model/07-tools-and-operations.md)
 - [08 — Earned autonomy: action types, grants, ledger](04-data-model/08-autonomy.md)
+- [09 — Self-improvement: feedback, lessons, groups, proposals](04-data-model/09-self-improvement.md)
 - [Document versioning](document-versioning.md)
 
 ### 5. UI
@@ -112,7 +125,7 @@ From `git clone` to a running cluster.
 - [The `--only` deploy trap](06-deployment/deploy-only-trap.md)
 
 ### 7. Building apps on Abenix
-How a third party builds a vertical app that uses Abenix as a remote platform. Includes references for the six example apps in this monorepo.
+How a third party builds a vertical app that uses Abenix as a remote platform. Includes references for the seven example apps in this monorepo.
 
 - [00 — Building an app on top of Abenix (read this first)](07-standalone-apps/00-pattern.md)
 - [01 — Wingman (reference: energy trading)](07-standalone-apps/01-wingman.md)
@@ -137,6 +150,9 @@ Concrete step-by-step guides for the most common developer tasks.
 - [11 — Set risk tiers, kill switches and permission sets](08-howto/11-governance.md)
 - [12 — Watch a source and react when it changes](08-howto/12-source-watch-and-events.md)
 - [13 — Let an agent earn autonomy](08-howto/13-earned-autonomy.md)
+- [14 — Marketplace and monetization](08-howto/14-marketplace-and-monetization.md)
+- [15 — Send a bot to a meeting (rehearse, then join)](08-howto/15-meetings.md)
+- [16 — Let an agent improve itself, under control](08-howto/16-self-improvement.md)
 
 ### 9. Reference
 Catalogues and tables you'll look up rather than read end-to-end.
@@ -147,7 +163,6 @@ Catalogues and tables you'll look up rather than read end-to-end.
 - [03 — Glossary](09-reference/03-glossary.md)
 - [04 — Platform settings (runtime knobs in the admin UI)](09-reference/04-platform-settings.md)
 - [05 — SSO / OIDC sign-in](09-reference/05-sso.md)
-- [SSO setup](sso.md)
 
 ---
 
@@ -155,8 +170,8 @@ Catalogues and tables you'll look up rather than read end-to-end.
 
 - **Source-file callouts** look like [`apps/api/app/main.py:75`](../apps/api/app/main.py#L75) — clickable on GitHub, copyable everywhere else.
 - **Diagrams** are Mermaid in fenced code blocks. GitHub renders them inline and the in-app viewer also renders them.
-- **Code examples** are runnable as-is unless explicitly marked otherwise.
+- **Code examples** run as written unless marked otherwise.
 - **`> Why`** call-outs explain the *rationale* behind a design choice. Useful when the code looks weirder than necessary.
 - **`> Trap`** call-outs flag known footguns. If something has bitten us in production it's here.
 
-If you read these top-to-bottom you'll have a solid understanding of the system in ~3-4 hours. If you skim only the diagrams + the "Why" call-outs you'll have the mental model in ~30 minutes.
+Reading top to bottom takes three to four hours. The newcomer map plus the diagrams and "Why" call-outs give you the mental model in about 30 minutes.

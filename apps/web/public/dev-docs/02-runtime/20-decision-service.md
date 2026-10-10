@@ -153,7 +153,7 @@ Publish, retire and model updates call `service.announce(tenant, key)`. It drops
 
 | Limit | Value |
 |---|---|
-| Facts per call | 256 KB of canonical JSON (`MAX_FACTS_BYTES`), 413 above |
+| Facts per call | 256,000 bytes of canonical JSON (`MAX_FACTS_BYTES`), 413 above |
 | Batch size | 1,000 items (`MAX_BATCH`) |
 | Compare targets | 2 to 10 |
 | Snapshot TTL | `DECISION_RESOLVE_TTL`, 30 s |

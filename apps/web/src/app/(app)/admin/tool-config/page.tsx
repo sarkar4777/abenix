@@ -8,6 +8,7 @@ import { apiFetch } from '@/lib/api-client';
 import type { ToolCredentialSource } from '@/components/CredentialBadge';
 import PageHeader from '@/components/layout/PageHeader';
 import { AccessGate } from '@/components/layout/NoAccess';
+import UnencryptedSecretsBanner from '@/components/shared/UnencryptedSecretsBanner';
 
 // Everything on this page comes from GET /api/admin/tool-config, which is
 // generated from the tools' own config_fields. Nothing here names a tool.
@@ -289,6 +290,8 @@ function ToolConfigPage() {
           </span>
         </div>
       </PageHeader>
+
+      <UnencryptedSecretsBanner />
 
       <div className="mb-6 flex flex-wrap items-center gap-3">
         <div className="relative flex-1 min-w-[240px]">

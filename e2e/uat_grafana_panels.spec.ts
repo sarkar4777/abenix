@@ -5,14 +5,31 @@
 // where the config rolls fine but a panel query is wrong / the metric
 // has been renamed / a dashboard has no data target.
 //
-// Anonymous read-only access is the default at install time; if a
-// future deploy requires auth, set GRAFANA_USER and GRAFANA_PASSWORD
-// and the spec will log in before walking the panels.
+// Anonymous access is off, so the spec signs in through the login form.
+// Creds come from GRAFANA_USER / GRAFANA_PASSWORD, else from the cluster secret under USE_K8S.
 import { test, expect, Page } from '@playwright/test';
+import { execSync } from 'child_process';
 
-const GRAFANA = process.env.GRAFANA || 'http://grafana.20.72.73.141.nip.io';
-const USER = process.env.GRAFANA_USER || '';
-const PASSWORD = process.env.GRAFANA_PASSWORD || '';
+const USE_K8S = process.env.USE_K8S === '1';
+const NS = process.env.NS || 'abenix';
+const RELEASE = process.env.RELEASE || 'abenix';
+const GRAFANA = process.env.GRAFANA
+  || (USE_K8S ? 'http://localhost:3030' : 'http://grafana.20.72.73.141.nip.io');
+const USER = process.env.GRAFANA_USER || 'admin';
+const PASSWORD = process.env.GRAFANA_PASSWORD || secretPassword();
+
+function secretPassword(): string {
+  if (!USE_K8S) return '';
+  try {
+    const b64 = execSync(
+      `kubectl get secret -n ${NS} ${RELEASE}-grafana-admin -o jsonpath={.data.admin-password}`,
+      { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] },
+    ).trim();
+    return b64 ? Buffer.from(b64, 'base64').toString('utf-8') : '';
+  } catch {
+    return '';
+  }
+}
 
 async function gotoOk(page: Page, path: string, settle = 1000) {
   const resp = await page.goto(`${GRAFANA}${path}`, { waitUntil: 'domcontentloaded' });
@@ -24,13 +41,15 @@ async function gotoOk(page: Page, path: string, settle = 1000) {
 }
 
 async function loginIfNeeded(page: Page) {
-  // Only attempt login when both creds are set; the default install
-  // serves dashboards anonymously to org-Viewer.
-  if (!USER || !PASSWORD) return;
+  // some installs allow anonymous viewers, so only sign in when Grafana asks
+  const probe = await page.request.get(`${GRAFANA}/api/search?limit=1`);
+  if (probe.status() !== 401) return;
+  expect(PASSWORD, 'Grafana needs sign-in, set GRAFANA_PASSWORD or USE_K8S=1').toBeTruthy();
   await page.goto(`${GRAFANA}/login`, { waitUntil: 'domcontentloaded' });
   await page.fill('input[name="user"]', USER);
   await page.fill('input[name="password"]', PASSWORD);
   await page.click('button[type="submit"]');
+  await page.waitForURL((u) => !u.pathname.startsWith('/login'), { timeout: 15_000 });
   await page.waitForLoadState('networkidle').catch(() => {});
 }
 
@@ -73,14 +92,12 @@ test.describe('Grafana — UI panel walk', () => {
   });
 
   test('Prometheus `up` query returns at least 1 series', async ({ page }) => {
-    // Datasource id 1 is the default in the provisioning configmap. If
-    // a future change reorders, swap to a name-based proxy lookup.
+    const settings = await (await page.request.get(`${GRAFANA}/api/frontend/settings`)).json();
+    const prom: any = Object.values(settings?.datasources || {}).find((d: any) => d.type === 'prometheus');
+    expect(prom?.uid, 'a Prometheus datasource must be wired').toBeTruthy();
     const r = await page.request.get(
-      `${GRAFANA}/api/datasources/proxy/1/api/v1/query?query=up`,
+      `${GRAFANA}/api/datasources/proxy/uid/${prom.uid}/api/v1/query?query=up`,
     );
-    if (r.status() === 404) {
-      test.skip(true, 'datasource id 1 not found; provisioning differs');
-    }
     expect(r.status()).toBeLessThan(500);
     const j = await r.json();
     expect(j?.status).toBe('success');

@@ -1,0 +1,101 @@
+[
+  {
+    "title": "Lessons were never grouped into clusters",
+    "area": "self-improvement",
+    "problem": "A new cluster was linked to lessons before it was saved, so every grouping pass failed on the foreign key and lessons waited forever.",
+    "fix": "The cluster is saved first, grouping locks new lessons with skip locked and commits before naming them.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 231
+  },
+  {
+    "title": "A passing proof ended as an error",
+    "area": "self-improvement",
+    "problem": "The proof finish lazy-loaded a timestamp after an update, so every passing proof showed The proof stopped with an error.",
+    "fix": "Proposals load server defaults eagerly and passing proofs finish as passed.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 232
+  },
+  {
+    "title": "Proofs could run far past the daily budget",
+    "area": "self-improvement",
+    "problem": "One automatic proof spent 1.79M tokens against a 400k budget and automatic proposals blocked people's requests.",
+    "fix": "Automatic proposals use at most half the budget, people's proposals go first and a running proof stops when the day is spent.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 233
+  },
+  {
+    "title": "Rollback and release notices never reached anyone",
+    "area": "self-improvement",
+    "problem": "Notifications were written after the caller's commit and never committed.",
+    "fix": "Notices commit on their own and reach the approver and the owner.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 234
+  },
+  {
+    "title": "A thumbs down then a correction made two lessons",
+    "area": "self-improvement",
+    "problem": "The thumbs lesson was grouped before the correction arrived.",
+    "fix": "The correction revises the same lesson and a switch to thumbs up takes it out of its group.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 235
+  },
+  {
+    "title": "Edit history and live edits were not reliable",
+    "area": "self-improvement",
+    "problem": "Healing patches, publish and import wrote no revision, a failed revision write was swallowed, and live agents could be edited without the eval gate.",
+    "fix": "Every change path writes a revision with its source, failures stop the change, and the gate runs on live edits and healing patches.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 236
+  },
+  {
+    "title": "Trajectory recall never found anything",
+    "area": "self-improvement",
+    "problem": "The runtime read one folder while Wingman wrote another, recall ignored success, and polling wrote duplicates.",
+    "fix": "One shared folder, ranking by outcome and one file per execution.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 237
+  },
+  {
+    "title": "Pipeline inputs showed as raw JSON",
+    "area": "ux",
+    "problem": "Runs store their input as an object, which showed as JSON on Executions and Moderation.",
+    "fix": "Inputs are shown as words on the runs list, the run page and moderation events.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 238
+  },
+  {
+    "title": "Start here chat steps opened an empty chat",
+    "area": "ux",
+    "problem": "The follow-up and feedback steps linked to a blank chat with no answer to rate.",
+    "fix": "They open the member's latest conversation.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 239
+  }
+]

@@ -46,7 +46,15 @@
     "rmse_gwh": 11.142912661140448,
     "mape_pct": 1.9935809913944602,
     "n_train": 1551,
-    "n_test": 274
+    "n_test": 274,
+    "feature_means": {
+      "sector_pmi": 50.08269457850601,
+      "plant_utilisation": 0.7807053661486986,
+      "cluster_id": 2.497098646034816,
+      "last_quarter_avg": 440.13869614957343,
+      "power_price_eur_mwh": 95.24322871108835,
+      "maintenance_flag": 0.04061895551257253
+    }
   },
   "tags": [
     "contractiq",

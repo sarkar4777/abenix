@@ -1,4 +1,4 @@
-"""Consumer terminal follow-ups: drift hook and trigger outcome, with the slim-image fallback."""
+"""Consumer terminal follow-ups: drift hook and trigger outcome."""
 
 from __future__ import annotations
 
@@ -49,11 +49,11 @@ async def test_after_terminal_calls_both_hooks():
     with (
         patch.object(consumer, "_get_session_factory", AsyncMock(return_value=factory)),
         patch("app.services.execution_hooks.record_terminal_by_id", record),
-        patch("app.routers.triggers.write_trigger_outcome", writer),
+        patch.object(consumer, "_write_trigger_outcome_fallback", writer),
     ):
         await consumer._after_terminal("ex-1", "failed", "boom", tid)
     record.assert_awaited_once_with(factory, "ex-1")
-    writer.assert_awaited_once_with(factory, "ex-1", "failed", "boom", trigger_id=tid)
+    writer.assert_awaited_once_with(factory, "failed", tid)
 
 
 @pytest.mark.asyncio
@@ -64,7 +64,7 @@ async def test_after_terminal_without_trigger_skips_trigger_write():
     with (
         patch.object(consumer, "_get_session_factory", AsyncMock(return_value=factory)),
         patch("app.services.execution_hooks.record_terminal_by_id", record),
-        patch("app.routers.triggers.write_trigger_outcome", writer),
+        patch.object(consumer, "_write_trigger_outcome_fallback", writer),
     ):
         await consumer._after_terminal("ex-1", "completed", None, None)
     record.assert_awaited_once()
@@ -76,7 +76,7 @@ async def test_after_terminal_falls_back_when_api_package_is_missing():
     session = FakeSession()
     factory = _factory(session)
     tid = str(uuid.uuid4())
-    missing = {"app.services.execution_hooks": None, "app.routers.triggers": None}
+    missing = {"app.services.execution_hooks": None}
     with (
         patch.object(consumer, "_get_session_factory", AsyncMock(return_value=factory)),
         patch.dict(sys.modules, missing),
@@ -101,7 +101,7 @@ async def test_hook_failure_does_not_block_trigger_write():
             "app.services.execution_hooks.record_terminal_by_id",
             AsyncMock(side_effect=RuntimeError("redis down")),
         ),
-        patch("app.routers.triggers.write_trigger_outcome", writer),
+        patch.object(consumer, "_write_trigger_outcome_fallback", writer),
     ):
         await consumer._after_terminal("ex-1", "completed", None, tid)
     writer.assert_awaited_once()
@@ -129,7 +129,7 @@ async def test_trigger_comes_from_the_row_when_the_message_has_none():
             "app.services.execution_hooks.record_terminal_by_id",
             AsyncMock(return_value=[]),
         ),
-        patch("app.routers.triggers.write_trigger_outcome", writer),
+        patch.object(consumer, "_write_trigger_outcome_fallback", writer),
     ):
         await consumer._after_terminal(ex, "completed", None, None)
-    writer.assert_awaited_once_with(factory, ex, "completed", None, trigger_id=str(tid))
+    writer.assert_awaited_once_with(factory, "completed", str(tid))

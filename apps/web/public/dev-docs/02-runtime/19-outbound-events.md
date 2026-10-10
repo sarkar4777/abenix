@@ -38,6 +38,15 @@ An event exists exactly when the change it describes was committed. A rolled-bac
 | `autonomy.recommended` | A grant met the bar for the next level, once per level | `services/autonomy.py`, ladder re-evaluation |
 | `autonomy.promoted` | A promotion approval was signed | `services/autonomy.py` |
 | `autonomy.demoted` | A grant moved down, by a person or automatically | `services/autonomy.py` |
+| `moderation.held` | Content held for review is announced to reviewers | `services/moderation_review.py`, `announce_pending` |
+| `moderation.decided` | Held content was released, redacted, rejected or timed out | `services/moderation_review.py`, `decide` |
+| `lesson.captured` | A lesson was captured from a run | `services/lessons.py`, `capture` |
+| `cluster.opened` | Lessons about the same mistake were grouped for the first time | `services/lessons.py`, `cluster_tick` |
+| `improvement.proposed` | A fix was drafted for a lesson cluster | `services/improvements.py` |
+| `improvement.proved` | A proposed fix finished its proof, passed or not | `services/improvements.py` |
+| `improvement.released` | An approved fix was released as a new agent revision | `services/improvements.py` |
+| `improvement.rolled_back` | A release was rolled back, by a person or automatically | `services/improvements.py` |
+| `improvement.kept` | A release held up through its watch period | `services/improvements.py` |
 
 Notes:
 
@@ -45,6 +54,7 @@ Notes:
 - Approvals closed by the expiry sweep emit `approval.resolved` with `status: expired`, the same as a sign-off that settles one.
 - The decision events and the `decision_publish` approvals behind them are covered in [Decision service](20-decision-service.md) and [the decisions how-to](../08-howto/09-decisions.md).
 - Agent tool calls go through the autonomy gate in the runtime. The `observe_actions` job emits their `action.proposed` and `action.executed` within 30 s. See [Earned autonomy](21-earned-autonomy.md).
+- Moderation events are covered in [13-moderation-gate.md](13-moderation-gate.md). Lesson and improvement events are covered in [22-lessons-and-improvements.md](22-lessons-and-improvements.md) and [23-governed-self-improvement.md](23-governed-self-improvement.md).
 - `execution.started`, `agent.published` and `agent.updated` are still accepted on subscriptions created before the catalogue. Nothing emits them.
 
 ### Payload fields
@@ -67,6 +77,15 @@ Notes:
 | `autonomy.promoted` | `grant_id`, `agent_id`, `action_key`, `from_level`, `to_level`, `approval_id`, `approved_by` |
 | `autonomy.demoted` | `grant_id`, `agent_id`, `action_key`, `from_level`, `to_level`, `reason`, `actor` (`user` or `system`) |
 | `eval.completed` | `suite_id`, `run_id`, `agent_id`, `status`, `score`, `threshold`, `threshold_met`, `passed`, `failed`, `model`, `model_override`, `config_hash`, `triggered_by` |
+| `moderation.held` | `review_id`, `source`, `priority`, `categories`, `expires_at` |
+| `moderation.decided` | `review_id`, `status`, `source`, `execution_id`, `automatic` |
+| `lesson.captured` | `lesson_id`, `agent_id`, `source`, `polarity`, `execution_id` |
+| `cluster.opened` | `cluster_id`, `agent_id`, `title`, `count`, `severity` |
+| `improvement.proposed` | `proposal_id`, `agent_id`, `cluster_id`, `change_kind` |
+| `improvement.proved` | `proposal_id`, `agent_id`, `passed_bar`, `fixed`, `broken` |
+| `improvement.released` | `proposal_id`, `agent_id`, `revision_id`, `watch_until` |
+| `improvement.rolled_back` | `proposal_id`, `agent_id`, `reason`, `actor` (`user` or `system`) |
+| `improvement.kept` | `proposal_id`, `agent_id`, `runs` |
 
 ## The envelope
 

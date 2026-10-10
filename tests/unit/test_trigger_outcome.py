@@ -157,3 +157,42 @@ async def test_queue_payload_carries_trigger_id():
     payload = backend.submit.await_args.args[1]
     assert payload["trigger_id"] == tid
     assert payload["execution_id"] == str(execution.id)
+
+
+@pytest.mark.asyncio
+async def test_failure_notice_goes_out_once_whoever_finishes_the_run():
+    owner = (uuid.uuid4(), uuid.uuid4())
+    db = FakeSession(owner_row=owner)
+    seen: set = set()
+
+    async def claim(key, redis=None):
+        if key in seen:
+            return False
+        seen.add(key)
+        return True
+
+    notify = AsyncMock()
+    with patch("app.services.run_announcer.claim", claim), patch.object(
+        triggers, "_notify_trigger_failure", notify
+    ):
+        first = await triggers.notify_trigger_failure_once(
+            db, uuid.uuid4(), "exec-1", "boom"
+        )
+        again = await triggers.notify_trigger_failure_once(
+            db, uuid.uuid4(), "exec-1", "boom"
+        )
+    assert first is True and again is False
+    assert notify.await_count == 1
+    assert notify.await_args.kwargs["user_id"] == owner[0]
+
+
+@pytest.mark.asyncio
+async def test_failure_notice_skipped_without_an_owner():
+    db = FakeSession(owner_row=None)
+    notify = AsyncMock()
+    with patch.object(triggers, "_notify_trigger_failure", notify):
+        sent = await triggers.notify_trigger_failure_once(
+            db, uuid.uuid4(), "exec-2", None
+        )
+    assert sent is False
+    notify.assert_not_awaited()

@@ -3,10 +3,11 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { mutate as globalMutate } from 'swr';
-import { AlertTriangle, CreditCard, Inbox, Loader2, RefreshCw, Store } from 'lucide-react';
+import { AlertTriangle, CreditCard, Inbox, Loader2, Lock, RefreshCw, Store } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { apiFetch } from '@/lib/api-client';
 import { usePageTitle } from '@/hooks/usePageTitle';
+import { useApi } from '@/hooks/useApi';
 import { PLATFORM_FEATURES_PATH, plainError, usePlatformFeatures, type PlatformFeatures } from '@/hooks/usePlatformFeatures';
 import ConfirmModal from '@/components/ui/ConfirmModal';
 import PageHeader from '@/components/layout/PageHeader';
@@ -14,6 +15,13 @@ import NoAccess from '@/components/layout/NoAccess';
 import { toastError, toastSuccess } from '@/stores/toastStore';
 
 type Switch = 'marketplace' | 'monetization';
+
+const ADMIN_FEATURES_PATH = '/api/admin/platform-features';
+
+interface AdminFeatures extends PlatformFeatures {
+  can_change: boolean;
+  operator_rule: string;
+}
 
 const COPY: Record<Switch, { title: string; on: string; off: string; offWarning: string; icon: typeof Store }> = {
   marketplace: {
@@ -34,7 +42,7 @@ const COPY: Record<Switch, { title: string; on: string; off: string; offWarning:
   },
 };
 
-function Toggle({ id, on, busy, onClick }: { id: Switch; on: boolean; busy: boolean; onClick: () => void }) {
+function Toggle({ id, on, busy, locked, onClick }: { id: Switch; on: boolean; busy: boolean; locked?: boolean; onClick: () => void }) {
   return (
     <button
       type="button"
@@ -42,7 +50,8 @@ function Toggle({ id, on, busy, onClick }: { id: Switch; on: boolean; busy: bool
       aria-checked={on}
       aria-label={COPY[id].title}
       data-testid={`switch-${id}`}
-      disabled={busy}
+      disabled={busy || locked}
+      title={locked ? 'Only a platform operator can change this' : undefined}
       onClick={onClick}
       className={`relative inline-flex h-7 w-12 shrink-0 items-center rounded-full border transition-colors disabled:opacity-60 ${
         on ? 'bg-cyan-500/80 border-cyan-400/60' : 'bg-slate-700 border-slate-600'
@@ -59,6 +68,8 @@ export default function AdminMarketplacePage() {
   usePageTitle('Marketplace & Billing');
   const { user } = useAuth();
   const { features, loaded, error, isLoading, mutate } = usePlatformFeatures();
+  const { data: access, mutate: mutateAccess } = useApi<AdminFeatures>(user?.role === 'admin' ? ADMIN_FEATURES_PATH : null);
+  const locked = access ? !access.can_change : true;
   const [busy, setBusy] = useState<Switch | null>(null);
   const [confirmOff, setConfirmOff] = useState<Switch | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -82,6 +93,7 @@ export default function AdminMarketplacePage() {
     // every hook reading the switches updates at once
     await globalMutate(PLATFORM_FEATURES_PATH);
     mutate();
+    mutateAccess();
     toastSuccess(`${COPY[which].title} turned ${value ? 'on' : 'off'}`);
   };
 
@@ -95,7 +107,7 @@ export default function AdminMarketplacePage() {
       <NoAccess
         testId="admin-marketplace-denied"
         title="Marketplace & Billing"
-        purpose="Turn the agent marketplace and paid listings on or off for everyone in this workspace. For admins."
+        purpose="Turn the agent marketplace and paid listings on or off for everyone on this deployment, every tenant included. For admins."
         icon={Store}
         need={{ admin: true }}
         role={user.role}
@@ -107,7 +119,7 @@ export default function AdminMarketplacePage() {
     <div className="space-y-6 max-w-3xl" data-testid="admin-marketplace">
       <PageHeader
         title="Marketplace & Billing"
-        purpose="Turn the agent marketplace and paid listings on or off for everyone in this workspace. For admins."
+        purpose="Turn the agent marketplace and paid listings on or off for everyone on this deployment, every tenant included. Tenant admins can see them, a platform operator changes them."
         icon={Store}
         storageKey="admin-marketplace"
         docSlug="08-howto/14-marketplace-and-monetization"
@@ -119,6 +131,22 @@ export default function AdminMarketplacePage() {
           'Every new listing waits in the review inbox until an admin approves it.',
         ]}
       />
+
+      {access && !access.can_change && (
+        <div
+          data-testid="admin-marketplace-operator-only"
+          className="flex items-start gap-3 rounded-xl border border-slate-600/60 bg-slate-800/50 px-4 py-3 text-sm text-slate-300"
+        >
+          <Lock className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />
+          <div>
+            <p className="font-medium text-white">Only a platform operator can change these switches</p>
+            <p className="mt-1">
+              They apply to every tenant on this deployment, not just yours, so a tenant admin can see them but not flip
+              them. {access.operator_rule} Ask whoever runs this deployment if one should change.
+            </p>
+          </div>
+        </div>
+      )}
 
       {saveError && (
         <div
@@ -176,12 +204,12 @@ export default function AdminMarketplacePage() {
                         >
                           {on ? 'On' : 'Off'}
                         </span>
-                        <Toggle id={which} on={on} busy={busy !== null} onClick={() => flip(which)} />
+                        <Toggle id={which} on={on} busy={busy !== null} locked={locked} onClick={() => flip(which)} />
                       </div>
                     </div>
                     <p className="text-sm text-slate-400 mt-1">{on ? c.on : c.off}</p>
                     <p className="text-[11px] text-slate-500 mt-2">
-                      {fromAdmin ? 'Set by an admin here.' : 'Using the deployment default.'} Deployment default:{' '}
+                      {fromAdmin ? 'Set by a platform operator here.' : 'Using the deployment default.'} Deployment default:{' '}
                       {deflt ? 'on' : 'off'}.
                     </p>
                     {which === 'monetization' && on && !features.marketplace && (

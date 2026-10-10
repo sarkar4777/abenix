@@ -1232,7 +1232,7 @@ export default function AtlasPage() {
                 {proposedOps && (
                   <motion.div
                     initial={{ y: 80, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 80, opacity: 0 }}
-                    className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20 w-[640px] max-w-[calc(100%-1.5rem)] rounded-xl border border-violet-500/40 bg-slate-900/95 backdrop-blur-md shadow-2xl shadow-violet-500/20 overflow-hidden"
+                    className="absolute bottom-4 inset-x-0 mx-auto z-20 w-[640px] max-w-[calc(100%-1.5rem)] rounded-xl border border-violet-500/40 bg-slate-900/95 backdrop-blur-md shadow-2xl shadow-violet-500/20 overflow-hidden"
                   >
                     <div className="px-4 py-2.5 bg-gradient-to-r from-violet-500/20 to-cyan-500/15 border-b border-violet-500/30 flex items-center gap-2">
                       <Sparkles className="w-4 h-4 text-violet-300" />
