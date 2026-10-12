@@ -383,7 +383,7 @@ It ends with a summary of every URL. Open http://localhost:3000 and sign in with
 Agents cannot answer until a model is connected, and the deploy does not need one to finish. Pick one of these.
 
 - **An API key.** As admin open **Admin → Tool Configuration**, search for `ANTHROPIC_API_KEY` (or `OPENAI_API_KEY`, `GOOGLE_API_KEY`), paste the key and save. It applies within 30 seconds. You can also put the key in `.env` (copy `.env.example`) before you run the deploy.
-- **A Claude Pro or Max subscription, no key.** Sign in with Claude Code on the same machine, then run `bash scripts/sync-claude-subscription.sh`. It copies the current credential into the platform, switches on subscription mode and checks it against Anthropic. The credential rotates, so re-run the script when agent runs fail with `OAuth access token has been revoked`. A subscription has usage limits, and a run that hits one fails with `rate_limit_error` until the limit resets.
+- **A Claude Pro or Max subscription, no key.** Sign in with Claude Code on the same machine, then run `bash scripts/sync-claude-subscription.sh`. It reads `~/.claude/.credentials.json`, or on macOS the Keychain item `Claude Code-credentials`. It copies the current credential into the platform, switches on subscription mode and checks it against Anthropic. The credential rotates, so re-run the script when agent runs fail with `OAuth access token has been revoked`. A subscription has usage limits, and a run that hits one fails with `rate_limit_error` until the limit resets.
 
 Once a model is connected, the **Connect an AI model** step on the home page ticks itself off.
 
@@ -412,7 +412,7 @@ Chat, the samples and every agent run need the model from the step above. The pa
 
 **A port already taken?** Every local port can be moved, for example
 `WEB_PORT=3100 API_PORT=8100 bash scripts/deploy.sh local`. The others are
-`NEO4J_PORT`, `GRAFANA_PORT`, `PROMETHEUS_PORT` and `LIVEKIT_PORT`. A moved API port
+`NEO4J_PORT`, `GRAFANA_PORT`, `PROMETHEUS_PORT`, `LIVEKIT_PORT` and `MQTT_PORT`. A moved API port
 is built into the web app, so set it on the deploy, and pass the same `API_PORT`
 to `scripts/sync-claude-subscription.sh`. The forwards are tied to the kube context
 they were started for, so a second cluster on the same machine keeps its own.
@@ -443,6 +443,12 @@ sends one malformed message for the dead-letter ring, `testbed-load <n> <rate>`
 runs a Kafka burst, and `testbed-down` removes it all. Passwords live in the
 `testbed-credentials` Secret. More in [infra/helm/testbed/README.md](infra/helm/testbed/README.md).
 
+`bash scripts/deploy.sh edge-demo` adds an Abenix Edge gateway that reads a
+simulated CAN bus, GPS and the testbed's meter and PLC. `edge-demo-cut 120`
+cuts its uplink for two minutes and proves nothing was lost, and
+`edge-demo-down` removes it. Step by step in
+[docs/08-howto/20-edge-demo-and-testbed.md](docs/08-howto/20-edge-demo-and-testbed.md).
+
 <a id="where-everything-lives"></a>
 ### Where everything lives
 
@@ -462,6 +468,7 @@ gets a hostname under the ingress load balancer's IP via `nip.io`.
 | PharmaVigil | http://localhost:3007 | `http://safety.<ip>.nip.io` | no login — open UI |
 | Grafana | http://localhost:3030 | `http://grafana.<ip>.nip.io` | `admin` / secret `abenix-grafana-admin` (default `abenix-admin`) |
 | Prometheus | http://localhost:9090 | `http://prom.<ip>.nip.io` | none |
+| MQTT broker | `mqtt://localhost:1883` (`MQTT_PORT`, the `abenix-mosquitto` forward) | in-cluster only, `abenix-mosquitto:1883` | none by default |
 
 `<ip>` is the ingress controller's load-balancer address. You do not have to
 look it up — `bash scripts/deploy-azure.sh status` prints every URL, and the

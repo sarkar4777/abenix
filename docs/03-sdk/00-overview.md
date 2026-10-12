@@ -219,9 +219,9 @@ The newer calls (`me`, `permissions`, `agents.by_slug/create/update`, `decisions
 
 ## Versions
 
-The SDK version follows the platform. Major and minor match the Abenix release the SDK was built and tested against, the patch number is the SDK's own. Abenix 2.5.x ships `abenix-sdk` 2.5.5 (Python), `@abenix/sdk` and `@abenix/react` 2.5.5 (TypeScript and React) and `com.abenix:sdk` 2.5.5 (Java). An SDK works against any platform with the same major and minor. A call added in a later minor needs that platform.
+Every SDK carries the platform version in `VERSION`. Abenix 2.5.9 ships `abenix-sdk` 2.5.9 (Python), `@abenix/sdk` and `@abenix/react` 2.5.9 (TypeScript and React) and `com.abenix:sdk` 2.5.9 (Java). An SDK works against any platform with the same major and minor. A call added in a later minor needs that platform.
 
-When the platform moves to a new minor, every SDK manifest moves with it in the same release: `packages/sdk/python/pyproject.toml`, `packages/sdk/js/package.json`, `packages/sdk/react/package.json` and `claimsiq/sdk/build.gradle.kts`.
+No script bumps them. When `VERSION` changes, set the same version by hand in `packages/sdk/python/pyproject.toml`, `packages/sdk/js/package.json`, `packages/sdk/react/package.json` (its own version and its `@abenix/sdk` range) and `claimsiq/sdk/build.gradle.kts`. `scripts/sdk-e2e.sh` reads the version from `packages/sdk/js/package.json` to find the JS tarball and the Java jar, so the JS and Java versions must match.
 
 ---
 

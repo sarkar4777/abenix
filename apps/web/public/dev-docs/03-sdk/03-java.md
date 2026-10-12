@@ -2,7 +2,7 @@
 
 > JDK 21. Blocking calls on the JDK `HttpClient`, Jackson for JSON. It lives in [`claimsiq/sdk/`](../../claimsiq/sdk/) and covers execute, watch, approvals, actions, feedback and the read-side clients. There are no decisions, sources or events clients in Java yet.
 
-Install: it is not published to a Maven repository. It is a Gradle subproject of `claimsiq/` (group `com.abenix`, version `2.5.5`, see [versions](00-overview.md#versions)). Inside that build, depend on it the way the ClaimsIQ app does:
+Install: it is not published to a Maven repository. It is a Gradle subproject of `claimsiq/` (group `com.abenix`, version `2.5.10`, see [versions](00-overview.md#versions)). Inside that build, depend on it the way the ClaimsIQ app does:
 
 ```kotlin
 // build.gradle.kts
@@ -15,12 +15,12 @@ Elsewhere, build the jar with Gradle 8.x and put it on your classpath with its t
 
 ```bash
 cd claimsiq && gradle :sdk:jar
-# claimsiq/sdk/build/libs/sdk-2.5.5.jar
+# claimsiq/sdk/build/libs/sdk-2.5.10.jar
 # gradle :sdk:copyRuntimeLibs puts jackson and slf4j in build/libs/deps
 ```
 
 ```kotlin
-implementation(files("libs/sdk-2.5.5.jar"))
+implementation(files("libs/sdk-2.5.10.jar"))
 implementation("com.fasterxml.jackson.core:jackson-databind:2.17.2")
 implementation("org.slf4j:slf4j-api:2.0.13")
 ```

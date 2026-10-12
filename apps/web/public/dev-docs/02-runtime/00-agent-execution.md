@@ -264,6 +264,22 @@ still live. When the subscription is enabled but unusable, the router falls
 through to any other configured provider and says so in the final error rather
 than surfacing the downstream provider's message on its own.
 
+### Where the sync script finds the credential
+
+`scripts/sync-claude-subscription.sh` reads `claudeAiOauth.accessToken` from
+the credential Claude Code keeps on this machine. It looks in this order:
+
+| Where | When |
+|---|---|
+| `CLAUDE_CREDENTIALS_FILE`, default `~/.claude/.credentials.json` | Every platform |
+| The login Keychain item `Claude Code-credentials`, read with `security find-generic-password -s "Claude Code-credentials" -w` | macOS, when the file is missing. macOS may ask you to allow the read |
+
+If it finds neither, it names both places and stops. Sign in with Claude Code
+on this machine, or skip the subscription and put `ANTHROPIC_API_KEY` in `.env`.
+On Linux and Windows a missing file stops the script as before. The token never
+leaves the script's Python step, so it is not printed or passed on the command
+line.
+
 ---
 
 ## Approval gates

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import {
   Box, Check, ChevronRight, CircleAlert, Code2, Download, FileArchive,
   FlaskConical, Github, Loader2, Play, Trash2, Upload, Workflow, ArrowRight,
@@ -16,6 +16,9 @@ import OwnerBadge from '@/components/OwnerBadge';
 import DeleteWithDependents from '@/components/ui/DeleteWithDependents';
 import PageHeader from '@/components/layout/PageHeader';
 import NextSteps from '@/components/shared/NextSteps';
+import DeepLinkMissing from '@/components/shared/DeepLinkMissing';
+import { deepLinkParam, scrollToDeepLinkRow, useDeepLink } from '@/lib/deep-link';
+import { scrollInMain } from '@/lib/scrollInMain';
 
 interface AnalysisNote {
   level: 'info' | 'warn' | 'error';
@@ -97,6 +100,19 @@ export default function CodeRunnerPage() {
       return fresh && fresh.status !== sel.status ? { ...sel, ...fresh } : sel;
     });
   }, [assets, watchId]);
+
+  // /code-runner?asset=<id> opens that asset
+  const searchParams = useSearchParams();
+  const pathname = usePathname();
+  const linkedId = deepLinkParam(searchParams, ['asset', 'id']);
+  const detailRef = useRef<HTMLDivElement>(null);
+  const linkMissing = useDeepLink(assets, linkedId, (a) => {
+    setSelected(a);
+    scrollToDeepLinkRow(a.id, (el) => scrollInMain(el, 'center'));
+    if (typeof window !== 'undefined' && window.innerWidth < 1024) {
+      setTimeout(() => scrollInMain(detailRef.current), 100);
+    }
+  });
 
   // Inline JSON lint state for the schema textareas — replaces the
   // alert() blocker so users see the error next to the field.
@@ -318,6 +334,11 @@ export default function CodeRunnerPage() {
           primaryAction={{ label: 'New code asset', icon: Upload, onClick: () => { nameRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }); nameRef.current?.focus({ preventScroll: true }); }, testId: 'code-new-asset' }}
         />
 
+        {linkMissing && (
+          <DeepLinkMissing noun="code asset" id={linkMissing} testId="code-deeplink-missing"
+            onDismiss={() => router.replace(pathname || '/code-runner')} />
+        )}
+
         {readyAsset && (
           <NextSteps
             title={`${readyAsset.name} is ready. What next?`}
@@ -387,7 +408,7 @@ export default function CodeRunnerPage() {
                 )}
                 {(assets || []).map(a => (
                   <button key={a.id} onClick={() => setSelected(a)}
-                    data-testid="code-asset-item" data-name={a.name} data-status={a.status}
+                    data-testid="code-asset-item" data-name={a.name} data-status={a.status} data-deeplink-id={a.id}
                     className={`w-full text-left px-3 py-2 rounded-lg text-xs ${selected?.id === a.id ? 'bg-indigo-500/10 border border-indigo-500/30' : 'bg-slate-900/30 border border-transparent hover:border-slate-700'}`}>
                     <div className="flex items-center justify-between mb-1">
                       <span className="font-medium text-white flex items-center gap-1.5">
@@ -409,7 +430,7 @@ export default function CodeRunnerPage() {
           </div>
 
           {/* Right: detail */}
-          <div className="lg:col-span-8 space-y-4 min-w-0">
+          <div ref={detailRef} className="lg:col-span-8 space-y-4 min-w-0 scroll-mt-4">
             {!selected ? (
               <div className="bg-slate-800/30 border border-slate-700/50 rounded-xl p-12 text-center">
                 <Code2 className="w-12 h-12 text-indigo-400/30 mx-auto mb-3" />

@@ -415,6 +415,10 @@
         {
           "slug": "08-howto/19-close-the-loop",
           "title": "Close the loop: from a stream to an action in your app"
+        },
+        {
+          "slug": "08-howto/20-edge-demo-and-testbed",
+          "title": "Run the Edge demo and the telemetry testbed"
         }
       ]
     },

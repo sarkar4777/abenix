@@ -27,6 +27,27 @@ The core platform is the API, web app, agent runtime, worker, Postgres, Redis, N
 | PharmaVigil | 640 MB |
 | Wingman | 512 MB |
 
+## Running something beside Abenix
+
+The sizes above cover Abenix and the apps you pick. The script does not know about anything else you install into the same minikube, so add room for it yourself.
+
+| Beside Abenix | Namespace | Memory |
+|---|---|---|
+| Telemetry testbed, `deploy.sh testbed` | `abenix-testbed` | about 1.3 GB |
+| Groundwork's four simulated industrial PCs | `groundwork-edge` | requests about 1.35 GiB, limits about 3.6 GiB |
+
+Kubernetes places pods by what they request, but a busy pod can grow to its limit, so size for the limits. A running cluster cannot grow, so set `MINIKUBE_MEMORY` when you create it:
+
+```bash
+# core platform, testbed and Groundwork: 8 GB + 1.3 GB + 3.6 GB
+FRESH=true APPS=none MINIKUBE_MEMORY=13312 bash scripts/deploy.sh local
+
+# everything, testbed and Groundwork: 13.25 GB + 1.3 GB + 3.6 GB
+FRESH=true APPS=all MINIKUBE_MEMORY=18944 bash scripts/deploy.sh local
+```
+
+Docker needs about 1 GB more than `MINIKUBE_MEMORY`. `FRESH=true` deletes the cluster and its data, see [Growing or shrinking a cluster](#growing-or-shrinking-a-cluster). How to run the testbed is in [08-howto/20-edge-demo-and-testbed](../08-howto/20-edge-demo-and-testbed.md).
+
 ## Giving Docker more memory
 
 - **Docker Desktop on macOS, or on Windows with the Hyper-V backend.** Settings > Resources > Memory, then Apply & restart.

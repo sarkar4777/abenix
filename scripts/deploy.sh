@@ -1949,6 +1949,7 @@ deploy_local() {
   done
   echo -e "  ${CYAN}Abenix API${NC}        http://localhost:${API_PORT}/docs"
   echo -e "  ${CYAN}Neo4j Browser${NC}     http://localhost:${NEO4J_PORT}"
+  echo -e "  ${CYAN}MQTT broker${NC}       mqtt://localhost:${MQTT_PORT}  (abenix-mosquitto, plain MQTT, no TLS)"
   if [[ "${OBSERVABILITY:-true}" == "true" ]]; then
     echo -e "  ${CYAN}Grafana${NC}           http://localhost:${GRAFANA_PORT}  (admin / $(grafana_admin_password))"
     echo -e "  ${CYAN}Prometheus${NC}        http://localhost:${PROMETHEUS_PORT}"
@@ -1961,6 +1962,7 @@ deploy_local() {
   echo ""
   echo -e "  ${YELLOW}Mode:${NC}            $(kubectl -n "${NAMESPACE}" get cm abenix-config -o jsonpath="{.data.RUNTIME_MODE}" 2>/dev/null || echo unknown) runtime"
   echo -e "  ${YELLOW}Namespace:${NC}       ${NAMESPACE}"
+  echo -e "  ${YELLOW}Kube context:${NC}    $(_kube_context)"
   echo -e "  ${YELLOW}Image tag:${NC}       ${IMAGE_TAG}"
   echo ""
   echo -e "  ${YELLOW}Upgrade:${NC}         bash scripts/deploy.sh local"
@@ -2039,9 +2041,11 @@ deploy_local_runtime() {
   echo -e "  ${CYAN}API Docs${NC}         http://localhost:${API_PORT}/docs"
   echo -e "  ${CYAN}Runtime Health${NC}   http://localhost:8001/health"
   echo -e "  ${CYAN}Neo4j Browser${NC}    http://localhost:${NEO4J_PORT}"
+  echo -e "  ${CYAN}MQTT broker${NC}      mqtt://localhost:${MQTT_PORT}  (abenix-mosquitto, plain MQTT, no TLS)"
   echo ""
   echo -e "  ${YELLOW}Mode:${NC}            ${BOLD}REMOTE${NC} (API delegates to runtime pod via HTTP)"
   echo -e "  ${YELLOW}Namespace:${NC}       ${NAMESPACE}"
+  echo -e "  ${YELLOW}Kube context:${NC}    $(_kube_context)"
   echo -e "  ${YELLOW}Image tag:${NC}       ${IMAGE_TAG}"
   echo ""
   echo -e "  ${YELLOW}Upgrade:${NC}         bash scripts/deploy.sh local-runtime"

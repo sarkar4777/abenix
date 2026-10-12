@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import PageHeader from '@/components/layout/PageHeader';
 import NextSteps from '@/components/shared/NextSteps';
+import DeepLinkMissing from '@/components/shared/DeepLinkMissing';
 import ResourceShareDialog from '@/components/share/ResourceShareDialog';
 import DocumentAccessModal from '@/components/knowledge/DocumentAccessModal';
 import ResponsiveModal from '@/components/ui/ResponsiveModal';
@@ -647,16 +648,22 @@ export default function KnowledgePage() {
 
   const total = (meta?.total as number) || (kbs ?? []).length;
 
+  const [linkMissing, setLinkMissing] = useState<string | null>(null);
   const openDetail = async (kbId: string) => {
     setLoadingDetail(true);
+    let opened = false;
     try {
-      const res = await apiFetch<KBDetail>(`/api/knowledge-bases/${kbId}`);
-      if (res.data) setSelectedKB(res.data);
+      const res = await apiFetch<KBDetail>(`/api/knowledge-bases/${kbId}`, { silent: true });
+      if (res.data) {
+        setSelectedKB(res.data);
+        opened = true;
+      }
     } catch {
-      // silent
+      // reported below
     } finally {
       setLoadingDetail(false);
     }
+    setLinkMissing(opened ? null : kbId);
   };
 
   const searchParams = useSearchParams();
@@ -671,11 +678,14 @@ export default function KnowledgePage() {
 
   // the sidebar link to /knowledge drops the id, go back to the list
   useEffect(() => {
-    if (!queryId) setSelectedKB(null);
+    if (!queryId) {
+      setSelectedKB(null);
+      setLinkMissing(null);
+    }
   }, [queryId]);
 
   useEffect(() => {
-    if (!queryId || selectedKB?.id === queryId) return;
+    if (!queryId || selectedKB?.id === queryId || linkMissing === queryId) return;
     void openDetail(queryId);
   // openDetail closes over apiFetch and setState only; queryId is the trigger
   }, [queryId, selectedKB?.id]);
@@ -745,6 +755,11 @@ export default function KnowledgePage() {
         primaryAction={{ label: 'New Knowledge Base', icon: Plus, onClick: () => setModalOpen(true) }}
         secondaryAction={{ label: 'Projects', icon: FolderOpen, href: '/knowledge/projects' }}
       />
+
+      {linkMissing && (
+        <DeepLinkMissing noun="knowledge base" id={linkMissing} testId="kb-deeplink-missing"
+          onDismiss={() => router.replace('/knowledge')} />
+      )}
 
       {/* Search & Filters */}
       <div className="flex flex-col gap-3 md:flex-row md:items-center">

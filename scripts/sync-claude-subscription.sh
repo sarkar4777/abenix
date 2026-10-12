@@ -2,7 +2,8 @@
 # sync-claude-subscription.sh — point the platform at the Claude subscription
 # credential this machine already uses.
 #
-# Claude Code stores a rotating OAuth credential in ~/.claude/.credentials.json.
+# Claude Code stores a rotating OAuth credential in ~/.claude/.credentials.json,
+# or on macOS in the login Keychain item "Claude Code-credentials".
 # The access token expires (typically within hours) and Claude Code mints a new
 # one, revoking the old. A token pasted once into Admin -> LLM Settings therefore
 # stops working with "OAuth access token has been revoked", which looks like a
@@ -23,6 +24,7 @@ API_URL="${API_URL:-http://localhost:${API_PORT:-8000}}"
 ADMIN_EMAIL="${ADMIN_EMAIL:-admin@abenix.dev}"
 ADMIN_PASSWORD="${ADMIN_PASSWORD:-Admin123456}"
 CRED_FILE="${CLAUDE_CREDENTIALS_FILE:-${HOME}/.claude/.credentials.json}"
+KEYCHAIN_SERVICE="Claude Code-credentials"
 
 CYAN='\033[0;36m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; NC='\033[0m'
 log()  { echo -e "${CYAN}[sync-sub]${NC} $1"; }
@@ -30,10 +32,24 @@ ok()   { echo -e "${GREEN}  [ok]${NC} $1"; }
 warn() { echo -e "${YELLOW}  [warn]${NC} $1"; }
 err()  { echo -e "${RED}  [err]${NC} $1" >&2; }
 
+CRED_SOURCE="${CRED_FILE}"
 if [ ! -f "${CRED_FILE}" ]; then
-  err "No credential file at ${CRED_FILE}"
-  err "Sign in with Claude Code on this machine first, or set CLAUDE_CREDENTIALS_FILE."
-  exit 1
+  if [ "$(uname -s)" = "Darwin" ]; then
+    if command -v security >/dev/null 2>&1       && security find-generic-password -s "${KEYCHAIN_SERVICE}" >/dev/null 2>&1; then
+      CRED_SOURCE="keychain:${KEYCHAIN_SERVICE}"
+    else
+      err "No Claude Code credential found. Looked in:"
+      err "  ${CRED_FILE}"
+      err "  the macOS Keychain item \"${KEYCHAIN_SERVICE}\""
+      err "Sign in with Claude Code on this machine first, or set CLAUDE_CREDENTIALS_FILE."
+      err "Or skip the subscription and put ANTHROPIC_API_KEY in .env instead."
+      exit 1
+    fi
+  else
+    err "No credential file at ${CRED_FILE}"
+    err "Sign in with Claude Code on this machine first, or set CLAUDE_CREDENTIALS_FILE."
+    exit 1
+  fi
 fi
 
 PY_BIN=""
@@ -45,28 +61,68 @@ if [ -z "${PY_BIN}" ]; then
   exit 1
 fi
 
-log "Reading ${CRED_FILE}"
+if [ "${CRED_SOURCE#keychain:}" != "${CRED_SOURCE}" ]; then
+  log "Reading the macOS Keychain item \"${KEYCHAIN_SERVICE}\" (macOS may ask to allow access)"
+else
+  log "Reading ${CRED_FILE}"
+fi
 log "Platform API ${API_URL}"
 
 # Everything that touches the token stays inside python so it never reaches the
 # shell's argv, environment, or this script's output.
-PYTHONIOENCODING=utf-8 "${PY_BIN}" - "${CRED_FILE}" "${API_URL}" "${ADMIN_EMAIL}" "${ADMIN_PASSWORD}" <<'PY'
+PYTHONIOENCODING=utf-8 "${PY_BIN}" - "${CRED_SOURCE}" "${API_URL}" "${ADMIN_EMAIL}" "${ADMIN_PASSWORD}" <<'PY'
 import datetime
 import io
 import json
+import subprocess
 import sys
 import urllib.error
 import urllib.request
 
-cred_file, api_url, email, password = sys.argv[1:5]
+cred_source, api_url, email, password = sys.argv[1:5]
 
-with io.open(cred_file, encoding="utf-8") as fh:
-    cred = json.load(fh)
+
+def read_keychain(service):
+    try:
+        out = subprocess.run(
+            ["security", "find-generic-password", "-s", service, "-w"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        out = None
+    raw = (out.stdout if out and out.returncode == 0 else "").strip()
+    if raw and not raw.startswith("{"):
+        # security prints the value as hex when it holds non-printable bytes
+        try:
+            raw = bytes.fromhex(raw).decode("utf-8").strip()
+        except ValueError:
+            pass
+    try:
+        return json.loads(raw)
+    except ValueError:
+        print(
+            f'  [err] could not read the macOS Keychain item "{service}"',
+            file=sys.stderr,
+        )
+        print(
+            "  [err] allow access when macOS asks, or put ANTHROPIC_API_KEY in .env instead",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+
+
+if cred_source.startswith("keychain:"):
+    cred = read_keychain(cred_source[len("keychain:") :])
+else:
+    with io.open(cred_source, encoding="utf-8") as fh:
+        cred = json.load(fh)
 
 oauth = cred.get("claudeAiOauth") or {}
 token = (oauth.get("accessToken") or "").strip()
 if not token:
-    print("  [err] no claudeAiOauth.accessToken in the credential file", file=sys.stderr)
+    print("  [err] no claudeAiOauth.accessToken in the credential", file=sys.stderr)
     raise SystemExit(1)
 
 expires_at = oauth.get("expiresAt")

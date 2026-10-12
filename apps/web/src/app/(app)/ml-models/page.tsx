@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { mutate as swrMutate } from 'swr';
 import {
   Brain, Upload, Trash2, Play, Loader2, CheckCircle2, AlertCircle,
@@ -17,6 +17,9 @@ import InvocationsTable from '@/components/observability/InvocationsTable';
 import ConfirmModal from '@/components/ui/ConfirmModal';
 import PageHeader from '@/components/layout/PageHeader';
 import NextSteps from '@/components/shared/NextSteps';
+import DeepLinkMissing from '@/components/shared/DeepLinkMissing';
+import { deepLinkParam, matchModel, scrollToDeepLinkRow, useDeepLink } from '@/lib/deep-link';
+import { scrollInMain } from '@/lib/scrollInMain';
 import ExplainBars, { type Explanation } from '@/components/ml/ExplainBars';
 import {
   type MLModel, RUNNABLE_EXTENSIONS, UNRUNNABLE_HINTS, FRAMEWORK_LABELS, INPUT_SCHEMA_TEMPLATE,
@@ -114,6 +117,15 @@ export default function MLModelsPage() {
       setTimeout(() => detailRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
     }
   };
+
+  // /ml-models?model=<id or name> opens that model, ?id= too
+  const searchParams = useSearchParams();
+  const pathname = usePathname();
+  const linkedModel = deepLinkParam(searchParams, ['model', 'id']);
+  const linkMissing = useDeepLink(models, linkedModel, (m) => {
+    selectModel(m.id);
+    scrollToDeepLinkRow(m.id, (el) => scrollInMain(el, 'center'));
+  }, (m, w) => matchModel(m, w, models || []));
 
   const versionsFor = (name: string) => (models || []).filter(m => m.name === name.trim()).map(m => m.version);
   const versionPlaceholder = uploadName.trim() ? nextVersion(versionsFor(uploadName)) : '1.0.0';
@@ -386,6 +398,11 @@ export default function MLModelsPage() {
           ]}
         />
 
+        {linkMissing && (
+          <DeepLinkMissing noun="model" id={linkMissing} testId="ml-deeplink-missing"
+            onDismiss={() => router.replace(pathname || '/ml-models')} />
+        )}
+
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-6">
           {/* Left: Upload + List */}
           <div className="lg:col-span-4 space-y-4 min-w-0">
@@ -500,7 +517,7 @@ export default function MLModelsPage() {
                   const st = STATUS_STYLES[m.status] || STATUS_STYLES.uploaded;
                   const isSel = selected?.id === m.id;
                   return (
-                    <button key={m.id} onClick={() => selectModel(m.id)} data-testid="ml-model-row"
+                    <button key={m.id} onClick={() => selectModel(m.id)} data-testid="ml-model-row" data-deeplink-id={m.id}
                       className={`w-full text-left px-3 py-2.5 rounded-lg text-xs transition-colors ${
                         isSel ? 'bg-purple-500/10 border border-purple-500/30 text-white' : 'border border-transparent text-slate-400 hover:bg-slate-800/50 hover:text-white'
                       }`}>

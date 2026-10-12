@@ -1,6 +1,6 @@
 # Local development setup
 
-> From `git clone` to a running platform on your laptop. Path B (processes on your machine) is up in about ten minutes once dependencies are installed. Path A (full minikube cluster) takes 30 to 40 minutes on a cold machine.
+> From `git clone` to a running platform on your laptop. Path B (processes on your machine) is up in about ten minutes once dependencies are installed. Path A (full minikube cluster) takes 45 to 90 minutes on the first run, mostly image builds, and later runs reuse the cache.
 
 ---
 
@@ -117,7 +117,11 @@ precedence rules and the prompt in about a second, with no cluster.
 with Claude Code on this machine, run `bash scripts/sync-claude-subscription.sh`
 instead of filling in a key. Every feature then routes through the subscription
 and records tokens at zero cost. The credential rotates, so run the script again
-when agent runs start failing with `OAuth access token has been revoked`.
+when agent runs start failing with `OAuth access token has been revoked`. The
+script reads `~/.claude/.credentials.json`. On macOS, where Claude Code keeps the
+credential in the Keychain, it falls back to the Keychain item
+`Claude Code-credentials`, and macOS may ask you to allow that. If it finds
+neither, put `ANTHROPIC_API_KEY` in `.env` instead.
 
 Ingress is off for local deploys (`ingress.enabled: false` in
 `values-local.yaml`), so everything is reached over port forwards rather than
@@ -136,6 +140,7 @@ hostnames. Nothing needs to go in `/etc/hosts`.
 | PharmaVigil | http://localhost:3007 |
 | Grafana | http://localhost:3030 (`admin` and the password in secret `abenix-grafana-admin`, `abenix-admin` unless `GRAFANA_ADMIN_PASSWORD` was set when it was created) |
 | Prometheus | http://localhost:9090 |
+| MQTT broker | `mqtt://localhost:1883`, plain MQTT from the `abenix-mosquitto` forward |
 
 `deploy.sh local` installs Grafana and Prometheus by default.
 `OBSERVABILITY=false` skips them and saves about 600 MB of memory.
@@ -153,11 +158,61 @@ every `dev-local.sh` start:
 Change them before anyone else can reach the instance.
 
 If port 3000 is already taken, deploy with `WEB_PORT=3100 bash scripts/deploy.sh local`.
-`API_PORT` moves the API forward the same way. The deploy passes the web port
+`API_PORT` moves the API forward the same way, and `NEO4J_PORT`, `GRAFANA_PORT`,
+`PROMETHEUS_PORT`, `LIVEKIT_PORT` and `MQTT_PORT` move the others. The deploy passes the web port
 through as the API's allowed CORS origin. A port already in use is named rather
 than skipped, so you find out from the deploy rather than from a page that will
 not load. Forwards drop whenever a pod restarts, so `bash scripts/deploy.sh forwards`
 puts them all back and prints which ones answer.
+
+To try telemetry and Abenix Edge without hardware, see
+[20-edge-demo-and-testbed](20-edge-demo-and-testbed.md).
+
+### Which cluster it uses
+
+`deploy.sh` runs `kubectl` and `helm` against the current kube context, the one
+`kubectl config current-context` prints. It never switches context itself.
+`minikube start` points the context at the cluster it starts, so a first run
+lands in minikube. If you have switched to another cluster since, switch back
+before you deploy, because `deploy.sh local` installs into whatever the context
+points at:
+
+```bash
+kubectl config use-context minikube
+```
+
+The summary at the end prints the context it used. `destroy` and `FRESH=true`
+act on the same context, so check it before you run them.
+
+The minikube CLI reads `MINIKUBE_PROFILE` as its `--profile`, and `deploy.sh`
+calls plain `minikube`, so the variable picks the cluster for the whole run:
+start, status, the image builds on its Docker and the size checks. Without it
+the profile is `minikube`. A profile's kube context has the profile's name.
+
+### A second, separate install
+
+A second minikube profile is a second cluster with its own Docker, images and
+data. Give it a profile name and its own host ports, because the port forwards
+of both clusters share localhost:
+
+```bash
+MINIKUBE_PROFILE=abenix-b APPS=none DEV_CATCHERS=false   WEB_PORT=3100 API_PORT=8100 NEO4J_PORT=7574 GRAFANA_PORT=3130   PROMETHEUS_PORT=9190 LIVEKIT_PORT=7980 MQTT_PORT=1983   bash scripts/deploy.sh local
+```
+
+- The use-case apps forward on fixed ports (3001 to 3007), so give them to one
+  install only. `APPS=none` above keeps them off the second.
+- Its first run builds every image again, 45 to 90 minutes.
+- Docker must hold both clusters. The memory check compares one cluster with
+  all of Docker's memory, not with what is left, so size Docker for the sum.
+  See [06-deployment/09-local-sizing](../06-deployment/09-local-sizing.md).
+- `minikube start` moves the current context to `abenix-b`. Switch with
+  `kubectl config use-context minikube` or `abenix-b` before each command, and
+  pass the same `MINIKUBE_PROFILE` and ports every time, for example
+  `MINIKUBE_PROFILE=abenix-b WEB_PORT=3100 API_PORT=8100 ... bash scripts/deploy.sh forwards`.
+- The forwards are tied to the kube context they were started for, so each
+  cluster keeps its own.
+- Point the subscription script at it with
+  `API_PORT=8100 bash scripts/sync-claude-subscription.sh`.
 
 ### Path B: processes on your machine
 

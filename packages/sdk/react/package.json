@@ -1,6 +1,6 @@
 {
   "name": "@abenix/react",
-  "version": "2.5.5",
+  "version": "2.5.10",
   "description": "Abenix React SDK, an embeddable agent chat component and the useAgentStream hook",
   "type": "module",
   "main": "dist/index.js",
@@ -16,7 +16,7 @@
     "build": "tsc"
   },
   "dependencies": {
-    "@abenix/sdk": "^2.5.5"
+    "@abenix/sdk": "^2.5.10"
   },
   "peerDependencies": {
     "react": ">=18.0.0",

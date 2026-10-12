@@ -22,8 +22,10 @@ failure is the normal recovery path.
 | `deploy.sh observability` | Installs only the Prometheus and Grafana stack from `infra/observability/`. |
 | `deploy.sh status` | Pod and service health. |
 | `deploy.sh destroy` | Tears the deployment down. |
+| `deploy.sh testbed`, `testbed-down`, `testbed-chaos <svc>` | The telemetry testbed in `abenix-testbed`, see [08-howto/20-edge-demo-and-testbed](../08-howto/20-edge-demo-and-testbed.md). |
+| `deploy.sh edge-demo`, `edge-demo-cut [s]`, `edge-demo-down` | An Abenix Edge gateway in `abenix-edge-demo` and the uplink cut test, same page. |
 
-Any other argument prints the usage.
+Any other argument prints the usage. Every command acts on the current kube context.
 
 Environment overrides:
 
@@ -32,6 +34,9 @@ Environment overrides:
 | `APPS` | prompts, or all apps when there is no terminal | Comma-separated app keys or 1-based numbers, or `all` or `none`. Shared with `dev-local.sh`. |
 | `WEB_PORT` | `3000` | Something else already owns 3000 on your machine. |
 | `API_PORT` | `8000` | Same, for the API. |
+| `NEO4J_PORT`, `GRAFANA_PORT`, `PROMETHEUS_PORT`, `LIVEKIT_PORT`, `MQTT_PORT` | `7474`, `3030`, `9090`, `7880`, `1883` | Same, for the other forwards. `MQTT_PORT` is the `abenix-mosquitto` broker. |
+| `MINIKUBE_PROFILE` | `minikube` | Read by the minikube CLI itself. Picks the cluster, for a second install beside the first, see [08-howto/00-local-setup](../08-howto/00-local-setup.md#a-second-separate-install). |
+| `MINIKUBE_MEMORY`, `MINIKUBE_CPUS` | sized from `APPS` | Force the size of a new cluster, see [06-deployment/09-local-sizing](../06-deployment/09-local-sizing.md#overrides). |
 | `FRESH` | `false` | `FRESH=true` destroys and recreates the minikube VM. Wipes all cluster data. |
 | `NAMESPACE` | `abenix` | Deploy into a different namespace. |
 | `RELEASE_NAME` | `abenix` | Helm release name. |
@@ -75,7 +80,7 @@ Local LiveKit server for meeting work, from `scripts/livekit-dev.yaml`. Subcomma
 
 | Command | What it does |
 |---|---|
-| `sync-claude-subscription.sh` | Copies the Claude Code OAuth credential from `~/.claude/.credentials.json` into the platform, turns on subscription mode and calls the verify endpoint. Re-run when agent runs start failing with `OAuth access token has been revoked`, because that token rotates. The value is never printed. `API_URL` points it at another API. |
+| `sync-claude-subscription.sh` | Copies the Claude Code OAuth credential from `~/.claude/.credentials.json`, or on macOS from the Keychain item `Claude Code-credentials` when the file is missing, into the platform, turns on subscription mode and calls the verify endpoint. Re-run when agent runs start failing with `OAuth access token has been revoked`, because that token rotates. The value is never printed. `API_URL` points it at another API. |
 | `seed-standalone-keys.sh [app]` | For each standalone app, keeps its platform API key if it is still active, otherwise mints a `can_delegate` key, patches `<app>-secrets` and restarts the deployment. Pass one app name to do just that one. Run it after the apps are deployed, not before, or their manifests overwrite what you just minted. |
 | `sync-sdks.sh` | Copies the canonical Python SDK in `packages/sdk/python/abenix_sdk/` over every vendored copy. `--check` only reports drift and exits 1. |
 

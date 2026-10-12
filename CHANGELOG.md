@@ -1,5 +1,22 @@
 # Changelog
 
+## v2.5.10 — 2026-10-12
+
+### Added
+- `/code-runner?asset=<id>` and `/ml-models?model=<id or name>` open that item. They and `/knowledge?id=<id>` say so when the item is gone or not shared
+- How-to for the Edge demo and the telemetry testbed, with every deploy.sh command for them
+- Local setup covers MINIKUBE_PROFILE, which kube context deploy.sh uses, and running a second install beside the first
+- Local sizing covers room for the testbed and Groundwork beside Abenix, with MINIKUBE_MEMORY examples
+- The deploy summary lists the MQTT broker on MQTT_PORT and the kube context it used
+
+### Changed
+- The Python, TypeScript, React and Java SDKs carry the platform version, now 2.5.9
+- The README port list and the CLI reference include MQTT_PORT and the abenix-mosquitto forward
+
+### Fixed
+- sync-claude-subscription.sh reads the Claude Code credential from the macOS Keychain when the file is missing, and names both places when it finds neither
+- Local setup gave 30 to 40 minutes for a first minikube run, it is 45 to 90 like the README and the script
+
 ## v2.5.9 — 2026-10-12
 
 ### Added

@@ -153,6 +153,10 @@ Concrete step-by-step guides for the most common developer tasks.
 - [14 — Marketplace and monetization](08-howto/14-marketplace-and-monetization.md)
 - [15 — Send a bot to a meeting (rehearse, then join)](08-howto/15-meetings.md)
 - [16 — Let an agent improve itself, under control](08-howto/16-self-improvement.md)
+- [17 — Connect machines and streams](08-howto/17-telemetry.md)
+- [18 — Connect your organisation's machines, vehicles and devices](08-howto/18-connect-your-organisation.md)
+- [19 — Close the loop: from a stream to an action in your app](08-howto/19-close-the-loop.md)
+- [20 — Run the Edge demo and the telemetry testbed](08-howto/20-edge-demo-and-testbed.md)
 
 ### 9. Reference
 Catalogues and tables you'll look up rather than read end-to-end.
