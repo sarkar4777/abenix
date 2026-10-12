@@ -13,3 +13,4 @@
 #   GHSA-xxxx-yyyy-zzzz  # not exposed via our API surface; tracked in #123
 
 MAL-2026-4750  # OSV malicious-packages feed flag against fastapi 0.136.3 — no fix version published, the legitimate fastapi release is in use, advisory tracks a typosquatting incident not the upstream package. Re-evaluate when OSV publishes a fix or withdraws the advisory.
+PYSEC-2026-2447  # diskcache 5.6.3, pulled in by cantools for the DBC decoder. The advisory is unsafe pickle loading from a cache directory. Abenix calls cantools.database.load_string with no cache_dir, so diskcache is never used. No fix version yet. Re-evaluate when diskcache ships one or cantools drops it.

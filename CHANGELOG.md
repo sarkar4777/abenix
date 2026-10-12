@@ -31,7 +31,6 @@
 - The quota banner offers to forget the devices offline for more than an hour, with the count found first
 - Asset pages link to watching the asset with an agent, What next links to the agent templates, and Ctrl+K finds both
 - Push and device-key snippets use the Python and JavaScript SDK ingest call
-
 - Telemetry ingest service that reads Sparkplug B from MQTT brokers in real time, with seq, bdSeq, alias and rebirth handling, as its own deployment on the API image
 - Broker connections API with a five second test, live status, encrypted passwords, teams and sharing, and a default Site broker on local installs
 - Latest values in Redis, history in TimescaleDB with compression and 1 minute and 1 hour aggregates, a ring of the last 2,000 raw CAN frames per machine, and the subscribed_feed keys filled at last
@@ -44,7 +43,6 @@
 - forge.telemetry in the Python and JavaScript SDKs
 - deploy.sh chart applies the Helm chart to a running local cluster without a build, and deploy.sh forwards adds the MQTT broker on port 1883
 - scripts/telemetry-loadtest.sh runs the telemetry load tests in the cluster
-
 - Telemetry reads any stream, not only Sparkplug: transports and payload decoders are plugins found on their own, with the forms built from what each one declares
 - HTTP push sources with a token shown once, gzip with a hard size cap, signatures, idempotency keys and a durable queue that every ingest replica reads as one group
 - Per-device and gateway keys for HTTP push sources, made one at a time or from a CSV, so a device can only write as itself
@@ -61,7 +59,6 @@
 - Commands write back as a Kafka message, an AMQP publish, a NATS publish, a WebSocket message, an OPC UA write or a Modbus register or coil write
 - A telemetry testbed with Redpanda, RabbitMQ, NATS JetStream, Microsoft's OPC PLC, a Modbus energy meter, a WebSocket price feed and an HTTP pusher, installed with deploy.sh testbed
 - Try the testbed adds every testbed source as a named connection with a working mapping in one click, and deploy.sh testbed-chaos, testbed-poison and testbed-load break, poison and load it on purpose
-
 - Abenix Edge collects: a gateway on your own box reads a CAN bus (J1939 with address claim and transport protocol, OBD-II PIDs, any bus with a DBC), Modbus TCP and RTU, OPC UA, an NMEA GPS, a site MQTT broker or a growing CSV or JSON lines file
 - Edge keeps readings on disk while the link is down, compressed, for 72 hours or 1 GB by default, and sends them oldest first with an idempotency key per batch, so a retry is never stored twice
 - Add an edge gateway on the Edge page walks through what it collects, the settings with examples and checks, the install command, the first heartbeat and the first data, then links to Telemetry
@@ -71,7 +68,6 @@
 - Revoke stops a gateway at once, Remove forgets it and can take its source with it, and both ask first. Members see gateways and their health, view only
 - deploy.sh edge-image builds the Edge image, deploy.sh edge-demo runs a gateway in the cluster on a socketcand CAN bus with simulated ECUs and the testbed's meter and PLC, and deploy.sh edge-demo-cut cuts its uplink and checks the backfill
 - How-to: Connect your organisation's machines, vehicles and devices
-
 - Assets page: every streaming asset and part shows up by itself, at first unregistered, and gets a name, a type, tags, a team, a location and details like VIN, plate, serial and model
 - Name hundreds of assets at once from a CSV, with a preview that marks every row it would create, update or reject and why, before anything is saved
 - Signal rules watch live signals and act the moment something happens: above or below a limit, out of a range, changing too fast, silent for a number of seconds, a value, entering or leaving a zone drawn on GPS or site positions, or happening too often in a window
@@ -85,7 +81,6 @@
 - Drifts from normal: a rule that fires when the last minutes of a signal run a percentage or a number of standard deviations away from its own recent baseline, kept as running averages so it costs nothing extra per reading
 - Rules can run in their own pool, so the number of rules never slows the telemetry ingest. The ingest hands matching readings over by Redis, the pool holds a share of workspaces each through leases and picks up where a stopped replica left off. Inside the ingest stays the default, an admin moves a workspace on the Signal rules page
 - Python and TypeScript SDKs create, preview, test and delete signal rules and name assets, list them, import them from a CSV and read their facets
-
 - Redis on local installs gets 512Mi, 1 CPU and a 410mb maxmemory with noeviction, and a RedisMemoryHigh alert fires above 85%
 - The telemetry ingest keeps its memory bounded, with message ids for 15 minutes, dead letters at 16 KB each, and HTTP push answers 503 when its queue is full
 - The telemetry ingest reports event loop lag and logs the code that held the loop whenever it stalls
@@ -97,7 +92,6 @@
 - Devices offline for more than 30 days are forgotten on their own, set by telemetry.forget_offline_after_days
 - Devices from sources without births now go offline after a silence learnt from their own pace, 60 seconds to 15 minutes, or set per source or platform wide. A fleet going quiet raises a few alerts and then one grouped alert
 - Device rows show messages and readings a second averaged over 5 seconds, so a source that sends in batches no longer reads as 0
-
 - The closed loop, built from the UI for any asset: a stream, a signal rule, an agent that reads and proposes a command, a person who approves it, the asset that takes it, and your app that hears each step
 - asset_search agent tool: find assets by name, type, tag, team, group or online state, with latest readings, as the person the agent runs for sees them
 - device_state and signal_history take asset keys or display names, several assets in one call, or every asset of a type or tag
@@ -116,17 +110,18 @@
 - A command to a value the asset already reads counts as confirmed, and says so
 
 ### Changed
+
 - An approval tells only the people who can decide it, not everyone in the workspace, and the notices go out in the background so asking is instant
 - Approving a machine command needs Send machine commands, since approving sends it. Admins still can
 - A whole asset that reports through its parts opens on a list of its parts with their live values and a chart per part
 - Rates read naturally, such as Frames 77 /s, and device headers say online since rather than born
 
 ### Fixed
+
 - An agent runtime pod that is scaled down or restarted finishes the runs it holds first, and pools scale down one pod at a time
 - A run whose runtime pod stopped and that no pod took over fails after about 5 minutes with WORKER_STOPPED and says to run it again, instead of staying running
 - An unexpected server error answers 500 in the usual envelope with CORS headers and a reference, so the browser shows it and not "Failed to fetch"
 - Two agents in a workspace can no longer share a slug. Existing duplicates are renamed with -2, -3 and so on, and renaming an agent keeps its slug unless the name changes
-
 - Dialogs keep their layout while open, so turning a phone or resizing the window no longer loses what was typed or a key shown once
 - A Sparkplug node's offline time is when its death arrived, not when it connected
 - A command that names a confirm signal without a value now waits for the value it sent
