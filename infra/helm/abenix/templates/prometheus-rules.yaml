@@ -83,4 +83,13 @@ data:
             annotations:
               summary: "Redis is unreachable"
               description: "The API has failed its Redis probe for 2 minutes (abenix_health_check, refreshed every 30s by each API pod)."
+
+          - alert: RedisMemoryHigh
+            expr: max(abenix_redis_memory_bytes{kind="used"}) / max(abenix_redis_memory_bytes{kind="max"} > 0) > 0.85
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Redis is above 85% of its memory limit"
+              description: "At the limit Redis refuses writes (maxmemory-policy noeviction). Find the largest keys with redis-cli --bigkeys, or raise redis.master resources and maxmemory together."
 {{- end }}

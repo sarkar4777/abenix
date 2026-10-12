@@ -468,6 +468,65 @@ for ch in await client.sources.changes(limit=20):
 
 Other methods: `list(q="")`, `get`, `update(source_id, **fields)`, `delete`, `pause(source_id, reason="")`, `resume`, `snapshots(source_id, limit=100)`, `snapshot(snapshot_id, *, full=False)`, `source_changes(source_id, limit=100)`, `validate_url(url)`, `preview(url, *, kind=None, selector=None)`, `settings()`.
 
+### Telemetry
+
+Machines that report Sparkplug B over MQTT. See [08-howto/17-telemetry](../08-howto/17-telemetry.md).
+
+```python
+for d in await client.telemetry.devices(group="groundwork", status="online"):
+    print(d["node"], d["device"] or "(machine)", d["msgs_per_sec"])
+
+ex1 = await client.telemetry.node("groundwork", "ipc-ex1")
+engine = next(d for d in ex1["devices"] if d["device"] == "engine")
+
+h = await client.telemetry.history("groundwork", "ipc-ex1", "engine", "Engine/Speed_rpm", from_="-15m", step="10s")
+frames = await client.telemetry.frames("groundwork", "ipc-ex1", limit=100)
+
+try:
+    await client.telemetry.command("groundwork", "ipc-ex1", "safety", "Safety/Hold", True, "person inside the swing radius")
+except AbenixError as e:
+    if e.code == "NODE_OFFLINE":
+        ...
+
+async for event, data in client.telemetry.stream(nodes=["groundwork/ipc-ex1"]):
+    if event == "metrics":
+        ...
+```
+
+`command` needs `telemetry.command`, which admins hold and an API key gets with `scopes={"allowed_actions": ["telemetry.command"]}`. It never waits for an approval, wrap it in Earned Autonomy when it needs one. Errors carry `code` `NODE_OFFLINE`, `RATE_LIMITED` (over 20 a second to one node) or `FORBIDDEN`.
+
+Any source: `transports()`, `decoders()`, `preview(source_id, payload=None, *, subject=None, mapping=None, capture=False)`, `suggest_mapping(payload, subject=...)`, `inspector`, `dead_letters`, `replay(source_id, ids=None)`, `signals`, `diagnose(source_id)` or `diagnose(group=, node=)`, `events(group, node)`, `rotate_token`, `keys`, `create_key(source_id, device_id, kind="device")`, `create_keys_csv(source_id, csv_text)` and `revoke_key`. `forget_device(group, node, device=None, force=False)` and `forget_devices(offline_for_s, group=, node_glob=, connection_id=, dry_run=, limit=)` free places under the device limit and keep history. `create_connection` takes `transport=`, `config=`, `secrets=`, `subjects=`, `decoder=`, `mapping=` as keyword arguments.
+
+Pushing readings uses the source's token or a device key, not the API key:
+
+```python
+await client.telemetry.ingest(source_id, {"vehicle_id": "van-12", "speed_kmh": 52}, token="tdk_...", subject="fleet/vans")
+```
+
+`command(group, node, device, signal, value, reason, confirm_timeout_ms=1000)` waits for the device to report the value back and sets `confirmed`.
+
+Other methods: `health()`, `connections()`, `create_connection(name, broker_url, *, topics=None, raw_topics=None, username=None, password=None, enabled=True, shared_subscription=False, team_id=None)`, `update_connection(connection_id, **fields)`, `delete_connection`, `test_connection`.
+
+Signal rules and the asset registry, the same shapes as the routes:
+
+```python
+t = client.telemetry
+await t.update_asset("groundwork", "ipc-ex1", display_name="Excavator EX1", type="machine", tags=["earthworks"], fields={"serial": "EX1-2291"})
+check = await t.import_assets(open("assets.csv").read(), dry_run=True)   # rows with action and errors, nothing saved
+
+scope = {"kind": "asset", "group": "groundwork", "node": "ipc-ex1", "device": "hydraulics"}
+cond = {"kind": "threshold", "signal": "Hydraulics/Pump1Pressure_bar", "op": ">", "value": 300, "hysteresis": 20}
+print((await t.preview_rule(scope, cond, hours=1))["summary"])   # "This rule would have fired 3 times in the last hour, ..."
+rule = await t.create_rule("EX1 pump above 300 bar", scope, cond, [{"kind": "alert"}], cooldown_s=60)
+await t.test_rule(rule["id"])                                     # runs the steps once, commands are skipped
+await t.update_rule(rule["id"], enabled=False)
+await t.delete_rule(rule["id"])
+```
+
+Rules: `rules(q="")`, `rule(id)`, `create_rule(name, scope, condition, actions=None, *, description, severity, cooldown_s, enabled, team_id)`, `update_rule(id, **fields)`, `delete_rule`, `test_rule`, `preview_rule(scope, condition, *, cooldown_s, hours)`, `rule_options()`, `rule_signals(group, node, device=None, *, kind, type, tag)`, `rules_mode()` and `set_rules_mode("inprocess" | "pool" | None)`, `firings(rule_id, since)` and `firing(id)`. Condition kinds are threshold, range, rate, stale, state, geofence, count and deviation, steps are alert, notify, run, decision and command. Field problems raise `AbenixError` 422 with `details["fields"]`.
+
+Assets: `assets(*, q, type, tag, group, status, parts, limit, offset)`, `asset(group, node, device=None)`, `update_asset(group, node, device=None, *, display_name, type, tags, team_id, location, fields)` which replaces the whole entry, `delete_asset`, `import_assets(csv, dry_run=True)` and `asset_facets()`.
+
 ### Events
 
 Platform events sent to a webhook, or used to start an agent or pipeline. See [02-runtime/19-outbound-events](../02-runtime/19-outbound-events.md).

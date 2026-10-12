@@ -24,6 +24,8 @@ DEV_CATCHERS="${DEV_CATCHERS:-true}"
 MAILPIT_PORT="${MAILPIT_PORT:-8025}"
 CATCHER_PORT="${CATCHER_PORT:-8091}"
 MOCK_OIDC_PORT="${MOCK_OIDC_PORT:-8090}"
+# in-cluster MQTT broker, for publishing Sparkplug B from the host
+MQTT_PORT="${MQTT_PORT:-1883}"
 
 # ── Load .env for API keys (LLM providers need these for agent execution) ───
 if [ -f "${ROOT_DIR}/.env" ]; then
@@ -103,6 +105,22 @@ usage() {
   echo "                 core: api web worker agent-runtime edge-runtime"
   echo "                 apps: {contractiq,industrial-iot,resolveai,wingman,mideasttourism,pharmavigil}-{api,web}, claimsiq"
   echo "  forwards       Re-establish and verify all local port forwards"
+  echo "  chart          Apply the Helm chart to the local cluster with the images already running, no build"
+  echo "                 TELEMETRY_INGEST_REPLICAS=2 sets the telemetry ingest replicas"
+  echo "  testbed        Install the telemetry testbed in abenix-testbed: Redpanda, RabbitMQ, NATS, OPC UA, Modbus, WebSocket, HTTP push"
+  echo "                 HTTP_PUSH_URL=... HTTP_PUSH_TOKEN=... points the HTTP pusher at an http_push source"
+  echo "                 it also adds each source to Abenix as a 'Testbed · ...' connection, TESTBED_CONNECT=false skips that"
+  echo "  testbed-connect  Add or refresh the 'Testbed · ...' connections in Abenix"
+  echo "  rules-pool-kill  Kill one signal rules pool replica and time until its shards are held again"
+  echo "  testbed-down   Remove the testbed namespace and its data"
+  echo "  testbed-chaos <svc>    Kill a testbed broker or simulator pod and time its return (redpanda, rabbitmq, nats, opc-plc, meter, prices)"
+  echo "  testbed-poison <sim>   Make a simulator send one malformed message (payments, sensors, logistics, fleet, prices, pusher)"
+  echo "  testbed-load <n> <rate>  One-off Kafka burst to load.events for throughput tests"
+  echo "  testbed-forwards       Testbed ports on localhost: 19092 kafka, 5672 amqp, 4222 nats, 50000 opcua, 5020 modbus, 8765 ws"
+  echo "  edge-image     Build the Abenix Edge image (edge-runtime, tagged latest) on the cluster's docker"
+  echo "  edge-demo      Run an Abenix Edge gateway in abenix-edge-demo: a CAN bus over socketcand, ECUs, GPS, the testbed meter and PLC"
+  echo "  edge-demo-cut [s]  Cut the demo gateway's uplink for s seconds (default 120), then prove zero loss and in-order backfill"
+  echo "  edge-demo-down Remove the demo gateway, its source and its namespace"
   echo "  pause-apps     Scale use-case apps to zero to free memory, data and images stay. APPS=contractiq,wingman picks some"
   echo "  resume-apps    Bring paused apps back, same APPS selection"
   echo ""
@@ -110,7 +128,7 @@ usage() {
   echo "  FRESH=true     Force destroy + recreate minikube from scratch"
   echo "  WEB_PORT=3100  Host port for the web UI (default 3000)"
   echo "  API_PORT=8100  Host port for the API (default 8000)"
-  echo "                 also NEO4J_PORT, GRAFANA_PORT, PROMETHEUS_PORT, LIVEKIT_PORT"
+  echo "                 also NEO4J_PORT, GRAFANA_PORT, PROMETHEUS_PORT, LIVEKIT_PORT, MQTT_PORT"
   echo "  DEV_CATCHERS=false  Skip Mailpit, the webhook catcher and mock OIDC on local"
   echo "                 their ports: MAILPIT_PORT 8025, CATCHER_PORT 8091, MOCK_OIDC_PORT 8090"
   echo ""
@@ -1193,7 +1211,7 @@ seed_agents() {
   # short — no seed_code_assets and no seed_atlas — so a local cluster came up
   # with an empty Atlas and nothing to explain why, while Azure looked fine.
   for seed in seed_agents seed_users seed_portfolio_schemas seed_ml_models \
-              seed_code_assets seed_kb seed_atlas seed_kb_agent_grants seed_llm_pricing seed_backfill_agent_shares; do
+              seed_code_assets seed_kb seed_atlas seed_kb_agent_grants seed_llm_pricing seed_backfill_agent_shares               seed_telemetry; do
     run_seed "${seed}" || failed_seeds="${failed_seeds} ${seed}"
   done
 
@@ -1576,6 +1594,7 @@ setup_port_forwards() {
   _plan "${RELEASE_NAME}-mailpit" "${MAILPIT_PORT}" 8025
   _plan "${RELEASE_NAME}-webhook-catcher" "${CATCHER_PORT}" 8080
   _plan "${RELEASE_NAME}-mock-oidc" "${MOCK_OIDC_PORT}" 8080
+  _plan abenix-mosquitto "${MQTT_PORT}" 1883
   if [ "${with_runtime}" = "true" ]; then
     plan+=("${RELEASE_NAME}-agent-runtime 8001 8001")
   fi
@@ -2182,6 +2201,7 @@ deploy_forwards() {
     "abenix-prometheus:${PROMETHEUS_PORT}" "abenix-grafana:${GRAFANA_PORT}"
     "abenix-mailpit:${MAILPIT_PORT}" "abenix-webhook-catcher:${CATCHER_PORT}"
     "abenix-mock-oidc:${MOCK_OIDC_PORT}"
+    "abenix-mosquitto:${MQTT_PORT}"
   )
   local bad=0
   for pair in "${pairs[@]}"; do
@@ -2190,6 +2210,16 @@ deploy_forwards() {
     # down is noise rather than a finding. Selective deploys made that the
     # normal case rather than the exception.
     if ! kubectl -n "${NAMESPACE}" get svc "${label}" &>/dev/null; then
+      continue
+    fi
+    # MQTT is not HTTP, a TCP connect is the whole check
+    if [ "${label}" = "abenix-mosquitto" ]; then
+      if (exec 3<>"/dev/tcp/127.0.0.1/${port}") 2>/dev/null; then
+        ok "${label} :${port} -> MQTT"
+      else
+        err "${label} :${port} not answering"
+        bad=$((bad + 1))
+      fi
       continue
     fi
     # Any HTTP status means the tunnel carried the request; only a connect
@@ -2354,6 +2384,19 @@ deploy_reload() {
     # the new API image may carry migrations the database has not seen yet
     if [ "${svc}" = "api" ]; then
       run_migrations || warn "migrations did not complete, check the API pod"
+      # the telemetry ingest runs the API image under its own command
+      local ti
+      for ti in $(kubectl -n "${NAMESPACE}" get deploy -l "app.kubernetes.io/component=telemetry-ingest" -o name 2>/dev/null); do
+        kubectl -n "${NAMESPACE}" set image "${ti}" "telemetry-ingest=${registry}/api:${IMAGE_TAG}" >/dev/null
+        kubectl -n "${NAMESPACE}" rollout restart "${ti}"
+        rollout_or_explain "telemetry-ingest" "${ti}" || return 1
+      done
+      # the rules pool runs the API image too
+      for ti in $(kubectl -n "${NAMESPACE}" get deploy -l "app.kubernetes.io/component=telemetry-rules" -o name 2>/dev/null); do
+        kubectl -n "${NAMESPACE}" set image "${ti}" "telemetry-rules=${registry}/api:${IMAGE_TAG}" >/dev/null
+        kubectl -n "${NAMESPACE}" rollout restart "${ti}"
+        rollout_or_explain "telemetry-rules" "${ti}" || return 1
+      done
     fi
   else
     # mideasttourism-api is the one app whose Dockerfile COPYs from the app
@@ -2387,6 +2430,378 @@ deploy_reload() {
   return 0
 }
 
+# Apply the chart to a running local cluster without building anything. Every
+# image stays at the tag its deployment runs now, so a chart change (a new
+# deployment, a value) lands without the tag cascade a plain helm upgrade
+# causes after `reload` moved some services to newer images.
+_running_tag() { # _running_tag <label selector>
+  kubectl -n "${NAMESPACE}" get deploy -l "$1"     -o jsonpath='{.items[0].spec.template.spec.containers[0].image}' 2>/dev/null | sed 's/.*://'
+}
+
+deploy_chart() {
+  check_prereqs
+  if ! kubectl -n "${NAMESPACE}" get deploy "${RELEASE_NAME}-api" &>/dev/null; then
+    err "no ${RELEASE_NAME}-api deployment in ${NAMESPACE}, run '$0 local' first"
+    exit 1
+  fi
+  step "Applying the Helm chart with the images already running"
+  helm_deps
+  local flags=() tag
+  tag=$(_running_tag "app.kubernetes.io/name=api")
+  [ -n "${tag}" ] && flags+=(--set "api.image.tag=${tag}")
+  tag=$(_running_tag "app.kubernetes.io/name=web")
+  [ -n "${tag}" ] && flags+=(--set "web.image.tag=${tag}")
+  tag=$(_running_tag "app.kubernetes.io/name=worker")
+  [ -n "${tag}" ] && flags+=(--set "worker.image.tag=${tag}")
+  tag=$(_running_tag "app.kubernetes.io/component=cognify-worker")
+  [ -n "${tag}" ] && flags+=(--set "cognifyWorker.image.tag=${tag}")
+  tag=$(_running_tag "app.kubernetes.io/name=agent-runtime")
+  [ -n "${tag}" ] && flags+=(--set "agent-runtime.image.tag=${tag}" --set "scaling.agentRuntimeImage.tag=${tag}")
+  [ -n "${TELEMETRY_INGEST_REPLICAS:-}" ] && flags+=(--set "telemetryIngest.replicaCount=${TELEMETRY_INGEST_REPLICAS}")
+  # the same browser-facing settings deploy_local passes, values-local alone would reset them
+  flags+=(--set "corsOrigins[0]=http://localhost:${WEB_PORT}" --set "frontendUrl=http://localhost:${WEB_PORT}"
+          --set "publicApiUrl=http://localhost:${API_PORT}" --set "devCatchers.enabled=${DEV_CATCHERS}"
+          --set "web.env.NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:${API_PORT}}")
+  log "images: ${flags[*]}"
+  # shellcheck disable=SC2046
+  helm upgrade --install "${RELEASE_NAME}" "${HELM_DIR}"     --namespace "${NAMESPACE}"     --reset-then-reuse-values     --values "${HELM_DIR}/values-local.yaml"     "${flags[@]}"     $(_build_secrets_flags)     --timeout 10m     --wait=false     2>&1 | tail -5
+  ok "Helm release applied"
+  roll_config_consumers
+  local ti
+  for ti in $(kubectl -n "${NAMESPACE}" get deploy -l "app.kubernetes.io/component in (telemetry-ingest,telemetry-rules)" -o name 2>/dev/null); do
+    # reload rebuilds the same tag under pullPolicy Never, a pool whose spec did not change keeps the old image
+    kubectl -n "${NAMESPACE}" rollout restart "${ti}" >/dev/null
+    rollout_or_explain "telemetry pool" "${ti}" || warn "${ti#*/} is not up yet"
+  done
+  run_seed seed_telemetry || warn "the default Site broker connection was not added"
+  warn "forwards to restarted services drop, run '$0 forwards' to restore them"
+}
+
+# Telemetry testbed: real brokers and simulated apps in their own namespace
+TESTBED_NS="${TESTBED_NAMESPACE:-abenix-testbed}"
+TESTBED_CHART="${ROOT_DIR}/infra/helm/testbed"
+TESTBED_KEYS="kafka-admin-password kafka-password rabbitmq-admin-password rabbitmq-password nats-admin-password nats-password opcua-password ws-token restricted-password"
+
+_testbed_up_check() {
+  check_prereqs
+  if ! { minikube status --format='{{.Host}}' 2>/dev/null || true; } | grep -q "Running"; then
+    err "minikube is not running, use '$0 local' first"
+    exit 1
+  fi
+}
+
+# passwords are made once and kept, so connections saved in Abenix keep working
+_testbed_credentials() {
+  local args=() k v
+  for k in ${TESTBED_KEYS}; do
+    v="$(kubectl get secret testbed-credentials -n "${TESTBED_NS}" -o jsonpath="{.data.${k}}" 2>/dev/null | base64 -d 2>/dev/null || true)"
+    [ -n "${v}" ] || v="$(head -c 18 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 20)"
+    args+=(--from-literal="${k}=${v}")
+    [ "${k}" = "kafka-admin-password" ] && args+=(--from-literal="kafka-bootstrap-user=admin:${v}:SCRAM-SHA-256")
+  done
+  kubectl create secret generic testbed-credentials -n "${TESTBED_NS}" "${args[@]}" \
+    --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+  ok "credentials kept in secret testbed-credentials"
+  if [ -n "${HTTP_PUSH_URL:-}" ] && [ -n "${HTTP_PUSH_TOKEN:-}" ]; then
+    kubectl create secret generic testbed-http-push -n "${TESTBED_NS}" \
+      --from-literal=url="${HTTP_PUSH_URL}" --from-literal=token="${HTTP_PUSH_TOKEN}" \
+      --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+    ok "the HTTP pusher posts to ${HTTP_PUSH_URL}"
+  elif ! kubectl get secret testbed-http-push -n "${TESTBED_NS}" &>/dev/null; then
+    log "the HTTP pusher gets its target when the testbed sources are added to Abenix"
+  fi
+}
+
+_testbed_sim_tag() {
+  cat "${TESTBED_CHART}"/sim/Dockerfile "${TESTBED_CHART}"/sim/requirements.txt "${TESTBED_CHART}"/sim/sim.py \
+    | sha256sum | cut -c1-12
+}
+
+deploy_testbed() {
+  _testbed_up_check
+  wait_for_docker
+  step "Telemetry testbed in namespace ${TESTBED_NS}"
+  eval "$(minikube docker-env)"
+  local tag image
+  tag="$(_testbed_sim_tag)"
+  image="localhost:5000/abenix/testbed-sim"
+  if docker image inspect "${image}:${tag}" &>/dev/null; then
+    ok "simulator image ${tag} is already built"
+  else
+    _build_app_image testbed-sim "${TESTBED_CHART}/sim/Dockerfile" "${TESTBED_CHART}/sim" \
+      "${image}:${tag}" "${image}:latest" || return 1
+  fi
+  kubectl create namespace "${TESTBED_NS}" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+  _testbed_credentials
+  helm upgrade --install abenix-testbed "${TESTBED_CHART}" --namespace "${TESTBED_NS}" \
+    --reset-then-reuse-values --set simImage.tag="${tag}" --set load.enabled=false \
+    --timeout 5m --wait=false 2>&1 | tail -2
+  local w bad=0
+  for w in statefulset/redpanda statefulset/rabbitmq statefulset/nats deploy/opc-plc \
+           deploy/payments-sim deploy/sensors-sim deploy/logistics-sim deploy/fleet-sim \
+           deploy/meter-sim deploy/prices-sim deploy/pusher-sim deploy/info-sim; do
+    kubectl get -n "${TESTBED_NS}" "${w}" &>/dev/null || continue
+    if kubectl rollout status -n "${TESTBED_NS}" "${w}" --timeout=300s >/dev/null 2>&1; then
+      ok "${w#*/} is up"
+    else
+      warn "${w#*/} is not ready yet, see: kubectl -n ${TESTBED_NS} describe ${w}"
+      bad=$((bad + 1))
+    fi
+  done
+  local d="${TESTBED_NS}.svc.cluster.local"
+  echo ""
+  log "Addresses from inside the cluster, passwords in secret ${TESTBED_NS}/testbed-credentials:"
+  echo "    kafka      redpanda.${d}:9092  SASL_PLAINTEXT SCRAM-SHA-256 user abenix (kafka-password), topics shop.orders plant.sensors, commands shop.commands"
+  echo "    amqp       rabbitmq.${d}:5672  user abenix (rabbitmq-password), exchange logistics.events or queue telemetry.shipments"
+  echo "    nats       nats://nats.${d}:4222  user abenix (nats-password), subjects fleet.positions.>, JetStream stream FLEET"
+  echo "    opcua      opc.tcp://opc-plc.${d}:50000  user abenix (opcua-password), browse Objects/OpcPlc/Telemetry"
+  echo "    modbus_tcp meter.${d}:502  unit 1, register map in infra/helm/testbed/README.md"
+  echo "    websocket  ws://prices.${d}:8765/ticks  Authorization: Bearer (ws-token)"
+  echo "    restricted user 'restricted' (restricted-password) is refused topics, queues and subjects, for ACL checks"
+  [ "${bad}" -eq 0 ] && ok "testbed is up" || warn "${bad} testbed workloads are not ready"
+  [ "${TESTBED_CONNECT:-true}" = "true" ] && { testbed_connect || warn "the testbed sources were not all added, rerun '$0 testbed-connect'"; }
+  return 0
+}
+
+deploy_testbed_down() {
+  _testbed_up_check
+  step "Removing the telemetry testbed"
+  NAMESPACE="${TESTBED_NS}" kill_port_forwards "19092 5672 4222 50000 5020 8765"
+  helm uninstall abenix-testbed --namespace "${TESTBED_NS}" 2>/dev/null | tail -1 || true
+  kubectl delete namespace "${TESTBED_NS}" --ignore-not-found --wait=true --timeout=180s >/dev/null 2>&1 \
+    || warn "namespace ${TESTBED_NS} is still terminating"
+  ok "testbed removed, its data and passwords with it"
+}
+
+# adds every testbed source to Abenix as a named connection with a sample mapping, through the public API
+# Kill one rules pool replica and time how long until every shard is held again
+rules_pool_kill() {
+  local pod
+  pod="$(kubectl -n "${NAMESPACE}" get pods -l app.kubernetes.io/name=telemetry-rules \
+    --field-selector=status.phase=Running -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
+  if [ -z "${pod}" ]; then
+    err "no running rules pool pod, turn it on with telemetryRules.enabled"
+    exit 1
+  fi
+  step "Killing rules pool pod ${pod}"
+  local t0
+  t0=$(date +%s)
+  kubectl -n "${NAMESPACE}" delete pod "${pod}" --grace-period=0 --force --wait=false >/dev/null 2>&1
+  # a shard counts once a replica other than the killed one holds its lease
+  local held=0
+  for _ in $(seq 1 120); do
+    sleep 1
+    held=$(kubectl -n "${NAMESPACE}" exec "${RELEASE_NAME:-abenix}-redis-master-0" -- sh -c \
+      "for s in \$(seq 0 15); do redis-cli --no-auth-warning \${REDIS_PASSWORD:+-a \$REDIS_PASSWORD} GET tel:rules:pool:lease:\$s; done" 2>/dev/null \
+      | grep -v "^${pod}-" | grep -c . || true)
+    if [ "${held:-0}" -ge 16 ]; then
+      break
+    fi
+  done
+  if [ "${held:-0}" -ge 16 ]; then
+    ok "all 16 shards held by another replica after $(( $(date +%s) - t0 )) s"
+  else
+    err "only ${held:-0} of 16 shards held after $(( $(date +%s) - t0 )) s"
+    exit 1
+  fi
+}
+
+testbed_connect() {
+  _testbed_up_check
+  step "Adding the testbed sources to Abenix"
+  local out
+  out="$(_edge_api "
+r = c.post('/api/telemetry/testbed/connect', headers=auth)
+body = r.json() if r.headers.get('content-type', '').startswith('application/json') else {}
+if r.status_code >= 300:
+    err = body.get('error')
+    print('FAIL', (err or {}).get('message') if isinstance(err, dict) else err or r.text[:300])
+    sys.exit(1)
+d = body['data']
+for row in d['connections']:
+    print(row['action'], row['name'])
+for p in d['errors']:
+    print('FAIL', p['name'] + ':', p['error'])
+print('pusher', d['pusher'])
+")" || true
+  if [ -z "${out}" ]; then
+    warn "Abenix did not answer, run '$0 testbed-connect' once the api is up"
+    return 1
+  fi
+  echo "${out}" | sed 's/^/    /'
+  echo "${out}" | grep -q '^FAIL' && return 1
+  ok "the testbed sources are in Abenix under Monitor, Telemetry, Connections"
+}
+
+# kills one broker or simulator pod and times how long until it is ready again
+testbed_chaos() { # testbed_chaos <svc>
+  _testbed_up_check
+  local svc="${1:-}" sel
+  case "${svc}" in
+    redpanda|kafka) sel="app=redpanda" ;;
+    rabbitmq|amqp)  sel="app=rabbitmq" ;;
+    nats)           sel="app=nats" ;;
+    opc-plc|opcua)  sel="app=opc-plc" ;;
+    meter|modbus)   sel="app=meter-sim" ;;
+    prices|websocket) sel="app=prices-sim" ;;
+    payments|sensors|logistics|fleet|pusher) sel="app=${svc}-sim" ;;
+    *) err "testbed-chaos takes redpanda, rabbitmq, nats, opc-plc, meter, prices or a simulator name"; exit 1 ;;
+  esac
+  local old uid start
+  old="$(kubectl get pod -n "${TESTBED_NS}" -l "${sel}" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)"
+  uid="$(kubectl get pod -n "${TESTBED_NS}" -l "${sel}" -o jsonpath='{.items[0].metadata.uid}' 2>/dev/null)"
+  [ -n "${old}" ] || { err "no pod for ${svc} in ${TESTBED_NS}"; exit 1; }
+  start=$(date +%s)
+  log "killing ${old}"
+  kubectl delete pod -n "${TESTBED_NS}" "${old}" --grace-period=0 --wait=false >/dev/null
+  local i row
+  for i in $(seq 1 180); do
+    sleep 1
+    # uid, ready for each pod: a StatefulSet pod comes back under the same name
+    row="$(kubectl get pod -n "${TESTBED_NS}" -l "${sel}" -o jsonpath='{range .items[*]}{.metadata.uid} {.status.containerStatuses[0].ready}{"\n"}{end}' 2>/dev/null | grep -v "^${uid} " | grep ' true$' || true)"
+    if [ -n "${row}" ]; then
+      ok "${svc} is back after $(( $(date +%s) - start ))s"
+      return 0
+    fi
+  done
+  warn "${svc} is not ready after 180s"
+  return 1
+}
+
+# makes a simulator send one malformed message, for dead-letter checks
+testbed_poison() { # testbed_poison <sim>
+  _testbed_up_check
+  local sim="${1:-}"
+  case "${sim}" in
+    payments|sensors|logistics|fleet|prices|pusher) ;;
+    *) err "testbed-poison takes payments, sensors, logistics, fleet, prices or pusher"; exit 1 ;;
+  esac
+  kubectl exec -n "${TESTBED_NS}" "deploy/${sim}-sim" -- python -c \
+    "import urllib.request as u; print(u.urlopen(u.Request('http://127.0.0.1:8081/poison', method='POST')).read().decode().strip())"
+}
+
+# a one-off Kafka burst: testbed-load <count> <msgs per second>
+testbed_load() {
+  _testbed_up_check
+  local count="${1:-100000}" rate="${2:-5000}" run
+  run="$(date +%s)"
+  step "Kafka burst: ${count} messages at ${rate}/s to ${TESTBED_LOAD_TOPIC:-load.events}"
+  helm upgrade abenix-testbed "${TESTBED_CHART}" --namespace "${TESTBED_NS}" --reuse-values \
+    --set load.enabled=true --set load.runId="${run}" --set load.count="${count}" --set load.rate="${rate}" \
+    --set load.topic="${TESTBED_LOAD_TOPIC:-load.events}" --wait=false 2>&1 | tail -1
+  if kubectl wait -n "${TESTBED_NS}" --for=condition=complete "job/kafka-load-${run}" \
+      --timeout="$(( count / (rate > 0 ? rate : 1) + 180 ))s" >/dev/null 2>&1; then
+    kubectl logs -n "${TESTBED_NS}" "job/kafka-load-${run}" | tail -1
+  else
+    warn "the burst did not finish, see: kubectl -n ${TESTBED_NS} logs job/kafka-load-${run}"
+  fi
+}
+
+# host ports for running connector tests from this machine
+testbed_forwards() {
+  _testbed_up_check
+  step "Forwarding testbed ports"
+  NAMESPACE="${TESTBED_NS}" kill_port_forwards "19092 5672 4222 50000 5020 8765"
+  local line svc lport rport
+  for line in "redpanda 19092 19092" "rabbitmq 5672 5672" "nats 4222 4222" "opc-plc 50000 50000" "meter 5020 502" "prices 8765 8765"; do
+    read -r svc lport rport <<< "${line}"
+    NAMESPACE="${TESTBED_NS}" start_persistent_forward "${svc}" "${lport}" "${rport}" || true
+    ok "${svc} on localhost:${lport}"
+  done
+}
+
+# Abenix Edge demo: one gateway pod with a socketcand CAN bus, simulated ECUs and an uplink relay as sidecars,
+# collecting from the bus and from the testbed's Modbus meter and OPC UA PLC. Driven through the public API.
+EDGE_DEMO_NS="abenix-edge-demo"
+EDGE_DEMO_PY="${ROOT_DIR}/apps/edge-runtime/demo/edge_demo.py"
+
+# builds the edge image on the cluster's docker, tagged :latest as the install commands expect
+build_edge_image() {
+  check_prereqs
+  wait_for_docker
+  eval "$(minikube docker-env)"
+  build_core_service edge-runtime "localhost:5000/abenix" "false"
+}
+
+_edge_demo_py() { # _edge_demo_py <mode> [args], runs the demo driver in the API pod
+  local pod pw
+  pod=$(_api_pod)
+  [ -z "${pod}" ] && { err "no running API pod"; return 1; }
+  pw="$(kubectl get secret testbed-credentials -n "${TESTBED_NS}" -o jsonpath='{.data.opcua-password}' 2>/dev/null | base64 -d 2>/dev/null || true)"
+  kubectl exec -i -n "${NAMESPACE}" "${pod}" -c api -- env ADMIN_EMAIL="${ADMIN_EMAIL:-admin@abenix.dev}" \
+    ADMIN_PASSWORD="${ADMIN_PASSWORD:-Admin123456}" OPCUA_PASSWORD="${pw}" TESTBED_NS="${TESTBED_NS}" \
+    API_SVC="${RELEASE_NAME}-api.${NAMESPACE}.svc.cluster.local:8000" \
+    python3 - "$@" < "${EDGE_DEMO_PY}"
+}
+
+deploy_edge_demo() {
+  step "Abenix Edge demo in namespace ${EDGE_DEMO_NS}"
+  if ! kubectl get namespace "${TESTBED_NS}" &>/dev/null; then
+    warn "the testbed is not installed, the Modbus and OPC UA collectors will say they cannot reach it. Run: bash scripts/deploy.sh testbed"
+  fi
+  [ "${SKIP_EDGE_BUILD:-false}" = "true" ] || build_edge_image || return 1
+  local manifest="${TMPDIR:-/tmp}/abenix-edge-demo.yaml"
+  _edge_demo_py setup > "${manifest}" || { err "the demo gateway could not be set up"; return 1; }
+  kubectl apply -f "${manifest}" | tail -4
+  # a new install token is in the secret, the pod reads it at start
+  kubectl -n "${EDGE_DEMO_NS}" rollout restart statefulset/edge-demo >/dev/null 2>&1 || true
+  kubectl -n "${EDGE_DEMO_NS}" rollout status statefulset/edge-demo --timeout=300s || warn "the demo pod is not ready yet"
+  log "Waiting for the first heartbeat and data (up to 4 minutes)..."
+  _edge_demo_py wait
+  ok "Edge demo running. Cut its uplink with: bash scripts/deploy.sh edge-demo-cut 120"
+}
+
+_edge_status() { # one line of the gateway's own /status
+  kubectl exec -n "${EDGE_DEMO_NS}" edge-demo-0 -c edge -- python -c "
+import json, urllib.request
+s = json.load(urllib.request.urlopen('http://127.0.0.1:8080/status', timeout=3))
+b, u = s['buffer'], s['uplink']
+print(f\"{b['depth']} {b['oldest_age_s']} {b['sent']} {u['status']} {b['dropped_age'] + b['dropped_size'] + b['rejected']}\")
+" 2>/dev/null
+}
+
+edge_demo_cut() { # edge_demo_cut [seconds]
+  local secs="${1:-120}" t0 t1 line depth age sent link lost peak=0 peak_age=0 sent0 drained=""
+  kubectl get pod -n "${EDGE_DEMO_NS}" edge-demo-0 &>/dev/null || { err "no demo gateway, run: bash scripts/deploy.sh edge-demo"; exit 1; }
+  step "Cutting the demo gateway's uplink for ${secs} s"
+  read -r depth age sent0 link lost <<< "$(_edge_status)"
+  log "before: buffer ${depth} readings, ${sent0} sent so far, link ${link}"
+  t0=$(date +%s)
+  kubectl exec -n "${EDGE_DEMO_NS}" edge-demo-0 -c uplink -- python -c "
+import urllib.request
+print(urllib.request.urlopen(urllib.request.Request('http://127.0.0.1:18001/cut?seconds=${secs}', method='POST'), timeout=3).read().decode())" >/dev/null
+  while [ $(( $(date +%s) - t0 )) -lt "${secs}" ]; do
+    sleep 10
+    read -r depth age sent link lost <<< "$(_edge_status)"
+    [ -n "${depth}" ] && [ "${depth}" -gt "${peak}" ] && { peak=${depth}; peak_age=${age}; }
+    log "  $(( $(date +%s) - t0 )) s: buffer ${depth} readings, oldest ${age} s, link ${link}"
+  done
+  t1=$(date +%s)
+  log "uplink back after $(( t1 - t0 )) s, waiting for the backfill..."
+  while [ $(( $(date +%s) - t1 )) -lt 180 ]; do
+    read -r depth age sent link lost <<< "$(_edge_status)"
+    if [ "${link}" = "online" ] && [ -n "${depth}" ] && [ "${depth}" -lt 200 ] && [ "${age%.*}" -lt 10 ]; then
+      drained=$(( $(date +%s) - t1 ))
+      break
+    fi
+    sleep 2
+  done
+  [ -z "${drained}" ] && warn "the buffer did not drain within 180 s"
+  # history is written in 250 ms batches, give it a moment
+  sleep 5
+  step "Proof"
+  log "peak buffer ${peak} readings, oldest ${peak_age} s, drained ${drained:-?} s after the link came back"
+  log "readings sent during the cut and backfill: $(( sent - sent0 )), lost by the gateway: ${lost}"
+  _edge_demo_py proof "${t0}" "${t1}"
+}
+
+deploy_edge_demo_down() {
+  step "Removing the Abenix Edge demo"
+  _edge_demo_py down || true
+  kubectl delete namespace "${EDGE_DEMO_NS}" --wait=false 2>/dev/null | tail -1 || true
+  ok "edge demo removed"
+}
+
 # MAIN
 # Use-case apps scaled down or back up, the platform is untouched
 apps_scale() { # apps_scale <replicas>
@@ -2416,5 +2831,18 @@ case "${1:-}" in
   pause-apps)     apps_scale 0         ;;
   resume-apps)    apps_scale 1         ;;
   observability)  install_observability_stack ;;
+  chart)          deploy_chart         ;;
+  testbed)        deploy_testbed       ;;
+  testbed-down)   deploy_testbed_down  ;;
+  testbed-chaos)  testbed_chaos "${2:-}" ;;
+  testbed-poison) testbed_poison "${2:-}" ;;
+  testbed-load)   testbed_load "${2:-}" "${3:-}" ;;
+  testbed-forwards) testbed_forwards   ;;
+  edge-image)     build_edge_image     ;;
+  edge-demo)      deploy_edge_demo     ;;
+  edge-demo-cut)  edge_demo_cut "${2:-120}" ;;
+  edge-demo-down) deploy_edge_demo_down ;;
+  testbed-connect) testbed_connect     ;;
+  rules-pool-kill) rules_pool_kill     ;;
   *)              usage                ;;
 esac

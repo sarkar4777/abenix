@@ -14,7 +14,8 @@ export type Shareable =
   | 'code_asset'
   | 'knowledge_base'
   | 'saved_tool'
-  | 'atlas_graph';
+  | 'atlas_graph'
+  | 'telemetry_connection';
 
 interface ShareRow {
   id: string;

@@ -50,3 +50,36 @@ describe('command palette decisions', () => {
     expect(isJunkLabel('Machine stop near worker')).toBe(false);
   });
 });
+
+describe('command palette telemetry', () => {
+  const OPERATOR = { is_admin: false, capabilities: ['telemetry.view', 'telemetry.command'], features: {} };
+  it('finds the telemetry page by machines, devices and MQTT', () => {
+    for (const q of ['telemetry', 'machines', 'devices', 'mqtt', 'j1939', 'broker', 'kafka', 'opc ua', 'webhook', 'dead letter']) {
+      expect(matchCommands(q, commandsFor(ADMIN)).map((c) => c.href).some((h) => h?.startsWith('/telemetry')), q).toBe(true);
+    }
+    expect(hrefs('mqtt', ADMIN)).toContain('/telemetry?tab=sources');
+  });
+  it('marks broker connections view only without Manage telemetry, and hides it all without View telemetry', () => {
+    expect(matchCommands('mqtt', commandsFor(OPERATOR)).find((c) => c.href === '/telemetry?tab=sources')?.label).toBe('Telemetry sources (view only)');
+    expect(matchCommands('kafka', commandsFor(ADMIN)).find((c) => c.href === '/telemetry?tab=sources')?.label).toBe('Telemetry sources (MQTT, Kafka, HTTP and more)');
+    expect(hrefs('machines', MEMBER).some((h) => h?.startsWith('/telemetry'))).toBe(false);
+  });
+});
+
+describe('command palette edge', () => {
+  it('finds the edge gateway and its collectors by plain words', () => {
+    expect(hrefs('edge gateway', ADMIN)).toContain('/edge?add=gateway');
+    for (const q of ['can', 'j1939', 'obd-ii', 'modbus rtu', 'serial gps', 'store and forward']) {
+      expect(hrefs(q, ADMIN), q).toContain('/edge');
+    }
+  });
+});
+
+describe('command palette telemetry agents', () => {
+  it('finds the agent templates and watching an asset', () => {
+    expect(hrefs('agent templates', ADMIN)).toContain('/telemetry/agents');
+    expect(hrefs('watch an asset', ADMIN)).toContain('/telemetry/agents?template=machine-health-watcher');
+    expect(hrefs('fleet dispatcher', ADMIN)).toContain('/telemetry/agents');
+    expect(hrefs('watch an asset', MEMBER)).not.toContain('/telemetry/agents?template=machine-health-watcher');
+  });
+});

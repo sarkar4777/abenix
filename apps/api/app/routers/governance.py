@@ -74,10 +74,11 @@ async def list_permission_sets(
     user: User = Depends(require_capability("permissions.manage")),
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
-    from app.core.approvers import ensure_decision_reviewers
+    from app.core.approvers import ensure_decision_reviewers, ensure_machine_operators
 
     # a workspace made before the set existed gets it the first time anyone looks
     await ensure_decision_reviewers(db, user.tenant_id)
+    await ensure_machine_operators(db, user.tenant_id)
     await db.commit()
     sets = (
         (

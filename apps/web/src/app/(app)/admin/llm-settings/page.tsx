@@ -6,6 +6,7 @@ import { Cpu, Save, RotateCcw, Sparkles, Shield, BookOpen, Zap, Clock } from 'lu
 import { apiFetch } from '@/lib/api-client';
 import { settingTitle } from '@/lib/monitor-format';
 import ModelPicker from '@/components/ModelPicker';
+import SettingInput, { type SettingChoice } from '@/components/settings/SettingInput';
 import PageHeader from '@/components/layout/PageHeader';
 import { AccessGate } from '@/components/layout/NoAccess';
 
@@ -19,8 +20,9 @@ type Setting = {
   updated_at?: string | null;
   is_secret?: boolean;
   is_set?: boolean;
-  /** "model" renders a picker, "int" a bounded number input. */
-  kind?: 'model' | 'int';
+  // model, int, choice or string, see SettingInput
+  kind?: string;
+  choices?: SettingChoice[] | null;
   min?: number | null;
   max?: number | null;
 };
@@ -518,43 +520,17 @@ function LlmSettingsPage() {
                           </span>
                         )}
                       </div>
-                      {s.kind === 'int' ? (
-                        <div data-testid={`number-${s.key}`}>
-                          <input
-                            type="number"
-                            value={currentValue}
-                            min={s.min ?? undefined}
-                            max={s.max ?? undefined}
-                            onChange={(e) => {
-                              const v = e.target.value;
-                              setPending((p) => {
-                                const next = { ...p };
-                                if (v === s.value) delete next[s.key]; else next[s.key] = v;
-                                return next;
-                              });
-                            }}
-                            className="w-40 bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white font-mono focus:outline-none focus:border-cyan-500"
-                          />
-                          {(s.min != null || s.max != null) && (
-                            <span className="ml-2 text-[11px] text-slate-500">
-                              allowed {s.min ?? '—'} to {s.max ?? '—'}
-                            </span>
-                          )}
-                        </div>
-                      ) : (
-                      <div data-testid={`select-${s.key}`}>
-                        <ModelPicker
-                          value={currentValue}
-                          onChange={(v) => {
-                            setPending((p) => {
-                              const next = { ...p };
-                              if (v === s.value) delete next[s.key]; else next[s.key] = v;
-                              return next;
-                            });
-                          }}
-                        />
-                      </div>
-                      )}
+                      <SettingInput
+                        spec={s}
+                        value={currentValue}
+                        onChange={(v) => {
+                          setPending((p) => {
+                            const next = { ...p };
+                            if (v === s.value) delete next[s.key]; else next[s.key] = v;
+                            return next;
+                          });
+                        }}
+                      />
                       <p className="text-[10px] text-slate-500 mt-1">
                         Platform default: <code className="text-slate-400">{s.default}</code>
                       </p>

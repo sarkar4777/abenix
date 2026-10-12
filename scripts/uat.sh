@@ -40,6 +40,7 @@ SUITE_IMPROVEMENTS=(uat_improvements_capture_ui uat_improvements_loop_ui uat_ai_
 SUITE_ADMIN=(
   uat_cluster_view_ui uat_nav_monitor_admin_ui uat_marketplace_ui uat_governance
   uat_abenix_multi_user uat_platform_surfaces uat_abenix_industrial uat_grafana_panels
+  uat_telemetry uat_telemetry_rules
 )
 # standalone apps, each owned by its app; they need the app stacks running
 SUITE_APPS=(

@@ -1389,9 +1389,9 @@ async def promote(db: AsyncSession, user: Any, grant_id: Any) -> dict[str, Any]:
 async def _announce_approval(db: AsyncSession, approval: Any, requester: Any) -> None:
     """Same bell, Slack and webhook as an approval made through POST /api/approvals."""
     try:
-        from app.routers.approvals import _notify_pending
+        from app.routers.approvals import notify_pending_later
 
-        await _notify_pending(db, approval, requester=requester)
+        notify_pending_later(approval.id, requester.id)
     except Exception as e:  # noqa: BLE001
         logger.warning("approval notification failed: %s", e)
 

@@ -1,0 +1,111 @@
+{{- define "testbed.rabbitmq.data" }}
+  name: rabbitmq-setup
+  labels: {{- include "testbed.labels" . | nindent 4 }}
+data:
+  start.sh: |
+    set -u
+    # the cookie must exist before rabbitmqctl, which runs as root, would make it unreadable for the server
+    c=/var/lib/rabbitmq/.erlang.cookie
+    if [ ! -s "$c" ]; then
+      head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n' > "$c"
+    fi
+    chown rabbitmq:rabbitmq "$c" && chmod 400 "$c"
+    docker-entrypoint.sh rabbitmq-server &
+    pid=$!
+    trap 'kill -TERM $pid; wait $pid' TERM INT
+    # the node can answer before it takes commands, so each step retries until it lands
+    retry() {
+      n=0
+      until "$@" >/dev/null 2>&1; do
+        kill -0 "$pid" 2>/dev/null || exit 1
+        n=$((n + 1))
+        [ "$n" -ge 60 ] && { echo "testbed setup failed: $*" | sed 's/ [^ ]*$//'; return 1; }
+        sleep 2
+      done
+    }
+    retry rabbitmqctl -q await_startup --timeout 10
+    retry sh -c 'rabbitmqctl -q add_user abenix "$ABENIX_PASSWORD" || rabbitmqctl -q change_password abenix "$ABENIX_PASSWORD"'
+    retry rabbitmqctl -q set_permissions -p / abenix '^(abenix|telemetry)\..*' '.*' '.*'
+    retry sh -c 'rabbitmqctl -q add_user restricted "$RESTRICTED_PASSWORD" || rabbitmqctl -q change_password restricted "$RESTRICTED_PASSWORD"'
+    rabbitmqctl -q clear_permissions -p / restricted >/dev/null 2>&1 || true
+    echo "testbed users are in place: abenix (abenix.* and telemetry.* queues), restricted (no vhost access)"
+    wait $pid
+  rabbitmq.conf: |
+    loopback_users = none
+    total_memory_available_override_value = 640MiB
+    vm_memory_high_watermark.relative = 0.4
+    disk_free_limit.absolute = 50MB
+    log.console.level = warning
+{{- end }}
+{{- if .Values.rabbitmq.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+{{ include "testbed.rabbitmq.data" . }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rabbitmq
+  labels: {{- include "testbed.labels" . | nindent 4 }}
+spec:
+  selector: {app: rabbitmq}
+  ports:
+    - {name: amqp, port: 5672, targetPort: 5672}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: rabbitmq
+  labels: {{- include "testbed.labels" . | nindent 4 }}
+spec:
+  serviceName: rabbitmq
+  replicas: 1
+  selector:
+    matchLabels: {app: rabbitmq}
+  template:
+    metadata:
+      labels: {app: rabbitmq, testbed: broker}
+      annotations:
+        checksum/config: {{ include "testbed.rabbitmq.data" . | sha256sum | trunc 16 }}
+    spec:
+      terminationGracePeriodSeconds: 15
+      securityContext: {fsGroup: 999}
+      containers:
+        - name: rabbitmq
+          image: {{ .Values.rabbitmq.image }}
+          command: ["sh", "/setup/start.sh"]
+          env:
+            - name: RABBITMQ_DEFAULT_USER
+              value: testbed
+            - name: RABBITMQ_DEFAULT_PASS
+              {{- include "testbed.secret" (dict "root" . "key" "rabbitmq-admin-password") | nindent 14 }}
+            - name: ABENIX_PASSWORD
+              {{- include "testbed.secret" (dict "root" . "key" "rabbitmq-password") | nindent 14 }}
+            - name: RESTRICTED_PASSWORD
+              {{- include "testbed.secret" (dict "root" . "key" "restricted-password") | nindent 14 }}
+            - name: RABBITMQ_NODENAME
+              value: rabbit@rabbitmq-0.rabbitmq.{{ .Release.Namespace }}.svc.cluster.local
+            - name: RABBITMQ_USE_LONGNAME
+              value: "true"
+          ports:
+            - {name: amqp, containerPort: 5672}
+          # a TCP check, the diagnostics escript cost a third of a CPU on every tick
+          readinessProbe:
+            tcpSocket: {port: 5672}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          volumeMounts:
+            - {name: data, mountPath: /var/lib/rabbitmq}
+            - {name: setup, mountPath: /setup}
+            - {name: setup, mountPath: /etc/rabbitmq/conf.d/20-testbed.conf, subPath: rabbitmq.conf}
+          resources: {{- toYaml .Values.rabbitmq.resources | nindent 12 }}
+      volumes:
+        - name: setup
+          configMap: {name: rabbitmq-setup}
+  volumeClaimTemplates:
+    - metadata: {name: data}
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources: {requests: {storage: 1Gi}}
+{{- end }}

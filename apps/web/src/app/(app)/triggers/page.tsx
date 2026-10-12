@@ -18,6 +18,7 @@ import { apiErrorText, looksLikeCron } from '@/lib/nav-walk';
 import { failureLabel } from '@/lib/monitor-format';
 import PageHeader from '@/components/layout/PageHeader';
 import NextSteps from '@/components/shared/NextSteps';
+import RulesOnTriggers from '@/components/telemetry-rules/RulesOnTriggers';
 
 const RUN_DOT: Record<string, string> = {
   completed: 'bg-emerald-400',
@@ -730,6 +731,8 @@ export default function TriggersPage() {
           </div>
         </div>
       )}
+
+      <RulesOnTriggers />
 
       <CreateTriggerModal
         open={showCreate}

@@ -146,6 +146,8 @@ from models.platform_settings import PlatformSetting
 from models.portfolio_schema import PortfolioSchema
 from models.subject_policy import SubjectPolicy
 from models.user_session import UserSession
+from models.telemetry import TelemetryConnection, TelemetryDeviceKey
+from models.telemetry_rules import TelemetryAsset, TelemetryRule, TelemetryRuleFiring
 
 __all__ = [
     "Base",
@@ -311,4 +313,9 @@ __all__ = [
     "PlatformSetting",
     "PortfolioSchema",
     "SubjectPolicy",
+    "TelemetryConnection",
+    "TelemetryAsset",
+    "TelemetryRule",
+    "TelemetryRuleFiring",
+    "TelemetryDeviceKey",
 ]

@@ -7,7 +7,7 @@ import contextlib
 import logging
 import os
 from datetime import datetime, timedelta, timezone
-from typing import AsyncIterator
+from typing import Any, AsyncIterator
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from croniter import croniter
@@ -263,6 +263,17 @@ async def _run_trigger(trigger_id: str, agent_id: str) -> None:
             pass
 
 
+WORKER_STOPPED_MESSAGE = (
+    "The worker running this stopped before it finished. Run it again."
+)
+
+
+def worker_stopped(row: Any, gone_before: datetime) -> bool:
+    """A runtime pod held the run and its lease ran out long enough ago that nothing took it over."""
+    runner, lease = row[5], row[6]
+    return bool(runner) and lease is not None and lease < gone_before
+
+
 async def sweep_stale_executions() -> dict[str, int] | None:
     """Mark executions still in RUNNING past the max allowed window as FAILED."""
     import os
@@ -271,15 +282,19 @@ async def sweep_stale_executions() -> dict[str, int] | None:
 
     sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "packages" / "db"))
 
-    from sqlalchemy import func, or_, select, update
+    from sqlalchemy import and_, func, or_, select, update
     from app.core.deps import async_session
 
     from models.execution import Execution, ExecutionStatus
 
     max_minutes = int(os.environ.get("STALE_EXECUTION_MAX_MINUTES", "10"))
     cutoff = datetime.now(timezone.utc) - timedelta(minutes=max_minutes)
+    # a runtime pod's lease lapsed this long ago and no pod took the run over
+    gone_s = int(os.environ.get("WORKER_GONE_SECONDS", "300"))
+    gone_before = datetime.now(timezone.utc) - timedelta(seconds=gone_s)
 
     stale: list = []
+    stopped: set = set()
     try:
         # One replica per interval, the lock drops with the helper's transaction
         async with advisory_lock(SWEEP_LOCK_KEY) as held:
@@ -295,13 +310,24 @@ async def sweep_stale_executions() -> dict[str, int] | None:
                         Execution.tenant_id,
                         Execution.agent_id,
                         Execution.created_at,
+                        Execution.runner_id,
+                        Execution.lease_expires_at,
                     ).where(
                         Execution.status == ExecutionStatus.RUNNING,
-                        Execution.created_at < cutoff,
-                        # a runtime pod still renewing its lease is alive
                         or_(
-                            Execution.lease_expires_at.is_(None),
-                            Execution.lease_expires_at < func.now(),
+                            and_(
+                                Execution.created_at < cutoff,
+                                # a runtime pod still renewing its lease is alive
+                                or_(
+                                    Execution.lease_expires_at.is_(None),
+                                    Execution.lease_expires_at < func.now(),
+                                ),
+                            ),
+                            # the pod that held it stopped and none took it over
+                            and_(
+                                Execution.runner_id.is_not(None),
+                                Execution.lease_expires_at < gone_before,
+                            ),
                         ),
                     )
                 )
@@ -318,9 +344,14 @@ async def sweep_stale_executions() -> dict[str, int] | None:
                 except Exception as e:
                     logger.error("hitl waiting lookup failed, skipping sweep: %s", e)
                     return {"swept": 0}
-                stale = [row for row in found if str(row[0]) not in waiting]
+                stale = [row[:5] for row in found if str(row[0]) not in waiting]
                 if not stale:
                     return {"swept": 0}
+                stopped = {
+                    row[0]
+                    for row in found
+                    if str(row[0]) not in waiting and worker_stopped(row, gone_before)
+                }
                 ids = [row[0] for row in stale]
                 logger.info(
                     "Sweeping %d stale executions (older than %d min)",
@@ -331,14 +362,32 @@ async def sweep_stale_executions() -> dict[str, int] | None:
                 try:
                     from app.core.telemetry import stale_sweeps_total
 
-                    stale_sweeps_total.labels(reason="owning_pod_crashed").inc(len(ids))
+                    stale_sweeps_total.labels(reason="owning_pod_crashed").inc(
+                        len(ids) - len(stopped)
+                    )
+                    stale_sweeps_total.labels(reason="worker_stopped").inc(len(stopped))
                 except Exception:
                     pass
 
+                if stopped:
+                    await db.execute(
+                        update(Execution)
+                        .where(
+                            Execution.id.in_(list(stopped)),
+                            Execution.status == ExecutionStatus.RUNNING,
+                            Execution.lease_expires_at < gone_before,
+                        )
+                        .values(
+                            status=ExecutionStatus.FAILED,
+                            failure_code="WORKER_STOPPED",
+                            error_message=WORKER_STOPPED_MESSAGE,
+                            completed_at=datetime.now(timezone.utc),
+                        )
+                    )
                 await db.execute(
                     update(Execution)
                     .where(
-                        Execution.id.in_(ids),
+                        Execution.id.in_([i for i in ids if i not in stopped]),
                         Execution.status == ExecutionStatus.RUNNING,
                         or_(
                             Execution.lease_expires_at.is_(None),
@@ -370,6 +419,7 @@ async def sweep_stale_executions() -> dict[str, int] | None:
                 for ex_id, uid, tid, agent_id, created in stale:
                     if not uid:
                         continue
+                    gone = ex_id in stopped
                     if not await user_wants_notification(
                         db, uid, NotificationType.EXECUTION_FAILED
                     ):
@@ -379,9 +429,11 @@ async def sweep_stale_executions() -> dict[str, int] | None:
                         tenant_id=tid,
                         user_id=uid,
                         type=NotificationType.EXECUTION_FAILED,
-                        title="Agent run abandoned",
+                        title="Agent run stopped" if gone else "Agent run abandoned",
                         message=(
-                            "An agent run was still marked RUNNING after "
+                            WORKER_STOPPED_MESSAGE
+                            if gone
+                            else "An agent run was still marked RUNNING after "
                             f"{max_minutes} minutes and has been marked FAILED. "
                             "The underlying process likely crashed."
                         ),
@@ -389,7 +441,7 @@ async def sweep_stale_executions() -> dict[str, int] | None:
                         metadata_={
                             "execution_id": str(ex_id),
                             "agent_id": str(agent_id) if agent_id else None,
-                            "reason": "stale_sweep",
+                            "reason": "worker_stopped" if gone else "stale_sweep",
                             "age_minutes": max_minutes,
                         },
                     )
@@ -610,7 +662,7 @@ def start_scheduler() -> None:
     scheduler.add_job(
         _tracked("sweep_stale_executions", sweep_stale_executions),
         trigger="interval",
-        minutes=5,
+        minutes=1,
         id="sweep_stale_executions",
         name="Mark stale RUNNING executions as FAILED",
         replace_existing=True,

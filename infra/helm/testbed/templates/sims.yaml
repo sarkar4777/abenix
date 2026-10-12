@@ -1,0 +1,153 @@
+{{- $root := . }}
+{{- $kafka := list (dict "name" "KAFKA_BOOTSTRAP" "value" "redpanda:9092") (dict "name" "KAFKA_USER" "value" "admin") (dict "name" "KAFKA_PASSWORD" "secret" "kafka-admin-password") }}
+{{- $envs := dict
+  "payments" (concat $kafka (list (dict "name" "RATE" "value" .Values.sims.payments.rate)))
+  "sensors" (concat $kafka (list (dict "name" "RATE" "value" .Values.sims.sensors.rate)))
+  "logistics" (list (dict "name" "AMQP_HOST" "value" "rabbitmq") (dict "name" "AMQP_USER" "value" "testbed") (dict "name" "AMQP_PASSWORD" "secret" "rabbitmq-admin-password") (dict "name" "RATE" "value" .Values.sims.logistics.rate))
+  "fleet" (list (dict "name" "NATS_URL" "value" "nats://nats:4222") (dict "name" "NATS_USER" "value" "fleet") (dict "name" "NATS_PASSWORD" "secret" "nats-admin-password") (dict "name" "VEHICLES" "value" .Values.sims.fleet.vehicles) (dict "name" "PERIOD" "value" .Values.sims.fleet.period))
+  "meter" (list (dict "name" "MODBUS_PORT" "value" "5020"))
+  "prices" (list (dict "name" "WS_TOKEN" "secret" "ws-token") (dict "name" "RATE" "value" .Values.sims.prices.rate))
+  "pusher" (list (dict "name" "PUSH_DIR" "value" "/etc/pusher") (dict "name" "PERIOD" "value" .Values.sims.pusher.period) (dict "name" "INFO_URL" "value" "http://testbed-info:8080") (dict "name" "ABENIX_API_URL" "value" .Values.abenixApiUrl))
+  "info" (list (dict "name" "NAMESPACE" "value" .Release.Namespace) (dict "name" "KAFKA_PASSWORD" "secret" "kafka-password") (dict "name" "RABBITMQ_PASSWORD" "secret" "rabbitmq-password") (dict "name" "NATS_PASSWORD" "secret" "nats-password") (dict "name" "OPCUA_PASSWORD" "secret" "opcua-password") (dict "name" "WS_TOKEN" "secret" "ws-token"))
+}}
+{{- range $role := list "payments" "sensors" "logistics" "fleet" "meter" "prices" "pusher" "info" }}
+{{- if (index $root.Values.sims $role).enabled }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $role }}-sim
+  labels: {{- include "testbed.labels" $root | nindent 4 }}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: {{ $role }}-sim}
+  template:
+    metadata:
+      labels: {app: {{ $role }}-sim, testbed: sim}
+    spec:
+      terminationGracePeriodSeconds: 5
+      containers:
+        - name: sim
+          image: "{{ $root.Values.simImage.repository }}:{{ $root.Values.simImage.tag }}"
+          imagePullPolicy: {{ $root.Values.simImage.pullPolicy }}
+          args: [{{ $role | quote }}]
+          env:
+            {{- range (index $envs $role) }}
+            - name: {{ .name }}
+              {{- if .secret }}
+              valueFrom: {secretKeyRef: {name: {{ $root.Values.credentialsSecret }}, key: {{ .secret }}}}
+              {{- else }}
+              value: {{ .value | quote }}
+              {{- end }}
+            {{- end }}
+          ports:
+            - {name: control, containerPort: 8081}
+            {{- if eq $role "meter" }}
+            - {name: modbus, containerPort: 5020}
+            {{- end }}
+            {{- if eq $role "prices" }}
+            - {name: ws, containerPort: 8765}
+            {{- end }}
+            {{- if eq $role "info" }}
+            - {name: http, containerPort: 8080}
+            {{- end }}
+          readinessProbe:
+            tcpSocket: {port: 8081}
+            periodSeconds: 5
+          {{- if eq $role "pusher" }}
+          volumeMounts:
+            - {name: push, mountPath: /etc/pusher, readOnly: true}
+          {{- end }}
+          {{- if eq $role "info" }}
+          volumeMounts:
+            - {name: data, mountPath: /data}
+          {{- end }}
+          resources: {{- toYaml $root.Values.simResources | nindent 12 }}
+      {{- if eq $role "pusher" }}
+      volumes:
+        - name: push
+          secret: {secretName: {{ $root.Values.httpPushSecret }}, optional: true}
+      {{- end }}
+      {{- if eq $role "info" }}
+      volumes:
+        - name: data
+          emptyDir: {sizeLimit: 1Mi}
+      {{- end }}
+{{- end }}
+{{- end }}
+{{- if .Values.sims.meter.enabled }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: meter
+  labels: {{- include "testbed.labels" . | nindent 4 }}
+spec:
+  selector: {app: meter-sim}
+  ports:
+    - {name: modbus, port: 502, targetPort: 5020}
+{{- end }}
+{{- if .Values.sims.info.enabled }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: testbed-info
+  labels: {{- include "testbed.labels" . | nindent 4 }}
+spec:
+  selector: {app: info-sim}
+  ports:
+    - {name: http, port: 8080, targetPort: 8080}
+{{- end }}
+{{- if .Values.sims.prices.enabled }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: prices
+  labels: {{- include "testbed.labels" . | nindent 4 }}
+spec:
+  selector: {app: prices-sim}
+  ports:
+    - {name: ws, port: 8765, targetPort: 8765}
+{{- end }}
+{{- if .Values.load.enabled }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: kafka-load-{{ .Values.load.runId }}
+  labels: {{- include "testbed.labels" . | nindent 4 }}
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels: {app: kafka-load, testbed: load}
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: load
+          image: "{{ .Values.simImage.repository }}:{{ .Values.simImage.tag }}"
+          imagePullPolicy: {{ .Values.simImage.pullPolicy }}
+          args: ["load"]
+          env:
+            {{- range $kafka }}
+            - name: {{ .name }}
+              {{- if .secret }}
+              valueFrom: {secretKeyRef: {name: {{ $root.Values.credentialsSecret }}, key: {{ .secret }}}}
+              {{- else }}
+              value: {{ .value | quote }}
+              {{- end }}
+            {{- end }}
+            - {name: TOPIC, value: {{ .Values.load.topic | quote }}}
+            - {name: LOAD_COUNT, value: {{ .Values.load.count | quote }}}
+            - {name: LOAD_RATE, value: {{ .Values.load.rate | quote }}}
+            - {name: LOAD_PARTITIONS, value: {{ .Values.load.partitions | quote }}}
+            - {name: LOAD_DEVICES, value: {{ .Values.load.devices | quote }}}
+          resources:
+            requests: {cpu: 100m, memory: 64Mi}
+            limits: {cpu: "1", memory: 256Mi}
+{{- end }}

@@ -1,0 +1,6 @@
+apiVersion: v2
+name: testbed
+version: 0.1.0
+appVersion: "2.5.8"
+description: Real brokers and simulated apps for testing Abenix telemetry connectors (Redpanda, RabbitMQ, NATS JetStream, OPC UA, Modbus TCP, WebSocket, HTTP push)
+type: application

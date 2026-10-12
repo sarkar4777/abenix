@@ -132,9 +132,10 @@ async def register(
         created_by=user.id,
     )
     db.add(policy)
-    from app.core.approvers import ensure_decision_reviewers
+    from app.core.approvers import ensure_decision_reviewers, ensure_machine_operators
 
     await ensure_decision_reviewers(db, tenant.id)
+    await ensure_machine_operators(db, tenant.id)
     await db.commit()
     await db.refresh(user)
 

@@ -1853,9 +1853,9 @@ async def request_approval(db: AsyncSession, p: Any) -> dict[str, Any]:
     await db.commit()
     if requester is not None:
         try:
-            from app.routers.approvals import _notify_pending
+            from app.routers.approvals import notify_pending_later
 
-            await _notify_pending(db, a, requester=requester)
+            notify_pending_later(a.id, requester.id)
         except Exception as e:  # noqa: BLE001
             logger.warning("approval notification failed: %s", e)
     await _notify(

@@ -182,6 +182,24 @@ CATALOG: tuple[Capability, ...] = (
         "Runs",
         "Re-run an execution against its recorded inputs and versions.",
     ),
+    Capability(
+        "telemetry.view",
+        "View machine telemetry",
+        "Telemetry",
+        "See connected machines, their live readings, history and raw bus frames.",
+    ),
+    Capability(
+        "telemetry.manage",
+        "Manage telemetry brokers",
+        "Telemetry",
+        "Add, test, change and remove the MQTT brokers machines report through.",
+    ),
+    Capability(
+        "telemetry.command",
+        "Send machine commands",
+        "Telemetry",
+        "Send a command to a machine, such as a safety hold or a new task. Every command is logged.",
+    ),
 )
 KEYS = frozenset(c.key for c in CATALOG)
 
@@ -196,6 +214,7 @@ ROLE_DEFAULTS: dict[str, frozenset[str]] = {
             "autonomy.view",
             "actions.review",
             "feedback.give",
+            "telemetry.view",
         }
     ),
     "creator": frozenset(
@@ -215,6 +234,7 @@ ROLE_DEFAULTS: dict[str, frozenset[str]] = {
             "improvements.view",
             "improvements.propose",
             "feedback.give",
+            "telemetry.view",
         }
     ),
     "admin": frozenset({"*"}),

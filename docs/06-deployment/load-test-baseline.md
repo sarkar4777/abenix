@@ -81,6 +81,42 @@ python scripts/load/decision_load.py --base http://abenix-api:8000   --token <to
 
 The load is spread over processes because one httpx client degrades past a few dozen connections and the client becomes the bottleneck. The script prints one JSON line with `rps`, `p50_ms`, `p95_ms`, `p99_ms`, `errors` by status or exception, `versions_seen` and `nondeterministic_cases`. Anything above 0 in the last one is a bug.
 
+## Telemetry
+
+`bash scripts/telemetry-loadtest.sh t2` and `t7` run as a Kubernetes Job on the API image and save a JSON report under `logs/telemetry-loadtest/`.
+
+| Scenario | Load | Budget |
+|---|---|---|
+| t2 | 4 Sparkplug nodes at 400 msg/s each, 60 s | publish to Redis p99 under 50 ms, read p99 under 10 ms |
+| t7 | 50 nodes at 200 msg/s over 3 workspaces, 2 ingest replicas, 200 live viewers, one replica killed mid run | leases move to the survivor with no lost device state, reads hold under the viewers |
+
+Last t2 on the shared local minikube (6 vCPU, load average near 20 at idle from Groundwork and the testbeds), with OPC UA, Modbus and WebSocket in the industrial pool:
+
+| Measure | p50 | p99 |
+|---|---|---|
+| Ingest to Redis | 17 ms | 288 ms |
+| Publish to Redis | 25 ms | 3006 ms |
+| Read through the API | 83 ms | 299 ms |
+| Read from Redis | 15 ms | 97 ms |
+
+Ingest kept up, 1636 msg/s stored against 1576 published, with nothing dropped or throttled. The replica holding the load waited for CPU 32% of the time on average (`cpu_wait_pct`), and its longest young collection took 177 ms of wall time but 38 ms of CPU. So the tail is the node, not the ingest. Run it on a node with free CPU before comparing against the budget.
+
+Last t7 on the same node did not hold. 50 nodes published 9890 msg/s, and the two default replicas waited for CPU about two thirds of the time (`cpu_wait_pct` 64 to 67% mean, 84% at worst). Storage fell 14 s behind at p50, and the 200 live viewers saw readings 17 s old at p50. Nothing was throttled, and Redis peaked at 67 MB of its 410 MB. One replica's heartbeat ran late enough that its leases moved before the planned kill, so this run gives no clean failover time. The heartbeat now runs on its own, apart from the health pass. A Kafka burst on the same node stored 200k of 200k messages at 8k/s across the two default replicas. t7 at full scale needs about four free cores, so run it on a cluster node and not on a shared minikube.
+
+The same t7 at a fifth of the rate (`RATE=40`, 1979 msg/s) held on that node:
+
+| Measure | Result |
+|---|---|
+| Ingest kept up | 2073 msg/s stored against 1979 published |
+| Per workspace | 674, 707 and 692 msg/s for 17, 17 and 16 nodes |
+| Ingest to Redis | p50 56 to 62 ms, p99 about 900 ms |
+| 200 live viewers | all open, none refused, readings 181 ms old at p50 and 592 ms at p99 |
+| Replica killed | seen in 2.9 s, every node reporting again 8.3 s after the kill |
+| Shared subscription | the shared connection ran on both default replicas |
+| Redis | peak 67 MB of 410 MB |
+
+Messages published to a connection while its replica was down are lost at QoS 0, and they show as seq gaps followed by a rebirth. Device state in Redis is not lost.
+
 ## What this test does NOT cover
 
 - Long-running pipelines (the `long-running` pool serves those, and they're slow by design — measuring their p95 over short windows is misleading).

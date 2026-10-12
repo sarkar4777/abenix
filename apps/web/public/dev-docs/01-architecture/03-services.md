@@ -114,7 +114,7 @@ flowchart TB
 |---|---|---|
 | `check_due_triggers` | every 30 s | Fires due cron triggers on agents |
 | `ping_models` | every 60 min | LLM availability probes |
-| `sweep_stale_executions` | every 5 min | Marks runs still `running` after `STALE_EXECUTION_MAX_MINUTES` (default 10) as failed with `STALE_SWEEP`, skipping runs parked on an approval and runs whose queue lease is still live |
+| `sweep_stale_executions` | every minute | Fails runs whose runtime pod stopped and that no pod took over with `WORKER_STOPPED`, and runs still `running` after `STALE_EXECUTION_MAX_MINUTES` (default 10) with `STALE_SWEEP`, skipping runs parked on an approval and runs whose queue lease is still live |
 | `eval_schedules` | every 60 s | Scheduled and model-change evaluation runs |
 | `reconcile_active_executions_gauge` | every 5 min | Re-syncs the active executions gauge to the database |
 | `score_drift_backlog` | every `DRIFT_SCAN_INTERVAL_SECONDS` (default 300) | Scores finished runs the drift hooks missed |

@@ -21,6 +21,7 @@ import { decisionErrorText } from '@/lib/decisionValues';
 import ViewOnlyBanner from '@/components/shared/ViewOnlyBanner';
 import { tierName } from '@/lib/decisions';
 import ConfirmModal from '@/components/ui/ConfirmModal';
+import CommandApproval from '@/components/approvals/CommandApproval';
 import { approvalEffect as decisionEffect, askedBecause, changesText, confirmApproveText, refusal, requesterName, signerName, signoffError, takesOutOfService } from '@/lib/approvalText';
 
 interface SignoffEntry {
@@ -225,7 +226,7 @@ function ApprovalCard({ row, onDecide, busy, meId, isAdmin, onReload }: { row: A
   const [decideErr, setDecideErr] = useState<string | null>(null);
   const [denying, setDenying] = useState(false);
   const [confirming, setConfirming] = useState(false);
-  const confirm = takesOutOfService(row) ? confirmApproveText(row) : null;
+  const confirm = takesOutOfService(row) || row.gate_kind === 'telemetry.command' ? confirmApproveText(row) : null;
   async function decide(d: 'approve' | 'deny' | 'return', sure = false) {
     setDecideErr(null);
     if (d === 'deny') { setDenying(true); return; }
@@ -325,7 +326,9 @@ function ApprovalCard({ row, onDecide, busy, meId, isAdmin, onReload }: { row: A
               {typeof row.payload?.link === 'string' && <a href={row.payload.link as string} className="text-cyan-300 hover:underline">Open the decision</a>}
             </div>
           )}
-          {!row.gate_kind || !(DECISION_KINDS.has(row.gate_kind) || row.gate_kind === 'autonomy.promote') ? <GenericSummary payload={row.payload} summary={row.summary} /> : null}
+          {row.gate_kind === 'telemetry.command' ? (
+            <CommandApproval payload={row.payload} pending={isPending} executionId={row.agent_execution_id} />
+          ) : !row.gate_kind || !(DECISION_KINDS.has(row.gate_kind) || row.gate_kind === 'autonomy.promote') ? <GenericSummary payload={row.payload} summary={row.summary} /> : null}
           {isPending && !blockedAsAuthor && decisionEffect(row, 'before') && <p className="mt-1.5 text-[11px] text-slate-400" data-testid="approval-effect">{decisionEffect(row, 'before')}</p>}
           {row.gate_kind === 'decision_tier_change' && (
             <div className="mt-1.5 flex flex-wrap items-center gap-3 text-[11px]" data-testid="approval-tier-change">

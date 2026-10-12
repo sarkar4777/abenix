@@ -2,19 +2,22 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
+import re
+import secrets
 import sys
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
 import httpx
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives import serialization
-from fastapi import APIRouter, Body, Depends, HTTPException, Path as PathParam
+from fastapi import APIRouter, Body, Depends, HTTPException, Path as PathParam, Request
 from fastapi.responses import JSONResponse, Response
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -22,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.deps import get_current_user, get_db
 from app.core.responses import error, success
+from app.services import edge_collectors as EC
 from app.services.edge_compiler import (
     EdgeCompileError,
     compile_agent_bundle,
@@ -181,17 +185,76 @@ async def signing_key() -> JSONResponse:
     )
 
 
-def _serialize_gateway(g: EdgeGateway) -> dict[str, Any]:
-    return {
+ONLINE_GRACE_S = 60
+ENROLL_TTL = timedelta(hours=24)
+ENROLL_PREFIX = "etk_"
+MANAGE_REFUSAL = (
+    "Only people who can manage telemetry sources can change edge gateways. "
+    "An admin can give you that under Admin, Permissions."
+)
+
+
+def _iso(v: datetime | None) -> str | None:
+    return v.isoformat() if v else None
+
+
+def _live_status(g: EdgeGateway) -> str:
+    """waiting, online, offline or revoked, worked out from the last heartbeat."""
+    if g.revoked_at:
+        return "revoked"
+    roles = list(g.roles or ["agents"])
+    if "collect" in roles and not g.enrolled_at:
+        if g.enroll_expires_at and g.enroll_expires_at < datetime.now(timezone.utc):
+            return "expired"
+        return "waiting"
+    hb = int((g.settings or {}).get("heartbeat_s") or 15)
+    grace = max(ONLINE_GRACE_S, 3 * hb) if g.enrolled_at else 300
+    seen = g.last_seen_at
+    if seen and (datetime.now(timezone.utc) - seen).total_seconds() <= grace:
+        return "online"
+    return "offline"
+
+
+def _serialize_gateway(g: EdgeGateway, full: bool = False) -> dict[str, Any]:
+    health = dict(g.health or {})
+    out = {
         "id": str(g.id),
         "gateway_id": g.gateway_id,
         "name": g.name,
+        "description": g.description or "",
         "endpoint_url": g.endpoint_url,
-        "status": g.status,
+        "status": _live_status(g),
+        "roles": list(g.roles or ["agents"]),
         "deployed_agents": list(g.deployed_agents or []),
-        "registered_at": g.registered_at.isoformat() if g.registered_at else None,
-        "last_seen_at": g.last_seen_at.isoformat() if g.last_seen_at else None,
+        "registered_at": _iso(g.registered_at),
+        "last_seen_at": _iso(g.last_seen_at),
+        "enrolled_at": _iso(g.enrolled_at),
+        "enroll_expires_at": _iso(g.enroll_expires_at),
+        "revoked_at": _iso(g.revoked_at),
+        "first_data_at": _iso(g.first_data_at),
+        "version": g.version,
+        "platform": g.platform,
+        "hostname": g.hostname,
+        "config_version": g.config_version,
+        "applied_version": g.applied_version,
+        "config_pending": bool(g.enrolled_at) and g.applied_version != g.config_version,
+        "telemetry_connection_id": (
+            str(g.telemetry_connection_id) if g.telemetry_connection_id else None
+        ),
+        "collector_count": len(g.collectors or []),
+        "buffer": health.get("buffer") or {},
+        "uplink": health.get("uplink") or {},
+        "collector_health": health.get("collectors") or [],
+        "uptime_s": health.get("uptime_s"),
+        "problem": health.get("problem"),
     }
+    if full:
+        out["collectors"] = [EC.masked(c) for c in (g.collectors or [])]
+        out["settings"] = {
+            **{f["key"]: f["default"] for f in EC.SETTINGS_FIELDS},
+            **(g.settings or {}),
+        }
+    return out
 
 
 @router.get("/runtime/download")
@@ -298,6 +361,8 @@ async def mint_edge_token(
 
     from models.api_key import ApiKey
 
+    if not await _can_manage(db, user):
+        return error(MANAGE_REFUSAL, 403, error_code="FORBIDDEN")
     # Refuse before minting a token nobody can pair with a verify key
     pubkey_pem = public_key_pem(_signing_key_or_503())
 
@@ -386,7 +451,12 @@ async def list_gateways(
         .order_by(EdgeGateway.registered_at.desc())
     )
     rows = res.scalars().all()
-    return success({"gateways": [_serialize_gateway(g) for g in rows]})
+    return success(
+        {
+            "gateways": [_serialize_gateway(g) for g in rows],
+            "can_manage": await _can_manage(db, user),
+        }
+    )
 
 
 async def _publish_to_mqtt(topic: str, payload: bytes) -> bool:
@@ -435,6 +505,8 @@ async def deploy_to_gateway(
 
     Tries MQTT first; falls back to HTTP POST against the gateway's endpoint.
     """
+    if not await _can_manage(db, user):
+        return error(MANAGE_REFUSAL, 403, error_code="FORBIDDEN")
     agent_id = (body.get("agent_id") or "").strip()
     if not agent_id:
         return error("agent_id is required", 400)
@@ -524,22 +596,35 @@ async def list_gateway_agents(
 
 @router.delete("/gateways/{gateway_pk}")
 async def delete_gateway(
+    request: Request,
     gateway_pk: str = PathParam(...),
+    remove_source: bool = False,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> JSONResponse:
-    """Forget a gateway. The edge runtime re-registers on its next start."""
-    try:
-        pk = uuid.UUID(gateway_pk)
-    except ValueError:
-        raise HTTPException(404, "gateway not found")
-    res = await db.execute(select(EdgeGateway).where(EdgeGateway.id == pk))
-    g = res.scalar_one_or_none()
-    if g is None or g.tenant_id != user.tenant_id:
-        raise HTTPException(404, "gateway not found")
+    """Forget a gateway and revoke its key. Its readings stay in Telemetry unless remove_source."""
+    if not await _can_manage(db, user):
+        return error(MANAGE_REFUSAL, 403, error_code="FORBIDDEN")
+    g = await _gateway_or_404(db, user, gateway_pk)
+    await _revoke_key(db, g)
+    conn_id = g.telemetry_connection_id
+    removed = False
+    if remove_source and conn_id:
+        from models.telemetry import TelemetryConnection
+
+        c = await db.get(TelemetryConnection, conn_id)
+        if c is not None and c.tenant_id == user.tenant_id:
+            await db.delete(c)
+            removed = True
+    await _audit(
+        db, user, request, "edge.gateway.removed", g, {"removed_source": removed}
+    )
     await db.delete(g)
     await db.commit()
-    return success({"deleted": True, "gateway_id": g.gateway_id})
+    await _telemetry_changed()
+    return success(
+        {"deleted": True, "gateway_id": g.gateway_id, "removed_source": removed}
+    )
 
 
 @router.post("/agents/{agent_id}/compile")
@@ -578,3 +663,622 @@ async def compile_agent(
             ),
         },
     )
+
+
+# Collect role: gateways that read buses, PLCs and sensors and send to Telemetry
+
+
+async def _can_manage(db: AsyncSession, user: User) -> bool:
+    from app.telemetry import access
+
+    return await access.has(db, user, "telemetry.manage")
+
+
+async def _can_view(db: AsyncSession, user: User) -> bool:
+    from app.telemetry import access
+
+    return await access.has(db, user, "telemetry.view")
+
+
+async def _gateway_or_404(db: AsyncSession, user: User, gateway_pk: str) -> EdgeGateway:
+    try:
+        pk = uuid.UUID(gateway_pk)
+    except ValueError:
+        raise HTTPException(404, "gateway not found")
+    g = await db.get(EdgeGateway, pk)
+    if g is None or g.tenant_id != user.tenant_id:
+        raise HTTPException(404, "gateway not found")
+    return g
+
+
+async def _audit(
+    db: AsyncSession,
+    user: User | None,
+    request: Request | None,
+    action: str,
+    g: EdgeGateway,
+    extra: dict[str, Any] | None = None,
+) -> None:
+    from app.core.audit import log_action
+
+    uid = user.id if user is not None else g.created_by
+    if uid is None:
+        return
+    try:
+        await log_action(
+            db,
+            g.tenant_id,
+            uid,
+            action,
+            {"name": g.name, "gateway_id": g.gateway_id, **(extra or {})},
+            request,
+            resource_type="edge_gateway",
+            resource_id=str(g.id),
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.warning("edge_audit_failed action=%s err=%s", action, e)
+
+
+async def _telemetry_changed() -> None:
+    try:
+        from app.routers.telemetry import _changed
+
+        await _changed()
+    except Exception as e:  # noqa: BLE001
+        logger.warning("telemetry_changed_publish_failed err=%s", e)
+
+
+async def _revoke_key(db: AsyncSession, g: EdgeGateway) -> None:
+    if not g.key_id:
+        return
+    from models.telemetry import TelemetryDeviceKey
+
+    k = await db.get(TelemetryDeviceKey, g.key_id)
+    if k is not None and k.revoked_at is None:
+        k.revoked_at = datetime.now(timezone.utc)
+
+
+def _check_collectors(
+    items: Any, old: list[dict[str, Any]] | None, tenant_id: Any
+) -> tuple[list[dict[str, Any]], dict[str, dict[str, str]]]:
+    if not isinstance(items, list):
+        return [], {"_": {"collectors": "collectors must be a list"}}
+    if len(items) > EC.MAX_COLLECTORS:
+        return [], {
+            "_": {
+                "collectors": f"A gateway runs at most {EC.MAX_COLLECTORS} collectors"
+            }
+        }
+    prev = {str(c.get("id")): c for c in (old or [])}
+    out: list[dict[str, Any]] = []
+    problems: dict[str, dict[str, str]] = {}
+    ids: set[str] = set()
+    for i, raw in enumerate(items):
+        if not isinstance(raw, dict):
+            problems[str(i)] = {"_": "Each collector is an object"}
+            continue
+        clean, p = EC.validate(raw)
+        if clean["id"] in ids:
+            clean["id"] = EC.new_id(clean.get("name") or clean["type"])
+        ids.add(clean["id"])
+        if p:
+            problems[str(i)] = p
+            continue
+        out.append(EC.merge_secrets(clean, prev.get(clean["id"]), tenant_id))
+    return out, problems
+
+
+def _first_problem(problems: dict[str, dict[str, str]]) -> str:
+    for p in problems.values():
+        for v in p.values():
+            return v
+    return "Check the collector settings"
+
+
+def _new_gateway_id(name: str) -> str:
+    base = re.sub(r"[^a-z0-9]+", "-", (name or "gateway").lower()).strip("-")[:40]
+    return f"{base or 'gateway'}-{secrets.token_hex(2)}"
+
+
+def _config_for(g: EdgeGateway) -> dict[str, Any]:
+    st = {**{f["key"]: f["default"] for f in EC.SETTINGS_FIELDS}, **(g.settings or {})}
+    return {
+        "roles": list(g.roles or ["collect"]),
+        "collectors": [EC.for_gateway(c, g.tenant_id) for c in (g.collectors or [])],
+        "buffer": {"max_mb": st["buffer_max_mb"], "max_age_h": st["buffer_max_age_h"]},
+        "uplink": {"gzip": bool(st["gzip"])},
+        "heartbeat_s": st["heartbeat_s"],
+        "self_metrics_s": int(st.get("self_metrics_s") or 10),
+        "gateway_asset": {"group": st.get("gateway_group") or "edge"},
+    }
+
+
+@router.get("/collectors/catalog")
+async def collector_catalog(user: User = Depends(get_current_user)) -> JSONResponse:
+    """What a gateway can collect from, with every field, its help and an example."""
+    return success(EC.catalog())
+
+
+@router.post("/collectors/validate")
+async def validate_collector(
+    body: dict = Body(...), user: User = Depends(get_current_user)
+) -> JSONResponse:
+    """Checks one collector the way saving would, so the form can show problems as you type."""
+    clean, problems = EC.validate(body.get("collector") or body)
+    return success(
+        {"ok": not problems, "problems": problems, "collector": EC.masked(clean)}
+    )
+
+
+@router.post("/dbc/check")
+async def check_dbc(
+    body: dict = Body(...), user: User = Depends(get_current_user)
+) -> JSONResponse:
+    text = str(body.get("dbc") or "")
+    if not text.strip():
+        return error("Pick a DBC file to check.", 422, error_code="VALIDATION_ERROR")
+    if len(text) > EC.MAX_DBC:
+        return error(
+            "The DBC file is over 2 MB. Upload the file for this bus only.",
+            413,
+            error_code="PAYLOAD_TOO_LARGE",
+        )
+    problem = EC.dbc_problem(text)
+    if problem:
+        return success({"ok": False, "error": problem, "messages": [], "count": 0})
+    return success({"ok": True, "error": None, **EC.dbc_summary(text)})
+
+
+@router.post("/gateways")
+async def create_gateway(
+    request: Request,
+    body: dict = Body(...),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> JSONResponse:
+    """A gateway that collects, waiting for its first boot. The install command comes from /install."""
+    if not await _can_manage(db, user):
+        return error(MANAGE_REFUSAL, 403, error_code="FORBIDDEN")
+    name = str(body.get("name") or "").strip()
+    if not name or len(name) > 80:
+        return error(
+            "Give the gateway a name under 80 characters, such as Yard gateway or Truck 12.",
+            422,
+            error_code="VALIDATION_ERROR",
+            details={"field": "name"},
+        )
+    roles = [
+        r for r in (body.get("roles") or ["collect"]) if r in ("collect", "agents")
+    ]
+    if not roles:
+        return error(
+            "Pick what the gateway does: collect, run agents, or both.",
+            422,
+            error_code="VALIDATION_ERROR",
+        )
+    collectors, problems = _check_collectors(
+        body.get("collectors") or [], None, user.tenant_id
+    )
+    if problems:
+        return error(
+            _first_problem(problems),
+            422,
+            error_code="VALIDATION_ERROR",
+            details={"collectors": problems},
+        )
+    settings_in, sp = EC.clean_settings(body.get("settings") or {})
+    if sp:
+        return error(
+            next(iter(sp.values())),
+            422,
+            error_code="VALIDATION_ERROR",
+            details={"settings": sp},
+        )
+    now = datetime.now(timezone.utc)
+    g = EdgeGateway(
+        tenant_id=user.tenant_id,
+        gateway_id=_new_gateway_id(name),
+        name=name,
+        description=str(body.get("description") or "")[:500],
+        status="waiting",
+        roles=roles,
+        collectors=collectors,
+        settings=settings_in,
+        health={},
+        deployed_agents=[],
+        config_version=1,
+        applied_version=0,
+        registered_at=now,
+        last_seen_at=now,
+        created_by=user.id,
+    )
+    db.add(g)
+    await db.flush()
+    await _audit(
+        db, user, request, "edge.gateway.created", g, {"collectors": len(collectors)}
+    )
+    await db.commit()
+    await db.refresh(g)
+    return success(_serialize_gateway(g, full=True), status_code=201)
+
+
+@router.get("/gateways/{gateway_pk}")
+async def get_gateway(
+    gateway_pk: str = PathParam(...),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> JSONResponse:
+    if not await _can_view(db, user):
+        return error(
+            "You do not have access to edge gateways. Ask an admin for telemetry access.",
+            403,
+            error_code="FORBIDDEN",
+        )
+    g = await _gateway_or_404(db, user, gateway_pk)
+    out = _serialize_gateway(g, full=True)
+    out["assets"] = await _assets_of(g)
+    out["can_manage"] = await _can_manage(db, user)
+    return success(out)
+
+
+async def _assets_of(g: EdgeGateway) -> list[dict[str, Any]]:
+    """The assets this gateway's source has written, from the live device index."""
+    if not g.telemetry_connection_id:
+        return []
+    try:
+        from app.routers.telemetry import redis as tel_redis
+        from app.telemetry import reads
+
+        rows = await reads.all_devices(tel_redis(), g.tenant_id)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("edge_assets_failed err=%s", e)
+        return []
+    cid = str(g.telemetry_connection_id)
+    return [r for r in rows if str(r.get("connection_id") or "") == cid][:200]
+
+
+@router.patch("/gateways/{gateway_pk}")
+async def update_gateway(
+    request: Request,
+    gateway_pk: str = PathParam(...),
+    body: dict = Body(...),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> JSONResponse:
+    """Change the name, collectors or settings. The gateway picks changes up on its next heartbeat."""
+    if not await _can_manage(db, user):
+        return error(MANAGE_REFUSAL, 403, error_code="FORBIDDEN")
+    g = await _gateway_or_404(db, user, gateway_pk)
+    changed = False
+    if "name" in body:
+        name = str(body.get("name") or "").strip()
+        if not name or len(name) > 80:
+            return error(
+                "Give the gateway a name under 80 characters.",
+                422,
+                error_code="VALIDATION_ERROR",
+            )
+        g.name = name
+    if "description" in body:
+        g.description = str(body.get("description") or "")[:500]
+    if "roles" in body:
+        roles = [r for r in (body.get("roles") or []) if r in ("collect", "agents")]
+        if not roles:
+            return error(
+                "Pick what the gateway does: collect, run agents, or both.",
+                422,
+                error_code="VALIDATION_ERROR",
+            )
+        g.roles = roles
+        changed = True
+    if "collectors" in body:
+        collectors, problems = _check_collectors(
+            body["collectors"], list(g.collectors or []), user.tenant_id
+        )
+        if problems:
+            return error(
+                _first_problem(problems),
+                422,
+                error_code="VALIDATION_ERROR",
+                details={"collectors": problems},
+            )
+        g.collectors = collectors
+        changed = True
+    if "settings" in body:
+        st, sp = EC.clean_settings(
+            {**(g.settings or {}), **(body.get("settings") or {})}
+        )
+        if sp:
+            return error(
+                next(iter(sp.values())),
+                422,
+                error_code="VALIDATION_ERROR",
+                details={"settings": sp},
+            )
+        g.settings = st
+        changed = True
+    if changed:
+        g.config_version = (g.config_version or 0) + 1
+    await _audit(
+        db,
+        user,
+        request,
+        "edge.gateway.changed",
+        g,
+        {"config_version": g.config_version},
+    )
+    await db.commit()
+    await db.refresh(g)
+    return success(_serialize_gateway(g, full=True))
+
+
+@router.post("/gateways/{gateway_pk}/install")
+async def install_command(
+    request: Request,
+    gateway_pk: str = PathParam(...),
+    body: dict = Body(default={}),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> JSONResponse:
+    """A fresh one-time enrolment token and the commands that use it. An older unused token stops working."""
+    if not await _can_manage(db, user):
+        return error(MANAGE_REFUSAL, 403, error_code="FORBIDDEN")
+    g = await _gateway_or_404(db, user, gateway_pk)
+    urls = EC.platform_urls()
+    url = str(body.get("platform_url") or (urls[0]["url"] if urls else ""))
+    url = url.strip().rstrip("/")
+    problem = EC.url_problem(url)
+    if problem:
+        return error(
+            problem,
+            422,
+            error_code="VALIDATION_ERROR",
+            details={"field": "platform_url"},
+        )
+    token = ENROLL_PREFIX + secrets.token_urlsafe(32)
+    g.enroll_token_hash = hashlib.sha256(token.encode()).hexdigest()
+    g.enroll_expires_at = datetime.now(timezone.utc) + ENROLL_TTL
+    reenrol = bool(g.enrolled_at or g.revoked_at)
+    if reenrol:
+        # the box enrols again with this token, its old key stops at once
+        await _revoke_key(db, g)
+        g.enrolled_at = None
+        g.revoked_at = None
+        g.status = "waiting"
+    await _audit(
+        db, user, request, "edge.gateway.install_token", g, {"reenrol": reenrol}
+    )
+    await db.commit()
+    await db.refresh(g)
+    cmds = EC.install(g.gateway_id, url, token, list(g.collectors or []))
+    return success(
+        {
+            "gateway": _serialize_gateway(g, full=True),
+            "enroll_token": token,
+            "expires_at": _iso(g.enroll_expires_at),
+            "platform_urls": urls,
+            **cmds,
+        }
+    )
+
+
+@router.get("/install/urls")
+async def install_urls(user: User = Depends(get_current_user)) -> JSONResponse:
+    """Addresses a gateway might reach Abenix on, to pre-fill the install step."""
+    return success({"platform_urls": EC.platform_urls(), "image": EC.image()})
+
+
+@router.post("/gateways/{gateway_pk}/revoke")
+async def revoke_gateway(
+    request: Request,
+    gateway_pk: str = PathParam(...),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> JSONResponse:
+    """Stops the gateway at once: its key is refused for sending and for heartbeats."""
+    if not await _can_manage(db, user):
+        return error(MANAGE_REFUSAL, 403, error_code="FORBIDDEN")
+    g = await _gateway_or_404(db, user, gateway_pk)
+    await _revoke_key(db, g)
+    g.revoked_at = datetime.now(timezone.utc)
+    g.enroll_token_hash = None
+    g.status = "revoked"
+    await _audit(db, user, request, "edge.gateway.revoked", g)
+    await db.commit()
+    await db.refresh(g)
+    return success(_serialize_gateway(g, full=True))
+
+
+def _bearer(request: Request) -> str:
+    auth = (request.headers.get("authorization") or "").strip()
+    return auth[7:].strip() if auth.lower().startswith("bearer ") else ""
+
+
+@router.post("/enroll")
+async def enroll(
+    request: Request,
+    body: dict = Body(...),
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """A gateway's first call, with the one-time token from its install command."""
+    token = str(body.get("token") or "").strip()
+    if not token.startswith(ENROLL_PREFIX):
+        return error(
+            "This is not an enrolment token. Copy the install command from the Edge page again.",
+            401,
+            error_code="UNAUTHORIZED",
+        )
+    digest = hashlib.sha256(token.encode()).hexdigest()
+    g = (
+        await db.execute(
+            select(EdgeGateway).where(EdgeGateway.enroll_token_hash == digest)
+        )
+    ).scalar_one_or_none()
+    if g is None:
+        return error(
+            "This enrolment token is not valid. It was used already or replaced by a newer "
+            "install command. Make a new one on the Edge page.",
+            401,
+            error_code="UNAUTHORIZED",
+        )
+    if g.enroll_expires_at and g.enroll_expires_at < datetime.now(timezone.utc):
+        return error(
+            "This enrolment token expired. Make a new install command on the Edge page.",
+            410,
+            error_code="EXPIRED",
+        )
+    from app.telemetry.sources import ensure_edge_source
+
+    src = await ensure_edge_source(
+        db,
+        g.tenant_id,
+        g.gateway_id,
+        name=g.name,
+        created_by=g.created_by,
+        group=None,
+        decoder="values",
+    )
+    now = datetime.now(timezone.utc)
+    g.telemetry_connection_id = uuid.UUID(src.connection_id)
+    g.key_id = uuid.UUID(src.key_id)
+    g.enrolled_at = now
+    g.enroll_token_hash = None
+    g.enroll_expires_at = None
+    g.revoked_at = None
+    g.status = "online"
+    g.last_seen_at = now
+    g.hostname = str(body.get("hostname") or "")[:255] or None
+    g.platform = str(body.get("platform") or "")[:128] or None
+    g.version = str(body.get("version") or "")[:64] or None
+    g.applied_version = 0
+    await _audit(
+        db,
+        None,
+        request,
+        "edge.gateway.enrolled",
+        g,
+        {"hostname": g.hostname, "source_created": src.created},
+    )
+    await db.commit()
+    await _telemetry_changed()
+    pubkey = ""
+    if "agents" in (g.roles or []):
+        try:
+            pubkey = public_key_pem(_resolve_signing_key())
+        except Exception:  # noqa: BLE001
+            pubkey = ""
+    return success(
+        {
+            "id": str(g.id),
+            "gateway_id": g.gateway_id,
+            "name": g.name,
+            "key": src.key,
+            "connection_id": src.connection_id,
+            "ingest_url": src.ingest_url,
+            "config": _config_for(g),
+            "config_version": g.config_version,
+            "signing_pubkey_pem": pubkey,
+        }
+    )
+
+
+async def _gateway_for_key(
+    db: AsyncSession, raw: str
+) -> tuple[EdgeGateway | None, str | None]:
+    from models.telemetry import TelemetryDeviceKey
+
+    if not raw:
+        return None, "Send the gateway key as Authorization: Bearer tgk_..."
+    k = (
+        await db.execute(
+            select(TelemetryDeviceKey).where(
+                TelemetryDeviceKey.key_hash == hashlib.sha256(raw.encode()).hexdigest()
+            )
+        )
+    ).scalar_one_or_none()
+    if k is None or k.kind != "gateway":
+        return None, (
+            "Abenix does not know this gateway key. Enrol the gateway again from the Edge page."
+        )
+    g = (
+        await db.execute(
+            select(EdgeGateway).where(
+                EdgeGateway.tenant_id == k.tenant_id,
+                EdgeGateway.gateway_id == k.device_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if g is None:
+        return None, (
+            "This gateway was removed in Abenix. Add it again on the Edge page to bring it back."
+        )
+    if g.revoked_at is not None:
+        return None, (
+            "This gateway was revoked in Abenix. Re-enrol it from the Edge page to bring it back."
+        )
+    if k.revoked_at is not None or (g.key_id and g.key_id != k.id):
+        return None, (
+            "This gateway's key was revoked or replaced by a newer enrolment. "
+            "Re-enrol it from the Edge page."
+        )
+    return g, None
+
+
+def _trim(v: Any, depth: int = 0) -> Any:
+    if depth > 6:
+        return None
+    if isinstance(v, str):
+        return v[:500]
+    if isinstance(v, list):
+        return [_trim(x, depth + 1) for x in v[:64]]
+    if isinstance(v, dict):
+        return {str(k)[:64]: _trim(x, depth + 1) for k, x in list(v.items())[:64]}
+    return v
+
+
+@router.post("/heartbeat")
+async def heartbeat(
+    request: Request, db: AsyncSession = Depends(get_db)
+) -> JSONResponse:
+    """Health in, config out. Called by an enrolled gateway every few seconds with its key."""
+    raw = await request.body()
+    if len(raw) > 256 * 1024:
+        return error(
+            "The heartbeat is over 256 KB.", 413, error_code="PAYLOAD_TOO_LARGE"
+        )
+    g, why = await _gateway_for_key(db, _bearer(request))
+    if g is None:
+        return error(why or "Unknown gateway", 401, error_code="UNAUTHORIZED")
+    try:
+        body = json.loads(raw or b"{}")
+    except ValueError:
+        return error("The heartbeat is not JSON.", 422, error_code="VALIDATION_ERROR")
+    now = datetime.now(timezone.utc)
+    health = {
+        k: _trim(body.get(k))
+        for k in ("buffer", "uplink", "collectors", "uptime_s", "problem", "python")
+    }
+    health["received_at"] = now.isoformat()
+    g.health = health
+    g.last_seen_at = now
+    g.status = "online"
+    g.version = str(body.get("version") or g.version or "")[:64] or None
+    g.platform = str(body.get("platform") or g.platform or "")[:128] or None
+    g.hostname = str(body.get("hostname") or g.hostname or "")[:255] or None
+    if body.get("endpoint_url"):
+        g.endpoint_url = str(body["endpoint_url"])[:500]
+    try:
+        g.applied_version = int(body.get("applied_version") or 0)
+    except (TypeError, ValueError):
+        pass
+    sent = int((health.get("buffer") or {}).get("sent") or 0)
+    if g.first_data_at is None and sent > 0 and await _assets_of(g):
+        g.first_data_at = now
+    await db.commit()
+    out: dict[str, Any] = {
+        "config_version": g.config_version,
+        "heartbeat_s": int((g.settings or {}).get("heartbeat_s") or 15),
+    }
+    if g.applied_version != g.config_version:
+        out["config"] = _config_for(g)
+    return success(out)

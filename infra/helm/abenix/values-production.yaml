@@ -233,8 +233,9 @@ redis:
       size: 20Gi
       storageClass: managed-premium
     configuration: |
-      maxmemory 6gb
-      maxmemory-policy allkeys-lru
+      # 80% of the limit, and fail writes loudly at it, never evict queues, streams or leases
+      maxmemory 6550mb
+      maxmemory-policy noeviction
       save 900 1
       save 300 10
       save 60 10000

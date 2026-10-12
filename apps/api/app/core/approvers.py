@@ -30,7 +30,16 @@ REVIEWERS_DESC = (
     "People in this set can approve decisions: publishing a version, lowering a risk "
     "tier, a review after a raise, and retiring, archiving or restoring at high risk."
 )
+OPERATORS_KEY = "machine_operators"
+OPERATORS_NAME = "Machine operators"
+OPERATORS_CAPS = ["telemetry.view", "telemetry.command"]
+OPERATORS_DESC = (
+    "People in this set can send commands to machines over telemetry, such as a "
+    "safety hold or a new task. Every command is logged with who sent it and why."
+)
 SOLE_OPERATOR_SETTING = "sole_operator_signoff"
+# approving one of these sends a command to a machine
+COMMAND_KINDS = ("telemetry.command",)
 MIN_REASON = 10
 SYSTEM_USER_EMAIL = "system@abenix.dev"
 
@@ -41,6 +50,8 @@ def required_capabilities(
     caps = [str((policy or {}).get("capability") or "approvals.sign")]
     if gate_kind in DECISION_KINDS:
         caps.append("decisions.review")
+    if gate_kind in COMMAND_KINDS:
+        caps.append("telemetry.command")
     return caps
 
 
@@ -51,6 +62,8 @@ def can_sign(
     gate_kind: str | None,
 ) -> bool:
     """The same test approver_denial applies, leaving out who asked."""
+    if gate_kind in COMMAND_KINDS and not holds(granted, "telemetry.command"):
+        return False
     if not all(holds(granted, c) for c in required_capabilities(policy, gate_kind)):
         if policy or gate_kind in DECISION_KINDS:
             return False
@@ -223,13 +236,14 @@ def is_self_approved(a: Any) -> bool:
     )
 
 
-async def ensure_decision_reviewers(db: AsyncSession, tenant_id: Any) -> PermissionSet:
-    """The tenant's Decision reviewers set, created when missing. Flushes, never commits."""
+async def _ensure_builtin_set(
+    db: AsyncSession, tenant_id: Any, key: str, name: str, desc: str, caps: list[str]
+) -> PermissionSet:
     ps = (
         await db.execute(
             select(PermissionSet).where(
                 PermissionSet.tenant_id == tenant_id,
-                PermissionSet.builtin_key == REVIEWERS_KEY,
+                PermissionSet.builtin_key == key,
             )
         )
     ).scalar_one_or_none()
@@ -239,24 +253,38 @@ async def ensure_decision_reviewers(db: AsyncSession, tenant_id: Any) -> Permiss
         await db.execute(
             select(PermissionSet).where(
                 PermissionSet.tenant_id == tenant_id,
-                PermissionSet.name == REVIEWERS_NAME,
+                PermissionSet.name == name,
             )
         )
     ).scalar_one_or_none()
     if ps is not None:
-        ps.builtin_key = REVIEWERS_KEY
+        ps.builtin_key = key
         await db.flush()
         return ps
     ps = PermissionSet(
         tenant_id=tenant_id,
-        name=REVIEWERS_NAME,
-        description=REVIEWERS_DESC,
-        capabilities=list(REVIEWERS_CAPS),
-        builtin_key=REVIEWERS_KEY,
+        name=name,
+        description=desc,
+        capabilities=list(caps),
+        builtin_key=key,
     )
     db.add(ps)
     await db.flush()
     return ps
+
+
+async def ensure_decision_reviewers(db: AsyncSession, tenant_id: Any) -> PermissionSet:
+    """The tenant's Decision reviewers set, created when missing. Flushes, never commits."""
+    return await _ensure_builtin_set(
+        db, tenant_id, REVIEWERS_KEY, REVIEWERS_NAME, REVIEWERS_DESC, REVIEWERS_CAPS
+    )
+
+
+async def ensure_machine_operators(db: AsyncSession, tenant_id: Any) -> PermissionSet:
+    """The tenant's Machine operators set, created when missing. Flushes, never commits."""
+    return await _ensure_builtin_set(
+        db, tenant_id, OPERATORS_KEY, OPERATORS_NAME, OPERATORS_DESC, OPERATORS_CAPS
+    )
 
 
 async def remove_decision_reviewer(

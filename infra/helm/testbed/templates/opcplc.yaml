@@ -1,0 +1,64 @@
+{{- if .Values.opcplc.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: opc-plc
+  labels: {{- include "testbed.labels" . | nindent 4 }}
+spec:
+  selector: {app: opc-plc}
+  ports:
+    - {name: opcua, port: 50000, targetPort: 50000}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: opc-plc
+  labels: {{- include "testbed.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: opc-plc}
+  template:
+    metadata:
+      labels: {app: opc-plc, testbed: broker}
+    spec:
+      terminationGracePeriodSeconds: 5
+      containers:
+        - name: opc-plc
+          image: {{ .Values.opcplc.image }}
+          args:
+            - --pn=50000
+            - --autoaccept
+            - --unsecuretransport
+            - --plchostname=opc-plc.{{ .Release.Namespace }}.svc.cluster.local
+            # random doubles, not one counter in lockstep, and the DI boiler for a real temperature
+            - --sn=3
+            - --sr=2
+            - --st=double
+            - --str=true
+            - --stl=0
+            - --stu=100
+            - --fn=2
+            - --fr=1
+            - --ft=double
+            - --ftr=true
+            - --ftl=0
+            - --ftu=10
+            - --b2bt=20
+            - --b2tt=80
+            - --b2ts=1
+            - --disableanonymousauth
+            - --defaultuser=abenix
+            - --defaultpassword=$(OPCUA_PASSWORD)
+          env:
+            - name: OPCUA_PASSWORD
+              {{- include "testbed.secret" (dict "root" . "key" "opcua-password") | nindent 14 }}
+          ports:
+            - {name: opcua, containerPort: 50000}
+          readinessProbe:
+            tcpSocket: {port: 50000}
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          resources: {{- toYaml .Values.opcplc.resources | nindent 12 }}
+{{- end }}

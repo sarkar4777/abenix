@@ -70,6 +70,26 @@ the run out first and reports which nodes ran over.
 
 ---
 
+## Telemetry
+
+Limits for machine telemetry. Each one applies per workspace. A workspace can
+have its own with `PUT /api/telemetry/quota` (admin), stored in the tenant's
+settings under `telemetry_quota`, and that wins over the value here. See
+[08-howto/17-telemetry](../08-howto/17-telemetry.md).
+
+| Key | Default | Range | What it controls |
+|---|---|---|---|
+| `telemetry.retention_days` | 7 | 1-365 | Days of raw history kept. The raw table keeps the longest any workspace asks for and shorter ones are deleted per workspace every 10 minutes. The 1 minute and 1 hour aggregates keep 30 and 365 days. |
+| `telemetry.quota.max_connections` | 20 | 1-1000 | Brokers one workspace can add. Past it `POST /api/telemetry/connections` answers 429 `QUOTA_EXCEEDED`. |
+| `telemetry.quota.max_devices` | 5000 | 1-1000000 | Machines and devices one workspace can have. A birth from a new one past this is not added, and health says why. |
+| `telemetry.quota.max_msgs_per_sec` | 20000 | 10-1000000 | Messages a second one workspace can send. The rest of that second is skipped and counted, and health says why. Other workspaces are not slowed. |
+| `telemetry.history_interval_ms` | 1000 | 0-60000 | Shortest gap between two history samples of one reading. Live values are never thinned. 0 keeps every sample. |
+| `telemetry.max_payload_bytes` | 1048576 | 1024-16777216 | Largest message the ingest decodes, and the largest HTTP push body before and after gzip. Bigger messages go to the dead letters, bigger bodies answer 413. |
+| `telemetry.sse.max_per_user` | 8 | 1-100 | Live telemetry views one person can keep open. One more answers 429 `RATE_LIMITED`. |
+| `telemetry.rules_mode` | inprocess | inprocess, pool | Where signal rules run. inprocess runs them inside the telemetry ingest, which suits a few rules on modest streams. pool runs them in the separate rules pool (Helm `telemetryRules.enabled`), so many rules or busy streams never slow the ingest, at a few milliseconds more per decision. Give the pool its own nodes, it only isolates the ingest when it does not share CPU with it. An admin can choose per workspace on the Signal rules page, and with no pool running rules stay in the ingest. |
+| `telemetry.default_offline_after_s` | 0 | 0-86400 | Seconds of silence before a device from a source without births reads as offline, when its source sets none. 0 learns it per device, ten of its usual gaps, 60 seconds to 15 minutes. |
+| `telemetry.forget_offline_after_days` | 30 | 0-3650 | Devices offline longer than this are forgotten, which frees their place under the device limit. History stays. 0 never forgets. |
+
 ## Model selection
 
 One setting per surface, so a cheaper model can be used for the high-volume

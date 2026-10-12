@@ -1,5 +1,140 @@
 # Changelog
 
+## v2.5.8 — 2026-10-12
+
+### Added
+
+- Telemetry page under Monitor. Machines that publish Sparkplug B over MQTT show up as live cards with their devices, ingest rate, seq gaps and an offline banner that links to Alerts
+- Device view with every value updating up to 10 times a second, a minute of sparkline per value and a history chart from 5 minutes to 7 days
+- Frames tab with a live J1939 trace that decodes EEC1, ET1, LFE1, VP, VDS, ETC2, CCVS1, HOURS and DM1, reassembles multi-packet DM1, and can be paused and filtered
+- Connections tab for admins to add, test, turn off and delete an MQTT broker, with the test result in plain words and passwords never shown. Members see it view only
+- Send command dialog for people with Send machine commands. It asks for a reason, shows the exact DCMD it will publish and confirms before sending
+- Ingest health strip with messages a second, ingest delay, seq gaps and machines online, plus a plain banner when the workspace hits a quota or ingest is slowed down
+- Telemetry stays fast at 5,000 devices: windowed cards and table, search and filters kept in the link, and live updates only for what is on screen
+- Ctrl+K finds Telemetry by machines, devices, MQTT, J1939 and broker
+- Telemetry is labelled for any stream: Assets, Messages and Sources tabs, with Group, Asset and Part names and the Sparkplug and J1939 terms kept to help and Sparkplug sources
+- Add a source is a guided flow: pick the kind from the server catalogue, fill a form built from its declared fields with help and an example on each, test it, pick the format, map it, then turn it on
+- Mapping editor with a pasted or captured sample, a suggested mapping and a live preview of the records it makes, with plain errors
+- Messages tab shows the last raw messages per source with what each became, a Problems view with the reason for each failed message, Fix mapping and Replay, and the J1939 trace for sources that carry CAN frames
+- Push over HTTP gives an address, a token shown once, copy-ready curl, Python and JavaScript, and a Send a test message button
+- Device keys for push sources, one at a time or thousands from a CSV with a preview, each shown once, with last used, search and revoke
+- Get started guide asks what you want to connect, trucks and vans, machinery, sensors, products or software, and ends each path in a live source or the Edge gateway when code has to run on your side
+- What next panel once data flows, pointing at rules, agents with device_state, pipelines, decision tables and twins, with Groundwork as the worked example
+- Every way of seeing nothing says why: turned off, cannot connect, connected but quiet, messages failing, or the mapping keeping nothing, each with the one thing to do
+- Bad, uncertain and clock-ahead values are marked with the reason, an asset gone quiet gets a banner, and a command the asset did not confirm says so after 10 seconds
+- Asset charts show several signals as small multiples on one synced time axis, pick headline signals for each kind of asset, and open chart-first from a link with focus=charts, signals and range
+- Mapping editor has a filter for which messages to keep, with the preview and the source status saying when a message or every message is skipped
+- Assets show their registered name, type and tags, filter by type and tag, and an unnamed asset links to the asset page to name it. Each signal links to a new rule built from it
+- Ctrl+K finds the edge gateway and its collectors by CAN, J1939, OBD-II, Modbus RTU, serial GPS and store and forward
+- Sidebar highlights the closest entry for pages under it, so a rule page lights Signal rules and not Telemetry
+- Forget a device or a whole asset from its page, or many at once from Assets with a dry-run count and sample, then progress. History is kept and a device that reports again comes back
+- The quota banner offers to forget the devices offline for more than an hour, with the count found first
+- Asset pages link to watching the asset with an agent, What next links to the agent templates, and Ctrl+K finds both
+- Push and device-key snippets use the Python and JavaScript SDK ingest call
+
+- Telemetry ingest service that reads Sparkplug B from MQTT brokers in real time, with seq, bdSeq, alias and rebirth handling, as its own deployment on the API image
+- Broker connections API with a five second test, live status, encrypted passwords, teams and sharing, and a default Site broker on local installs
+- Latest values in Redis, history in TimescaleDB with compression and 1 minute and 1 hour aggregates, a ring of the last 2,000 raw CAN frames per machine, and the subscribed_feed keys filled at last
+- Read API for devices, one machine, history, frames, health and a live event stream that any API pod can serve
+- Governed machine commands that publish DCMD or NCMD, need Send machine commands, are rate limited to 20 a second per machine and land in the audit log
+- device_state agent tool, telemetry events for online, offline and seq gaps, and an alert when a machine goes offline
+- Machine operators permission set and three new permissions, View machine telemetry, Manage telemetry brokers and Send machine commands
+- Per-workspace telemetry limits for brokers, devices, messages a second and days of history
+- Ingest replicas share brokers through leases that move when a replica joins or dies, with shared subscriptions for one busy broker and KEDA scaling
+- forge.telemetry in the Python and JavaScript SDKs
+- deploy.sh chart applies the Helm chart to a running local cluster without a build, and deploy.sh forwards adds the MQTT broker on port 1883
+- scripts/telemetry-loadtest.sh runs the telemetry load tests in the cluster
+
+- Telemetry reads any stream, not only Sparkplug: transports and payload decoders are plugins found on their own, with the forms built from what each one declares
+- HTTP push sources with a token shown once, gzip with a hard size cap, signatures, idempotency keys and a durable queue that every ingest replica reads as one group
+- Per-device and gateway keys for HTTP push sources, made one at a time or from a CSV, so a device can only write as itself
+- Decoders for JSON, NDJSON, CSV, Influx line protocol, Protocol Buffers, Avro, MessagePack, CBOR, plain numbers, typed values and CAN frames with DBC decoding
+- Mapping from any message to assets and readings with templates, time formats, flattening, units, renames, events and strict mode, plus a live preview and a suggested first mapping
+- Message inspector, dead letters with the reason and replay after a fix, and counters that say why data is not showing
+- Latest values only move forward in event time, late readings still reach history, clock skew is measured per source and repeats are dropped by message id
+- Commands write back through any source that can take them and can wait for the device to confirm the value
+- Record evaluators can see every stored record on the ingest, for signal rules
+- Kafka, RabbitMQ, NATS, WebSocket, OPC UA and Modbus TCP sources, each with a connection test that names the cause and the fix in plain words
+- Kafka reads as one consumer group over every ingest replica with SASL PLAIN, SCRAM and OAUTHBEARER, TLS and client certificates, and commits offsets only after the records are stored
+- RabbitMQ reads a queue or binds one to an exchange, NATS reads core subjects with a queue group or a JetStream durable consumer, and both acknowledge after the store
+- OPC UA subscribes to listed nodes or everything under a browse path and keeps each status code as quality, Modbus polls a register map with types, scale, units and byte and word order
+- Commands write back as a Kafka message, an AMQP publish, a NATS publish, a WebSocket message, an OPC UA write or a Modbus register or coil write
+- A telemetry testbed with Redpanda, RabbitMQ, NATS JetStream, Microsoft's OPC PLC, a Modbus energy meter, a WebSocket price feed and an HTTP pusher, installed with deploy.sh testbed
+- Try the testbed adds every testbed source as a named connection with a working mapping in one click, and deploy.sh testbed-chaos, testbed-poison and testbed-load break, poison and load it on purpose
+
+- Abenix Edge collects: a gateway on your own box reads a CAN bus (J1939 with address claim and transport protocol, OBD-II PIDs, any bus with a DBC), Modbus TCP and RTU, OPC UA, an NMEA GPS, a site MQTT broker or a growing CSV or JSON lines file
+- Edge keeps readings on disk while the link is down, compressed, for 72 hours or 1 GB by default, and sends them oldest first with an idempotency key per batch, so a retry is never stored twice
+- Add an edge gateway on the Edge page walks through what it collects, the settings with examples and checks, the install command, the first heartbeat and the first data, then links to Telemetry
+- Install commands for Docker, Docker Compose, Kubernetes and a Linux IPC or Raspberry Pi with systemd, amd64 and arm64, carry a one-time enrolment token that expires after 24 hours
+- A gateway enrols itself, gets its own key and its HTTP push source in Telemetry, reports health every few seconds and picks up changes made on the Edge page on its next heartbeat
+- Gateway health shows online and last seen, the buffer's depth, oldest reading and disk use, the link, and each collector's status with the problem in plain words
+- Revoke stops a gateway at once, Remove forgets it and can take its source with it, and both ask first. Members see gateways and their health, view only
+- deploy.sh edge-image builds the Edge image, deploy.sh edge-demo runs a gateway in the cluster on a socketcand CAN bus with simulated ECUs and the testbed's meter and PLC, and deploy.sh edge-demo-cut cuts its uplink and checks the backfill
+- How-to: Connect your organisation's machines, vehicles and devices
+
+- Assets page: every streaming asset and part shows up by itself, at first unregistered, and gets a name, a type, tags, a team, a location and details like VIN, plate, serial and model
+- Name hundreds of assets at once from a CSV, with a preview that marks every row it would create, update or reject and why, before anything is saved
+- Signal rules watch live signals and act the moment something happens: above or below a limit, out of a range, changing too fast, silent for a number of seconds, a value, entering or leaving a zone drawn on GPS or site positions, or happening too often in a window
+- A rule watches one asset, every asset of a type, or every asset with a tag, with a clear margin so a reading hovering at the limit fires once, and a quiet time between firings
+- Rules raise an alert that clears by itself, tell people in Abenix, by email or on Slack, run an agent or pipeline with the firing as its context, check a decision table, or send a command with the rule as the reason
+- The rule builder picks signals from what is streaming now, says the rule back in plain words, and replays it over the last 1, 6 or 24 hours on a chart before you save it
+- Each firing keeps what every step did, with links to the run, the decision and the alert, and Test the steps runs them once without sending commands
+- Rules run inside the telemetry ingest as data streams in, with their state shared across ingest replicas so a stream split over replicas fires exactly as one would, and a firing is never sent twice
+- telemetry.rule_fired is a platform event, so webhooks and event subscriptions can follow rules, and rules show on the Triggers page
+- signal_history agent tool: how a signal moved over a time range, with a summary of first, last, min, max and when the peak was
+- Drifts from normal: a rule that fires when the last minutes of a signal run a percentage or a number of standard deviations away from its own recent baseline, kept as running averages so it costs nothing extra per reading
+- Rules can run in their own pool, so the number of rules never slows the telemetry ingest. The ingest hands matching readings over by Redis, the pool holds a share of workspaces each through leases and picks up where a stopped replica left off. Inside the ingest stays the default, an admin moves a workspace on the Signal rules page
+- Python and TypeScript SDKs create, preview, test and delete signal rules and name assets, list them, import them from a CSV and read their facets
+
+- Redis on local installs gets 512Mi, 1 CPU and a 410mb maxmemory with noeviction, and a RedisMemoryHigh alert fires above 85%
+- The telemetry ingest keeps its memory bounded, with message ids for 15 minutes, dead letters at 16 KB each, and HTTP push answers 503 when its queue is full
+- The telemetry ingest reports event loop lag and logs the code that held the loop whenever it stalls
+- Telemetry ingest pools: a default pool for MQTT, HTTP push, Kafka, AMQP and NATS and an industrial pool for OPC UA, Modbus and WebSocket, each scaling on its own. A connection no pool takes says so
+- Replica health shows how long the node kept the ingest loop waiting for CPU, and GC time as CPU apart from wall time
+- A Sparkplug birth now replaces the device's signal set. Signals it no longer declares leave the live view and are marked retired with the birth time, and their history stays
+- Signals from sources without births go stale on their own age once offline_after_s passes, even while the device keeps sending other signals
+- Forget telemetry devices one at a time or in bulk by how long they have been offline, with a dry run first. Their place under the device limit frees at once, history stays, and a device that reports again comes back
+- Devices offline for more than 30 days are forgotten on their own, set by telemetry.forget_offline_after_days
+- Devices from sources without births now go offline after a silence learnt from their own pace, 60 seconds to 15 minutes, or set per source or platform wide. A fleet going quiet raises a few alerts and then one grouped alert
+- Device rows show messages and readings a second averaged over 5 seconds, so a source that sends in batches no longer reads as 0
+
+- The closed loop, built from the UI for any asset: a stream, a signal rule, an agent that reads and proposes a command, a person who approves it, the asset that takes it, and your app that hears each step
+- asset_search agent tool: find assets by name, type, tag, team, group or online state, with latest readings, as the person the agent runs for sees them
+- device_state and signal_history take asset keys or display names, several assets in one call, or every asset of a type or tag
+- device_command agent tool: set a signal on an asset within a policy set on the agent's tool settings, which assets and signals, approval always, by risk tier or never, a rate and a confirmation wait. Anything outside it is refused in plain words, and an Earned Autonomy grant decides instead once the agent has one
+- Command approvals on Approvals show the asset, the value then and the new value, the reading now, the agent's reason and the last minutes as a chart, and ask once more before sending
+- Each agent command is audited with the agent, the run, the person it ran for, the approval and who approved, and goes out as the telemetry.command_sent event with its timings
+- Asset agents under Monitor: Machine health watcher, Fleet dispatcher, Anomaly triage and Shift reporter, each one click from Telemetry or an asset, with the right tools and a prompt that answers in JSON
+- Rule steps chain: a run step waits for the agent's answer and keeps it on the firing, and later steps use it as {steps.N.output} or one field of it. The firing history shows what each step was given, what it gave back, how long it took and the run
+- The rule builder's run step shows what the agent will receive from the last firing, tests the agent with it without sending commands, and offers a template when there is no agent yet
+- GET /api/events/stream: platform events as server-sent events, filtered to what the caller may see and resumable with Last-Event-ID. execution.completed carries the agent's answer, telemetry.firing_completed the step outputs
+- GET /api/telemetry/rules/firings takes since and include=outputs, and GET /api/telemetry/rules/firings/{id} gives one firing with every step
+- SDK: forge.events.stream with reconnect and resume, forge.telemetry.firings, forge.telemetry.firing and forge.telemetry.find_assets, in Python and JavaScript
+- How-to: Close the loop, from a stream to an action in your app
+- A command waiting on approval goes out the moment it is approved, woken through Redis instead of a 2 second poll
+- approval.resolved says who decided and when
+- A command to a value the asset already reads counts as confirmed, and says so
+
+### Changed
+- An approval tells only the people who can decide it, not everyone in the workspace, and the notices go out in the background so asking is instant
+- Approving a machine command needs Send machine commands, since approving sends it. Admins still can
+- A whole asset that reports through its parts opens on a list of its parts with their live values and a chart per part
+- Rates read naturally, such as Frames 77 /s, and device headers say online since rather than born
+
+### Fixed
+- An agent runtime pod that is scaled down or restarted finishes the runs it holds first, and pools scale down one pod at a time
+- A run whose runtime pod stopped and that no pod took over fails after about 5 minutes with WORKER_STOPPED and says to run it again, instead of staying running
+- An unexpected server error answers 500 in the usual envelope with CORS headers and a reference, so the browser shows it and not "Failed to fetch"
+- Two agents in a workspace can no longer share a slug. Existing duplicates are renamed with -2, -3 and so on, and renaming an agent keeps its slug unless the name changes
+
+- Dialogs keep their layout while open, so turning a phone or resizing the window no longer loses what was typed or a key shown once
+- A Sparkplug node's offline time is when its death arrived, not when it connected
+- A command that names a confirm signal without a value now waits for the value it sent
+- The telemetry load test counted only the last few seconds of ingest, so it showed ingest falling far behind when it was not
+- A telemetry ingest replica on a busy node no longer loses its connections because its heartbeat waited behind the health report
+- Dialogs no longer open half off-screen on desktop
+- Finished tool jobs are now deleted from the Redis job stream once acknowledged, and old ones are cleared on start. The stream had grown to 219 MB and was crashing Redis.
+
 ## v2.5.7 — 2026-10-10
 
 ### Added

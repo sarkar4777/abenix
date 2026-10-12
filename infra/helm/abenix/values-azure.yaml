@@ -185,6 +185,9 @@ redis:
     resources:
       requests: { cpu: 100m, memory: 256Mi }
       limits:   { cpu: 500m, memory: 512Mi }
+    configuration: |
+      maxmemory 410mb
+      maxmemory-policy noeviction
   replica:
     replicaCount: 0
 
@@ -298,6 +301,8 @@ scaling:
       max_replicas: 3
       concurrency_per_replica: 1
       keda_queue_trigger: "1"   # scale up on even a single queued job
+      # long runs get longer to finish when the pool scales down
+      termination_grace_seconds: 900
       resources:
         requests: { cpu: 500m, memory: 1Gi }
         limits:   { cpu: "2",  memory: 2Gi }

@@ -28,7 +28,10 @@ def build_tool_config_prompt(
             parts.append(
                 "Requires human approval before each call — explain why you need it."
             )
-        defaults = tc.get("parameter_defaults") or {}
+        defaults = dict(tc.get("parameter_defaults") or {})
+        policy = defaults.pop("policy", None) if tool_name == "device_command" else None
+        if tool_name == "device_command":
+            parts.append(f"Command policy: {command_policy_words(policy)}")
         if defaults:
             defaults_str = ", ".join(f"{k}={v}" for k, v in defaults.items())
             parts.append(f"Default parameters: {defaults_str}")
@@ -40,6 +43,23 @@ def build_tool_config_prompt(
 
     section = "\n\n## Tool Usage Guidelines\n" + "\n".join(lines)
     return (base_prompt or "").rstrip() + section
+
+
+def command_policy_words(policy: Any) -> str:
+    """device_command's policy in words the model can follow."""
+    if not isinstance(policy, dict) or not policy.get("assets"):
+        return "none set yet, so every command is refused until the owner sets one."
+    mode = policy.get("approval") or "always"
+    ask = {
+        "always": "A person approves every command first.",
+        "never": "Commands go out without asking.",
+        "tier": f"The workspace rule for {policy.get('tier') or 'high'} risk decides whether a person approves.",
+    }.get(mode, "")
+    return (
+        f"may command {', '.join(map(str, policy.get('assets') or []))}; "
+        f"signals {', '.join(map(str, policy.get('signals') or [])) or 'none'}. {ask} "
+        f"At most {policy.get('rate_per_minute') or 6} commands a minute."
+    )
 
 
 def append_mcp_warnings(prompt: str, warnings: list[str] | None) -> str:

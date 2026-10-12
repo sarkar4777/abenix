@@ -40,6 +40,7 @@ export const GATE_LABEL: Record<string, string> = {
   decision_restore: 'Restore a decision',
   'autonomy.promote': 'Promotion',
   'improvement.release': 'Agent improvement',
+  'telemetry.command': 'Machine command',
 };
 
 function str(v: unknown): string | null {
@@ -77,7 +78,7 @@ export function takesOutOfService(row: ApprovalLike): boolean {
 
 // approvals that change something the moment they are signed ask once more
 export function needsApproveConfirm(row: ApprovalLike): boolean {
-  return takesOutOfService(row) || row.gate_kind === 'decision_tier_change' || row.gate_kind === 'decision_restore';
+  return takesOutOfService(row) || row.gate_kind === 'decision_tier_change' || row.gate_kind === 'decision_restore' || row.gate_kind === 'telemetry.command';
 }
 
 
@@ -86,6 +87,16 @@ export function confirmApproveText(row: ApprovalLike): { title: string; body: st
   const key = str(p.decision_key) || 'this decision';
   const tier = cap(tierOf(row) || 'high');
   const who = requesterName(row) || 'The person who asked';
+  if (row.gate_kind === 'telemetry.command') {
+    const c = (p.command || {}) as { signal?: string; value?: unknown; node?: string; device?: string };
+    const asset = (p.asset as { name?: string } | undefined)?.name || [c.node, c.device].filter(Boolean).join('/') || 'the asset';
+    const agent = (p.agent as { name?: string } | undefined)?.name || 'The agent';
+    const v = typeof c.value === 'object' ? JSON.stringify(c.value) : String(c.value);
+    return {
+      title: `Send ${c.signal ?? 'the command'} = ${v} to ${asset}?`,
+      body: `It goes out at once through the asset's source, and the audit log records you as the approver. ${agent} asked because: ${str(p.reason) || 'no reason given'}.`,
+    };
+  }
   if (row.gate_kind === 'decision_tier_change') {
     const from = cap(String(p.from_tier ?? '')), to = cap(String(p.to_tier ?? ''));
     return {

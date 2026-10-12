@@ -141,7 +141,9 @@ spec:
         lagThreshold: "3"     # keda_queue_trigger, default 3
 ```
 
-Scale-down waits 600 s and drops at most 50 percent or one pod a minute. Scale-up has no wait and can double, or add 4 pods, every 15 s.
+Scale-down waits 600 s and then drops one pod at a time, at most one every 300 s (`scaling.keda.scaleDownPeriodSeconds`). Scale-up has no wait and can double, or add 4 pods, every 15 s.
+
+**A pod that is stopped finishes its runs.** On SIGTERM, whether from a scale-down, a rollout or a node drain, the consumer stops taking messages at once, even from an idle queue, and hands back any message that arrives after the signal. It then waits for the runs it holds, renewing their leases as usual, for up to `RUNTIME_DRAIN_SECONDS`. The chart gives each pool pod `terminationGracePeriodSeconds` of `termination_grace_seconds` (default 300) and sets the drain to 30 seconds less. A run still going at the deadline is cancelled unacked, so another pod takes it over. Give a pool of long runs a longer grace, `values-azure.yaml` sets 900 for `long-running`.
 
 `lagThreshold: "3"` targets at most 3 pending messages per replica. With 27 pending, KEDA aims for ⌈27/3⌉ = 9 replicas, capped at `maxReplicaCount`.
 

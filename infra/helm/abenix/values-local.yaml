@@ -226,11 +226,15 @@ redis:
         cpu: 50m
         memory: 64Mi
       limits:
-        cpu: 250m
-        memory: 256Mi
+        cpu: "1"
+        memory: 512Mi
     persistence:
       size: 2Gi
       storageClass: ""
+    # 80% of the limit, a runaway key then fails writes and alerts instead of OOM-killing Redis
+    configuration: |
+      maxmemory 410mb
+      maxmemory-policy noeviction
 
 # -- Secrets (provide via --set or external secret manager) ------------------
 secrets:
@@ -400,3 +404,25 @@ mcpAllowedHosts: "uat-mcp.abenix.svc.cluster.local,custom-mcp.abenix.svc.cluster
 devCatchers:
   enabled: true
 
+
+# a single minikube node has little request room left, the API rollout needs 500m of surge
+telemetryIngest:
+  resources:
+    requests:
+      cpu: 150m
+      memory: 192Mi
+    limits:
+      cpu: "2"
+      memory: 768Mi
+
+# the rules pool runs locally so both rule modes can be tried, small requests for minikube
+telemetryRules:
+  enabled: true
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 160Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi

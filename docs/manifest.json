@@ -403,6 +403,18 @@
         {
           "slug": "08-howto/16-self-improvement",
           "title": "Let an agent improve itself, under control"
+        },
+        {
+          "slug": "08-howto/17-telemetry",
+          "title": "Connect machines and streams"
+        },
+        {
+          "slug": "08-howto/18-connect-your-organisation",
+          "title": "Connect your organisation's machines, vehicles and devices"
+        },
+        {
+          "slug": "08-howto/19-close-the-loop",
+          "title": "Close the loop: from a stream to an action in your app"
         }
       ]
     },

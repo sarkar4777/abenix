@@ -209,6 +209,99 @@ cognifyWorker:
     maxReplicas: 5
     targetCPUUtilizationPercentage: 75
 
+# Telemetry ingest: reads Sparkplug B from the brokers under Monitor, Telemetry
+# into Redis and TimescaleDB. Runs the API image with its own command, so it
+# has no image of its own. Replicas share the broker connections through
+# per-connection leases, so more replicas means more brokers read in parallel.
+telemetryIngest:
+  enabled: true
+  replicaCount: 1
+  image:
+    # empty means the API image, repository and tag included
+    repository: ""
+    tag: ""
+    pullPolicy: ""
+  port: 8090
+  # messages waiting per broker connection before new ones are dropped and counted
+  queueMax: 20000
+  # history rows held in memory while TimescaleDB is slow or away
+  historyBuffer: 200000
+  resources:
+    requests:
+      # the CPU request sets the scheduler weight, too low and a busy node starves the loop
+      cpu: 300m
+      memory: 192Mi
+    limits:
+      cpu: "2"
+      memory: 768Mi
+  autoscaling:
+    enabled: false
+    # keda scales on messages a second and queued messages, hpa on CPU
+    kind: keda
+    minReplicas: 1
+    maxReplicas: 4
+    targetMessagesPerSecond: 4000
+    targetQueued: 2000
+    targetCPUUtilizationPercentage: 70
+  # One deployment per pool, each taking only its transports, so one noisy client
+  # library cannot stall the rest. default keeps the name abenix-telemetry-ingest and
+  # takes replicaCount above. A transport no pool lists is reported on its connection.
+  # Each pool may set its own replicaCount, resources and autoscaling.
+  pools:
+    - name: default
+      transports: [mqtt, http_push, kafka, amqp, nats]
+    - name: industrial
+      transports: [opcua, modbus_tcp, websocket]
+      replicaCount: 1
+      resources:
+        requests:
+          cpu: 100m
+          memory: 192Mi
+        limits:
+          cpu: "1"
+          memory: 768Mi
+
+# Signal rules in their own pool. The ingest then only hands matching readings over through
+# Redis, so rule count never changes ingest latency. Off by default, rules run inside the
+# ingest. A workspace moves to the pool with the telemetry.rules_mode setting or its own
+# choice on the Signal rules page, and stays in the ingest while no pool replica is up.
+telemetryRules:
+  enabled: false
+  # two so a shard always has a second replica to move to within a lease
+  replicaCount: 2
+  pdb:
+    enabled: true
+    minAvailable: 1
+  # give the pool its own nodes, it only takes load off the ingest when it does not share their CPU
+  nodeSelector: {}
+  tolerations: []
+  # replaces the default soft anti-affinity below when set
+  affinity: {}
+  # soft anti-affinity against ingest pods, false lets them share nodes freely
+  avoidIngest: true
+  image:
+    # empty means the API image
+    repository: ""
+    tag: ""
+    pullPolicy: ""
+  port: 8091
+  resources:
+    requests:
+      cpu: 200m
+      memory: 192Mi
+    limits:
+      cpu: "2"
+      memory: 512Mi
+  autoscaling:
+    enabled: false
+    # keda scales on the readings waiting in the shard streams, hpa on CPU
+    kind: keda
+    minReplicas: 1
+    # 16 shards, more replicas than that sit idle
+    maxReplicas: 8
+    targetLag: 5000
+    targetCPUUtilizationPercentage: 70
+
 pinecone:
   indexName: abenix
 
@@ -339,6 +432,8 @@ scaling:
   agentRuntimeImage: {}
   keda:
     enabled: false
+    # pools scale down one pod at a time, this many seconds apart
+    scaleDownPeriodSeconds: 300
   alerts:
     # PrometheusRule CRD is not present on a vanilla cluster.
     enabled: false

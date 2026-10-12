@@ -55,6 +55,8 @@ CATALOG: dict[str, dict[str, Any]] = {
             "approval_id": "…",
             "status": "approved",
             "gate_kind": "decision_publish",
+            "decided_by": {"id": "…", "name": "Ops Lead"},
+            "decided_at": "2026-10-12T09:00:00+00:00",
         },
     },
     "decision.proposed": {
@@ -229,6 +231,90 @@ CATALOG: dict[str, dict[str, Any]] = {
             "actor": "system",
         },
     },
+    "telemetry.device_online": {
+        "description": "A machine or one of its devices came online with a birth message",
+        "sample": {
+            "group": "groundwork",
+            "node": "ipc-ex1",
+            "device": "engine",
+            "connection_id": "…",
+            "connection": "Site broker",
+            "at": 1791720000000,
+        },
+    },
+    "telemetry.device_offline": {
+        "description": "A machine or one of its devices went offline",
+        "sample": {
+            "group": "groundwork",
+            "node": "ipc-ex1",
+            "device": "",
+            "devices": ["engine", "safety"],
+            "connection_id": "…",
+            "connection": "Site broker",
+            "at": 1791720000000,
+        },
+    },
+    "telemetry.seq_gap": {
+        "description": "Messages from a machine were lost, a rebirth was requested",
+        "sample": {
+            "group": "groundwork",
+            "node": "ipc-ex1",
+            "expected": 12,
+            "received": 15,
+            "seq_gaps": 1,
+            "connection_id": "…",
+        },
+    },
+    "telemetry.rule_fired": {
+        "description": "A signal rule fired on an asset, with the reading that set it off",
+        "sample": {
+            "rule_id": "…",
+            "rule": "EX1 pump pressure high",
+            "severity": "warning",
+            "group": "groundwork",
+            "node": "ipc-ex1",
+            "device": "hydraulics",
+            "asset": "Excavator EX1 hydraulics",
+            "signal": "Hydraulics/Pump1Pressure_bar",
+            "value": 312.4,
+            "detail": "Hydraulics/Pump1Pressure_bar on Excavator EX1 hydraulics is 312.4, above 300.",
+            "firing_id": "…",
+            "at": 1791720000000,
+        },
+    },
+    "telemetry.firing_completed": {
+        "description": "A signal rule's steps finished, with what each step gave back",
+        "sample": {
+            "firing_id": "…",
+            "rule_id": "…",
+            "rule": "EX1 pump pressure high",
+            "asset": "Excavator EX1 hydraulics",
+            "steps": [
+                {
+                    "kind": "run",
+                    "status": "ok",
+                    "output": {"action": "safe_mode"},
+                    "execution_id": "…",
+                }
+            ],
+        },
+    },
+    "telemetry.command_sent": {
+        "description": "An agent sent a governed command to an asset",
+        "sample": {
+            "agent": "Machine health watcher",
+            "execution_id": "…",
+            "group": "groundwork",
+            "node": "ipc-ex1",
+            "device": "safety",
+            "signal": "Mode/Set",
+            "value": "safe",
+            "reason": "Pump pressure climbed 18% in 10 minutes",
+            "approval_id": "…",
+            "approved_by": "ops@example.com",
+            "confirmed": True,
+        },
+    },
     "improvement.kept": {
         "description": "A release did as well or better through its watch period",
         "sample": {"proposal_id": "…", "agent_id": "…", "runs": 200},
@@ -362,6 +448,9 @@ async def fan_out(db: AsyncSession, limit: int = 500) -> int:
     )
     await db.commit()
     await _publish_nats(rows)
+    from app.services.event_stream import publish as _publish_stream
+
+    await _publish_stream(db, rows)
     return len(rows)
 
 

@@ -89,6 +89,7 @@ KIND_LABELS = {
     "decision_retire": "Retire a version",
     "decision_archive": "Archive a decision",
     "decision_restore": "Restore a decision",
+    "telemetry.command": "Machine command",
 }
 
 
@@ -597,9 +598,13 @@ async def _expire_stale(db: AsyncSession, tenant_id: uuid.UUID) -> None:
                 "status": ApprovalStatus.expired.value,
                 "gate_kind": gate_kind,
                 "title": title,
+                "decided_by": None,
+                "decided_at": now.isoformat(),
             },
         )
     await db.commit()
+    for aid, _, _ in expired:
+        await wake_waiters(aid, ApprovalStatus.expired.value)
     for aid, _, gate_kind in expired:
         if gate_kind in DECISION_KINDS:
             from app.routers.decisions import on_approval_resolved
@@ -671,7 +676,7 @@ async def create_approval(
     )
     await db.commit()
     await db.refresh(a)
-    await _notify_pending(db, a, requester=user)
+    notify_pending_later(a.id, user.id)
     return success(_serialize(a), status_code=201)
 
 
@@ -1305,6 +1310,9 @@ async def sign_off(
         )
     await db.commit()
     await db.refresh(a)
+    if prev_status == ApprovalStatus.pending and new_status != ApprovalStatus.pending:
+        # whoever waits on this approval moves now, before the notifications
+        await wake_waiters(a.id, new_status.value)
     if sole:
         await _notify_self_approved(db, a, user, (body.reason or "").strip())
     if prev_status == ApprovalStatus.pending and new_status != ApprovalStatus.pending:
@@ -1319,6 +1327,12 @@ async def sign_off(
                 "status": new_status.value,
                 "gate_kind": a.gate_kind,
                 "title": a.title,
+                "decided_by": {
+                    "id": str(user.id),
+                    "name": user.full_name or user.email,
+                },
+                "decided_at": a.decided_at.isoformat() if a.decided_at else None,
+                "reason": (body.reason or "").strip() or None,
             },
         )
         await db.commit()
@@ -1329,6 +1343,29 @@ async def sign_off(
         await _autonomy_resolved(db, a, user)
         await _notify_resolved(db, a, decider=user)
     return success(await _serialize_one(db, a, user))
+
+
+WAKE_TTL_S = 3600
+
+
+def wake_channel(approval_id: Any) -> str:
+    return f"approval:{approval_id}:resolved"
+
+
+async def wake_waiters(approval_id: Any, status: str) -> None:
+    """Tell a run waiting on this approval at once. Best effort, waiters also poll."""
+    try:
+        from app.routers.telemetry import redis
+
+        r = redis()
+        ch = wake_channel(approval_id)
+        pipe = r.pipeline(transaction=False)
+        # a waiter that subscribes a moment late still finds it
+        pipe.set(ch, status, ex=WAKE_TTL_S)
+        pipe.publish(ch, status)
+        await pipe.execute()
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("approval wake skipped: %s", exc)
 
 
 async def _sole_hint(db: AsyncSession, a: Approval, denial: str) -> str:
@@ -1446,18 +1483,43 @@ async def _post_webhook(
         logger.warning("approval webhook to %s failed: %s", url, e)
 
 
+_background: set[asyncio.Task] = set()
+
+
+def notify_pending_later(approval_id: Any, requester_id: Any) -> None:
+    """Notify after the reply, so asking for an approval never waits on it."""
+    task = asyncio.create_task(_notify_pending_by_id(approval_id, requester_id))
+    _background.add(task)
+    task.add_done_callback(_background.discard)
+
+
+async def _notify_pending_by_id(approval_id: Any, requester_id: Any) -> None:
+    from app.core.deps import async_session
+
+    try:
+        # a caller that commits just after handing it over is waited for briefly
+        for _ in range(10):
+            async with async_session() as db:
+                a = await db.get(Approval, approval_id)
+                who = await db.get(User, requester_id)
+                if a is not None and who is not None:
+                    await _notify_pending(db, a, requester=who)
+                    return
+            await asyncio.sleep(0.5)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("approval notifications failed: %s", exc)
+
+
 async def _notify_pending(
     db: AsyncSession, approval: Approval, *, requester: User
 ) -> None:
-    """Tell every other user in the tenant a new approval needs their attention."""
-    res = await db.execute(
-        select(User).where(
-            User.tenant_id == approval.tenant_id,
-            User.is_active.is_(True),
-            User.id != requester.id,
-        )
+    """Tell the people who can decide a new approval that it needs them, nobody else."""
+    targets = eligible_from(
+        await tenant_people(db, approval.tenant_id),
+        approval.policy,
+        approval.gate_kind,
+        requester.id,
     )
-    targets = res.scalars().all()
     title = approval.title or "Approval requested"
     truncated_title = title if len(title) <= 80 else title[:77] + "..."
     requester_name = requester.full_name or requester.email or "An agent"

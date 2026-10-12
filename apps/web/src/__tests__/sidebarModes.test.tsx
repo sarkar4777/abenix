@@ -38,7 +38,7 @@ vi.mock('@/hooks/usePlatformFeatures', () => ({
 }));
 vi.mock('@/lib/api-client', () => ({ apiFetch: (...a: any[]) => apiFetch(...a) }));
 
-import { NAV_ROUTE_LABELS, SidebarNav } from '@/components/layout/Sidebar';
+import { NAV_ROUTE_LABELS, SidebarNav, isActive } from '@/components/layout/Sidebar';
 import { SIDEBAR_MODE_KEY } from '@/lib/inbox';
 
 const MEMBER_FEATURES = {
@@ -104,6 +104,14 @@ describe('sidebar essentials mode', () => {
     cleanup();
     nav(as('user', [...USER_CAPS, 'improvements.view']));
     expect(labels()).not.toContain('Improvements');
+  });
+
+  it('adds Telemetry for people who can command machines, and keeps it under all tools for viewers', () => {
+    nav(as('user', [...USER_CAPS, 'telemetry.view', 'telemetry.command']));
+    expect(labels()).toEqual(['Needs you', 'Home', 'Agents', 'AI Chat', 'Knowledge', 'Monitor', 'Telemetry']);
+    cleanup();
+    nav(as('user', [...USER_CAPS, 'telemetry.view']));
+    expect(labels()).not.toContain('Telemetry');
   });
 
   it('adds an Admin section for admins that opens to the admin pages', () => {
@@ -205,5 +213,26 @@ describe('sidebar all mode', () => {
     nav(as('user'));
     expect(screen.getByTestId('sidebar-essentials')).toBeInTheDocument();
     get.mockRestore();
+  });
+});
+
+describe('sidebar highlight', () => {
+  it('lights the closest entry for a page under it, never its parent too', () => {
+    const t = { href: '/telemetry' }, rules = { href: '/telemetry/rules' }, assets = { href: '/telemetry/assets' };
+    expect(isActive(t, '/telemetry')).toBe(true);
+    expect(isActive(rules, '/telemetry')).toBe(false);
+    expect(isActive(rules, '/telemetry/rules/new')).toBe(true);
+    expect(isActive(rules, '/telemetry/rules/abc-123')).toBe(true);
+    expect(isActive(t, '/telemetry/rules/new')).toBe(false);
+    expect(isActive(assets, '/telemetry/assets')).toBe(true);
+    expect(isActive(t, '/telemetry/assets')).toBe(false);
+    expect(isActive(rules, '/telemetry/rulesets')).toBe(false);
+  });
+  it('keeps settings pages on their own entries', () => {
+    expect(isActive({ href: '/settings' }, '/settings/profile')).toBe(true);
+    expect(isActive({ href: '/settings' }, '/settings/team')).toBe(false);
+    expect(isActive({ href: '/settings/team' }, '/settings/team')).toBe(true);
+    expect(isActive({ href: '/agents' }, '/agents/manage')).toBe(false);
+    expect(isActive({ href: '/agents/manage' }, '/agents/manage')).toBe(true);
   });
 });

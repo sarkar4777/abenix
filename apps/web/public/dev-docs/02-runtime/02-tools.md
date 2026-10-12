@@ -451,7 +451,11 @@ Read watched sources and their changes. See [17-source-watch](17-source-watch.md
 | `mqtt_publish` | Publish JSON to an MQTT topic on the platform broker | medium | |
 | `redis_stream_consumer` | Consume from a Redis Stream | | |
 | `redis_stream_publisher` | Publish to a Redis Stream | medium | |
-| `subscribed_feed` | Latest cached sample of a live feed | | |
+| `subscribed_feed` | Latest cached sample of a live feed. The telemetry ingest fills `group/node/device/metric` feeds | | |
+| `device_state` | Latest readings of one or more assets and their parts, by key, name, type or tag, from the telemetry store | | |
+| `signal_history` | How a telemetry signal moved over a time range, bucketed from TimescaleDB with a summary | | |
+| `asset_search` | Find streaming assets by name, type, tag, team, group or online state, with latest readings | | |
+| `device_command` | Set a signal on an asset, within the policy on the agent's tool settings, with approval when it asks | | |
 | `tsdb_query` | Query the time-series store for a metric | | |
 | `twilio_sms` | SMS or WhatsApp through Twilio | high | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER`, `TWILIO_WHATSAPP_FROM` |
 | `windowed_state` | Per-asset sliding-window state | | |

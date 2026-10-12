@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, type ReactNode } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X } from 'lucide-react';
 import { useIsMobile } from '@/hooks/useMediaQuery';
@@ -15,6 +15,11 @@ interface ResponsiveModalProps {
   maxWidth?: string;
 }
 
+function phoneWidth(): boolean {
+  if (typeof window === 'undefined' || !window.matchMedia) return false;
+  return !window.matchMedia('(min-width: 768px)').matches;
+}
+
 export default function ResponsiveModal({
   open,
   onClose,
@@ -23,7 +28,13 @@ export default function ResponsiveModal({
   children,
   maxWidth = 'max-w-lg',
 }: ResponsiveModalProps) {
-  const isMobile = useIsMobile();
+  const live = useIsMobile();
+  // the layout is read straight from the window when it opens and held until it closes,
+  // so a resize never swaps the panel and nothing typed inside is lost
+  const locked = useRef<boolean | null>(null);
+  if (!open) locked.current = null;
+  else if (locked.current === null) locked.current = phoneWidth();
+  const isMobile = locked.current ?? live;
   useEscapeToClose(open, onClose);
 
   useEffect(() => {
@@ -54,6 +65,7 @@ export default function ResponsiveModal({
           {/* Panel */}
           {isMobile ? (
             <motion.div
+              key="sheet"
               className="relative z-10 flex h-full w-full flex-col bg-[#0F172A]"
               initial={{ y: '100%' }}
               animate={{ y: 0 }}
@@ -83,7 +95,9 @@ export default function ResponsiveModal({
               <div className="flex-1 overflow-y-auto p-4">{children}</div>
             </motion.div>
           ) : (
+            // own key so a sheet that mounted first cannot leave its offset here
             <motion.div
+              key="dialog"
               className={`relative z-10 mx-4 flex max-h-[90vh] w-full flex-col rounded-xl border border-slate-700/50 bg-[#0F172A] shadow-2xl ${maxWidth}`}
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}

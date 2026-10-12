@@ -64,6 +64,7 @@ import {
   Boxes,
   KeyRound,
   ListChecks,
+  RadioTower,
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useSidebar } from '@/stores/sidebar';
@@ -155,6 +156,10 @@ const NAV_GROUPS: NavGroup[] = [
       { label: 'Observability',icon: Gauge,    href: '/observability',   feature: 'view_executions' },
       { label: 'Executions',  icon: Activity,  href: '/executions',      feature: 'view_executions' },
       { label: 'Live Debug',  icon: Radio,     href: '/executions/live', feature: 'view_executions' },
+      { label: 'Telemetry',   icon: RadioTower, href: '/telemetry',      capability: 'telemetry.view' },
+      { label: 'Signal rules', icon: Zap,      href: '/telemetry/rules', capability: 'telemetry.view' },
+      { label: 'Assets',      icon: Boxes,     href: '/telemetry/assets', capability: 'telemetry.view' },
+      { label: 'Asset agents', icon: Bot,      href: '/telemetry/agents', capability: 'telemetry.view' },
       { label: 'Analytics',   icon: BarChart3, href: '/analytics',       feature: 'view_analytics' },
       { label: 'Moderation',  icon: ShieldCheck, href: '/moderation',    feature: 'view_alerts' },
       { label: 'Autonomy',    icon: Milestone, href: '/autonomy',        capability: 'autonomy.view' },
@@ -294,6 +299,8 @@ const ESSENTIALS: EssentialSpec[] = [
   { href: '/chat' },
   { href: '/knowledge', label: 'Knowledge' },
   { href: '/executions', label: 'Monitor' },
+  // people who can command machines watch them every day
+  { href: '/telemetry', capability: 'telemetry.command' },
   { href: '/builder', builders: true },
   // business rules and their sign-off, so a new owner finds them without all tools
   { href: '/decisions', builders: true },
@@ -320,11 +327,13 @@ export function adminEssentials(ctx: NavContext): NavItem[] {
   return (NAV_GROUPS.find((g) => g.id === 'admin')?.items ?? []).filter((i) => itemVisible(i, ctx));
 }
 
-function isActive(item: NavItem, pathname: string): boolean {
-  return (
-    pathname === item.href ||
-    (item.href === '/settings' && pathname.startsWith('/settings/') && !pathname.startsWith('/settings/team') && !pathname.startsWith('/settings/api-keys'))
-  );
+const under = (path: string, href: string) => path === href || path.startsWith(`${href}/`);
+
+// the entry for this page or the closest one above it, /telemetry/rules/new lights Signal rules and not Telemetry
+export function isActive(item: { href: string }, pathname: string): boolean {
+  if (pathname === item.href) return true;
+  if (!under(pathname, item.href)) return false;
+  return !ALL_ITEMS.some((o) => o.href !== item.href && o.href.startsWith(`${item.href}/`) && under(pathname, o.href));
 }
 
 // the server copy wins once it lands, localStorage only paints the first frame

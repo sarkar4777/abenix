@@ -165,7 +165,7 @@ def test_an_approval_request_posts_once_to_the_channel(monkeypatch) -> None:
 
     from app.routers import approvals
 
-    members = [types.SimpleNamespace(id=uuid.uuid4()) for _ in range(4)]
+    members = [types.SimpleNamespace(id=uuid.uuid4(), role="user") for _ in range(4)]
     seen = {"notify": [], "slack": 0}
 
     class DB:
@@ -194,6 +194,17 @@ def test_an_approval_request_posts_once_to_the_channel(monkeypatch) -> None:
     monkeypatch.setattr(n, "post_once_to_tenant_slack", fake_once)
     monkeypatch.setattr(approvals, "_tenant_settings", no_settings)
     monkeypatch.setattr(approvals, "_post_webhook", no_hook)
+
+    # only people who can sign it are told, a member who cannot is left out
+    async def people(db, tid):
+        signers = [
+            (m, frozenset({"approvals.sign", "decisions.review"})) for m in members
+        ]
+        return signers + [
+            (types.SimpleNamespace(id=uuid.uuid4(), role="user"), frozenset())
+        ]
+
+    monkeypatch.setattr(approvals, "tenant_people", people)
     a = types.SimpleNamespace(
         id=uuid.uuid4(),
         tenant_id=uuid.uuid4(),
@@ -203,6 +214,7 @@ def test_an_approval_request_posts_once_to_the_channel(monkeypatch) -> None:
         required_signoffs=1,
         expires_at=None,
         gate_kind="decision_publish",
+        policy=None,
     )
     monkeypatch.setattr(approvals, "_serialize", lambda x: {})
     requester = types.SimpleNamespace(id=uuid.uuid4(), full_name="Ann", email="a@b")

@@ -39,6 +39,21 @@ def _gauge() -> Gauge:
 health_check = _gauge()
 
 
+def _memory_gauge() -> Gauge:
+    try:
+        return Gauge(
+            "abenix_redis_memory_bytes",
+            "Redis used_memory and maxmemory from the API's last probe, 0 maxmemory means no limit",
+            ["kind"],
+            multiprocess_mode="mostrecent",
+        )
+    except ValueError:
+        return REGISTRY._names_to_collectors["abenix_redis_memory_bytes"]  # type: ignore[return-value]
+
+
+redis_memory = _memory_gauge()
+
+
 async def probe_postgres() -> bool:
     from app.core.deps import engine
 
@@ -65,6 +80,12 @@ async def probe_redis() -> bool:
     )
     try:
         await asyncio.wait_for(client.ping(), PROBE_TIMEOUT_SECONDS)
+        try:
+            info = await asyncio.wait_for(client.info("memory"), PROBE_TIMEOUT_SECONDS)
+            redis_memory.labels(kind="used").set(float(info.get("used_memory") or 0))
+            redis_memory.labels(kind="max").set(float(info.get("maxmemory") or 0))
+        except Exception:  # noqa: BLE001
+            pass
         return True
     except Exception:
         return False

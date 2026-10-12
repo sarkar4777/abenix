@@ -96,6 +96,12 @@ Image repositories and tags are per subchart. The deploy scripts pass them with
 | `eventsAllowedInternalHosts` | `""` | `EVENTS_ALLOWED_INTERNAL_HOSTS`. Exact host names outbound webhooks may save and call although they are cluster-internal or resolve to private addresses |
 | `pinecone.indexName` | `abenix` | `PINECONE_INDEX_NAME`. The template falls back to `agentforge-knowledge` only when this is empty |
 | `azureEmbeddingDeployment` | `text-embedding-3-small` | `AZURE_EMBEDDING_DEPLOYMENT` |
+| `telemetryIngest.enabled` / `replicaCount` | `true` / `1` | The `abenix-telemetry-ingest` Deployment, on the API image with `python -m app.telemetry.ingest`. Replicas share the brokers through per-connection leases |
+| `telemetryIngest.pools` | `default` (mqtt, http_push, kafka, amqp, nats) and `industrial` (opcua, modbus_tcp, websocket) | One ingest deployment per pool, each reading only its transports, so a heavy client library cannot stall the others. `default` keeps the name `abenix-telemetry-ingest` and `replicaCount`, the others are `abenix-telemetry-ingest-<name>`. Each pool can set `replicaCount`, `resources` and `autoscaling`. A transport no pool lists shows "No ingest pool takes ..." on its connection |
+| `telemetryIngest.image.*` | empty | Empty means the API image, repository, tag and pull policy |
+| `telemetryIngest.port` / `queueMax` / `historyBuffer` | `8090` / `20000` / `200000` | Health port, messages queued per connection, history rows buffered |
+| `telemetryIngest.autoscaling.enabled` / `kind` / `minReplicas` / `maxReplicas` | `false` / `keda` / `1` / `4` | `keda` scales on `targetMessagesPerSecond` (4000) and `targetQueued` (2000) read from `/scale`, `hpa` on CPU |
+| `redis.master.resources` / `redis.master.configuration` | 512Mi and `maxmemory 410mb` local, 8Gi and `maxmemory 6550mb` production | Redis keeps queues, streams, leases and telemetry state, so every overlay sets `maxmemory-policy noeviction` at about 80% of the container limit. At the limit writes fail loudly and `RedisMemoryHigh` fires at 85%, nothing is evicted silently |
 | `streaming.*` | release hosts, `abenix` / `abenix` / `abenix_tsdb` | Builds `MQTT_URL` and `TSDB_URL` |
 | `edge.allowUnsigned` | `false` | `EDGE_ALLOW_UNSIGNED` on the API |
 | `ingress.enabled` / `className` / `host` / `tls.*` | `true` / `nginx` / `app.abenix.io` | One host, `/api` to the API, `/` to web. Local values turn it off. `deploy-azure.sh` applies its own `abenix-ingress` instead |

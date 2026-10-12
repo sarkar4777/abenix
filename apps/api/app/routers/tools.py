@@ -104,7 +104,17 @@ def _runtime_tool_description(slug: str) -> str | None:
 _CATEGORY_HINTS: tuple[tuple[tuple[str, ...], str], ...] = (
     (("atlas_", "graph_", "vector_", "knowledge_", "semantic_"), "data"),
     (
-        ("mqtt_", "tsdb_", "windowed_", "subscribed_", "kafka_", "redis_stream"),
+        (
+            "mqtt_",
+            "tsdb_",
+            "windowed_",
+            "subscribed_",
+            "kafka_",
+            "redis_stream",
+            "device_",
+            "signal_history",
+            "asset_search",
+        ),
         "integration",
     ),
     (("moodys", "spg_", "fitch", "edgar", "ferc", "bundesanzeiger", "eex_"), "finance"),

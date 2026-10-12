@@ -232,11 +232,11 @@ When the loop ends the consumer writes the terminal state (`status`, `output_mes
 
 ### 16. Stragglers + sweeper
 
-`sweep_stale_executions` in [`apps/api/app/core/scheduler.py`](../../apps/api/app/core/scheduler.py) runs every 5 minutes in the API pod, one replica at a time under an advisory lock. It:
+`sweep_stale_executions` in [`apps/api/app/core/scheduler.py`](../../apps/api/app/core/scheduler.py) runs every minute in the API pod, one replica at a time under an advisory lock. It:
 
-1. Finds executions still `running` whose `created_at` is older than `STALE_EXECUTION_MAX_MINUTES` (default 10).
+1. Finds executions still `running` whose `created_at` is older than `STALE_EXECUTION_MAX_MINUTES` (default 10), and runs a runtime pod held whose lease lapsed more than `WORKER_GONE_SECONDS` (default 300) ago with no pod taking them over.
 2. Skips runs parked on a human approval gate (`hitl:waiting:<id>` in Redis) and runs whose queue lease (`lease_expires_at`) is still live.
-3. Marks the rest `failed` with `failure_code='STALE_SWEEP'`, then notifies the owners in-app.
+3. Marks the runs whose pod stopped `failed` with `failure_code='WORKER_STOPPED'` and "The worker running this stopped before it finished. Run it again.", the rest with `STALE_SWEEP`, then notifies the owners in-app.
 
 This is what unsticks the dashboard when a pod gets OOM-killed mid-loop.
 

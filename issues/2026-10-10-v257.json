@@ -1,0 +1,182 @@
+[
+  {
+    "title": "Typing a decimal in a decision rule dropped the point",
+    "area": "decisions",
+    "problem": "Typing 0.5 key by key into a rule threshold saved 5, and 2.50 saved 250, because every keystroke was parsed as a number. A safety rule could silently get the wrong threshold.",
+    "fix": "Values keep the typed text until it is complete. Typed decimals are stored exactly in conditions, outcomes and Try it.",
+    "fixed_in": "v2.5.7",
+    "labels": [
+      "bug"
+    ]
+  },
+  {
+    "title": "A decision author could skip sign-off by lowering the risk tier",
+    "area": "governance",
+    "problem": "While a version waited for sign-off, the author could lower the tier, withdraw, re-propose under the low tier, publish and raise the tier back, with nothing recorded.",
+    "fix": "Lowering a tier needs sign-off under the current tier, the tier is locked while a version waits, and publish checks the higher of the tier at proposal and now.",
+    "fixed_in": "v2.5.7",
+    "labels": [
+      "bug"
+    ]
+  },
+  {
+    "title": "A live version published at low risk was never reviewed after a tier raise",
+    "area": "governance",
+    "problem": "A decision created at low, published and then raised to high kept a live version nobody had reviewed at high.",
+    "fix": "Raising a tier opens a review of the version in force under the new tier, shown on the decision until it is signed.",
+    "fixed_in": "v2.5.7",
+    "labels": [
+      "bug"
+    ]
+  },
+  {
+    "title": "One person could switch off a live high-risk decision",
+    "area": "governance",
+    "problem": "Retire and archive acted at once at any tier, though lowering the tier needed sign-off.",
+    "fix": "At High and Critical, retire, archive and restore need a reason and a second person's sign-off.",
+    "fixed_in": "v2.5.7",
+    "labels": [
+      "bug"
+    ]
+  },
+  {
+    "title": "Decision outcomes were always saved as text",
+    "area": "decisions",
+    "problem": "Outcomes typed in the Rules view were stored as strings, so margin 4 came back as \"4\" and one decision could mix types.",
+    "fix": "Outcomes have a type, values are checked against it and numeric text is stored as a number.",
+    "fixed_in": "v2.5.7",
+    "labels": [
+      "bug"
+    ]
+  },
+  {
+    "title": "Retiring a decision version answered 500 after it succeeded",
+    "area": "decisions",
+    "problem": "The retire committed, then reading the row back failed, so the API and the UI reported an error.",
+    "fix": "The row is refreshed before answering.",
+    "fixed_in": "v2.5.7",
+    "labels": [
+      "bug"
+    ]
+  },
+  {
+    "title": "Deny from Needs you never sent its reason",
+    "area": "approvals",
+    "problem": "The Needs you inbox dropped the reason typed in the deny dialog, so every deny failed and told the user to write a reason.",
+    "fix": "The reason is passed through, with a test that checks the request body.",
+    "fixed_in": "v2.5.7",
+    "labels": [
+      "bug"
+    ]
+  },
+  {
+    "title": "An invited reviewer could not approve and was not told",
+    "area": "approvals",
+    "problem": "No role or invite option made someone a decision approver, and Approvals showed them enabled buttons that failed with internal permission names.",
+    "fix": "Invites and Team can grant Can approve decisions, a built-in Decision reviewers set exists, and Approvals shows only what you can sign, in plain words.",
+    "fixed_in": "v2.5.7",
+    "labels": [
+      "bug"
+    ]
+  },
+  {
+    "title": "Archiving a decision left its publish request open",
+    "area": "approvals",
+    "problem": "Reviewers were asked to approve versions of decisions that were already archived.",
+    "fix": "Archiving withdraws every open request on the decision with a reason, and signing one afterwards is refused.",
+    "fixed_in": "v2.5.7",
+    "labels": [
+      "bug"
+    ]
+  },
+  {
+    "title": "A cancelled agent run left its approval gate behind",
+    "area": "approvals",
+    "problem": "A run cancelled or timed out while waiting kept its human approval gate listed for up to an hour, and denying it did nothing for the live run.",
+    "fix": "Gates are removed on every exit, stale gates drop off Approvals, and acting on a closed gate gets a plain message.",
+    "fixed_in": "v2.5.7",
+    "labels": [
+      "bug"
+    ]
+  },
+  {
+    "title": "Permission changes took up to ten seconds to apply",
+    "area": "rbac",
+    "problem": "Each API worker cached permissions, so a fresh grant could still be refused on the next request.",
+    "fix": "Grants, revokes and role changes clear the cache on every worker at once through Redis.",
+    "fixed_in": "v2.5.7",
+    "labels": [
+      "bug"
+    ]
+  },
+  {
+    "title": "Withdrawal notifications were never saved",
+    "area": "notifications",
+    "problem": "The requester of a withdrawn approval was never told, because the notification was flushed and not committed.",
+    "fix": "The notification is committed with the withdrawal.",
+    "fixed_in": "v2.5.7",
+    "labels": [
+      "bug"
+    ]
+  },
+  {
+    "title": "Restoring a decision claimed its rules applied again when nothing was in force",
+    "area": "decisions",
+    "problem": "After restoring a decision whose only version was retired, the message said its published version answered again.",
+    "fix": "Messages and list cards are built from the decision's real state, such as retired with nothing in force.",
+    "fixed_in": "v2.5.7",
+    "labels": [
+      "bug"
+    ]
+  },
+  {
+    "title": "Members saw admin controls that failed after the click",
+    "area": "ui",
+    "problem": "A Member on Team, decisions, Approvals or Risk and Controls saw invite, role and approve controls that were refused only when used.",
+    "fix": "These pages are view only for Members, with a line on who can act and how to get the right.",
+    "fixed_in": "v2.5.7",
+    "labels": [
+      "bug"
+    ]
+  },
+  {
+    "title": "Members could not export from Risk and Controls",
+    "area": "rbac",
+    "problem": "Export with hashes was refused for Members who were shown the button.",
+    "fix": "Shown only to people who can view the audit log, with a note otherwise.",
+    "fixed_in": "v2.5.7",
+    "labels": [
+      "bug"
+    ]
+  },
+  {
+    "title": "Wingman deny on one row denied every ticked row",
+    "area": "wingman",
+    "problem": "Denying a single approval on the Wingman desk also denied all other selected rows, with a canned reason.",
+    "fix": "Deny acts on its own row and asks the desk user for a real reason.",
+    "fixed_in": "v2.5.7",
+    "labels": [
+      "bug"
+    ]
+  },
+  {
+    "title": "Agents stacked a new decision draft on every proposal",
+    "area": "decisions",
+    "problem": "An agent proposing rule changes created a new version each time, leaving several drafts behind.",
+    "fix": "An agent updates its own open draft, with an append-only change note.",
+    "fixed_in": "v2.5.7",
+    "labels": [
+      "bug"
+    ]
+  },
+  {
+    "title": "Needs you showed 99+ to a brand-new member",
+    "area": "inbox",
+    "problem": "Watching reviews and failure alerts from everyone's agents counted for members who could not act on them.",
+    "fix": "Members see only their own agents' reviews and their own runs' alerts.",
+    "fixed_in": "v2.5.7",
+    "labels": [
+      "bug"
+    ]
+  }
+]

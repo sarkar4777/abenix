@@ -86,6 +86,7 @@ _SHAREABLE_KINDS = {
     "knowledge_base",
     "saved_tool",
     "atlas_graph",
+    "telemetry_connection",
 }
 
 
@@ -199,7 +200,11 @@ async def create_share(
             ),
             title=f"{user.email} shared a {kind} with you",
             message=f"Permission: {perm.value}. Open it from {kind}s page.",
-            link=f"/{kind}s/{rid}",
+            link=(
+                "/telemetry?tab=connections"
+                if kind == "telemetry_connection"
+                else f"/{kind}s/{rid}"
+            ),
             metadata={
                 "resource_type": kind,
                 "resource_id": str(rid),
@@ -420,5 +425,12 @@ async def _user_can_share(
         if not obj:
             return False
         return obj.creator_id == user.id or is_admin(user)
+
+    if kind == "telemetry_connection":
+        from app.telemetry import access
+
+        ok = await access.can_share(db, user, resource_id)
+        access.forget()
+        return ok
 
     return False

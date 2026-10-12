@@ -31,6 +31,11 @@ import {
   UserCog,
   Gauge,
   User,
+  RadioTower,
+  Cpu,
+  Binary,
+  CircuitBoard,
+  Plug,
   type LucideIcon,
 } from 'lucide-react';
 import { holds, useMyPermissions } from '@/lib/capabilities';
@@ -71,6 +76,8 @@ interface Command {
   // the label for someone who can look but not change
   viewLabel?: string;
   feature?: string;
+  // shown with viewLabel to someone without this capability
+  manageCapability?: string;
 }
 
 const NAVIGATION_COMMANDS: Command[] = [
@@ -147,6 +154,127 @@ const NAVIGATION_COMMANDS: Command[] = [
     href: '/analytics',
     category: 'Navigation',
     keywords: ['stats', 'metrics', 'charts', 'usage'],
+  },
+  {
+    id: 'nav-telemetry',
+    label: 'Telemetry',
+    icon: RadioTower,
+    href: '/telemetry',
+    category: 'Navigation',
+    keywords: ['machines', 'machine', 'devices', 'device', 'assets', 'sensors', 'iot', 'live data', 'streams', 'streaming', 'ingest', 'sparkplug', 'mqtt', 'kafka', 'industrial pc', 'ipc', 'plant', 'fleet'],
+    capability: 'telemetry.view',
+  },
+  {
+    id: 'nav-telemetry-assets',
+    label: 'Assets and live signals',
+    icon: Cpu,
+    href: '/telemetry?tab=assets',
+    category: 'Telemetry',
+    keywords: ['machines', 'devices', 'assets', 'parts', 'ecu', 'nodes', 'online', 'offline', 'sensors', 'signals', 'metrics', 'live values', 'send command', 'write back', 'safety hold'],
+    capability: 'telemetry.view',
+  },
+  {
+    id: 'nav-telemetry-messages',
+    label: 'Raw messages and problems',
+    icon: Binary,
+    href: '/telemetry?tab=messages',
+    category: 'Telemetry',
+    keywords: ['messages', 'raw', 'inspector', 'dead letter', 'dlq', 'problems', 'failed messages', 'replay', 'decode errors', 'mapping errors'],
+    capability: 'telemetry.view',
+  },
+  {
+    id: 'nav-telemetry-frames',
+    label: 'CAN bus frames (J1939)',
+    icon: Binary,
+    href: '/telemetry?tab=messages&mview=frames',
+    category: 'Telemetry',
+    keywords: ['can', 'can bus', 'j1939', 'frames', 'pgn', 'trace', 'dm1', 'fault codes'],
+    capability: 'telemetry.view',
+  },
+  {
+    id: 'nav-telemetry-rules',
+    label: 'Signal rules',
+    icon: Zap,
+    href: '/telemetry/rules',
+    category: 'Telemetry',
+    viewLabel: 'Signal rules (view only)',
+    manageCapability: 'telemetry.manage',
+    keywords: ['rules', 'signal rules', 'alarm', 'alarms', 'alert when', 'threshold', 'limit', 'over limit', 'out of range', 'geofence', 'zone', 'stale', 'stopped reporting', 'offline', 'rate of change', 'trigger', 'automation', 'when a machine', 'notify', 'act on streams'],
+    capability: 'telemetry.view',
+  },
+  {
+    id: 'nav-telemetry-rule-new',
+    label: 'New signal rule',
+    icon: Plus,
+    href: '/telemetry/rules/new',
+    category: 'Telemetry',
+    keywords: ['new rule', 'create rule', 'add rule', 'alert me when', 'watch a signal', 'geofence', 'threshold alert'],
+    capability: 'telemetry.manage',
+  },
+  {
+    id: 'nav-telemetry-firings',
+    label: 'Rule firing history',
+    icon: BellRing,
+    href: '/telemetry/rules?tab=history',
+    category: 'Telemetry',
+    keywords: ['firings', 'fired', 'rule history', 'what happened', 'rule log'],
+    capability: 'telemetry.view',
+  },
+  {
+    id: 'nav-telemetry-asset-registry',
+    label: 'Asset registry (names, types, tags)',
+    icon: Cpu,
+    href: '/telemetry/assets',
+    category: 'Telemetry',
+    viewLabel: 'Asset registry (view only)',
+    manageCapability: 'telemetry.manage',
+    keywords: ['assets', 'asset registry', 'name assets', 'unregistered', 'vin', 'plate', 'serial', 'fleet', 'vehicles', 'trucks', 'vans', 'machines', 'tags', 'import csv', 'asset types'],
+    capability: 'telemetry.view',
+  },
+  {
+    id: 'nav-telemetry-agents',
+    label: 'Agent templates for machines',
+    icon: Bot,
+    href: '/telemetry/agents',
+    category: 'Telemetry',
+    keywords: ['agent templates', 'machine health watcher', 'fleet dispatcher', 'anomaly triage', 'shift reporter', 'closed loop', 'machines', 'assets'],
+    capability: 'telemetry.view',
+  },
+  {
+    id: 'nav-telemetry-watch',
+    label: 'Watch an asset with an agent',
+    icon: Bot,
+    href: '/telemetry/agents?template=machine-health-watcher',
+    category: 'Telemetry',
+    keywords: ['watch an asset', 'watch a machine', 'monitor a machine', 'agent watches', 'machine health'],
+    capability: 'telemetry.view',
+  },
+  {
+    id: 'nav-telemetry-mqtt',
+    label: 'Telemetry sources (MQTT, Kafka, HTTP and more)',
+    icon: Plug,
+    href: '/telemetry?tab=sources',
+    category: 'Telemetry',
+    viewLabel: 'Telemetry sources (view only)',
+    manageCapability: 'telemetry.manage',
+    keywords: ['mqtt', 'broker', 'mosquitto', 'sparkplug', 'connect a broker', 'kafka', 'redpanda', 'rabbitmq', 'amqp', 'nats', 'opc ua', 'opcua', 'modbus', 'websocket', 'webhook', 'http push', 'source', 'connection', 'topics', 'mapping'],
+    capability: 'telemetry.view',
+  },
+  {
+    id: 'nav-edge-add',
+    label: 'Add an edge gateway',
+    icon: CircuitBoard,
+    href: '/edge?add=gateway',
+    category: 'Edge',
+    keywords: ['edge gateway', 'gateway', 'install edge', 'collector', 'site gateway', 'in-vehicle gateway', 'raspberry pi', 'ipc'],
+  },
+  {
+    id: 'nav-edge-collectors',
+    label: 'Edge collectors',
+    icon: CircuitBoard,
+    href: '/edge',
+    category: 'Edge',
+    keywords: ['edge', 'can', 'can bus', 'j1939', 'obd', 'obd-ii', 'obd2', 'modbus rtu', 'rs485', 'serial', 'serial gps', 'nmea', 'gps', 'store and forward', 'offline buffer', 'buffer'],
   },
   {
     id: 'nav-mcp',
@@ -266,7 +394,12 @@ export function matchCommands(query: string, commands: Command[] = ALL_COMMANDS)
 export function commandsFor(perms: { capabilities?: string[]; is_admin?: boolean; features?: Record<string, boolean> } | null | undefined, commands: Command[] = ALL_COMMANDS): Command[] {
   return commands
     .filter((c) => !c.capability || !perms || holds(perms.capabilities, c.capability))
-    .map((c) => (c.feature && perms && !perms.is_admin && perms.features?.[c.feature] !== true && c.viewLabel ? { ...c, label: c.viewLabel } : c));
+    .map((c) => {
+      if (!perms || !c.viewLabel) return c;
+      if (c.feature && !perms.is_admin && perms.features?.[c.feature] !== true) return { ...c, label: c.viewLabel };
+      if (c.manageCapability && !holds(perms.capabilities, c.manageCapability)) return { ...c, label: c.viewLabel };
+      return c;
+    });
 }
 
 // run logs and file dumps make poor results, a label that is mostly symbols is dropped

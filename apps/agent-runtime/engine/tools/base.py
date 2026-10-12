@@ -39,7 +39,8 @@ class ConfigField:
 
     key: str
     label: str = ""
-    kind: str = "secret"  # secret | string | url | int | bool | select
+    # secret | string | url | int | bool | select, and list (telemetry forms only)
+    kind: str = "secret"
     required: bool = False
     group: str = ""
     description: str = ""

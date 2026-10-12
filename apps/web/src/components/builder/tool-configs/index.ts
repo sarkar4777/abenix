@@ -9,3 +9,4 @@ export { default as CodeAssetConfig } from './CodeAssetConfig';
 export { default as SandboxedJobConfig } from './SandboxedJobConfig';
 export { default as ConnectorCallConfig } from './ConnectorCallConfig';
 export { default as ApprovalGateConfig } from './ApprovalGateConfig';
+export { default as DeviceCommandConfig } from './DeviceCommandConfig';

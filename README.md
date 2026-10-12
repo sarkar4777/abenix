@@ -420,6 +420,29 @@ Use `bash scripts/deploy.sh forwards` to re-establish every port forward after a
 restart, and `bash scripts/deploy.sh reload <service>` to rebuild and restart a single
 service without a full redeploy.
 
+<a id="telemetry-testbed"></a>
+### Telemetry testbed
+
+`bash scripts/deploy.sh testbed` starts real brokers with simulated apps in the
+`abenix-testbed` namespace, then adds each one to Abenix as a ready connection
+named `Testbed · ...` with a sample mapping. Open Monitor, Telemetry,
+Connections to see them stream.
+
+| Source | Software | Data |
+|---|---|---|
+| Payments, Plant sensors | Redpanda (Kafka API) | JSON order events on `shop.orders`, Avro readings on `plant.sensors` |
+| Shipments | RabbitMQ | shipment status on exchange `logistics.events` |
+| Fleet | NATS JetStream | vehicle positions on `fleet.positions.>` |
+| Line PLC | Microsoft OPC PLC | OPC UA nodes with good and bad status |
+| Energy meter | Modbus TCP | voltage, current, power, energy, a writable setpoint and breaker |
+| Market prices | WebSocket | price ticks, orders sent back are acknowledged |
+| Weather stations | HTTP push | NDJSON posted to an `http_push` source |
+
+`testbed-chaos <svc>` kills a broker and times its return, `testbed-poison <sim>`
+sends one malformed message for the dead-letter ring, `testbed-load <n> <rate>`
+runs a Kafka burst, and `testbed-down` removes it all. Passwords live in the
+`testbed-credentials` Secret. More in [infra/helm/testbed/README.md](infra/helm/testbed/README.md).
+
 <a id="where-everything-lives"></a>
 ### Where everything lives
 

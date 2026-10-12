@@ -5,7 +5,7 @@
 ## Conventions
 
 - Base URL is the API host, for example `https://api.example.com`. Every route below is under `/api` except `/`.
-- Responses use the envelope `{data, error, meta}`. Validation failures are 422 with `error_code: VALIDATION_ERROR`.
+- Responses use the envelope `{data, error, meta}`. Validation failures are 422 with `error_code: VALIDATION_ERROR`. An unexpected server error is 500 with `error_code: INTERNAL_ERROR` and a reference in the message, in the same envelope and with the CORS headers, so a browser shows the error and not a network failure.
 - The **Auth** column says what the route checks:
   - `public` needs nothing
   - `signed in` takes a JWT (`Authorization: Bearer ...`) or an API key (`X-API-Key: af_...`)
@@ -406,6 +406,70 @@ Detail in [02-runtime/17-source-watch](../02-runtime/17-source-watch.md).
 | `POST` | `/api/sources/{source_id}/check-now` | `sources.manage` | Check now, outside the cadence |
 | `GET` | `/api/sources/{source_id}/snapshots` | signed in | Snapshots of one source |
 | `GET` | `/api/sources/{source_id}/changes` | signed in | Changes of one source |
+
+---
+
+## Machine telemetry
+
+Sparkplug B machines over MQTT. How to use it in [08-howto/17-telemetry](../08-howto/17-telemetry.md).
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| `GET` | `/api/telemetry/connections` | `telemetry.view` | Brokers in view with live `status` (`connected`, `connecting`, `error`, `disabled`), `last_error`, `messages_per_second`, `last_message_at`, `team_id`, `team_name`, `share_count`. Takes `q`, `team`, `status`, `limit`, `offset`. `meta.total` |
+| `POST` | `/api/telemetry/connections` | `telemetry.manage` | Add a broker. Body `{name, broker_url, topics?, raw_topics?, username?, password?, enabled?, shared_subscription?, team_id?}`. `topics` defaults to `["spBv1.0/#"]` |
+| `POST` | `/api/telemetry/connections/test` | `telemetry.manage` | Test an unsaved broker for up to 5 s |
+| `GET` | `/api/telemetry/connections/{id}` | `telemetry.view` | One broker |
+| `PATCH` | `/api/telemetry/connections/{id}` | `telemetry.manage` | Change a broker. The masked password `********` leaves it as it is, `""` clears it |
+| `DELETE` | `/api/telemetry/connections/{id}` | `telemetry.manage` | Remove a broker and its shares |
+| `POST` | `/api/telemetry/connections/{id}/test` | `telemetry.manage` | Connect for up to 5 s, `{ok, connected, messages, topics_seen, error}` |
+| `GET` | `/api/telemetry/teams` | `telemetry.view` | Teams a broker can belong to. A team is a permission set |
+| `GET` | `/api/telemetry/quota` | `telemetry.view` | `{effective, defaults, override}` |
+| `PUT` | `/api/telemetry/quota` | admin | This workspace's own limits, `{max_connections, max_devices, max_msgs_per_sec, retention_days}` |
+| `GET` | `/api/telemetry/devices` | `telemetry.view` | Machines (device `""`) and devices, `[{group, node, device, online, last_seen, birth_at, offline_at, msgs_per_sec, readings_per_sec, seq_gaps, metric_count, connection_id, team_id, team_name}]`. Rates average the last 5 seconds to one decimal, so a source that sends batches reads as 0.4 rather than 0. Takes `q`, `group`, `node`, `status=online\|offline`, `team`, `limit`, `offset`. `meta.total` and `meta.online` |
+| `GET` | `/api/telemetry/devices/{group}/{node}` | `telemetry.view` | The machine, its metrics and its devices with theirs, each `{name, value, type, ts, quality}`. `?device=` narrows to one |
+| `DELETE` | `/api/telemetry/devices/{group}/{node}` | `telemetry.manage` | Forgets one part (`?device=`) or the whole asset, keeping history, `{forgotten, devices, history_kept}`. 409 `DEVICE_ONLINE` unless `force=true` |
+| `POST` | `/api/telemetry/devices/forget` | `telemetry.manage` | Forgets offline devices, `{offline_for_s, group, node_glob, connection_id, dry_run, limit}` answers `{dry_run, matched, forgotten, remaining, sample, history_kept}`. At most 2,000 a call, audited |
+| `GET` | `/api/telemetry/history` | `telemetry.view` | `group`, `node`, `device`, `metric` (one or a comma list), `from`, `to`, `step`. Time buckets `{t, avg, min, max, n}` per metric, `source` says raw, `1m` or `1h` |
+| `GET` | `/api/telemetry/frames/{group}/{node}` | `telemetry.view` | Newest raw CAN frames first, `[{t, id, data, dlc}]`, `t` in epoch ms and `data` hex. Takes `limit` up to 2000 and `since` |
+| `GET` | `/api/telemetry/health` | `telemetry.view` | Ingest health for the workspace, see below |
+| `GET` | `/api/telemetry/stream` | `telemetry.view` | Server-sent events, see below |
+| `GET` | `/api/telemetry/transports` | `telemetry.view` | Every transport with its `config_fields`, `capabilities`, `scale_mode` and `default_decoder`. `meta.unavailable` names any that did not load |
+| `GET` | `/api/telemetry/decoders` | `telemetry.view` | Every decoder with its `config_fields`, `stateful` and `uses_mapping` |
+| `POST` | `/api/telemetry/ingest/{connection_id}` | source token or device key | HTTP push. JSON, NDJSON, CSV or text, gzip taken, `?subject=`, `Idempotency-Key`. 202 `{accepted, id, bytes}` |
+| `POST` | `/api/telemetry/connections/{id}/token` | `telemetry.manage` | A new push token, shown once |
+| `GET`, `POST` | `/api/telemetry/connections/{id}/keys` | `telemetry.manage` | Device and gateway keys. POST `{device_id, kind?, group?, allowed_nodes?, label?}` shows the key once |
+| `POST` | `/api/telemetry/connections/{id}/keys/bulk` | `telemetry.manage` | Keys from CSV with a `device_id` column, each shown once |
+| `DELETE` | `/api/telemetry/connections/{id}/keys/{key_id}` | `telemetry.manage` | Revoke a key |
+| `POST` | `/api/telemetry/connections/{id}/preview` | `telemetry.view` | `{payload or payload_base64 or capture, subject?, mapping?, decoder?, decoder_config?}` to `{records, errors, sample}`. Nothing is stored |
+| `POST` | `/api/telemetry/mapping/suggest` | `telemetry.view` | `{payload, subject?, decoder?}` to `{mapping, records, errors}` |
+| `GET` | `/api/telemetry/connections/{id}/inspector` | `telemetry.view` | The last 500 messages with what each decoded to or why it failed. `errors_only` |
+| `GET`, `DELETE` | `/api/telemetry/connections/{id}/dlq` | view, manage | Dead letters with the reason, or clear them |
+| `POST` | `/api/telemetry/connections/{id}/dlq/replay` | `telemetry.manage` | `{ids?}`. Runs them through the current decoder and mapping, `{replayed, still_failing, remaining}` |
+| `GET` | `/api/telemetry/connections/{id}/signals` | `telemetry.view` | Every signal the source has sent, first and last seen, with `retired` where a later birth dropped it |
+| `GET` | `/api/telemetry/connections/{id}/diagnose` | `telemetry.view` | Why data is or is not showing, `{state, message, fix, counters}` |
+| `GET` | `/api/telemetry/diagnose` | `telemetry.view` | The same for `?group=&node=`, including `not_shared` |
+| `GET` | `/api/telemetry/events/{group}/{node}` | `telemetry.view` | Messages kept whole as events, newest first |
+| `POST` | `/api/telemetry/command` | `telemetry.command` | `{group, node, device, signal, value, reason, dry_run?, confirm_timeout_ms?, confirm_signal?, confirm_value?}`, `metric` is taken for `signal`. A Sparkplug DCMD, or NCMD when `device` is `""`, or the mapping's write target. Answers `{published, at, topic, payload, confirmed}` |
+| `GET` | `/api/telemetry/assets` | `telemetry.view` | Assets merged from the live streams and the registry, `[{id, key, group, node, device, registered, display_name, type, tags, team_id, team_name, location, fields, live, online, last_seen, connection_id, parts, updated_at, can_edit}]`. Takes `q`, `type`, `tag`, `group`, `status=registered\|unregistered`, `parts`, `limit`, `offset`. `meta` has `total`, `registered`, `unregistered`, `types` and `tags` |
+| `GET` | `/api/telemetry/assets/facets` | `telemetry.view` | `{types: [{type, count}], tags: [{tag, count}], registered, unregistered}` |
+| `GET`, `PUT`, `DELETE` | `/api/telemetry/assets/{group}/{node}?device=` | view, manage | One asset. PUT `{display_name, type, tags, team_id, location, fields}` names it, DELETE forgets the name and details only |
+| `POST` | `/api/telemetry/assets/import` | `telemetry.manage` | `{csv, dry_run}`. Every row with `action` create, update, unchanged or error and its `errors`. Nothing is saved while any row has an error. `GET /api/telemetry/assets/template.csv` is a starting file |
+| `GET`, `POST` | `/api/telemetry/rules` | view, manage | Signal rules with `summary` in plain words, `fire_count`, `last_fired_at`, `firing_now` and `last_firing`. POST `{name, description?, enabled?, severity, cooldown_s, scope, condition, actions, team_id?}` |
+| `GET`, `PATCH`, `DELETE` | `/api/telemetry/rules/{id}` | view, manage | One rule. A command step also needs `telemetry.command`, a run step run rights on the agent |
+| `POST` | `/api/telemetry/rules/preview` | `telemetry.view` | `{scope, condition, cooldown_s, hours: 1\|6\|24}` replays the rule over history, `{summary, fired, cleared, assets: [{key, name, firings, clears, series, track, stats}]}` |
+| `POST` | `/api/telemetry/rules/{id}/test` | `telemetry.manage` | Runs the steps once with the latest reading, as a test. Commands are skipped |
+| `GET` | `/api/telemetry/rules/firings` | `telemetry.view` | Firings newest first with what each step did, `[{id, rule_id, rule, fired_at, cleared_at, status, asset, signal, value, detail, actions: [{kind, status, message, ref}]}]`. Takes `rule_id`, `status`, `limit`, `before` |
+| `GET` | `/api/telemetry/rules/signals` | `telemetry.view` | Signals streaming now for `group` and `node`, or `kind=type\|tag` with `type` or `tag`, with their latest values |
+| `GET` | `/api/telemetry/rules/options` | `telemetry.view` | What steps can pick: agents and pipelines, decision tables, people and teams |
+| `GET` | `/api/telemetry/rules/health` | `telemetry.view` | Per ingest replica: rules, fired, cleared, suppressed, evaluation lag p50 and p99, observe cost p50 and p99 |
+
+`/health` answers `ingest_up`, `replicas`, `messages_per_second`, `messages_per_second_by_node`, `ingest_latency_ms_p50`, `ingest_latency_ms_p99` (also as `ingest_latency_ms: {p50, p99}`), `publish_to_store_ms`, `seq_gaps`, `dropped`, `throttled`, `throttle_reason`, `throttled_messages`, `nodes_online`, `nodes_total`, `connections` and `quota: {max_connections, max_devices, max_msgs_per_sec, retention_days, used: {connections, devices, msgs_per_sec}}`.
+
+`/stream` takes `?group=&node=&device=` for one view or `?nodes=grp/node,grp/node` for several, and sends `event: device`, `event: metrics` (at most 10 a second per device), `event: health` about once a second and `: ping` every 15 s. Auth is the usual header, so read it with `fetch` rather than `EventSource`.
+
+Connection bodies also take `transport`, `config`, `secrets` (never returned, shown as `********`), `subjects`, `decoder`, `decoder_config`, `mapping` and `strict`, and rows add `pipeline`, `last_reasons`, `diagnosis`, `clock_skew_ms` and, for HTTP push, `ingest_url` and `has_ingest_token`.
+
+Error codes: `FORBIDDEN` (403), `UNAUTHORIZED` (401, a push token or key that does not open the source), `BAD_SIGNATURE` (401), `BAD_ENCODING` (400), `PAYLOAD_TOO_LARGE` (413), `UNSUPPORTED_MEDIA_TYPE` (415), `DISABLED` (409), `NOT_WRITABLE` (422), `NOTHING_ARRIVED` (408, a preview capture), `NOT_FOUND` (404), `NODE_OFFLINE` (409), `DUPLICATE_NAME` (409), `VALIDATION_ERROR` (422), `QUOTA_EXCEEDED` (429), `RATE_LIMITED` (429, more than 20 commands a second to one node, or too many live views), `BROKER_UNREACHABLE` (502) and `HISTORY_UNAVAILABLE` (503). Each comes with a plain message.
 
 ---
 

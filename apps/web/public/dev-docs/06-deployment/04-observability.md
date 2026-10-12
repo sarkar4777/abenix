@@ -275,3 +275,9 @@ retried after a minute.
 - [06-k8s-specifics](06-k8s-specifics.md#rbac) — the roles behind the Cluster Health page
 - [02-runtime/04-streaming-tracing](../02-runtime/04-streaming-tracing.md) — what gets emitted from the runtime
 - [08-howto/04-debugging](../08-howto/04-debugging.md) — using traces + logs to chase real bugs
+
+## Redis memory
+
+Redis holds queues, streams, leases and telemetry state, so it never evicts: every overlay sets `maxmemory-policy noeviction` with `maxmemory` at about 80% of the container limit. The API's dependency probe exports `abenix_redis_memory_bytes{kind="used"}` and `{kind="max"}` every 30 seconds, and `RedisMemoryHigh` fires when used passes 85% of max for 5 minutes.
+
+When it fires, find the largest keys with `redis-cli --bigkeys` in the Redis pod. Telemetry keeps its own memory bounded: 2,000 frames per asset, 500 inspector entries and 500 dead letters of at most 16 KB per source, message ids for 15 minutes, and an HTTP push queue that answers 503 past 10,000 waiting batches. Raise `redis.master.resources` and `maxmemory` together when the steady state needs more.

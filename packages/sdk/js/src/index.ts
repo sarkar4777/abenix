@@ -250,6 +250,7 @@ export class Abenix {
   public killSwitches: KillSwitchesClient;
   public apiKeys: ApiKeysClient;
   public team: TeamClient;
+  public telemetry: TelemetryClient;
 
   constructor(config: AbenixConfig) {
     this.apiKey = config.apiKey;
@@ -273,6 +274,7 @@ export class Abenix {
     this.killSwitches = new KillSwitchesClient(this);
     this.apiKeys = new ApiKeysClient(this);
     this.team = new TeamClient(this);
+    this.telemetry = new TelemetryClient(this);
   }
 
   /** The user this key acts as, as { user: {...} }. */
@@ -1502,6 +1504,462 @@ export class ApiKeysClient {
   }
 }
 
+export interface TelemetryMetric {
+  name: string;
+  value: unknown;
+  type: string;
+  ts: number | null;
+  quality: 'good' | 'bad' | 'stale' | string;
+}
+
+export interface TelemetryDevice {
+  group: string;
+  node: string;
+  device: string;
+  online: boolean;
+  last_seen: number | null;
+  birth_at: number | null;
+  offline_at?: number | null;
+  msgs_per_sec: number;
+  readings_per_sec?: number;
+  seq_gaps: number;
+  metric_count: number;
+  connection_id: string | null;
+  team_id?: string | null;
+  team_name?: string | null;
+}
+
+export interface TelemetryFrame {
+  /** epoch milliseconds */
+  t: number;
+  id: number;
+  /** hex string */
+  data: string;
+  dlc: number;
+}
+
+export interface TelemetryCommandResult {
+  published: boolean;
+  at?: string;
+  /** epoch ms on the cluster clock: request arrival, time spent on checks, hand-over to the source */
+  received_at?: number;
+  checks_ms?: number;
+  published_at?: number;
+  confirmed?: boolean | null;
+  confirm_ms?: number | null;
+  topic: string;
+  payload: { timestamp: number; metrics: Array<{ name: string; timestamp: number; datatype: string; value: unknown }> };
+}
+
+function telemetryQuery(params: Record<string, unknown>): string {
+  const q = Object.entries(params)
+    .filter(([, v]) => v !== undefined && v !== null && v !== '')
+    .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`)
+    .join('&');
+  return q ? `?${q}` : '';
+}
+
+/** One platform event from forge.events.stream. id is the event id to resume after. */
+export interface PlatformEvent {
+  id: number;
+  type: string;
+  occurred_at: string;
+  data: Record<string, any>;
+}
+
+/** One step of a firing: what it was given, what it gave back and how long it took. */
+export interface RuleFiringStep {
+  kind: string;
+  status: 'ok' | 'failed' | 'skipped' | 'pending' | 'running';
+  message: string;
+  ref?: Record<string, any> | null;
+  input?: Record<string, any>;
+  output?: unknown;
+  started_at?: number;
+  duration_ms?: number;
+}
+
+export interface RuleFiring {
+  id: string;
+  rule_id: string | null;
+  rule: string;
+  fired_at: string;
+  cleared_at: string | null;
+  status: string;
+  group: string;
+  node: string;
+  device: string;
+  asset: string;
+  signal: string | null;
+  value: unknown;
+  detail: string;
+  actions: RuleFiringStep[];
+  context?: Record<string, any>;
+}
+
+/** What a signal rule is made of. See the condition kinds and steps under Telemetry in the docs. */
+export interface SignalRuleInput {
+  name: string;
+  /** { kind: 'asset', group, node, device } with device '*' for any part, or { kind: 'type', type } or { kind: 'tag', tag } */
+  scope: Record<string, unknown>;
+  /** threshold, range, rate, stale, state, geofence, count or deviation */
+  condition: Record<string, unknown>;
+  /** alert, notify, run, decision or command */
+  actions?: Record<string, unknown>[];
+  description?: string | null;
+  severity?: 'info' | 'warning' | 'critical';
+  cooldown_s?: number;
+  enabled?: boolean;
+  team_id?: string | null;
+}
+
+export interface SignalRule extends SignalRuleInput {
+  id: string;
+  summary: string;
+  fire_count: number;
+  last_fired_at: string | null;
+  firing_now: number;
+  last_firing: any;
+  can_edit: boolean;
+}
+
+export interface TelemetryAsset {
+  id: string | null;
+  key: string;
+  group: string;
+  node: string;
+  device: string;
+  registered: boolean;
+  display_name: string | null;
+  type: string | null;
+  tags: string[];
+  team_id: string | null;
+  location: Record<string, unknown> | null;
+  fields: Record<string, string>;
+  live: boolean;
+  online: boolean | null;
+  last_seen: number | null;
+  parts?: string[];
+}
+
+/** Machine telemetry: devices and their live readings, history, raw CAN frames, live updates and commands. */
+export class TelemetryClient {
+  constructor(private client: Abenix) {}
+
+  /** Every machine (device "") and device in view. */
+  devices(opts: { q?: string; group?: string; node?: string; status?: 'online' | 'offline'; team?: string; limit?: number; offset?: number } = {}): Promise<TelemetryDevice[]> {
+    return platformCall<TelemetryDevice[]>(this.client, 'GET', `/api/telemetry/devices${telemetryQuery(opts)}`).then((r) => r || []);
+  }
+
+  /** A machine with its devices and their latest metrics. device narrows it to one. */
+  node(group: string, node: string, device?: string): Promise<any> {
+    return platformCall(this.client, 'GET', `/api/telemetry/devices/${encodeURIComponent(group)}/${encodeURIComponent(node)}${telemetryQuery({ device })}`);
+  }
+
+  /** Time-bucketed numbers. from and to take ISO times, epoch ms or relative like -1h. */
+  history(group: string, node: string, opts: { device?: string; metric?: string | string[]; from?: string | number; to?: string | number; step?: string } = {}): Promise<any> {
+    const metric = Array.isArray(opts.metric) ? opts.metric.join(',') : opts.metric;
+    return platformCall(this.client, 'GET', `/api/telemetry/history${telemetryQuery({ group, node, device: opts.device ?? '', metric, from: opts.from, to: opts.to, step: opts.step })}`);
+  }
+
+  /** Newest raw CAN frames first. since keeps only frames after that epoch ms. */
+  frames(group: string, node: string, limit = 200, since?: number): Promise<TelemetryFrame[]> {
+    return platformCall<TelemetryFrame[]>(this.client, 'GET', `/api/telemetry/frames/${encodeURIComponent(group)}/${encodeURIComponent(node)}${telemetryQuery({ limit, since })}`).then((r) => r || []);
+  }
+
+  /** Write one signal back: a Sparkplug DCMD (NCMD when device is ""), or the target the mapping declares. confirmTimeoutMs waits for the device to report it. Throws AbenixError with code NODE_OFFLINE, NOT_WRITABLE, RATE_LIMITED or FORBIDDEN. */
+  command(group: string, node: string, device: string, signal: string, value: unknown, reason: string, opts: { dryRun?: boolean; confirmTimeoutMs?: number; confirmSignal?: string; confirmValue?: unknown } = {}): Promise<TelemetryCommandResult> {
+    const body: Record<string, unknown> = { group, node, device: device || '', signal, value, reason, dry_run: !!opts.dryRun, confirm_timeout_ms: opts.confirmTimeoutMs ?? 0 };
+    if (opts.confirmSignal) body.confirm_signal = opts.confirmSignal;
+    if (opts.confirmValue !== undefined) body.confirm_value = opts.confirmValue;
+    return platformCall(this.client, 'POST', '/api/telemetry/command', body);
+  }
+
+  transports(): Promise<any[]> {
+    return platformCall<any[]>(this.client, 'GET', '/api/telemetry/transports').then((r) => r || []);
+  }
+
+  decoders(): Promise<any[]> {
+    return platformCall<any[]>(this.client, 'GET', '/api/telemetry/decoders').then((r) => r || []);
+  }
+
+  /** Push readings into an HTTP push source with its tpk_ token or a device's tdk_ key, not the API key. */
+  async ingest(connectionId: string, data: unknown, opts: { token: string; subject?: string; contentType?: string; idempotencyKey?: string }): Promise<{ accepted: boolean; id: string; bytes: number }> {
+    const isText = typeof data === 'string';
+    const isBytes = data instanceof Uint8Array || data instanceof ArrayBuffer;
+    const body: BodyInit = isText ? (data as string) : isBytes ? (data as any) : JSON.stringify(data);
+    const headers: Record<string, string> = { Authorization: `Bearer ${opts.token}`, 'Content-Type': opts.contentType ?? 'application/json' };
+    if (opts.idempotencyKey) headers['Idempotency-Key'] = opts.idempotencyKey;
+    const res = await fetch(`${(this.client as any).baseUrl}/api/telemetry/ingest/${connectionId}${telemetryQuery({ subject: opts.subject })}`, { method: 'POST', body, headers });
+    const json: any = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const err = json?.error ?? {};
+      throw new AbenixError(res.status, err.message ?? `HTTP ${res.status}`, err.error_code, err.details);
+    }
+    return json?.data;
+  }
+
+  /** Run a sample, or with capture the next live message, through a mapping. Nothing is stored. */
+  preview(connectionId: string, opts: { payload?: unknown; subject?: string; mapping?: Record<string, unknown>; decoder?: string; decoderConfig?: Record<string, unknown>; capture?: boolean } = {}): Promise<any> {
+    return platformCall(this.client, 'POST', `/api/telemetry/connections/${connectionId}/preview`, { payload: opts.payload, subject: opts.subject, mapping: opts.mapping, decoder: opts.decoder, decoder_config: opts.decoderConfig, capture: !!opts.capture });
+  }
+
+  suggestMapping(payload: unknown, opts: { subject?: string; decoder?: string } = {}): Promise<any> {
+    return platformCall(this.client, 'POST', '/api/telemetry/mapping/suggest', { payload, subject: opts.subject ?? '', decoder: opts.decoder ?? 'json' });
+  }
+
+  inspector(connectionId: string, limit = 100, errorsOnly = false): Promise<any[]> {
+    return platformCall<any[]>(this.client, 'GET', `/api/telemetry/connections/${connectionId}/inspector${telemetryQuery({ limit, errors_only: errorsOnly })}`).then((r) => r || []);
+  }
+
+  deadLetters(connectionId: string, limit = 100): Promise<any[]> {
+    return platformCall<any[]>(this.client, 'GET', `/api/telemetry/connections/${connectionId}/dlq${telemetryQuery({ limit })}`).then((r) => r || []);
+  }
+
+  replay(connectionId: string, ids: string[] = []): Promise<any> {
+    return platformCall(this.client, 'POST', `/api/telemetry/connections/${connectionId}/dlq/replay`, { ids });
+  }
+
+  signals(connectionId: string): Promise<any[]> {
+    return platformCall<any[]>(this.client, 'GET', `/api/telemetry/connections/${connectionId}/signals`).then((r) => r || []);
+  }
+
+  /** Why data is or is not showing: { state, message, fix, counters }. */
+  diagnose(opts: { connectionId?: string; group?: string; node?: string }): Promise<any> {
+    if (opts.connectionId) return platformCall(this.client, 'GET', `/api/telemetry/connections/${opts.connectionId}/diagnose`);
+    return platformCall(this.client, 'GET', `/api/telemetry/diagnose${telemetryQuery({ group: opts.group, node: opts.node })}`);
+  }
+
+  events(group: string, node: string, limit = 100): Promise<any[]> {
+    return platformCall<any[]>(this.client, 'GET', `/api/telemetry/events/${encodeURIComponent(group)}/${encodeURIComponent(node)}${telemetryQuery({ limit })}`).then((r) => r || []);
+  }
+
+  keys(connectionId: string): Promise<any[]> {
+    return platformCall<any[]>(this.client, 'GET', `/api/telemetry/connections/${connectionId}/keys`).then((r) => r || []);
+  }
+
+  /** The raw key is in "key", shown only this once. */
+  createKey(connectionId: string, deviceId: string, opts: { kind?: 'device' | 'gateway'; group?: string; allowedNodes?: string[]; label?: string } = {}): Promise<any> {
+    return platformCall(this.client, 'POST', `/api/telemetry/connections/${connectionId}/keys`, { device_id: deviceId, kind: opts.kind ?? 'device', group: opts.group, allowed_nodes: opts.allowedNodes, label: opts.label ?? '' });
+  }
+
+  createKeysCsv(connectionId: string, csv: string): Promise<any[]> {
+    return platformCall<any[]>(this.client, 'POST', `/api/telemetry/connections/${connectionId}/keys/bulk`, { csv }).then((r) => r || []);
+  }
+
+  revokeKey(connectionId: string, keyId: string): Promise<any> {
+    return platformCall(this.client, 'DELETE', `/api/telemetry/connections/${connectionId}/keys/${keyId}`);
+  }
+
+  rotateToken(connectionId: string): Promise<any> {
+    return platformCall(this.client, 'POST', `/api/telemetry/connections/${connectionId}/token`);
+  }
+
+  /** Forgets a device, or a whole asset when device is left out. History stays, it comes back if it reports. */
+  forgetDevice(group: string, node: string, device?: string, opts: { force?: boolean } = {}): Promise<any> {
+    const q = new URLSearchParams({ device: device || '' });
+    if (opts.force) q.set('force', 'true');
+    return platformCall(this.client, 'DELETE', `/api/telemetry/devices/${encodeURIComponent(group)}/${encodeURIComponent(node)}?${q}`);
+  }
+
+  /** Forgets devices offline for at least offlineForS. dryRun counts them first, loop while remaining > 0. */
+  forgetDevices(
+    offlineForS: number,
+    opts: { group?: string; nodeGlob?: string; connectionId?: string; dryRun?: boolean; limit?: number } = {},
+  ): Promise<any> {
+    const body: Record<string, unknown> = { offline_for_s: offlineForS, dry_run: !!opts.dryRun };
+    if (opts.group) body.group = opts.group;
+    if (opts.nodeGlob) body.node_glob = opts.nodeGlob;
+    if (opts.connectionId) body.connection_id = opts.connectionId;
+    if (opts.limit) body.limit = opts.limit;
+    return platformCall(this.client, 'POST', '/api/telemetry/devices/forget', body);
+  }
+
+  /** Ingest health: messages_per_second, latency p50/p99, seq_gaps, dropped, throttling, quota and connections. */
+  health(): Promise<any> {
+    return platformCall(this.client, 'GET', '/api/telemetry/health');
+  }
+
+  connections(): Promise<any[]> {
+    return platformCall<any[]>(this.client, 'GET', '/api/telemetry/connections').then((r) => r || []);
+  }
+
+  createConnection(body: { name: string; broker_url?: string; transport?: string; config?: Record<string, unknown>; secrets?: Record<string, unknown>; subjects?: string[]; decoder?: string; decoder_config?: Record<string, unknown>; mapping?: Record<string, unknown>; strict?: boolean; topics?: string[]; raw_topics?: string[]; username?: string; password?: string; enabled?: boolean; shared_subscription?: boolean; team_id?: string | null }): Promise<any> {
+    return platformCall(this.client, 'POST', '/api/telemetry/connections', body);
+  }
+
+  updateConnection(connectionId: string, fields: Record<string, unknown>): Promise<any> {
+    return platformCall(this.client, 'PATCH', `/api/telemetry/connections/${connectionId}`, fields);
+  }
+
+  deleteConnection(connectionId: string): Promise<any> {
+    return platformCall(this.client, 'DELETE', `/api/telemetry/connections/${connectionId}`);
+  }
+
+  /** Connect for up to 5 s: { ok, connected, messages, topics_seen, error }. */
+  testConnection(connectionId: string): Promise<any> {
+    return platformCall(this.client, 'POST', `/api/telemetry/connections/${connectionId}/test`);
+  }
+
+  /** Signal rules in view, each with summary in plain words, fire_count, last_fired_at, firing_now and last_firing. */
+  rules(q = ''): Promise<SignalRule[]> {
+    return platformCall<SignalRule[]>(this.client, 'GET', `/api/telemetry/rules${telemetryQuery({ q })}`).then((r) => r || []);
+  }
+
+  rule(ruleId: string): Promise<SignalRule> {
+    return platformCall<SignalRule>(this.client, 'GET', `/api/telemetry/rules/${ruleId}`);
+  }
+
+  /** Add a signal rule. Needs telemetry.manage, and telemetry.command for a command step. Field problems throw AbenixError 422 with details.fields. */
+  createRule(rule: SignalRuleInput): Promise<SignalRule> {
+    return platformCall<SignalRule>(this.client, 'POST', '/api/telemetry/rules', { actions: [], severity: 'warning', cooldown_s: 60, enabled: true, ...rule });
+  }
+
+  /** Change a rule. Pass only what changes, like { enabled: false }. */
+  updateRule(ruleId: string, fields: Partial<SignalRuleInput>): Promise<SignalRule> {
+    return platformCall<SignalRule>(this.client, 'PATCH', `/api/telemetry/rules/${ruleId}`, fields);
+  }
+
+  /** Delete a rule and its firing history. Its open alerts resolve. */
+  deleteRule(ruleId: string): Promise<{ deleted: boolean; name: string }> {
+    return platformCall(this.client, 'DELETE', `/api/telemetry/rules/${ruleId}`);
+  }
+
+  /** Run the rule's steps once now with the latest reading, as a test. Commands are skipped. */
+  testRule(ruleId: string): Promise<{ firing_id: string; queued: boolean }> {
+    return platformCall(this.client, 'POST', `/api/telemetry/rules/${ruleId}/test`);
+  }
+
+  /** Replay a rule, saved or not, over the last 1, 6 or 24 hours. */
+  previewRule(scope: Record<string, unknown>, condition: Record<string, unknown>, opts: { cooldownS?: number; hours?: 1 | 6 | 24 } = {}): Promise<any> {
+    return platformCall(this.client, 'POST', '/api/telemetry/rules/preview', { scope, condition, cooldown_s: opts.cooldownS ?? 60, hours: opts.hours ?? 1 });
+  }
+
+  /** What rule steps can pick: agents and pipelines, decision tables, people, teams and can_command. */
+  ruleOptions(): Promise<any> {
+    return platformCall(this.client, 'GET', '/api/telemetry/rules/options');
+  }
+
+  /** Signals streaming now with their latest values, for one asset (group, node) or kind type or tag. */
+  ruleSignals(opts: { group?: string; node?: string; device?: string; kind?: 'type' | 'tag'; type?: string; tag?: string } = {}): Promise<any[]> {
+    return platformCall<any[]>(this.client, 'GET', `/api/telemetry/rules/signals${telemetryQuery(opts)}`).then((r) => r || []);
+  }
+
+  /** Where this workspace's rules run: { default, override, chosen, effective, pool_replicas, help }. */
+  rulesMode(): Promise<any> {
+    return platformCall(this.client, 'GET', '/api/telemetry/rules/mode');
+  }
+
+  /** inprocess, pool, or null for the platform default. Admins only, 409 POOL_NOT_RUNNING without a pool. */
+  setRulesMode(mode: 'inprocess' | 'pool' | null): Promise<any> {
+    return platformCall(this.client, 'PUT', '/api/telemetry/rules/mode', { mode });
+  }
+
+  /** Assets from the streams and the registry. status is registered or unregistered, parts adds parts as rows. */
+  assets(opts: { q?: string; type?: string; tag?: string; group?: string; status?: 'registered' | 'unregistered'; parts?: boolean; limit?: number; offset?: number } = {}): Promise<TelemetryAsset[]> {
+    return platformCall<TelemetryAsset[]>(this.client, 'GET', `/api/telemetry/assets${telemetryQuery({ ...opts, parts: opts.parts ? 'true' : undefined, limit: opts.limit ?? 500 })}`).then((r) => r || []);
+  }
+
+  /** One asset, or one part with device. */
+  asset(group: string, node: string, device?: string): Promise<TelemetryAsset> {
+    return platformCall<TelemetryAsset>(this.client, 'GET', `/api/telemetry/assets/${encodeURIComponent(group)}/${encodeURIComponent(node)}${telemetryQuery({ device })}`);
+  }
+
+  /** Name an asset and set its type, tags, team, location and details. The whole entry is replaced. Needs telemetry.manage. */
+  updateAsset(group: string, node: string, device: string | undefined, entry: { display_name?: string | null; type?: string | null; tags?: string[]; team_id?: string | null; location?: Record<string, unknown> | null; fields?: Record<string, string> }): Promise<TelemetryAsset> {
+    const body = { display_name: null, type: null, tags: [], team_id: null, location: null, fields: {}, ...entry };
+    return platformCall<TelemetryAsset>(this.client, 'PUT', `/api/telemetry/assets/${encodeURIComponent(group)}/${encodeURIComponent(node)}${telemetryQuery({ device })}`, body);
+  }
+
+  /** Forget an asset's name and details. The stream keeps flowing and it shows as unregistered again. */
+  deleteAsset(group: string, node: string, device?: string): Promise<{ removed: boolean }> {
+    return platformCall(this.client, 'DELETE', `/api/telemetry/assets/${encodeURIComponent(group)}/${encodeURIComponent(node)}${telemetryQuery({ device })}`);
+  }
+
+  /** Name assets from a CSV with a header row. dryRun (the default) only checks, nothing is applied while any row has an error. */
+  importAssets(csv: string, dryRun = true): Promise<{ rows: any[]; summary: Record<string, number>; applied: boolean }> {
+    return platformCall(this.client, 'POST', '/api/telemetry/assets/import', { csv, dry_run: dryRun });
+  }
+
+  /** Counts for filters: { types: [{type, count}], tags: [{tag, count}], registered, unregistered }. */
+  assetFacets(parts = false): Promise<any> {
+    return platformCall(this.client, 'GET', `/api/telemetry/assets/facets${telemetryQuery({ parts: parts ? 'true' : undefined })}`);
+  }
+
+  /** Signal rule firings with each step's status, and its input and output unless outputs is false. With since they come oldest first. */
+  firings(ruleId?: string, since?: string, opts: { status?: 'firing' | 'cleared' | 'test'; limit?: number; outputs?: boolean } = {}): Promise<RuleFiring[]> {
+    const q = new URLSearchParams({ limit: String(opts.limit ?? 50) });
+    if (ruleId) q.set('rule_id', ruleId);
+    if (since) q.set('since', since);
+    if (opts.status) q.set('status', opts.status);
+    if (opts.outputs !== false) q.set('include', 'outputs');
+    return platformCall<RuleFiring[]>(this.client, 'GET', `/api/telemetry/rules/firings?${q.toString()}`).then((r) => r || []);
+  }
+
+  /** One firing with its context and each step's input, output, duration, status and run link. */
+  firing(firingId: string): Promise<RuleFiring> {
+    return platformCall<RuleFiring>(this.client, 'GET', `/api/telemetry/rules/firings/${firingId}`);
+  }
+
+  /** Assets by name, type, tag or group, with a few latest readings, as agents see them. */
+  findAssets(q = '', opts: { type?: string; tag?: string; group?: string; online?: boolean; signals?: string[]; limit?: number } = {}): Promise<any[]> {
+    const p = new URLSearchParams({ limit: String(opts.limit ?? 25) });
+    if (q) p.set('q', q);
+    if (opts.type) p.set('type', opts.type);
+    if (opts.tag) p.set('tag', opts.tag);
+    if (opts.group) p.set('group', opts.group);
+    if (opts.online !== undefined) p.set('online', opts.online ? 'yes' : 'no');
+    if (opts.signals?.length) p.set('headline_signals', opts.signals.join(','));
+    return platformCall<any[]>(this.client, 'GET', `/api/telemetry/loop/assets?${p.toString()}`).then((r) => r || []);
+  }
+
+  /** Live updates: device, metrics (at most 10 a second per device) and health each second. */
+  async *stream(opts: { group?: string; node?: string; device?: string; nodes?: string[]; signal?: AbortSignal } = {}): AsyncGenerator<{ event: string; data: any }> {
+    const query = telemetryQuery({ group: opts.group, node: opts.node, device: opts.device, nodes: opts.nodes?.join(',') });
+    const res = await this.client._fetch(`/api/telemetry/stream${query}`, {
+      method: 'GET',
+      headers: { Accept: 'text/event-stream' },
+      signal: opts.signal ?? new AbortController().signal,
+    });
+    if (!res.ok || !res.body) {
+      const json: any = await res.json().catch(() => ({}));
+      const err = json?.error ?? {};
+      throw new AbenixError(res.status, err.message ?? `HTTP ${res.status}`, err.error_code, err.details);
+    }
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    let event = 'message';
+    let data: string[] = [];
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      let nl: number;
+      while ((nl = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, nl).replace(/\r$/, '');
+        buf = buf.slice(nl + 1);
+        if (line === '') {
+          if (data.length) {
+            const raw = data.join('\n');
+            let parsed: any = raw;
+            try { parsed = JSON.parse(raw); } catch { /* keep the text */ }
+            yield { event, data: parsed };
+          }
+          event = 'message';
+          data = [];
+        } else if (line.startsWith(':')) {
+          continue;
+        } else if (line.startsWith('event:')) {
+          event = line.slice(6).trim();
+        } else if (line.startsWith('data:')) {
+          data.push(line.slice(5).replace(/^ /, ''));
+        }
+      }
+    }
+  }
+}
+
 /** Source Watch: watched pages and feeds, their snapshots and the changes found between them. */
 export class SourcesClient {
   constructor(private client: Abenix) {}
@@ -1589,6 +2047,101 @@ export class EventsClient {
     const q = new URLSearchParams({ limit: String(opts.limit ?? 20) });
     if (opts.status) q.set('status', opts.status);
     return platformCall(this.client, 'GET', `/api/webhooks/${subscriptionId}/deliveries?${q.toString()}`);
+  }
+
+  /** Every event type the stream can carry, with a description and a sample. */
+  types(): Promise<Array<{ type: string; description: string; sample?: unknown }>> {
+    return platformCall<Array<{ type: string; description: string; sample?: unknown }>>(this.client, 'GET', '/api/events/types').then((r) => r || []);
+  }
+
+  /**
+   * Platform events as they happen. types takes names or patterns such as
+   * ['telemetry.rule_fired', 'execution.*']. since resumes after an event id or
+   * replays from an ISO time. A dropped connection reconnects and resumes after
+   * the last event it gave you.
+   *
+   *   for await (const ev of forge.events.stream(['telemetry.rule_fired', 'execution.completed'])) { ... }
+   */
+  async *stream(
+    types?: string[] | string,
+    since?: string | number,
+    opts: { reconnect?: boolean; maxRetries?: number; signal?: AbortSignal } = {},
+  ): AsyncGenerator<PlatformEvent> {
+    const pats = Array.isArray(types) ? types.join(',') : (types ?? '');
+    let last: string | undefined = since !== undefined && since !== null ? String(since) : undefined;
+    let tries = 0;
+    const reconnect = opts.reconnect ?? true;
+    for (;;) {
+      if (opts.signal?.aborted) return;
+      const q = new URLSearchParams();
+      if (pats) q.set('types', pats);
+      const headers: Record<string, string> = { Accept: 'text/event-stream' };
+      if (last !== undefined) {
+        if (/^\d+$/.test(last)) headers['Last-Event-ID'] = last;
+        else q.set('since', last);
+      }
+      const qs = q.toString();
+      try {
+        const res = await this.client._fetch(`/api/events/stream${qs ? `?${qs}` : ''}`, {
+          method: 'GET',
+          headers,
+          signal: opts.signal ?? new AbortController().signal,
+        });
+        if (!res.ok || !res.body) {
+          const json: any = await res.json().catch(() => ({}));
+          const err = json?.error ?? {};
+          const e = new AbenixError(res.status, err.message ?? `HTTP ${res.status}`, err.error_code, err.details);
+          if ([401, 403, 422].includes(res.status) || !reconnect) throw e;
+          throw Object.assign(e, { retry: true });
+        }
+        tries = 0;
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buf = '';
+        let event = 'message';
+        let id: string | undefined;
+        let data: string[] = [];
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+          let nl: number;
+          while ((nl = buf.indexOf('\n')) >= 0) {
+            const line = buf.slice(0, nl).replace(/\r$/, '');
+            buf = buf.slice(nl + 1);
+            if (line === '') {
+              if (data.length && event !== 'gap') {
+                try {
+                  const doc = JSON.parse(data.join('\n'));
+                  if (id !== undefined) last = id;
+                  yield doc as PlatformEvent;
+                } catch { /* not an event */ }
+              }
+              event = 'message';
+              id = undefined;
+              data = [];
+            } else if (line.startsWith(':')) {
+              continue;
+            } else if (line.startsWith('id:')) {
+              id = line.slice(3).trim();
+            } else if (line.startsWith('event:')) {
+              event = line.slice(6).trim();
+            } else if (line.startsWith('data:')) {
+              data.push(line.slice(5).replace(/^ /, ''));
+            }
+          }
+        }
+      } catch (e: any) {
+        if (opts.signal?.aborted) return;
+        if (e instanceof AbenixError && !(e as any).retry) throw e;
+        if (!reconnect) throw e;
+      }
+      tries += 1;
+      if (opts.maxRetries !== undefined && tries > opts.maxRetries) {
+        throw new AbenixError(0, 'The event stream dropped and did not come back.');
+      }
+      await new Promise((r) => setTimeout(r, Math.min(30_000, 500 * 2 ** Math.min(tries, 6))));
+    }
   }
 
   /** True when the X-Abenix-Signature header matches the raw request body. */

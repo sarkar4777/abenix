@@ -73,6 +73,21 @@
       ports:
         - port: 4222
           protocol: TCP
+    # MQTT broker and TimescaleDB, installed as their own releases
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: mosquitto
+      ports:
+        - port: 1883
+          protocol: TCP
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: timescaledb
+      ports:
+        - port: 5432
+          protocol: TCP
     - to:
         - podSelector:
             matchLabels:
@@ -113,6 +128,12 @@
         - podSelector:
             matchLabels:
               app.kubernetes.io/component: cognify-worker
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: telemetry-ingest
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: telemetry-rules
 {{- end }}
 {{- if .Values.networkPolicy.enabled | default false }}
 {{- $release := .Release.Name }}
@@ -224,6 +245,72 @@ spec:
   policyTypes:
     - Egress
   egress:
+{{- include "abenix.np.platformEgress" . }}
+---
+# -- Telemetry ingest: the data stores, and MQTT brokers wherever a tenant runs them
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "abenix.fullname" . }}-telemetry-ingest
+  labels:
+    {{- include "abenix.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: telemetry-ingest
+      app.kubernetes.io/instance: {{ $release }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # health for probes and the KEDA metrics scaler
+    - ports:
+        - port: {{ .Values.telemetryIngest.port | default 8090 }}
+          protocol: TCP
+  egress:
+    - ports:
+        - port: 1883
+          protocol: TCP
+        - port: 8883
+          protocol: TCP
+    # offline machines raise alerts
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: alertmanager
+      ports:
+        - port: 9093
+          protocol: TCP
+{{- include "abenix.np.platformEgress" . }}
+---
+# -- Telemetry rules pool: the data stores, and Alertmanager for rule alerts
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "abenix.fullname" . }}-telemetry-rules
+  labels:
+    {{- include "abenix.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: telemetry-rules
+      app.kubernetes.io/instance: {{ $release }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # health for probes and the KEDA metrics scaler
+    - ports:
+        - port: {{ (.Values.telemetryRules | default dict).port | default 8091 }}
+          protocol: TCP
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: alertmanager
+      ports:
+        - port: 9093
+          protocol: TCP
 {{- include "abenix.np.platformEgress" . }}
 ---
 # -- Web: only the API

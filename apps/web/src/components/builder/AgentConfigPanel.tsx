@@ -27,6 +27,7 @@ import {
   SandboxedJobConfig,
   ConnectorCallConfig,
   ApprovalGateConfig,
+  DeviceCommandConfig,
 } from './tool-configs';
 
 export interface ToolConfig {
@@ -182,6 +183,7 @@ const SPECIALIZED_CONFIGS: Record<string, React.ComponentType<{ values: Record<s
   sandboxed_job: SandboxedJobConfig,
   connector_call: ConnectorCallConfig,
   approval_gate: ApprovalGateConfig,
+  device_command: DeviceCommandConfig,
 };
 
 function ToolConfigPanel({

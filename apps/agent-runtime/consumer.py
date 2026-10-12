@@ -1836,14 +1836,18 @@ async def main() -> None:
     stop = asyncio.Event()
 
     def _stop(*_a: Any) -> None:
-        logger.info("consumer: shutdown signal received")
+        logger.info("consumer: shutdown signal received, finishing runs in hand")
         stop.set()
 
+    loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
         try:
-            signal.signal(sig, _stop)
-        except Exception:
-            pass
+            loop.add_signal_handler(sig, _stop)
+        except (NotImplementedError, RuntimeError):
+            try:
+                signal.signal(sig, _stop)
+            except Exception:
+                pass
 
     max_concurrency = int(
         os.environ.get("AGENT_CONCURRENCY")
@@ -1857,30 +1861,98 @@ async def main() -> None:
     depth_task = asyncio.create_task(_report_queue_depth(backend, pool, stop))
 
     try:
-        async for qm in backend.stream(pool):
-            if stop.is_set():
-                break
-            data = qm.data if isinstance(qm.data, dict) else {}
-            await concurrency_gate.acquire()
-            concurrency_gate.release()
-            logger.info(
-                "consumer: picked task %s from agents.%s",
-                data.get("task_id", "?"),
-                pool,
-            )
-            t = asyncio.create_task(_handle_delivery(qm, concurrency_gate))
-            in_flight.add(t)
-            t.add_done_callback(in_flight.discard)
+        await run_loop(
+            backend.stream(pool),
+            stop,
+            concurrency_gate,
+            in_flight,
+            lambda qm: _handle_delivery(qm, concurrency_gate),
+            pool,
+        )
+        await drain(in_flight, DRAIN_SECONDS)
     except Exception as e:
         logger.exception("consumer: stream loop crashed: %s", e)
         raise
     finally:
+        if _tool_worker_task is not None:
+            _tool_worker_task.cancel()
         health_task.cancel()
         depth_task.cancel()
         try:
             await health_task
         except (asyncio.CancelledError, Exception):
             pass
+
+
+# a stopping pod finishes the runs it holds, sized to the pod's termination grace
+DRAIN_SECONDS = float(os.environ.get("RUNTIME_DRAIN_SECONDS", "270"))
+
+
+async def run_loop(
+    stream: Any,
+    stop: asyncio.Event,
+    gate: asyncio.Semaphore,
+    in_flight: set,
+    handle: Any,
+    pool: str = "default",
+) -> None:
+    """Takes work until stop is set. A message that arrives after stop goes back at once."""
+    it = stream.__aiter__()
+    stopped = asyncio.ensure_future(stop.wait())
+    try:
+        while not stop.is_set():
+            nxt = asyncio.ensure_future(it.__anext__())
+            done, _ = await asyncio.wait(
+                {nxt, stopped}, return_when=asyncio.FIRST_COMPLETED
+            )
+            if nxt not in done:
+                nxt.cancel()
+                break
+            try:
+                qm = nxt.result()
+            except StopAsyncIteration:
+                break
+            if stop.is_set():
+                await _give_back(qm)
+                break
+            data = qm.data if isinstance(qm.data, dict) else {}
+            await gate.acquire()
+            gate.release()
+            if stop.is_set():
+                await _give_back(qm)
+                break
+            logger.info(
+                "consumer: picked task %s from agents.%s",
+                data.get("task_id", "?"),
+                pool,
+            )
+            t = asyncio.create_task(handle(qm))
+            in_flight.add(t)
+            t.add_done_callback(in_flight.discard)
+    finally:
+        stopped.cancel()
+
+
+async def _give_back(qm: Any) -> None:
+    try:
+        await qm.nak()
+    except Exception as e:
+        logger.debug("consumer: could not hand back a message: %s", e)
+
+
+async def drain(in_flight: set, seconds: float) -> None:
+    """Waits for the runs in hand. Any still going at the deadline stay unacked for another pod."""
+    if not in_flight:
+        return
+    logger.info("consumer: draining %d run(s) for up to %.0fs", len(in_flight), seconds)
+    _, pending = await asyncio.wait(set(in_flight), timeout=seconds)
+    for t in pending:
+        t.cancel()
+    if pending:
+        logger.warning(
+            "consumer: %d run(s) did not finish in time and go back to the queue",
+            len(pending),
+        )
 
 
 async def _report_queue_depth(backend: Any, pool: str, stop: asyncio.Event) -> None:

@@ -166,6 +166,9 @@ app.add_middleware(
         "X-API-Key",
         "X-CIQ-Key",
         "X-Abenix-Subject",
+        "X-Device-Id",
+        "X-Abenix-Signature",
+        "Idempotency-Key",
         "If-Match",
         "If-None-Match",
     ],
@@ -237,6 +240,38 @@ async def _pool_timeout_handler(request: Request, exc: _PoolTimeout) -> JSONResp
             },
         },
         headers={"Retry-After": "2", **_cors_headers_for(request)},
+    )
+
+
+@app.exception_handler(Exception)
+async def _unhandled_exception_handler(
+    request: Request, exc: Exception
+) -> JSONResponse:
+    """A crash still answers in the envelope and with CORS, so the browser shows it, not a network error."""
+    import logging as _logging
+
+    import structlog as _structlog
+
+    ref = (
+        _structlog.contextvars.get_contextvars().get("request_id")
+        or request.headers.get("x-request-id")
+        or ""
+    )
+    _logging.getLogger("abenix.errors").exception(
+        "unhandled error on %s %s (ref %s)", request.method, request.url.path, ref
+    )
+    message = "Something went wrong on our side. Try again, and if it keeps happening tell your admin"
+    message += f" with reference {ref}." if ref else "."
+    headers = _cors_headers_for(request)
+    if ref:
+        headers["X-Request-ID"] = ref
+    return JSONResponse(
+        status_code=500,
+        content={
+            "data": None,
+            "error": {"message": message, "code": 500, "error_code": "INTERNAL_ERROR"},
+        },
+        headers=headers,
     )
 
 
@@ -413,6 +448,30 @@ from app.routers import sources as sources_router
 
 app.include_router(sources_router.router)
 
+from app.routers import telemetry as telemetry_router
+
+app.include_router(telemetry_router.router)
+
+from app.routers import telemetry_streams as telemetry_streams_router
+
+app.include_router(telemetry_streams_router.router)
+
+from app.routers import telemetry_assets as telemetry_assets_router
+from app.routers import telemetry_rules as telemetry_rules_router
+
+app.include_router(telemetry_assets_router.router)
+app.include_router(telemetry_rules_router.router)
+
+from app.routers import telemetry_testbed as telemetry_testbed_router
+
+app.include_router(telemetry_testbed_router.router)
+
+from app.routers import telemetry_loop as telemetry_loop_router
+from app.routers import events_stream as events_stream_router
+
+app.include_router(telemetry_loop_router.router)
+app.include_router(events_stream_router.router)
+
 from app.routers import autonomy as autonomy_router
 
 app.include_router(autonomy_router.router)
@@ -447,6 +506,18 @@ async def on_startup():
     from app.core import capabilities as _caps
 
     _caps.start_listener()
+
+    async def _warm_telemetry() -> None:
+        try:
+            from app.telemetry.brokers import warm_publishers
+
+            await warm_publishers()
+        except Exception:  # noqa: BLE001
+            pass
+
+    import asyncio as _asyncio
+
+    _asyncio.get_running_loop().create_task(_warm_telemetry())
 
     import sys
     from pathlib import Path
@@ -671,6 +742,11 @@ async def on_startup():
 
     dependency_health.start()
 
+    # runs what signal rules do, one consumer per API pod
+    from app.telemetry.rules import runner as _rule_runner
+
+    _rule_runner.start()
+
     try:
         import sys
         from pathlib import Path
@@ -696,6 +772,10 @@ async def on_shutdown():
     from app.core import dependency_health
 
     await dependency_health.stop()
+
+    from app.telemetry.rules import runner as _rule_runner
+
+    await _rule_runner.stop()
 
 
 @app.get("/api/health")

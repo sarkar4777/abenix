@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import time
 import uuid
 from typing import Any
@@ -23,6 +24,8 @@ from app.core.execution_state import _get_redis
 logger = logging.getLogger(__name__)
 
 TOOL_STREAM = "tools:queue"
+# safety cap, the consumer deletes jobs once acked
+TOOL_STREAM_MAXLEN = int(os.environ.get("TOOL_STREAM_MAXLEN", "5000"))
 RESULT_CHANNEL_PREFIX = "tools:result:"
 DEFAULT_TIMEOUT = 30.0
 
@@ -61,7 +64,7 @@ async def enqueue_and_wait(
     await pubsub.subscribe(result_ch)
 
     try:
-        await r.xadd(TOOL_STREAM, payload)
+        await r.xadd(TOOL_STREAM, payload, maxlen=TOOL_STREAM_MAXLEN, approximate=True)
     except Exception as e:
         await pubsub.unsubscribe(result_ch)
         await pubsub.close()

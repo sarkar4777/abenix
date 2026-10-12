@@ -181,7 +181,8 @@ Tenants can override the three `SANDBOXED_JOB_*` switches from
 | `SMTP_FROM` | `no-reply@abenix.dev` | |
 | `OIDC_INTERNAL_URL_MAP` | empty | Dev only, `public=internal` pairs so a localhost SSO issuer is reached by service name. Set by `devCatchers.enabled` |
 | `PUBLIC_API_BASE_URL` | `http://localhost:8000` | Where SSO providers send the browser back. Helm `publicApiUrl` |
-| `STALE_EXECUTION_MAX_MINUTES` | `10` | A run still `running` after this long is marked failed by the sweeper, which runs every 5 minutes. Runs with a live queue lease are skipped |
+| `STALE_EXECUTION_MAX_MINUTES` | `10` | A run still `running` after this long is marked failed by the sweeper, which runs every minute. Runs with a live queue lease are skipped |
+| `WORKER_GONE_SECONDS` | `300` | A run whose runtime pod's lease lapsed this long ago, with no pod taking it over, fails with `WORKER_STOPPED` |
 | `DRIFT_DETECTION_ENABLED` | `true` | Platform default for drift scoring. An agent's `model_config.drift_detection` and the tenant toggle win |
 | `DRIFT_SCAN_INTERVAL_SECONDS` | `300` | Floor 30 |
 | `DRIFT_SCAN_BATCH` | `500` | Executions scored per backlog pass |
@@ -256,6 +257,22 @@ Read by abenix-api unless noted. Details in [02-runtime/17-source-watch](../02-r
 
 Credentials for a source are stored as tool credentials under the keys `SOURCE_AUTH_1` to `SOURCE_AUTH_5`, not as environment variables.
 
+### Telemetry
+
+Read by the telemetry ingest (`python -m app.telemetry.ingest`, the API image) unless noted. Details in [08-howto/17-telemetry](../08-howto/17-telemetry.md).
+
+| Variable | Default | Notes |
+|---|---|---|
+| `TELEMETRY_INGEST_PORT` | `8090` | Health port. `/healthz` for the probes, `/scale` for KEDA |
+| `TELEMETRY_QUEUE_MAX` | `20000` | Messages waiting per broker connection. Past it new ones are dropped and counted in `dropped` |
+| `TELEMETRY_HISTORY_BUFFER` | `200000` | History rows held while TimescaleDB is slow or away |
+| `TELEMETRY_LOG_LEVEL` | `INFO` | Log level of the ingest process, separate from `LOG_LEVEL` |
+| `TSDB_URL` | built by the chart | History store. The ingest writes `telemetry_samples` there and the API reads it |
+| `MQTT_URL` | built by the chart | The in-cluster broker. `seed_telemetry` points the default Site broker at it |
+| `ALERTMANAGER_URL` | set by the chart | Offline machines raise `TelemetryDeviceOffline` there. Without it the alert goes straight to admins as a notification |
+
+Limits per workspace (connections, devices, messages a second, retention days), the history sample gap and the live views per person are platform settings, see [04-platform-settings](04-platform-settings.md#telemetry).
+
 ### Evaluation suites
 
 Read by abenix-api. Details in [02-runtime/18-evaluation-suites](../02-runtime/18-evaluation-suites.md).
@@ -328,6 +345,7 @@ Also read by the API in embedded mode, since it imports the same engine.
 | `RUNTIME_POOL` | `default` | Pool a consumer drains. Set per pool Deployment. Pools, their replica bounds and KEDA scaling come from `scaling.*` in the Helm values, not from variables. See [08-queue-scaling](../02-runtime/08-queue-scaling.md) |
 | `AGENT_CONCURRENCY` | `8` | Runs one consumer handles at once. Pool Deployments set it from `concurrency_per_replica`, default 3. `CONSUMER_MAX_CONCURRENCY` is the older name |
 | `HEALTH_PORT` | `8001` | Consumer health and `/metrics` port. `dev-local.sh` runs its consumer on `CONSUMER_HEALTH_PORT`, default 8020, clear of the app ports 8000 to 8008 |
+| `RUNTIME_DRAIN_SECONDS` | `270` | On SIGTERM a pool pod stops taking work and waits this long for its runs. The chart sets it to the pod's grace less 30 |
 | `CONSUMER_LEASE_SECONDS` | `25` | Length of a run's lease on its execution row. Renewed every third of that while the run lives. Floor 6 |
 | `CONSUMER_MAX_ATTEMPTS` | `3` | Pickups of one run before it is failed with `STALE_SWEEP` instead of rerun |
 | `CONSUMER_DB_POOL_SIZE` / `CONSUMER_DB_MAX_OVERFLOW` | `10` / `5` | Consumer database engine |

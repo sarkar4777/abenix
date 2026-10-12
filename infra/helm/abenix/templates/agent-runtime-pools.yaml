@@ -49,6 +49,8 @@ spec:
         prometheus.io/scrape: "true"
         prometheus.io/port: "8001"
     spec:
+      # a stopping pod finishes the runs it holds before it goes, scale-down included
+      terminationGracePeriodSeconds: {{ default 300 .termination_grace_seconds }}
       {{- if .nodeAffinity }}
       nodeSelector:
         abenix.io/node-pool: {{ .nodeAffinity }}
@@ -106,6 +108,8 @@ spec:
               value: {{ default "celery" $.Values.scaling.queueBackend | quote }}
             - name: AGENT_CONCURRENCY
               value: {{ default 3 .concurrency_per_replica | quote }}
+            - name: RUNTIME_DRAIN_SECONDS
+              value: {{ sub (default 300 .termination_grace_seconds) 30 | quote }}
             {{- if eq (default "celery" $.Values.scaling.queueBackend) "nats" }}
             - name: NATS_URL
               value: "nats://{{ $release }}-nats:4222"
@@ -250,13 +254,11 @@ spec:
         scaleDown:
           stabilizationWindowSeconds: 600
           selectPolicy: Min
+          # one pod at a time, a few minutes apart, so draining pods finish first
           policies:
-            - type: Percent
-              value: 50
-              periodSeconds: 60
             - type: Pods
               value: 1
-              periodSeconds: 60
+              periodSeconds: {{ default 300 $.Values.scaling.keda.scaleDownPeriodSeconds }}
         scaleUp:
           stabilizationWindowSeconds: 0
           selectPolicy: Max

@@ -35,6 +35,13 @@ const PAGES: { route: string; note?: string }[] = [
   { route: '/admin/risk#tools', note: 'risk-view-only' },
   { route: '/admin/risk#audit', note: 'risk-view-only' },
   { route: '/admin/permissions' },
+  { route: '/telemetry', note: 'tel-view-only' },
+  { route: '/telemetry?tab=messages', note: 'tel-view-only' },
+  { route: '/telemetry?tab=sources', note: 'tel-connections-view-only' },
+  { route: '/telemetry/rules', note: 'rules-view-only' },
+  { route: '/telemetry/rules?tab=history', note: 'rules-view-only' },
+  { route: '/telemetry/assets', note: 'assets-view-only' },
+  { route: '/edge', note: 'edge-view-only' },
 ];
 
 // controls a Member can never use on these pages, so they must not be offered
@@ -209,6 +216,14 @@ test('Ctrl+K finds decisions by name and plain words about approving, for an adm
     await expect(page.locator('[data-testid="command-palette-item"][data-href="/settings/team"]').first(), `${who.email}: who can approve leads to Team`).toBeVisible();
     await expect(page.locator('[data-testid="command-palette-item"][data-href="/approvals"]').first(), `${who.email}: and to Approvals`).toBeVisible();
     if (who === MEMBER) await expect(page.locator('[data-testid="command-palette-item"][data-href="/settings/team"]').first()).toContainText('Team (view only)');
+    await page.keyboard.press('Escape');
+    await palette(page, 'mqtt');
+    const mqtt = page.locator('[data-testid="command-palette-item"][data-href="/telemetry?tab=sources"]').first();
+    await expect(mqtt, `${who.email}: MQTT leads to the telemetry sources`).toBeVisible();
+    await expect(mqtt).toContainText(who === MEMBER ? 'Telemetry sources (view only)' : 'Telemetry sources (MQTT, Kafka, HTTP and more)');
+    await page.keyboard.press('Escape');
+    await palette(page, 'machines');
+    await expect(page.locator('[data-testid="command-palette-item"][data-href^="/telemetry"]').first(), `${who.email}: machines leads to Telemetry`).toBeVisible();
     await page.keyboard.press('Escape');
     await palette(page, 'zzqq nothing like this');
     await expect(page.getByTestId('command-palette-empty')).toContainText('Nothing found');

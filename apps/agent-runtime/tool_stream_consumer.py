@@ -37,6 +37,27 @@ async def _get_redis():
     return aioredis.from_url(url, decode_responses=True)
 
 
+async def _trim_done(r: Any) -> None:
+    """Drop jobs every consumer has already acked, left behind by older builds."""
+    try:
+        groups = await r.xinfo_groups(TOOL_STREAM)
+        if len(groups) != 1:
+            return
+        pending = await r.xpending(TOOL_STREAM, TOOL_CONSUMER_GROUP)
+        if pending.get("pending"):
+            floor = pending["min"]
+        else:
+            last = groups[0]["last-delivered-id"]
+            last = last.decode() if isinstance(last, bytes) else str(last)
+            ms, seq = last.split("-")
+            floor = f"{ms}-{int(seq) + 1}"
+        removed = await r.xtrim(TOOL_STREAM, minid=floor, approximate=False)
+        if removed:
+            logger.info("tool_consumer: trimmed %s finished jobs", removed)
+    except Exception as e:
+        logger.warning("tool_consumer: trim skipped: %s", e)
+
+
 async def _ensure_group(r) -> None:
     try:
         await r.xgroup_create(TOOL_STREAM, TOOL_CONSUMER_GROUP, id="$", mkstream=True)
@@ -118,6 +139,7 @@ async def consumer_loop() -> None:
         return
 
     await _ensure_group(r)
+    await _trim_done(r)
     logger.info(
         "tool_consumer: started group=%s consumer=%s",
         TOOL_CONSUMER_GROUP,
@@ -132,6 +154,8 @@ async def consumer_loop() -> None:
             finally:
                 try:
                     await r.xack(TOOL_STREAM, TOOL_CONSUMER_GROUP, msg_id)
+                    # one group reads this stream, so an acked job is done
+                    await r.xdel(TOOL_STREAM, msg_id)
                 except Exception:
                     pass
 

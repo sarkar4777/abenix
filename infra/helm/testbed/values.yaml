@@ -1,0 +1,66 @@
+# Every password comes from this Secret, which deploy.sh testbed creates once and keeps.
+credentialsSecret: testbed-credentials
+# Optional, created only when HTTP_PUSH_URL and HTTP_PUSH_TOKEN are given
+httpPushSecret: testbed-http-push
+
+# where the HTTP pusher reaches Abenix
+abenixApiUrl: http://abenix-api.abenix.svc.cluster.local:8000
+
+simImage:
+  repository: localhost:5000/abenix/testbed-sim
+  tag: latest
+  pullPolicy: IfNotPresent
+
+simResources:
+  requests: {cpu: 10m, memory: 48Mi}
+  limits: {cpu: 250m, memory: 160Mi}
+
+redpanda:
+  enabled: true
+  image: docker.redpanda.com/redpandadata/redpanda:v26.2.4
+  memory: 512M
+  resources:
+    requests: {cpu: 100m, memory: 640Mi}
+    limits: {cpu: "1", memory: 800Mi}
+
+rabbitmq:
+  enabled: true
+  image: rabbitmq:4.3-alpine
+  resources:
+    requests: {cpu: 50m, memory: 200Mi}
+    limits: {cpu: 500m, memory: 640Mi}
+
+nats:
+  enabled: true
+  image: nats:2.15-alpine
+  resources:
+    requests: {cpu: 20m, memory: 32Mi}
+    limits: {cpu: 300m, memory: 256Mi}
+
+opcplc:
+  enabled: true
+  image: mcr.microsoft.com/iotedge/opc-plc:2.15.10
+  resources:
+    requests: {cpu: 50m, memory: 128Mi}
+    limits: {cpu: 500m, memory: 384Mi}
+
+sims:
+  payments: {enabled: true, rate: "5"}
+  sensors: {enabled: true, rate: "2"}
+  logistics: {enabled: true, rate: "3"}
+  fleet: {enabled: true, vehicles: "20", period: "1"}
+  meter: {enabled: true}
+  prices: {enabled: true, rate: "10"}
+  pusher: {enabled: true, period: "2"}
+  # serves the ready-made connections to Abenix's Try the testbed, and the pusher's target
+  info: {enabled: true}
+
+# a one-off Kafka burst for throughput tests, run with deploy.sh testbed-load
+load:
+  enabled: false
+  runId: "0"
+  count: "100000"
+  rate: "5000"
+  topic: load.events
+  partitions: "6"
+  devices: "50"

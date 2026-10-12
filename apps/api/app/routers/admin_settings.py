@@ -216,13 +216,15 @@ async def list_settings(
             "is_default": not current.get("value")
             or current.get("value") == meta["value"],
             "is_secret": key in SECRET_KEYS,
-            # "model" (a model id, rendered as a picker) or "int" (a numeric
-            # limit, rendered as a number input with the bounds below).
+            # "model" (a model id, rendered as a picker), "int" (a numeric
+            # limit, with the bounds below) or "choice" (one of choices).
             "kind": meta.get("kind", "model"),
         }
         if meta.get("kind") == "int":
             item["min"] = meta.get("min")
             item["max"] = meta.get("max")
+        if meta.get("kind") == "choice":
+            item["choices"] = list(meta.get("choices") or [])
         if key in SECRET_KEYS:
             item["is_set"] = bool((current.get("value") or "").strip())
         out.setdefault(meta["category"], []).append(item)
@@ -291,6 +293,10 @@ async def update_setting(
             if isinstance(hi, int) and num > hi:
                 return error(f"'{key}' must be at most {hi}", 400)
             value = str(num)
+        elif meta_kind == "choice":
+            choices = DEFAULTS[key].get("choices") or []
+            if value not in choices:
+                return error(f"'{key}' must be one of {', '.join(choices)}", 400)
 
     if key == "llm.subscription.enabled" and value.lower() in {
         "1",

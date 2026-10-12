@@ -324,6 +324,42 @@ const full = await client.sources.change(recent[0].id);
 
 `create` takes one object with snake_case keys. Other methods: `list(q)`, `get`, `update(sourceId, fields)`, `delete`, `pause(sourceId, reason)`, `resume`, `sourceChanges(sourceId, limit)`, `snapshot(snapshotId, { full })`. The Python `snapshots`, `validate_url`, `preview` and `settings` have no TS version.
 
+### Telemetry
+
+Machines and streams, see [08-howto/17-telemetry](../08-howto/17-telemetry.md). Same names as the Python SDK.
+
+```ts
+const devices = await client.telemetry.devices({ group: 'groundwork', status: 'online' });
+const ex1 = await client.telemetry.node('groundwork', 'ipc-ex1');
+const history = await client.telemetry.history('groundwork', 'ipc-ex1', { device: 'engine', metric: 'Engine/Speed_rpm', from: '-15m', step: '10s' });
+const frames = await client.telemetry.frames('groundwork', 'ipc-ex1', 100);
+await client.telemetry.command('groundwork', 'ipc-ex1', 'safety', 'Safety/Hold', true, 'person inside the swing radius', { confirmTimeoutMs: 1000 });
+const health = await client.telemetry.health();
+
+for await (const { event, data } of client.telemetry.stream({ nodes: ['groundwork/ipc-ex1'] })) {
+  if (event === 'metrics') console.log(data.device, data.metrics);
+}
+```
+
+`command(..., { dryRun: true })` returns the exact message without sending it, `confirmTimeoutMs` waits for the device to report the value and sets `confirmed`. Errors are `AbenixError` with `code` `NODE_OFFLINE`, `NOT_WRITABLE`, `RATE_LIMITED` or `FORBIDDEN`.
+
+Sources: `connections()`, `createConnection`, `updateConnection`, `deleteConnection`, `testConnection`, `transports()`, `decoders()`, `preview(sourceId, { payload, subject, mapping, capture })`, `suggestMapping(payload, { subject })`, `inspector`, `deadLetters`, `replay(sourceId, ids)`, `signals`, `diagnose({ connectionId } or { group, node })`, `events(group, node)`, `rotateToken`, `keys`, `createKey(sourceId, deviceId, { kind })`, `createKeysCsv(sourceId, csv)` and `revokeKey`. `forgetDevice(group, node, device, { force })` and `forgetDevices(offlineForS, { group, nodeGlob, connectionId, dryRun, limit })` free places under the device limit and keep history. `ingest(sourceId, data, { token, subject })` pushes with the source token or a device key, not the API key.
+
+Signal rules and the asset registry:
+
+```ts
+const t = client.telemetry;
+await t.updateAsset('groundwork', 'ipc-ex1', undefined, { display_name: 'Excavator EX1', type: 'machine', tags: ['earthworks'] });
+const scope = { kind: 'asset', group: 'groundwork', node: 'ipc-ex1', device: 'hydraulics' };
+const condition = { kind: 'threshold', signal: 'Hydraulics/Pump1Pressure_bar', op: '>', value: 300, hysteresis: 20 };
+console.log((await t.previewRule(scope, condition, { hours: 1 })).summary);
+const rule = await t.createRule({ name: 'EX1 pump above 300 bar', scope, condition, actions: [{ kind: 'alert' }] });
+await t.testRule(rule.id);
+await t.deleteRule(rule.id);
+```
+
+Rules: `rules(q)`, `rule(id)`, `createRule(input)`, `updateRule(id, fields)`, `deleteRule`, `testRule`, `previewRule(scope, condition, { cooldownS, hours })`, `ruleOptions()`, `ruleSignals({ group, node, device, kind, type, tag })`, `rulesMode()`, `setRulesMode('inprocess' | 'pool' | null)`, `firings(ruleId, since)` and `firing(id)`. Assets: `assets({ q, type, tag, group, status, parts, limit, offset })`, `asset(group, node, device)`, `updateAsset(group, node, device, entry)` which replaces the whole entry, `deleteAsset`, `importAssets(csv, dryRun)` and `assetFacets()`.
+
 ### Events
 
 See [02-runtime/19-outbound-events](../02-runtime/19-outbound-events.md).

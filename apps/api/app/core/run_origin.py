@@ -24,6 +24,8 @@ KINDS: dict[str, str] = {
     "batch": "Batch",
     "meeting": "Meeting",
     "builder": "Builder test",
+    "telemetry_rule": "Signal rule",
+    "telemetry_rule_test": "Signal rule test",
 }
 
 # what a browser may claim for itself, anything else is decided server side

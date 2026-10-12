@@ -58,6 +58,24 @@ ALERTMANAGER = {
     "app.kubernetes.io/instance": "abenix",
 }
 TEMPO = {"app": "abenix-tempo"}
+TELEMETRY = {
+    "app.kubernetes.io/name": "telemetry-ingest",
+    "app.kubernetes.io/instance": "abenix",
+    "app.kubernetes.io/component": "telemetry-ingest",
+}
+RULES = {
+    "app.kubernetes.io/name": "telemetry-rules",
+    "app.kubernetes.io/instance": "abenix",
+    "app.kubernetes.io/component": "telemetry-rules",
+}
+MOSQUITTO = {
+    "app.kubernetes.io/name": "mosquitto",
+    "app.kubernetes.io/instance": "abenix-mosquitto",
+}
+TIMESCALE = {
+    "app.kubernetes.io/name": "timescaledb",
+    "app.kubernetes.io/instance": "abenix-timescaledb",
+}
 STANDALONE = {"app": "contractiq-api"}
 
 FLOWS = [
@@ -94,6 +112,18 @@ FLOWS = [
     (PROMETHEUS, NATS, 8222),
     (ALERTMANAGER, API, 8000),
     (STANDALONE, API, 8000),
+    (API, MOSQUITTO, 1883),
+    (API, TIMESCALE, 5432),
+    (TELEMETRY, POSTGRES, 5432),
+    (TELEMETRY, REDIS, 6379),
+    (TELEMETRY, MOSQUITTO, 1883),
+    (TELEMETRY, TIMESCALE, 5432),
+    (TELEMETRY, ALERTMANAGER, 9093),
+    (RULES, POSTGRES, 5432),
+    (RULES, REDIS, 6379),
+    (RULES, TIMESCALE, 5432),
+    (RULES, ALERTMANAGER, 9093),
+    (PROMETHEUS, RULES, 8091),
 ]
 
 BLOCKED = [

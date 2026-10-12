@@ -83,12 +83,15 @@ async def _resolve_agent_by_slug(
     if not slug:
         return None
     row = await db.execute(
-        select(Agent).where(
+        select(Agent)
+        .where(
             Agent.slug == slug,
             or_(Agent.tenant_id == tenant_id, Agent.agent_type == AgentType.OOB),
         )
+        .order_by((Agent.tenant_id == tenant_id).desc())
+        .limit(1)
     )
-    return row.scalar_one_or_none()
+    return row.scalars().first()
 
 
 def _serialize_message(m: Message) -> dict:

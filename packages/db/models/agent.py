@@ -39,6 +39,7 @@ class Agent(UUIDMixin, TenantMixin, TimestampMixin, Base):
     __table_args__ = (
         Index("ix_agents_tenant_created", "tenant_id", "created_at"),
         Index("ix_agents_status", "tenant_id", "status"),
+        Index("uq_agents_tenant_slug", "tenant_id", "slug", unique=True),
     )
 
     creator_id: Mapped[uuid.UUID] = mapped_column(

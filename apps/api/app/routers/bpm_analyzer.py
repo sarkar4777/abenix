@@ -1978,7 +1978,11 @@ async def _create_agent_from_spec(
     suffix = 0
     while True:
         existing = (
-            await db.execute(select(AgentModel).where(AgentModel.slug == slug))
+            await db.execute(
+                select(AgentModel.id)
+                .where(AgentModel.slug == slug, AgentModel.tenant_id == user.tenant_id)
+                .limit(1)
+            )
         ).scalar_one_or_none()
         if not existing:
             break

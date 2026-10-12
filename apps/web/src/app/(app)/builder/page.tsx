@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import dynamic from 'next/dynamic';
+import { buildFromTemplate, templateById } from '@/lib/telemetry/agentTemplates';
 import { usePageTitle } from '@/hooks/usePageTitle';
 import { fetchDefaultModel } from '@/lib/models';
 import { useIsMobile } from '@/hooks/useMediaQuery';
@@ -249,6 +250,9 @@ export default function BuilderPage() {
   const presetName = searchParams.get('name');
   const presetPrompt = searchParams.get('prompt');
   const presetPersonaScope = searchParams.get('persona_scope');
+  const presetTemplate = searchParams.get('template');
+  const presetAsset = searchParams.get('asset');
+  const presetAssetName = searchParams.get('asset_name');
   const isMobile = useIsMobile();
 
   const [agentId, setAgentId] = useState<string | null>(agentParam);
@@ -358,6 +362,30 @@ export default function BuilderPage() {
   // Load agent or init empty
   useEffect(() => {
     if (!agentParam) {
+      // a stream agent template from Telemetry, filled in and ready to save
+      const tpl = templateById(presetTemplate);
+      if (tpl) {
+        const forcedModel = _forcedModelFromLocalStorage();
+        const b = buildFromTemplate(tpl, presetAsset ? { key: presetAsset, name: presetAssetName || undefined } : undefined);
+        const presetConfig: AgentConfig = {
+          ...DEFAULT_CONFIG,
+          ...(forcedModel ? { model: forcedModel } : {}),
+          name: b.name,
+          description: b.description,
+          system_prompt: b.system_prompt,
+          temperature: 0.2,
+          max_iterations: 12,
+          example_prompts: b.example_prompts,
+          tool_config: Object.fromEntries(Object.entries(b.tool_config).map(([k, v]) => [k, normalizeToolConfig(v)])),
+        };
+        setConfig(presetConfig);
+        setSelectedTools(b.tools);
+        setNodes(buildInitialNodes(presetConfig, b.tools));
+        setEdges(buildInitialEdges(b.tools));
+        setDirty(true);
+        setLoading(false);
+        return;
+      }
       if (presetTool === 'ml_model' && presetModelName) {
         const presetConfig: AgentConfig = {
           ...DEFAULT_CONFIG,
@@ -529,7 +557,7 @@ export default function BuilderPage() {
       })
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [agentParam, presetTool, presetModelName, presetAssetId, presetAtlas, presetKb, presetName, presetPrompt, presetPersonaScope, setNodes, setEdges, buildInitialNodes, buildInitialEdges]);
+  }, [agentParam, presetTool, presetModelName, presetAssetId, presetAtlas, presetKb, presetName, presetPrompt, presetPersonaScope, presetTemplate, presetAsset, presetAssetName, setNodes, setEdges, buildInitialNodes, buildInitialEdges]);
 
   // Update agent config & reflect in nodes
   const updateConfig = useCallback(

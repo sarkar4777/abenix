@@ -10,6 +10,7 @@ logger = logging.getLogger(__name__)
 # Order matters — first match wins. Regexes are case-insensitive on the
 # exception's message + class name combined.
 _RULES: list[tuple[str, str]] = [
+    (r"worker running this stopped before it finished", "WORKER_STOPPED"),
     # Stale-sweeper messages — match FIRST because the message shape
     # ("stuck in RUNNING for >N minutes") would otherwise hit the
     # timeout rule below.

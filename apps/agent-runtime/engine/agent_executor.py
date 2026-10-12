@@ -2016,6 +2016,10 @@ def _ensure_tool_classes() -> None:
     from engine.tools.tsdb_query import TsdbQueryTool
     from engine.tools.windowed_state import WindowedStateTool
     from engine.tools.subscribed_feed import SubscribedFeedTool
+    from engine.tools.device_state import DeviceStateTool
+    from engine.tools.signal_history import SignalHistoryTool
+    from engine.tools.asset_search import AssetSearchTool
+    from engine.tools.device_command import DeviceCommandTool
 
     _TOOL_CLASSES.update(
         {
@@ -2181,6 +2185,10 @@ def _ensure_tool_classes() -> None:
             "tsdb_query": TsdbQueryTool,
             "windowed_state": WindowedStateTool,
             "subscribed_feed": SubscribedFeedTool,
+            "device_state": DeviceStateTool,
+            "signal_history": SignalHistoryTool,
+            "asset_search": AssetSearchTool,
+            "device_command": DeviceCommandTool,
         }
     )
     # Store context tool factories (need constructor args)

@@ -200,6 +200,39 @@ def _build_effective_system_prompt(
     return build_tool_config_prompt(base_prompt, tool_config)
 
 
+async def _free_slug(
+    db: AsyncSession, tenant_id: Any, base: str, exclude: Any = None
+) -> str:
+    """The base slug when this workspace has no other agent on it, else the base with a short suffix."""
+    base = (base or "agent")[:240]
+    slug = base
+    for _ in range(6):
+        q = select(Agent.id).where(Agent.tenant_id == tenant_id, Agent.slug == slug)
+        if exclude is not None:
+            q = q.where(Agent.id != exclude)
+        if (await db.execute(q.limit(1))).scalar_one_or_none() is None:
+            return slug
+        slug = f"{base}-{uuid.uuid4().hex[:6]}"
+    return slug
+
+
+async def _insert_agent(db: AsyncSession, agent: Any, tries: int = 3) -> None:
+    """Commits a new agent, picking another slug if a racing create took this one."""
+    from sqlalchemy.exc import IntegrityError
+
+    base = agent.slug
+    for attempt in range(tries):
+        db.add(agent)
+        try:
+            await db.commit()
+            return
+        except IntegrityError as exc:
+            await db.rollback()
+            if "uq_agents_tenant_slug" not in str(exc) or attempt == tries - 1:
+                raise
+            agent.slug = f"{base}-{uuid.uuid4().hex[:6]}"
+
+
 def _slugify(name: str) -> str:
     import re
 
@@ -676,15 +709,17 @@ async def get_agent_by_slug(
 ) -> JSONResponse:
     """Resolve an agent by slug. Returns 404 when not found or not visible."""
     result = await db.execute(
-        select(Agent).where(
+        select(Agent)
+        .where(
             Agent.slug == slug,
             or_(
                 Agent.tenant_id == user.tenant_id,
                 Agent.agent_type == AgentType.OOB,
             ),
         )
+        .order_by((Agent.tenant_id == user.tenant_id).desc())
     )
-    agent = result.scalar_one_or_none()
+    agent = result.scalars().first()
     if not agent:
         return error("Agent not found", 404)
     if agent.status == AgentStatus.ARCHIVED and agent.agent_type != AgentType.OOB:
@@ -1058,15 +1093,17 @@ async def self_check_agent(
         pass
     if agent is None:
         result = await db.execute(
-            select(Agent).where(
+            select(Agent)
+            .where(
                 Agent.slug == agent_id,
                 or_(
                     Agent.tenant_id == user.tenant_id,
                     Agent.agent_type == AgentType.OOB,
                 ),
             )
+            .order_by((Agent.tenant_id == user.tenant_id).desc())
         )
-        agent = result.scalar_one_or_none()
+        agent = result.scalars().first()
     if agent is None:
         return error("Agent not found", 404)
 
@@ -1124,13 +1161,7 @@ async def create_agent(
     # Honour an explicit slug if the caller asked for one, otherwise
     # auto-derive from name. Collisions still get a 6-char suffix so a
     # malicious / racing caller can't squat on someone else's slug.
-    slug = body.slug or _slugify(body.name)
-
-    existing = await db.execute(
-        select(Agent).where(Agent.slug == slug, Agent.tenant_id == user.tenant_id)
-    )
-    if existing.scalar_one_or_none():
-        slug = f"{slug}-{uuid.uuid4().hex[:6]}"
+    slug = await _free_slug(db, user.tenant_id, body.slug or _slugify(body.name))
 
     if body.icon_url and not is_safe_url(body.icon_url):
         return error("Invalid icon URL", 400)
@@ -1194,8 +1225,7 @@ async def create_agent(
     problem = _apply_scaling(agent, nested_cfg_dump, user)
     if problem:
         return error(problem, 400)
-    db.add(agent)
-    await db.commit()
+    await _insert_agent(db, agent)
     await db.refresh(agent)
 
     await log_action(
@@ -1268,8 +1298,13 @@ async def update_agent(
         changes.append(f"category: {agent.category} → {body.category}")
 
     if body.name is not None:
-        agent.name = sanitize_input(body.name)
-        agent.slug = _slugify(body.name)
+        renamed = sanitize_input(body.name)
+        if renamed != agent.name:
+            # a rename moves the slug only to a free one, an unchanged name keeps it
+            agent.slug = await _free_slug(
+                db, agent.tenant_id, _slugify(body.name), exclude=agent.id
+            )
+        agent.name = renamed
     if body.description is not None:
         agent.description = sanitize_input(body.description)
     if body.system_prompt is not None:
@@ -2047,15 +2082,17 @@ async def preview_validation(
         pass
     if agent is None:
         result = await db.execute(
-            select(Agent).where(
+            select(Agent)
+            .where(
                 Agent.slug == agent_id,
                 or_(
                     Agent.tenant_id == user.tenant_id,
                     Agent.agent_type == AgentType.OOB,
                 ),
             )
+            .order_by((Agent.tenant_id == user.tenant_id).desc())
         )
-        agent = result.scalar_one_or_none()
+        agent = result.scalars().first()
     if agent is None:
         return error("Agent not found", 404)
 

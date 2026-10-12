@@ -198,7 +198,7 @@ MCP tools annotated with `destructiveHint: true` require explicit approval. Read
 
 ### 26. Reconciliation sweepers in the API scheduler
 
-There is no Celery beat. Sweepers run on APScheduler in the API pod ([`apps/api/app/core/scheduler.py`](../../apps/api/app/core/scheduler.py)). The ones that change rows take a Postgres advisory lock, so one replica does the work. Every 5 minutes `sweep_stale_executions` fails runs still `running` after `STALE_EXECUTION_MAX_MINUTES` (default 10) with `STALE_SWEEP`, skipping runs waiting on an approval and runs whose queue lease is still live. `escalate_approvals` escalates overdue tiered approvals every 15 minutes. `reconcile_active_executions_gauge` re-syncs the active-executions gauge every 5. Together they cover a pod that died before writing a terminal status.
+There is no Celery beat. Sweepers run on APScheduler in the API pod ([`apps/api/app/core/scheduler.py`](../../apps/api/app/core/scheduler.py)). The ones that change rows take a Postgres advisory lock, so one replica does the work. Every minute `sweep_stale_executions` fails runs whose runtime pod stopped with `WORKER_STOPPED` and runs still `running` after `STALE_EXECUTION_MAX_MINUTES` (default 10) with `STALE_SWEEP`, skipping runs waiting on an approval and runs whose queue lease is still live. `escalate_approvals` escalates overdue tiered approvals every 15 minutes. `reconcile_active_executions_gauge` re-syncs the active-executions gauge every 5. Together they cover a pod that died before writing a terminal status.
 
 ---
 

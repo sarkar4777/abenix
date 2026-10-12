@@ -3,3 +3,8 @@ pyyaml==6.0.2
 paho-mqtt==2.1.0
 cryptography==50.0.1
 redis==5.0.7
+python-can==4.5.0
+cantools==40.2.1
+pymodbus==3.15.0
+pyserial==3.5
+asyncua==2.1.0

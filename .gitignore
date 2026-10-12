@@ -29,6 +29,7 @@ PLAN_*.md
 *_INTERNAL.md
 BUILDOUT_*.md
 logs/uat/
+logs/telemetry-loadtest/
 logs/build-*.log
 .local-logs/
 
@@ -259,3 +260,9 @@ e2e/sdk/**/shots/
 # scripts/ci-e2e-stack.sh logs and its copy of the web build
 logs/ci-e2e/
 claimsiq/.gradle/
+
+# telemetry spec screenshots, kept local
+e2e/uat_closed_loop/
+e2e/uat_edge_collect/
+e2e/uat_telemetry/
+e2e/uat_telemetry_rules/

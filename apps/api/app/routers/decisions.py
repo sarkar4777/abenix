@@ -1423,11 +1423,9 @@ async def _request_tier_change(
 async def _announce_approval(db: AsyncSession, user: User, approval_id: str) -> None:
     """Signers hear about it the way every other approval request reaches them."""
     try:
-        from app.routers.approvals import _notify_pending
+        from app.routers.approvals import notify_pending_later
 
-        approval = await db.get(Approval, uuid.UUID(approval_id))
-        if approval is not None:
-            await _notify_pending(db, approval, requester=user)
+        notify_pending_later(uuid.UUID(approval_id), user.id)
     except Exception as e:  # noqa: BLE001
         import logging
 
@@ -2761,11 +2759,9 @@ async def propose(
     if v.approval_id:
         # signers hear about it the way every other approval request reaches them
         try:
-            from app.routers.approvals import _notify_pending
+            from app.routers.approvals import notify_pending_later
 
-            approval = await db.get(Approval, v.approval_id)
-            if approval is not None:
-                await _notify_pending(db, approval, requester=user)
+            notify_pending_later(v.approval_id, user.id)
         except Exception as e:  # noqa: BLE001
             import logging
 
