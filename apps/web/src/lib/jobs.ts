@@ -141,4 +141,5 @@ export const JOB_SETTINGS: Record<string, { href: string; label: string }> = {
   ping_models: { href: '/admin/llm-settings', label: 'Model Selection' },
   link_audit_chain: { href: '/admin/audit', label: 'Audit log' },
   verify_audit_chain: { href: '/admin/audit', label: 'Audit log' },
+  alert_notification_retention: { href: '/admin/llm-settings', label: 'Platform settings, alert notification retention' },
 };

@@ -8,6 +8,7 @@ import { Zap } from 'lucide-react';
 import PageHeader from '@/components/layout/PageHeader';
 import NoAccess from '@/components/layout/NoAccess';
 import ViewOnlyBanner from '@/components/shared/ViewOnlyBanner';
+import LoadRetry from '@/components/shared/LoadRetry';
 import { usePageTitle } from '@/hooks/usePageTitle';
 import { apiFetch } from '@/lib/api-client';
 import { holds, useMyPermissions } from '@/lib/capabilities';
@@ -23,7 +24,7 @@ function fetcher(url: string) {
 function NewRule() {
   usePageTitle('New signal rule');
   const params = useSearchParams();
-  const { perms, loading } = useMyPermissions();
+  const { perms, loading, failed: permsFailed, retry: retryPerms } = useMyPermissions();
   const canView = holds(perms?.capabilities, 'telemetry.view');
   const canManage = holds(perms?.capabilities, 'telemetry.manage');
   const tpl = params.get('template');
@@ -43,6 +44,7 @@ function NewRule() {
   const list = useSWR(canView ? '/api/telemetry/rules' : null, fetcher, { revalidateOnFocus: false });
   const names = Array.isArray(list.data?.data) ? (list.data!.data as Rule[]).map((r) => r.name) : [];
 
+  if (permsFailed) return <div className="mx-auto max-w-7xl"><LoadRetry what="your permissions" onRetry={retryPerms} testId="perms-retry" /></div>;
   if (loading && !perms) return <div className="mx-auto max-w-7xl"><div className="h-40 animate-pulse rounded-xl bg-slate-800/40" /></div>;
   if (perms && !canView) {
     return (

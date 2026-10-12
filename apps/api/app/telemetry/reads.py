@@ -297,6 +297,20 @@ def _sum_counts(parts: list[dict[str, Any]]) -> dict[str, int]:
     return out
 
 
+def with_replayed(counts: dict[str, int], rp: dict[str, Any] | None) -> dict[str, int]:
+    """Counters after a replay: what it stored counts as stored, and leaves the dead-letter count."""
+    n = K.as_int((rp or {}).get("stored"))
+    if not n:
+        return counts
+    out = dict(counts)
+    out["stored"] = out.get("stored", 0) + n
+    out["replayed"] = n
+    for k in ("dlq", "decode_failed", "mapping_failed"):
+        if k in out:
+            out[k] = max(0, out[k] - n)
+    return out
+
+
 def _latest_reasons(parts: list[dict[str, Any]]) -> dict[str, Any]:
     out: dict[str, Any] = {}
     for p in parts:
@@ -318,10 +332,13 @@ async def connection_status(
     pipe = r.pipeline(transaction=False)
     for c in conns:
         pipe.hgetall(K.conn_status(c.id))
+        pipe.hgetall(K.conn_replayed(c.id))
     res = await pipe.execute() if conns else []
+    replayed = res[1::2]
+    res = res[0::2]
     now = int(time.time() * 1000)
     out: dict[str, dict[str, Any]] = {}
-    for c, h in zip(conns, res):
+    for c, h, rp in zip(conns, res, replayed):
         cid = str(c.id)
         if not c.enabled:
             out[cid] = {
@@ -385,7 +402,9 @@ async def connection_status(
             "last_message_at": max(lasts) if lasts else None,
             "dropped": sum(K.as_int(p.get("dropped")) for p in parts),
             "decode_errors": sum(K.as_int(p.get("decode_errors")) for p in parts),
-            "pipeline": _sum_counts([p.get("pipeline") or {} for p in parts]),
+            "pipeline": with_replayed(
+                _sum_counts([p.get("pipeline") or {} for p in parts]), rp
+            ),
             "last_reasons": _latest_reasons(
                 [p.get("last_reasons") or {} for p in parts]
             ),
@@ -594,4 +613,6 @@ def diagnose(
         return out(
             "dropping", why("dropped"), "Add ingest replicas or mark the source shared."
         )
-    return out("ok", f"{stored} messages stored.", None)
+    return out(
+        "ok", f"{stored} {'message' if stored == 1 else 'messages'} stored.", None
+    )

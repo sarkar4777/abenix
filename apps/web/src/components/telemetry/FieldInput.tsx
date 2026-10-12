@@ -2,7 +2,7 @@
 
 import { useRef, useState } from 'react';
 import { FileUp, X } from 'lucide-react';
-import { fieldHelp, fieldLabel, isFileLike, isSecret, type FieldDecl } from '@/lib/telemetry/sources';
+import { fieldHelp, fieldLabel, isFileLike, isSecret, LIST_HINT, type FieldDecl } from '@/lib/telemetry/sources';
 
 const BINARY = /\.(desc|pb|bin|der|p12|pfx)$/i;
 
@@ -140,7 +140,7 @@ export default function FieldInput({
       ) : field.kind !== 'bool' && (help || example || field.kind === 'list') ? (
         <p className="mt-1 text-xs text-slate-400" data-testid={`${id}-help`}>
           {help}
-          {field.kind === 'list' ? `${help ? ' ' : ''}One per line.` : ''}
+          {field.kind === 'list' ? `${help ? ' ' : ''}${LIST_HINT}` : ''}
           {example && !isFileLike(field) ? <> {help || field.kind === 'list' ? ' ' : ''}Example: <code className="break-all text-slate-300">{example}</code></> : null}
         </p>
       ) : field.kind === 'bool' && field.description && field.label ? (

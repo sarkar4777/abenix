@@ -153,7 +153,7 @@ test.describe.serial('platform gaps, exploratory', () => {
     await visit(page, '/tools');
     const toolsShot = await shot(page, '01-tools-catalogue');
     const toolsText = await mainText(page);
-    const mentionsKey = /api key|api_key|credential|requires .*key|not configured|needs key|optional key|key set/i.test(toolsText);
+    const mentionsKey = /api key|api_key|credential|requires .*key|not configured|needs key|needs a key|optional key|key optional|key set|settings ready/i.test(toolsText);
     expect.soft(mentionsKey, 'tools catalogue shows credential badges').toBeTruthy();
     const regCfg = await api(page, 'GET', '/api/tools');
     const regRows: any[] = Array.isArray(regCfg.json?.data) ? regCfg.json.data : regCfg.json?.data?.tools ?? [];
@@ -230,7 +230,7 @@ test.describe.serial('platform gaps, exploratory', () => {
     await page.locator('input[placeholder*="earch"]').first().fill('github').catch(() => {});
     await page.waitForTimeout(800);
     const palText = await mainText(page);
-    const warns = /api key|credential|not configured|requires|needs key|optional key|key set/i.test(palText);
+    const warns = /api key|credential|not configured|requires|needs key|needs a key|optional key|key optional|key set|settings ready/i.test(palText);
     expect.soft(warns, 'builder palette shows a credential badge on github_tool').toBeTruthy();
     note({
       area: 'agent builder', severity: warns ? 'note' : 'major',

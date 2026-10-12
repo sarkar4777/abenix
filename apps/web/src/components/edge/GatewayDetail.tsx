@@ -12,6 +12,7 @@ import {
   COLLECTOR_STATUS, bytes, count, duration, edgeCall, telemetryHref, timeAgo,
   type Gateway, type InstallOut,
 } from './model';
+import { pluralShown } from '@/lib/plural';
 
 function Row({ k, v }: { k: string; v: React.ReactNode }) {
   return (
@@ -120,11 +121,11 @@ export default function GatewayDetail({ id, onClose, onEdit, onChanged, canManag
                 <section aria-label="Buffer">
                   <h3 className="mb-1 text-sm font-medium text-white">Store and forward buffer</h3>
                   <p className="mb-2 text-[11px] text-slate-400">Readings wait on the gateway&apos;s disk until Abenix has them, oldest first, so a lost link loses nothing within the limits.</p>
-                  <Row k="Waiting to send" v={`${count(b.depth)} readings${b.oldest_age_s ? `, oldest ${duration(b.oldest_age_s)}` : ''}`} />
+                  <Row k="Waiting to send" v={`${pluralShown(b.depth, count(b.depth), 'reading')}${b.oldest_age_s ? `, oldest ${duration(b.oldest_age_s)}` : ''}`} />
                   <Row k="Disk used" v={`${bytes(b.bytes)} of ${bytes(b.max_bytes)}`} />
                   <div className="my-1 h-1.5 overflow-hidden rounded bg-slate-800" aria-hidden><div className={`h-full ${fillPct > 80 ? 'bg-amber-400' : 'bg-cyan-500'}`} style={{ width: `${fillPct}%` }} /></div>
                   <Row k="Kept for" v={duration(b.max_age_s)} />
-                  <Row k="Sent so far" v={`${count(b.sent)} readings`} />
+                  <Row k="Sent so far" v={`${pluralShown(b.sent, count(b.sent), 'reading')}`} />
                   {(b.dropped_age || b.dropped_size || b.rejected) ? (
                     <Row k="Lost" v={<span className="text-amber-200">{count(b.dropped_age)} too old, {count(b.dropped_size)} buffer full, {count(b.rejected)} refused</span>} />
                   ) : null}
@@ -147,7 +148,7 @@ export default function GatewayDetail({ id, onClose, onEdit, onChanged, canManag
                           </div>
                           <p className="font-mono text-[11px] text-slate-500">{[c.asset?.group, c.asset?.node, c.asset?.device].filter(Boolean).join(' / ')}</p>
                           {h?.error && <p className="mt-1 break-words text-rose-200">{h.error}</p>}
-                          {h && <p className="mt-1 text-[11px] text-slate-400">{count(h.readings)} readings, {h.readings_per_s ?? 0} a second, last {timeAgo(h.last_reading_at ?? null)}{h.bus_load_pct !== undefined ? `, bus load ${h.bus_load_pct}%` : ''}{h.last_poll_ms !== undefined ? `, poll ${h.last_poll_ms} ms` : ''}</p>}
+                          {h && <p className="mt-1 text-[11px] text-slate-400">{pluralShown(h.readings, count(h.readings), 'reading')}, {h.readings_per_s ?? 0} a second, last {timeAgo(h.last_reading_at ?? null)}{h.bus_load_pct !== undefined ? `, bus load ${h.bus_load_pct}%` : ''}{h.last_poll_ms !== undefined ? `, poll ${h.last_poll_ms} ms` : ''}</p>}
                         </li>
                       );
                     })}
@@ -162,7 +163,7 @@ export default function GatewayDetail({ id, onClose, onEdit, onChanged, canManag
                     {(g.assets || []).filter((a) => a.device).slice(0, 20).map((a) => (
                       <li key={`${a.group}/${a.node}/${a.device}`} className="flex flex-wrap items-center justify-between gap-2">
                         <Link href={telemetryHref(g, a)} className="font-mono text-cyan-300 hover:underline">{a.group} / {a.node} / {a.device}</Link>
-                        <span className="text-slate-500">{a.metric_count ?? 0} signals, {a.online ? 'live' : 'quiet'}</span>
+                        <span className="text-slate-500">{pluralShown(a.metric_count ?? 0, (a.metric_count ?? 0).toLocaleString('en-US'), 'signal')}, {a.online ? 'live' : 'quiet'}</span>
                       </li>
                     ))}
                   </ul>

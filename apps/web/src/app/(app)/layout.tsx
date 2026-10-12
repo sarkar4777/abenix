@@ -15,7 +15,7 @@ import { currentPath, signInUrl } from '@/lib/auth-redirect';
 import ModelSetupBanner from '@/components/layout/ModelSetupBanner';
 
 function AuthGuard({ children }: { children: React.ReactNode }) {
-  const { user, loading } = useAuth();
+  const { user, loading, reconnecting, retryNow } = useAuth();
   const router = useRouter();
   const [checked, setChecked] = useState(false);
 
@@ -34,7 +34,21 @@ function AuthGuard({ children }: { children: React.ReactNode }) {
       <div className="flex items-center justify-center h-screen bg-[#0B0F19]">
         <div className="flex flex-col items-center gap-4">
           <div className="w-10 h-10 border-2 border-cyan-500/30 border-t-cyan-500 rounded-full animate-spin" />
-          <p className="text-sm text-slate-500">Loading...</p>
+          {reconnecting ? (
+            <div role="status" className="text-center">
+              <p className="text-sm text-slate-300">Reconnecting…</p>
+              <p className="mt-1 text-xs text-slate-500">The server is busy. You are still signed in, we keep trying.</p>
+              <button
+                type="button"
+                onClick={retryNow}
+                className="mt-3 rounded-md border border-slate-700 px-3 py-1.5 text-xs text-slate-200 hover:border-cyan-500/60"
+              >
+                Retry now
+              </button>
+            </div>
+          ) : (
+            <p className="text-sm text-slate-500">Loading...</p>
+          )}
         </div>
       </div>
     );

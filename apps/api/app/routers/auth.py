@@ -9,7 +9,12 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import log_action
-from app.core.deps import get_current_user, get_db
+from app.core.deps import (
+    get_current_user,
+    get_current_user_priority,
+    get_db,
+    get_priority_db,
+)
 from app.core.responses import error, success
 from app.core import sessions
 from app.core.security import (
@@ -150,7 +155,7 @@ async def register(
 
 @router.post("/login")
 async def login(
-    body: LoginRequest, request: Request, db: AsyncSession = Depends(get_db)
+    body: LoginRequest, request: Request, db: AsyncSession = Depends(get_priority_db)
 ):
     result = await db.execute(select(User).where(User.email == body.email))
     user = result.scalar_one_or_none()
@@ -192,7 +197,9 @@ class TwoFactorLoginRequest(BaseModel):
 
 @router.post("/login/2fa")
 async def login_two_factor(
-    body: TwoFactorLoginRequest, request: Request, db: AsyncSession = Depends(get_db)
+    body: TwoFactorLoginRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_priority_db),
 ):
     from app.core import two_factor
 
@@ -484,7 +491,7 @@ async def _rt_denylist_threshold(user_id: uuid.UUID) -> int:
 
 
 @router.post("/refresh")
-async def refresh(body: RefreshRequest, db: AsyncSession = Depends(get_db)):
+async def refresh(body: RefreshRequest, db: AsyncSession = Depends(get_priority_db)):
     payload = verify_token(body.refresh_token)
     sub = payload.get("sub")
     if not sub or payload.get("type") != "refresh":
@@ -560,5 +567,5 @@ async def logout(
 
 
 @router.get("/me")
-async def me(user: User = Depends(get_current_user)):
+async def me(user: User = Depends(get_current_user_priority)):
     return success({"user": _user_dict(user)})

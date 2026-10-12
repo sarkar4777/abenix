@@ -171,8 +171,13 @@ Prometheus rule  ->  Alertmanager (chart)  ->  POST /api/admin/alerts/webhook  -
 1. Prometheus evaluates the rules and sends firing and resolved alerts to `abenix-alertmanager.abenix.svc.cluster.local:9093`.
 2. Alertmanager groups by `alertname` and `severity`, waits 30s, repeats at most every 4h (`alerting.repeatInterval`) and resolves after 5m without data (`alerting.resolveTimeout`).
 3. Every group goes to the `abenix-api` receiver, a webhook at `http://<release>-api:8000/api/admin/alerts/webhook` with `Authorization: Bearer <token>`. The token is `ALERT_WEBHOOK_TOKEN` in `abenix-secrets`, generated once per install and kept across upgrades.
-4. The API validates the token, dedupes by alert fingerprint for `alerting.dedupeMinutes`, then writes one `system_alert` notification per active admin and posts once per distinct Slack webhook (per-tenant hook or `ABENIX_SLACK_WEBHOOK_URL`). Resolved alerts arrive the same way with a `[RESOLVED]` title.
-5. When `alerting.slackWebhookUrl` is set, Alertmanager also posts the raw alert to that hook through a second receiver.
+4. The API validates the token and answers at once with `{received, queued, skipped, dropped}`. Device-offline alerts from telemetry are folded into one per source. Each alert, or group, is claimed in Redis with `SET NX EX` for `alerting.dedupeMinutes`, so a repeat inside the window is skipped without touching the database. One call handles at most `ALERT_WEBHOOK_MAX_ALERTS` (200) after grouping.
+5. A single background worker per API process delivers each batch in one short transaction on its own small pool with a statement timeout. It writes one `system_alert` notification per admin, only the workspace's admins when the alert carries a `tenant_id`, and posts once per distinct Slack webhook (per-tenant hook or `ABENIX_SLACK_WEBHOOK_URL`). Resolved alerts arrive the same way with a `[RESOLVED]` title.
+6. When `alerting.slackWebhookUrl` is set, Alertmanager also posts the raw alert to that hook through a second receiver.
+
+The `alert_notification_retention` job deletes `system_alert` notifications older than `notifications.system_alert_retention_days` (14) and keeps at most `notifications.system_alert_max_per_user` (500) per person. It runs a minute after start and then hourly, 5,000 rows per delete. Sign-in, token refresh, `/api/auth/me` and readiness use their own small pool, so an alert storm cannot lock people out.
+
+The page filters on the server: `GET /api/admin/alerts?q=&alertname=&status=&label=key:value&rule_id=`. `alertname` and `status` take a comma list, `label` repeats. `counts` and `total` stay over every alert, `matched` is what the filters kept. A firing alert has no `ends_at`.
 
 The `/alerts` page reads current alerts from Alertmanager `/api/v2/alerts` (so it can show silenced and inhibited ones) and falls back to the Prometheus `/api/v1/alerts` proxy when Alertmanager is unreachable. The badge next to the heading says which backend answered.
 

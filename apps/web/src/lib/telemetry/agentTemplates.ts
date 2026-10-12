@@ -1,6 +1,7 @@
 // Starting points for agents that read streams and act on assets, used from Telemetry and the builder
 
 import { blankPolicy, type CommandPolicy } from './commandPolicy';
+import { agentAssetLabel } from './assetLabel';
 
 export type TemplateId = 'machine-health-watcher' | 'fleet-dispatcher' | 'anomaly-triage' | 'shift-reporter';
 
@@ -142,7 +143,7 @@ export function buildFromTemplate(t: AgentTemplate, asset?: TemplateAsset, signa
       require_approval: false,
     };
   }
-  const label = asset ? ` for ${asset.name || asset.key}` : '';
+  const label = asset ? ` for ${agentAssetLabel(asset.key, asset.name)}` : '';
   return {
     name: `${t.name}${label}`.slice(0, 100),
     description: t.description(asset),
@@ -161,4 +162,13 @@ export function templateHref(id: TemplateId, asset?: TemplateAsset): string {
     if (asset.name) q.set('asset_name', asset.name);
   }
   return `/builder?${q.toString()}`;
+}
+
+// what the agent hands back, as words a person reads, not the JSON shape
+export function answerWords(output: string): string {
+  const keys = Array.from(output.matchAll(/"([a-z_]+)"\s*:/gi)).map((m) => m[1].replace(/_/g, ' '));
+  const top = Array.from(new Set(keys)).slice(0, 5);
+  if (!top.length) return 'Its answer is passed on, so later rule steps can use it.';
+  const list = top.length > 1 ? `${top.slice(0, -1).join(', ')} and ${top[top.length - 1]}` : top[0];
+  return `It answers with ${list}, so later rule steps can use them.`;
 }

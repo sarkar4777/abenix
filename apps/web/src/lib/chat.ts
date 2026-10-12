@@ -21,6 +21,22 @@ export interface ToolAutonomyData {
   autonomy: AutonomyMeta;
 }
 
+// a tool that is waiting, for now only a machine command on its approval
+export interface ToolStatusData {
+  name: string;
+  status: string;
+  approval_id?: string | null;
+  message?: string | null;
+}
+
+// a refused machine command reads as denied with its reason, not as a failure
+export function deniedReason(tr: ToolResultData): string | null {
+  const md = (tr.metadata || {}) as Record<string, unknown>;
+  if (md.status === 'denied') return typeof md.reason === 'string' ? md.reason : '';
+  const m = /\b(?:was not approved|was denied|denied by [^.:]+)[.:]?\s*(?:reason:\s*)?(.*)$/i.exec(tr.result || '');
+  return m ? (m[1] || '').trim().replace(/^["“]|["”]$/g, '') : null;
+}
+
 export interface DoneData {
   execution_id?: string;
   total_tokens: number;
@@ -84,6 +100,7 @@ interface StreamCallbacks {
   onToolCall: (data: ToolCallData) => void;
   onToolResult: (data: ToolResultData) => void;
   onToolAutonomy?: (data: ToolAutonomyData) => void;
+  onToolStatus?: (data: ToolStatusData) => void;
   onDone: (data: DoneData) => void;
   onError: (message: string) => void;
   onNodeStart?: (data: PipelineNodeStartData) => void;
@@ -164,6 +181,9 @@ export function connectToAgentStream(
               case 'tool_autonomy':
                 if (data && data.autonomy) callbacks.onToolAutonomy?.(data as ToolAutonomyData);
                 break;
+              case 'tool_status':
+                if (data && data.name) callbacks.onToolStatus?.(data as ToolStatusData);
+                break;
               case 'done':
                 finished = true;
                 callbacks.onDone(data as DoneData);
@@ -200,4 +220,18 @@ export function connectToAgentStream(
   })();
 
   return controller;
+}
+
+// marks the open call of this tool as waiting, the result clears it
+export function withToolStatus<B extends { type: string }>(blocks: B[], ts: ToolStatusData): B[] {
+  const out = [...blocks];
+  for (let i = out.length - 1; i >= 0; i--) {
+    const b = out[i] as B & { name?: string; result?: string };
+    if (b.type === 'tool' && b.name === ts.name && b.result === undefined) {
+      const waiting = ts.status === 'waiting_approval' ? { approvalId: ts.approval_id ?? null, message: ts.message ?? null } : null;
+      out[i] = { ...b, waiting } as B;
+      break;
+    }
+  }
+  return out;
 }

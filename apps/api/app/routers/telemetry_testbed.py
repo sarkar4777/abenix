@@ -212,12 +212,45 @@ async def _testbed_rows(db: AsyncSession, user: User) -> list[dict[str, Any]]:
     return [{k: r.get(k) for k in keep} for r in rows]
 
 
+def with_details(
+    services: list[dict[str, Any]], sources: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Each service with the settings and sign-in of its first testbed source, for an admin to copy."""
+    first: dict[str, dict[str, Any]] = {}
+    for src in sources:
+        first.setdefault(str(src.get("transport") or ""), src)
+    out = []
+    for svc in services:
+        src = first.get(svc["transport"]) or {}
+        row = {
+            **svc,
+            "config": dict(src.get("config") or {}),
+            "secrets": dict(src.get("secrets") or {}),
+        }
+        for k in ("subjects", "decoder"):
+            if src.get(k) is not None:
+                row[k] = src[k]
+        out.append(row)
+    return out
+
+
+def _is_admin(user: User) -> bool:
+    role = getattr(getattr(user, "role", None), "value", getattr(user, "role", None))
+    return bool(getattr(user, "is_admin", False) or role == "admin")
+
+
 @router.get("")
 async def testbed_status(
     user: User = Depends(require_capability("telemetry.view")),
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
     services = await probe()
+    if _is_admin(user) and any(s["reachable"] for s in services):
+        # testbed sign-ins only, never a real source's
+        try:
+            services = with_details(services, await fetch_sources())
+        except Exception:  # noqa: BLE001
+            pass
     return success(
         {
             "installed": any(s["reachable"] for s in services),

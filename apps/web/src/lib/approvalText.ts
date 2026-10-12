@@ -200,3 +200,43 @@ export function approvalEffect(row: { gate_kind?: string | null; payload?: Recor
   }
   return null;
 }
+
+export interface Approver { id: string; name: string; is_requester?: boolean }
+
+// who can approve a machine command, and what the person who asked may do
+export function commandApprovers(
+  row: ApprovalLike & { approvers?: Approver[] | null; approvers_total?: number | null; can_self_approve?: boolean | null },
+  meId?: string | null,
+): { who: string | null; mine: string | null } {
+  const list = row.approvers || [];
+  const me = meId ? String(meId) : '';
+  const isRequester = !!me && !!row.requested_by && String(row.requested_by) === me;
+  // admins are always eligible, so an empty list means the lookup failed
+  if (!list.length && (row.can_self_approve === null || row.can_self_approve === undefined)) {
+    return {
+      who: "Couldn't load who can approve. Anyone with Send machine commands, or an admin, can.",
+      mine: isRequester ? 'You asked for this.' : null,
+    };
+  }
+  const meListed = !!me && list.some((a) => String(a.id) === me);
+  const meIn = !!me && (meListed || (isRequester && row.can_self_approve !== false));
+  const others = list.filter((a) => String(a.id) !== me);
+  const total = Math.max(row.approvers_total ?? list.length, list.length);
+  const othersTotal = total - (meListed ? 1 : 0);
+  const shown = others.slice(0, 2).map((a) => `${a.name || 'someone'}${a.is_requester ? ' (asked)' : ''}`);
+  const extra = othersTotal - shown.length;
+  let who: string | null = null;
+  const names = shown.join(', ') + (extra > 0 ? ` (+${extra})` : '');
+  if (meIn && names) who = `Who can approve: you and ${names}`;
+  else if (meIn) who = 'Who can approve: only you';
+  else if (names) who = `Who can approve: ${names}`;
+  let mine: string | null = null;
+  if (isRequester) {
+    mine = row.can_self_approve === false
+      ? 'You asked for this. Workspace rules ask for someone other than the requester, so one of the people listed has to approve it.'
+      : othersTotal > 0
+        ? 'You asked for this. You can approve it, or anyone listed can.'
+        : 'You asked for this. You can approve it.';
+  }
+  return { who, mine };
+}

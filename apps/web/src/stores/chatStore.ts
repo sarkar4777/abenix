@@ -6,6 +6,9 @@ import {
   type ToolCallData,
   type ToolResultData,
   type ToolAutonomyData,
+  type ToolStatusData,
+  deniedReason,
+  withToolStatus,
   type PipelineNodeStartData,
   type PipelineNodeCompleteData,
   type ModerationData,
@@ -25,6 +28,8 @@ export interface ToolBlock {
   result?: string;
   isError?: boolean;
   autonomy?: AutonomyMeta | null;
+  waiting?: { approvalId?: string | null; message?: string | null } | null;
+  denied?: string | null;
 }
 
 export interface PipelineNodeBlock {
@@ -216,7 +221,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
             const b = blocks[i];
             if (b.type === 'tool' && b.name === tr.name && b.result === undefined) {
               b.result = tr.result;
-              b.isError = Boolean(tr.is_error);
+              b.denied = deniedReason(tr);
+              b.isError = Boolean(tr.is_error) && b.denied === null;
+              b.waiting = null;
               b.autonomy = autonomyMetaOf(tr) ?? b.autonomy;
               break;
             }
@@ -234,6 +241,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
             }
           }
           set({ streamingBlocks: blocks });
+        },
+
+        onToolStatus: (ts: ToolStatusData) => {
+          set({ streamingBlocks: withToolStatus(get().streamingBlocks, ts) });
         },
 
         onNodeStart: (data: PipelineNodeStartData) => {

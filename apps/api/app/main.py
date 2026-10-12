@@ -243,6 +243,33 @@ async def _pool_timeout_handler(request: Request, exc: _PoolTimeout) -> JSONResp
     )
 
 
+from sqlalchemy.exc import OperationalError as _DbOperational  # noqa: E402
+
+
+@app.exception_handler(_DbOperational)
+async def _db_unavailable_handler(
+    request: Request, exc: _DbOperational
+) -> JSONResponse:
+    # a lost connection or a statement timeout passes, a retry soon usually works
+    import logging as _logging
+
+    _logging.getLogger("abenix.errors").warning(
+        "database unavailable on %s %s: %s", request.method, request.url.path, exc
+    )
+    return JSONResponse(
+        status_code=503,
+        content={
+            "data": None,
+            "error": {
+                "message": "The database did not answer in time, retry shortly.",
+                "code": 503,
+                "error_code": "SERVICE_UNAVAILABLE",
+            },
+        },
+        headers={"Retry-After": "2", **_cors_headers_for(request)},
+    )
+
+
 @app.exception_handler(Exception)
 async def _unhandled_exception_handler(
     request: Request, exc: Exception
@@ -785,7 +812,7 @@ async def health_check() -> dict[str, str]:
 
 @app.get("/api/health/ready")
 async def readiness_check() -> dict[str, Any]:
-    from app.core.deps import engine as db_engine
+    from app.core.deps import priority_engine as db_engine
 
     checks: dict[str, str] = {}
 

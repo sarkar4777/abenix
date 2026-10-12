@@ -1070,9 +1070,10 @@ async def forget_device(
     if doc.get("online") and not force:
         return error(
             f"{device or node} is online and still sending, so it would come straight back. "
-            "Forget it anyway with force, or stop its source first.",
+            "Forget it anyway, or turn off its source first.",
             409,
             error_code="DEVICE_ONLINE",
+            details={"online": True},
         )
     done = await lifecycle.forget(r, user.tenant_id, [(group, node, device)])
     await log_action(

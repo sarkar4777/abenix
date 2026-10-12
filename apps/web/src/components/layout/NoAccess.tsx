@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { ArrowRight, Lock, Users, type LucideIcon } from 'lucide-react';
 import PageHeader from '@/components/layout/PageHeader';
 import { holds, useMyPermissions, type MyPermissions } from '@/lib/capabilities';
+import LoadRetry from '@/components/shared/LoadRetry';
 import { roleLabel } from '@/lib/monitor-format';
 
 // admin role, a ROLE_FEATURES flag (admin by default), or a named capability
@@ -97,7 +98,10 @@ export default function NoAccess({ title, purpose, icon, need, role, instead = D
 
 // Renders the page only for people who can use it, NoAccess for everyone else.
 export function AccessGate({ children, ...props }: Omit<NoAccessProps, 'role'> & { children: ReactNode }) {
-  const { perms, loading } = useMyPermissions();
+  const { perms, loading, failed, retry } = useMyPermissions();
+  if (failed) {
+    return <div className="mx-auto max-w-3xl"><LoadRetry what="your permissions" onRetry={retry} testId="perms-retry" /></div>;
+  }
   if (loading && !perms) {
     return (
       <div className="mx-auto max-w-3xl" aria-busy="true">

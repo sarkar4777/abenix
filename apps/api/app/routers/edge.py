@@ -263,7 +263,7 @@ async def runtime_download() -> JSONResponse:
         {
             "name": "python",
             "label": "Python (reference)",
-            "image": "agentforge/edge-runtime:1.1.0",
+            "image": EC.image(),
             "size_mb": 80,
             "helm_chart": "infra/helm/edge-runtime",
             "helm_install": (
@@ -275,8 +275,7 @@ async def runtime_download() -> JSONResponse:
             ),
             "docker_run": (
                 "docker run -d --name abenix-edge "
-                "-e PLATFORM_URL=... -e PLATFORM_TOKEN=... "
-                "agentforge/edge-runtime:1.1.0"
+                "-e PLATFORM_URL=... -e PLATFORM_TOKEN=... " + EC.image()
             ),
             "targets": ["x86_64-linux", "arm64-linux"],
             "deps": ["python3.12+"],
@@ -285,7 +284,7 @@ async def runtime_download() -> JSONResponse:
         {
             "name": "rust",
             "label": "Rust (single static binary)",
-            "image": "agentforge/edge-runtime-rust:1.1.0",
+            "image": EC.image("edge-runtime-rust"),
             "size_mb": 25,
             "helm_chart": "infra/helm/edge-runtime-rust",
             "helm_install": (
@@ -298,7 +297,7 @@ async def runtime_download() -> JSONResponse:
             "docker_run": (
                 "docker run -d --name abenix-edge-rust "
                 "-e PLATFORM_URL=... -e PLATFORM_TOKEN=... "
-                "agentforge/edge-runtime-rust:1.1.0"
+                + EC.image("edge-runtime-rust")
             ),
             "targets": ["x86_64-linux", "arm64-linux", "armv7-linux"],
             "deps": [],
@@ -310,7 +309,7 @@ async def runtime_download() -> JSONResponse:
         {
             "name": "c",
             "label": "C (musl static)",
-            "image": "agentforge/edge-runtime-c:1.1.0",
+            "image": EC.image("edge-runtime-c"),
             "size_mb": 12,
             "helm_chart": "infra/helm/edge-runtime-c",
             "helm_install": (
@@ -323,7 +322,7 @@ async def runtime_download() -> JSONResponse:
             "docker_run": (
                 "docker run -d --name abenix-edge-c "
                 "-e PLATFORM_URL=... -e PLATFORM_TOKEN=... "
-                "agentforge/edge-runtime-c:1.1.0"
+                + EC.image("edge-runtime-c")
             ),
             "targets": ["armv7-linux", "arm64-linux", "x86_64-linux"],
             "deps": [
@@ -1024,7 +1023,7 @@ async def install_command(
     if not await _can_manage(db, user):
         return error(MANAGE_REFUSAL, 403, error_code="FORBIDDEN")
     g = await _gateway_or_404(db, user, gateway_pk)
-    urls = EC.platform_urls()
+    urls = await _platform_urls(request)
     url = str(body.get("platform_url") or (urls[0]["url"] if urls else ""))
     url = url.strip().rstrip("/")
     problem = EC.url_problem(url)
@@ -1062,10 +1061,32 @@ async def install_command(
     )
 
 
+def request_base(request: Request) -> str:
+    """The scheme and host this request came in on, as the browser saw it."""
+    h = request.headers
+    host = (h.get("x-forwarded-host") or h.get("host") or "").split(",")[0].strip()
+    proto = (h.get("x-forwarded-proto") or request.url.scheme or "http").split(",")[0]
+    return f"{proto.strip()}://{host}" if host else ""
+
+
+async def _platform_urls(request: Request) -> list[dict[str, str]]:
+    from app.core.platform_settings import get_setting
+
+    try:
+        public = await get_setting("platform.public_api_url", "")
+    except Exception:  # noqa: BLE001
+        public = ""
+    return EC.platform_urls(public, request_base(request))
+
+
 @router.get("/install/urls")
-async def install_urls(user: User = Depends(get_current_user)) -> JSONResponse:
+async def install_urls(
+    request: Request, user: User = Depends(get_current_user)
+) -> JSONResponse:
     """Addresses a gateway might reach Abenix on, to pre-fill the install step."""
-    return success({"platform_urls": EC.platform_urls(), "image": EC.image()})
+    return success(
+        {"platform_urls": await _platform_urls(request), "image": EC.image()}
+    )
 
 
 @router.post("/gateways/{gateway_pk}/revoke")

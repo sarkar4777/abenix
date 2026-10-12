@@ -8,6 +8,7 @@ import { AlertTriangle, Boxes, Plug, RefreshCw, Search, Tag, Upload, X } from 'l
 import PageHeader from '@/components/layout/PageHeader';
 import NoAccess from '@/components/layout/NoAccess';
 import ViewOnlyBanner from '@/components/shared/ViewOnlyBanner';
+import LoadRetry from '@/components/shared/LoadRetry';
 import { usePageTitle } from '@/hooks/usePageTitle';
 import { apiFetch } from '@/lib/api-client';
 import { holds, useMyPermissions } from '@/lib/capabilities';
@@ -56,7 +57,7 @@ function AssetsPage() {
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
-  const { perms, loading: permsLoading } = useMyPermissions();
+  const { perms, loading: permsLoading, failed: permsFailed, retry: retryPerms } = useMyPermissions();
   const caps = perms?.capabilities;
   const canView = holds(caps, 'telemetry.view');
   const canManage = holds(caps, 'telemetry.manage');
@@ -181,6 +182,9 @@ function AssetsPage() {
   };
   const clearFilters = () => { setQ(''); setParams({ q: null, type: null, tag: null, status: null }); };
 
+  if (permsFailed) {
+    return <div className="mx-auto max-w-7xl"><LoadRetry what="your permissions" onRetry={retryPerms} testId="perms-retry" /></div>;
+  }
   if (permsLoading && !perms) {
     return <div className="mx-auto max-w-7xl"><div className="h-40 animate-pulse rounded-xl bg-slate-800/40" /></div>;
   }

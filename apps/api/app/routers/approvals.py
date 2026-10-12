@@ -35,9 +35,11 @@ from app.core.hitl import (
     write_hitl_decision,
 )
 from app.core.approvers import (
+    COMMAND_KINDS,
     DECISION_KINDS,
     SOLE_OPERATOR_KINDS,
     can_sign,
+    command_approvers,
     eligible_from,
     is_self_approved,
     people_words,
@@ -271,6 +273,9 @@ async def _serialize_many(
                 **_serialize(a),
                 "eligible_approver_count": None,
                 "sole_operator_available": False,
+                "approvers": [],
+                "approvers_total": None,
+                "can_self_approve": None,
             }
             for a in rows
         ]
@@ -308,6 +313,11 @@ async def _serialize_many(
             and req is not None
             and can_sign(_role(req[0]), req[1], a.policy, a.gate_kind)
         )
+        row["approvers"], row["can_self_approve"] = _approvers_of(
+            a, people, eligible, req, row["sole_operator_available"]
+        )
+        row["approvers_total"] = len(row["approvers"])
+        row["approvers"] = row["approvers"][:APPROVERS_SHOWN]
         if viewer is not None:
             check = _check_row(viewer, granted, a)
             own = a.requested_by is not None and str(a.requested_by) == str(viewer.id)
@@ -317,6 +327,43 @@ async def _serialize_many(
             row["visible"] = _visible_row(viewer, a, check)
         out.append(row)
     return out
+
+
+APPROVERS_SHOWN = 50
+
+
+def _approvers_of(
+    a: Approval, people: list, eligible: list, req: Any, sole: bool
+) -> tuple[list[dict[str, Any]], bool]:
+    """Who can approve this row, the requester first when they may, and whether they may."""
+    if a.gate_kind in COMMAND_KINDS:
+        return command_approvers(people, a.policy, a.requested_by)
+    self_ok = sole
+    if req is not None and not self_ok:
+        p = a.payload or {}
+        self_ok = (
+            sign_check(
+                req[0],
+                req[1],
+                requested_by=a.requested_by,
+                policy=a.policy,
+                gate_kind=a.gate_kind,
+                signoffs=[],
+                agent_creator_id=p.get("agent_creator_id"),
+                self_approval=p.get("self_approval"),
+            )
+            is None
+        )
+    out = [
+        {"id": str(u.id), "name": u.full_name or u.email, "is_requester": False}
+        for u in eligible
+    ]
+    if self_ok and req is not None:
+        u = req[0]
+        out.insert(
+            0, {"id": str(u.id), "name": u.full_name or u.email, "is_requester": True}
+        )
+    return out, bool(self_ok)
 
 
 def _visible_row(viewer: Any, a: Approval, check: Any) -> bool:
@@ -1279,6 +1326,13 @@ async def sign_off(
         "self_approved": is_self_approval(user, a.requested_by),
         "sole_operator": sole,
     }
+    by_requester = (
+        a.gate_kind in COMMAND_KINDS
+        and body.decision == "approve"
+        and is_self_approval(user, a.requested_by)
+    )
+    if by_requester:
+        record["approved_by_requester"] = True
     if body.client_token:
         record["client_token"] = body.client_token
     signoffs.append(record)
@@ -1304,6 +1358,24 @@ async def sign_off(
                 "reason": (body.reason or "").strip(),
                 "eligible_approvers": 0,
                 "required_signoffs": a.required_signoffs,
+            },
+            resource_type="approval",
+            resource_id=str(a.id),
+        )
+    if by_requester:
+        from app.core.audit import log_action
+
+        await log_action(
+            db,
+            a.tenant_id,
+            user.id,
+            "approval.approved_by_requester",
+            {
+                "approval_id": str(a.id),
+                "gate_kind": a.gate_kind,
+                "title": a.title,
+                "note": "approved by the requester",
+                "reason": (body.reason or "").strip() or None,
             },
             resource_type="approval",
             resource_id=str(a.id),
@@ -1514,12 +1586,15 @@ async def _notify_pending(
     db: AsyncSession, approval: Approval, *, requester: User
 ) -> None:
     """Tell the people who can decide a new approval that it needs them, nobody else."""
-    targets = eligible_from(
-        await tenant_people(db, approval.tenant_id),
-        approval.policy,
-        approval.gate_kind,
-        requester.id,
-    )
+    people = await tenant_people(db, approval.tenant_id)
+    if approval.gate_kind in COMMAND_KINDS:
+        # every machine operator and admin hears about it, the requester too
+        ids = {p["id"] for p in command_approvers(people, approval.policy, None)[0]}
+        targets = [u for u, _ in people if str(u.id) in ids]
+    else:
+        targets = eligible_from(
+            people, approval.policy, approval.gate_kind, requester.id
+        )
     title = approval.title or "Approval requested"
     truncated_title = title if len(title) <= 80 else title[:77] + "..."
     requester_name = requester.full_name or requester.email or "An agent"

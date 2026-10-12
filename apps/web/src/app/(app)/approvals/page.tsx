@@ -6,7 +6,7 @@ import {
   RefreshCw, ChevronDown, ChevronRight, Eye, Inbox,
 } from 'lucide-react';
 import Link from 'next/link';
-import { apiFetch } from '@/lib/api-client';
+import { apiFetch, isTransientError } from '@/lib/api-client';
 import { useApi } from '@/hooks/useApi';
 import { holds, useMyPermissions } from '@/lib/capabilities';
 import { isActionGate, levelLabel, signoffApproval } from '@/lib/autonomy';
@@ -19,10 +19,11 @@ import { useAuth } from '@/contexts/AuthContext';
 import { InviteApprover, ReasonDialog, SelfApprovedBadge, SoleOperatorDialog } from '@/components/decisions/SignOff';
 import { decisionErrorText } from '@/lib/decisionValues';
 import ViewOnlyBanner from '@/components/shared/ViewOnlyBanner';
+import LoadRetry from '@/components/shared/LoadRetry';
 import { tierName } from '@/lib/decisions';
 import ConfirmModal from '@/components/ui/ConfirmModal';
 import CommandApproval from '@/components/approvals/CommandApproval';
-import { approvalEffect as decisionEffect, askedBecause, changesText, confirmApproveText, refusal, requesterName, signerName, signoffError, takesOutOfService } from '@/lib/approvalText';
+import { approvalEffect as decisionEffect, askedBecause, changesText, commandApprovers, type Approver, confirmApproveText, refusal, requesterName, signerName, signoffError, takesOutOfService } from '@/lib/approvalText';
 
 interface SignoffEntry {
   user_id: string;
@@ -64,6 +65,9 @@ interface ApprovalRow {
   withdraw_reason?: string | null;
   withdrawn_by_name?: string | null;
   eligible_approvers?: { id: string; name: string }[] | null;
+  approvers?: Approver[] | null;
+  approvers_total?: number | null;
+  can_self_approve?: boolean | null;
 }
 
 // rule changes and tier changes can be signed by the requester alone when nobody else can
@@ -262,6 +266,7 @@ function ApprovalCard({ row, onDecide, busy, meId, isAdmin, onReload }: { row: A
   const refused = refusal(row);
   const askedBy = requesterName(row);
   const because = askedBecause(row);
+  const cmdWho = row.gate_kind === 'telemetry.command' ? commandApprovers(row, meId) : null;
 
   return (
     <div className="bg-slate-800/40 border border-slate-700/50 rounded-xl p-4 mb-3" data-testid="approval-card" data-approval-id={row.id} data-status={row.status}>
@@ -287,7 +292,7 @@ function ApprovalCard({ row, onDecide, busy, meId, isAdmin, onReload }: { row: A
             )}
           </div>
           <div className="flex flex-wrap gap-3 text-[11px] text-slate-500">
-            <span data-testid="approval-requester">Asked{askedBy ? ` by ${askedBy}` : ''} {relTime(row.created_at)}</span>
+            <span data-testid="approval-requester">{cmdWho?.mine && mine ? `You asked ${relTime(row.created_at)}` : `Asked${askedBy ? ` by ${askedBy}` : ''} ${relTime(row.created_at)}`}</span>
             <span>{approveCount}/{row.required_signoffs} approvals</span>
             {row.expires_at && row.status === 'pending' && (
               <span className="text-amber-300/80 flex items-center gap-1" data-testid="approval-expiry">
@@ -324,6 +329,12 @@ function ApprovalCard({ row, onDecide, busy, meId, isAdmin, onReload }: { row: A
                 {row.gate_kind === 'decision_retire' ? `Retire version ${String(row.payload?.version ?? '?')} of ${String(row.payload?.decision_key ?? 'a decision')}` : row.gate_kind === 'decision_archive' ? `Archive ${String(row.payload?.decision_key ?? 'a decision')}` : `Restore ${String(row.payload?.decision_key ?? 'a decision')}`}, at {tierName(String(row.payload?.tier ?? 'its'))} risk.
               </span>
               {typeof row.payload?.link === 'string' && <a href={row.payload.link as string} className="text-cyan-300 hover:underline">Open the decision</a>}
+            </div>
+          )}
+          {cmdWho && isPending && (cmdWho.mine || cmdWho.who) && (
+            <div className="mt-1.5 space-y-0.5 text-[11px]" data-testid="approval-command-who">
+              {cmdWho.mine && <p className="text-slate-200" data-testid="approval-command-mine">{cmdWho.mine}</p>}
+              {cmdWho.who && <p className="text-slate-400" data-testid="approval-command-approvers">{cmdWho.who}.</p>}
             </div>
           )}
           {row.gate_kind === 'telemetry.command' ? (
@@ -550,7 +561,7 @@ function PromotionSummary({ payload }: { payload: Record<string, unknown> }) {
 }
 
 export default function ApprovalsPage() {
-  const { perms } = useMyPermissions();
+  const { perms, failed: permsFailed, retry: retryPerms } = useMyPermissions();
   const { user: me } = useAuth();
   const canReview = holds(perms?.capabilities, 'actions.review');
   const [tab, setTab] = useState<'pending' | 'reviews'>('pending');
@@ -596,16 +607,19 @@ export default function ApprovalsPage() {
     const pendingRes = await apiFetch<ApprovalRow[]>(`/api/approvals?mine=1&status=pending${scope}`, { silent: true });
     const recentRes = await apiFetch<ApprovalRow[]>(`/api/approvals?mine=1${scope}&status=resolved&offset=0&limit=${recentLimitRef.current}`, { silent: true });
     if (pendingRes.error && !pendingRes.data) {
-      setError(pendingRes.error);
+      setError(isTransientError(pendingRes.errorDetail) ? 'busy' : pendingRes.error);
     } else {
       setError(null);
       setPending(pendingRes.data || []);
     }
-    const all = recentRes.data || [];
-    setRecent(all.filter(a => a.status !== 'pending'));
-    setRecentMore(!!recentRes.meta?.has_more);
-    setRecentTotal(typeof recentRes.meta?.total === 'number' ? (recentRes.meta.total as number) : null);
-    setLoading(false);
+    // a failed read keeps what is on screen rather than showing an empty list
+    if (!recentRes.error) {
+      const all = recentRes.data || [];
+      setRecent(all.filter(a => a.status !== 'pending'));
+      setRecentMore(!!recentRes.meta?.has_more);
+      setRecentTotal(typeof recentRes.meta?.total === 'number' ? (recentRes.meta.total as number) : null);
+    }
+    if (!pendingRes.error || pendingRes.data) setLoading(false);
   }, []);
 
   useEffect(() => {
@@ -721,7 +735,9 @@ export default function ApprovalsPage() {
         <ReviewQueue canReview={canReview} onCountChange={setReviewCount} />
       ) : (
       <>
-      {error && (
+      {error === 'busy' ? (
+        <LoadRetry what="the approvals" onRetry={() => void load()} testId="approvals-retry" />
+      ) : error && (
         <div className="mb-4 rounded-xl border border-rose-500/40 bg-rose-500/10 p-3 flex items-center gap-2 text-sm text-rose-200">
           <AlertTriangle className="w-4 h-4 shrink-0" />
           <span>{error}</span>
@@ -738,6 +754,7 @@ export default function ApprovalsPage() {
         </div>
       )}
 
+      {permsFailed && <LoadRetry what="your permissions" onRetry={retryPerms} testId="perms-retry" />}
       {perms && !perms.is_admin && !perms.can_approve_decisions && (
         <ViewOnlyBanner testId="approvals-view-only">
           {holds(perms.capabilities, 'approvals.sign')

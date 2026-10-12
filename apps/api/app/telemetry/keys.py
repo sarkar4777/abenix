@@ -128,6 +128,11 @@ def conn_status(conn_id: Any) -> str:
     return f"tel:conn:{conn_id}:status"
 
 
+def conn_replayed(conn_id: Any) -> str:
+    # dead letters a replay stored, folded into the ingest's own counters
+    return f"tel:conn:{conn_id}:replayed"
+
+
 def command_rate(t: Any, g: str, n: str, sec: int) -> str:
     return f"tel:{t}:cmdrl:{g}:{n}:{sec}"
 

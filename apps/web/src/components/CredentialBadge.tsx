@@ -35,9 +35,9 @@ export function adminConfigHref(config?: ToolConfigInfo | null): string {
 }
 
 const STYLE: Record<Exclude<ToolCredentialStatus, 'none'>, { cls: string; text: string }> = {
-  missing: { cls: 'bg-rose-500/10 text-rose-300 border-rose-500/30', text: 'needs key' },
-  optional: { cls: 'bg-amber-500/10 text-amber-300 border-amber-500/30', text: 'optional key' },
-  configured: { cls: 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30', text: 'key set' },
+  missing: { cls: 'bg-rose-500/10 text-rose-300 border-rose-500/30', text: 'Needs a key' },
+  optional: { cls: 'bg-amber-500/10 text-amber-300 border-amber-500/30', text: 'Key optional' },
+  configured: { cls: 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30', text: 'Settings ready' },
 };
 
 export function CredentialBadge({
@@ -53,13 +53,13 @@ export function CredentialBadge({
   const fromTenant = config.fields.filter((f) => f.source === 'tenant').length;
   const title =
     config.status === 'configured'
-      ? `All ${config.fields.length} configured value(s) present${fromTenant ? `, ${fromTenant} saved for this tenant` : ''}`
+      ? `${config.fields.length === 1 ? 'Its setting is' : `All ${config.fields.length} of its settings are`} saved${fromTenant ? `, ${fromTenant} for this workspace` : ''}`
       : `Not set for this tenant: ${missing.join(', ')}. An admin adds these under Admin -> Tool Configuration.`;
   return (
     <span
       title={title}
       data-testid={`credential-badge-${config.status}`}
-      className={`inline-flex items-center gap-1 border rounded px-1.5 ${compact ? 'py-0 text-[9px]' : 'py-0.5 text-[10px]'} uppercase tracking-wider ${s.cls}`}
+      className={`inline-flex items-center gap-1 border rounded px-1.5 ${compact ? 'py-0 text-[9px]' : 'py-0.5 text-[10px]'} ${s.cls}`}
     >
       <KeyRound className={compact ? 'w-2.5 h-2.5' : 'w-3 h-3'} />
       {s.text}

@@ -3968,6 +3968,8 @@ async def _stream_execution(
                 yield f"event: moderation\ndata: {json.dumps(event_data, default=str)}\n\n"
             elif event_type == "tool_result":
                 yield f"event: tool_result\ndata: {json.dumps(event_data, default=str)}\n\n"
+            elif event_type == "tool_status":
+                yield f"event: tool_status\ndata: {json.dumps(event_data, default=str)}\n\n"
             elif event_type == "reply_checking":
                 # the reply is held back until the output check decides
                 yield f"event: reply_checking\ndata: {json.dumps(event_data, default=str)}\n\n"

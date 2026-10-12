@@ -3,11 +3,18 @@
 import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { WifiOff, Wifi, RefreshCw } from 'lucide-react';
+import { getApiConnection, onApiConnection, type ApiConnection } from '@/lib/api-client';
 
 export default function OfflineBanner() {
   const [isOnline, setIsOnline] = useState(true);
   const [showRestored, setShowRestored] = useState(false);
   const [wasOffline, setWasOffline] = useState(false);
+  const [api, setApi] = useState<ApiConnection>('ok');
+
+  useEffect(() => {
+    setApi(getApiConnection());
+    return onApiConnection(setApi);
+  }, []);
 
   const handleOnline = useCallback(() => {
     setIsOnline(true);
@@ -38,7 +45,8 @@ export default function OfflineBanner() {
     };
   }, [handleOnline, handleOffline]);
 
-  const showBanner = !isOnline || showRestored;
+  const busy = isOnline && api === 'reconnecting';
+  const showBanner = !isOnline || showRestored || busy;
 
   return (
     <AnimatePresence>
@@ -50,7 +58,16 @@ export default function OfflineBanner() {
           transition={{ type: 'spring', stiffness: 300, damping: 30 }}
           className="fixed top-0 left-0 right-0 z-[80]"
         >
-          {!isOnline ? (
+          {busy ? (
+            <div role="status" className="bg-amber-500/90 backdrop-blur-sm text-slate-950">
+              <div className="flex items-center justify-center gap-2 py-2 px-4">
+                <RefreshCw className="w-4 h-4 flex-shrink-0 animate-spin" />
+                <span className="text-sm font-medium">
+                  Reconnecting… The server is busy, your work is safe and we keep retrying.
+                </span>
+              </div>
+            </div>
+          ) : !isOnline ? (
             <div className="bg-red-500/90 backdrop-blur-sm text-white">
               <div className="flex items-center justify-center gap-2 py-2 px-4">
                 <WifiOff className="w-4 h-4 flex-shrink-0" />

@@ -1683,7 +1683,7 @@ class AgentExecutor:
                             "tool.args_preview", _short(tc.get("arguments"))
                         )
                         autonomy.set_tool_call(tc.get("id"))
-                        if autonomy.managed(
+                        if getattr(tool, "streams_status", False) or autonomy.managed(
                             str(getattr(self, "tenant_id", "") or ""),
                             governance.current(),
                             tc["name"],
@@ -1743,6 +1743,15 @@ class AgentExecutor:
                 }
                 if (result.metadata or {}).get("autonomy"):
                     _tr_data["autonomy"] = result.metadata["autonomy"]
+                _md = result.metadata or {}
+                if _md.get("status") in ("denied", "expired"):
+                    # the chat says denied with the reason, not failed
+                    _tr_data["metadata"] = {
+                        "status": _md["status"],
+                        "reason": _md.get("reason"),
+                        "approval_id": _md.get("approval_id"),
+                        "decided_by": _md.get("decided_by"),
+                    }
                 yield ExecutionEvent(event="tool_result", data=_tr_data)
 
                 _trace = {

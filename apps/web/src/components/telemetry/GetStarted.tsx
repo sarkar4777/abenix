@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { ArrowLeft, ArrowRight, CircuitBoard, Code2, Compass, Factory, Plug, Radio, Truck, Wrench } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Check, CircuitBoard, Copy, Code2, Compass, Factory, Plug, Radio, Truck, Wrench } from 'lucide-react';
 import ResponsiveModal from '@/components/ui/ResponsiveModal';
 import { GUIDE, edgeHref, type GuideCategory, type GuidePath } from '@/lib/telemetry/guide';
 import type { TransportDecl } from '@/lib/telemetry/sources';
@@ -11,7 +11,25 @@ import type { WizardStart } from './SourceWizard';
 
 const ICONS = { truck: Truck, factory: Factory, sensor: Radio, plug: Plug, code: Code2 };
 
-function PathCard({ p, canManage, available, onSource }: { p: GuidePath; canManage: boolean; available: boolean; onSource: (s: WizardStart) => void }) {
+// lower case for a sentence, keeping words like PLCs and IoT as they are
+export function inSentence(title: string): string {
+  return title.split(' ').map((w) => (/[A-Z]/.test(w.slice(1)) ? w : w.toLowerCase())).join(' ');
+}
+
+function CopyPageLink({ catId }: { catId: string }) {
+  const [done, setDone] = useState(false);
+  const copy = () => {
+    const url = `${window.location.origin}/telemetry?guide=${encodeURIComponent(catId)}`;
+    navigator.clipboard?.writeText(url).then(() => { setDone(true); setTimeout(() => setDone(false), 1500); }).catch(() => {});
+  };
+  return (
+    <button type="button" onClick={copy} className="ml-1 inline-flex items-center gap-1 rounded border border-slate-700 px-1.5 py-0.5 text-[11px] text-slate-200 hover:bg-slate-800" data-testid="tel-guide-copy-link">
+      {done ? <Check className="h-3 w-3 text-emerald-300" /> : <Copy className="h-3 w-3" />} {done ? 'Link copied' : 'Copy the link'}
+    </button>
+  );
+}
+
+function PathCard({ p, canManage, available, onSource, catId }: { p: GuidePath; canManage: boolean; available: boolean; onSource: (s: WizardStart) => void; catId: string }) {
   const a = p.action;
   return (
     <li className="rounded-lg border border-slate-700 p-3" data-testid="tel-guide-path" data-path={p.id}>
@@ -27,7 +45,7 @@ function PathCard({ p, canManage, available, onSource }: { p: GuidePath; canMana
           )}
           <div className="mt-2">
             {!canManage ? (
-              <p className="text-xs text-slate-400">An admin sets this up under Telemetry, Sources. Send them this page.</p>
+              <p className="text-xs text-slate-400">An admin sets this up under Telemetry, Sources. Send them this page. <CopyPageLink catId={catId} /></p>
             ) : a.kind === 'edge' ? (
               <Link href={edgeHref(a.collector)} className="inline-flex items-center gap-1 text-xs font-medium text-cyan-300 hover:underline" data-testid="tel-guide-edge">
                 Add an edge gateway <ArrowRight className="h-3.5 w-3.5" />
@@ -52,10 +70,10 @@ function PathCard({ p, canManage, available, onSource }: { p: GuidePath; canMana
 }
 
 // "What do you want to connect?", then the ways in for that kind of thing
-export default function GetStarted({ open, onClose, canManage, transports, onSource }: {
-  open: boolean; onClose: () => void; canManage: boolean; transports: TransportDecl[] | null; onSource: (s: WizardStart) => void;
+export default function GetStarted({ open, onClose, canManage, transports, onSource, initialCat }: {
+  open: boolean; onClose: () => void; canManage: boolean; transports: TransportDecl[] | null; onSource: (s: WizardStart) => void; initialCat?: string | null;
 }) {
-  const [cat, setCat] = useState<GuideCategory | null>(null);
+  const [cat, setCat] = useState<GuideCategory | null>(() => GUIDE.find((g) => g.id === initialCat) ?? null);
   const have = (t: string) => !transports || transports.some((x) => x.transport === t);
   return (
     <ResponsiveModal open={open} onClose={onClose} title={cat ? cat.title : 'Get started'} icon={<Compass className="h-4 w-4" />} maxWidth="max-w-3xl">
@@ -85,12 +103,12 @@ export default function GetStarted({ open, onClose, canManage, transports, onSou
         ) : (
           <>
             <button type="button" onClick={() => setCat(null)} className="inline-flex items-center gap-1 text-xs text-slate-400 hover:text-cyan-300" data-testid="tel-guide-back">
-              <ArrowLeft className="h-3 w-3" /> Something else
+              <ArrowLeft className="h-3 w-3" /> Back to every kind of thing
             </button>
-            <p className="text-sm text-slate-300">Ways to bring in {cat.title.toLowerCase()}, quickest first.</p>
+            <p className="text-sm text-slate-300">Ways to bring in {inSentence(cat.title)}, quickest first.</p>
             <ol className="space-y-2">
               {cat.paths.map((p) => (
-                <PathCard key={p.id} p={p} canManage={canManage} available={p.action.kind !== 'source' || have(p.action.transport)} onSource={(s) => { onSource(s); onClose(); }} />
+                <PathCard key={p.id} p={p} catId={cat.id} canManage={canManage} available={p.action.kind !== 'source' || have(p.action.transport)} onSource={(s) => { onSource(s); onClose(); }} />
               ))}
             </ol>
           </>

@@ -67,7 +67,7 @@ _INFRA = (PoolTimeout, DBAPIError, OSError, asyncio.TimeoutError)
 def _busy() -> HTTPException:
     return HTTPException(
         status_code=503,
-        detail="The service is busy, retry shortly.",
+        detail={"message": "The service is busy, retry shortly.", "error_code": "BUSY"},
         headers={"Retry-After": "2"},
     )
 

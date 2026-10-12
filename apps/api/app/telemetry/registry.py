@@ -76,9 +76,34 @@ def decoder(name: str) -> Decoder:
     return cls()
 
 
+# most used first on the source forms, anything new after them by name
+TRANSPORT_ORDER = (
+    "mqtt",
+    "http_push",
+    "kafka",
+    "opcua",
+    "modbus_tcp",
+    "amqp",
+    "nats",
+    "websocket",
+)
+
+
+def _transport_rank(name: str) -> tuple[int, str]:
+    try:
+        return TRANSPORT_ORDER.index(name), name
+    except ValueError:
+        return len(TRANSPORT_ORDER), name
+
+
 def catalogue() -> dict[str, Any]:
     return {
-        "transports": [c.describe() for _, c in sorted(connectors().items())],
+        "transports": [
+            c.describe()
+            for _, c in sorted(
+                connectors().items(), key=lambda kv: _transport_rank(kv[0])
+            )
+        ],
         "decoders": [d.describe() for _, d in sorted(decoders().items())],
         "unavailable": dict(broken),
     }

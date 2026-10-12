@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Loader2, Plus, Radio, Sparkles, Trash2 } from 'lucide-react';
 import { apiFetch } from '@/lib/api-client';
-import { explainTelemetryError } from '@/lib/telemetry/errors';
+import { CAPTURE_SECONDS, captureReason, explainTelemetryError } from '@/lib/telemetry/errors';
 import { formatValue } from '@/lib/telemetry/format';
 import { BLANK_MAPPING, cleanFilter, localSuggest, rulesToText, splitList, textToRules, type Mapping, type PreviewResult, type TsFormat } from '@/lib/telemetry/sources';
 
@@ -93,12 +93,41 @@ export default function MappingEditor({
     return () => clearTimeout(t);
   }, [sourceId, sample, subject, m, decoder]);
 
+  const [capLeft, setCapLeft] = useState<number | null>(null);
+  const [capErr, setCapErr] = useState<string | null>(null);
+  const capAbort = useRef<AbortController | null>(null);
+  useEffect(() => () => capAbort.current?.abort(), []);
+  useEffect(() => {
+    if (capLeft === null || capLeft <= 0) return;
+    const t = setTimeout(() => setCapLeft((n) => (n === null ? n : n - 1)), 1000);
+    return () => clearTimeout(t);
+  }, [capLeft]);
+
+  function cancelCapture() {
+    capAbort.current?.abort();
+    capAbort.current = null;
+    setCapLeft(null);
+    setBusy(null);
+  }
+
   async function capture() {
     if (!sourceId) return;
+    capAbort.current?.abort();
+    const ctl = new AbortController();
+    capAbort.current = ctl;
+    // the server gives up at 20 s, this is the backstop if it never answers
+    const backstop = setTimeout(() => ctl.abort(), (CAPTURE_SECONDS + 5) * 1000);
     setBusy('capture');
     setErr(null);
+    setCapErr(null);
+    setCapLeft(CAPTURE_SECONDS);
     try {
-      const res = await apiFetch<PreviewResult & { sample?: { payload?: string; encoding?: string; subject?: string } | string }>(`/api/telemetry/connections/${sourceId}/preview`, { method: 'POST', body: JSON.stringify({ capture: true, mapping: m, decoder }) });
+      const res = await apiFetch<PreviewResult & { sample?: { payload?: string; encoding?: string; subject?: string } | string }>(`/api/telemetry/connections/${sourceId}/preview`, { method: 'POST', body: JSON.stringify({ capture: true, mapping: m, decoder }), signal: ctl.signal, throwOnError: false, silent: true });
+      if (ctl.signal.aborted) return;
+      if (res.error) {
+        setCapErr(captureReason({ status: res.errorDetail?.code, code: res.errorDetail?.error_code, message: res.error }));
+        return;
+      }
       const got = res.data?.sample;
       if (typeof got === 'string') setSample(got);
       else if (got?.payload !== undefined) {
@@ -109,9 +138,15 @@ export default function MappingEditor({
       }
       setPreview({ records: res.data?.records ?? [], errors: res.data?.errors ?? [], skipped: res.data?.skipped, skip_reason: res.data?.skip_reason });
     } catch (e) {
-      setErr(explainTelemetryError(e, 'load'));
+      if (capAbort.current === ctl && ctl.signal.aborted) setCapErr(captureReason({ code: 'CAPTURE_TIMEOUT' }));
+      else if (!ctl.signal.aborted) setCapErr(captureReason(e));
     } finally {
-      setBusy(null);
+      clearTimeout(backstop);
+      if (capAbort.current === ctl) {
+        capAbort.current = null;
+        setCapLeft(null);
+        setBusy(null);
+      }
     }
   }
 
@@ -144,15 +179,27 @@ export default function MappingEditor({
         <div>
           <div className="mb-1 flex flex-wrap items-center gap-2">
             <p className="flex-1 text-xs font-medium text-slate-300">A sample message</p>
-            {sourceId && (
-              <button type="button" onClick={capture} disabled={busy === 'capture'} className="inline-flex items-center gap-1 rounded-md border border-slate-700 px-2 py-1 text-xs text-slate-200 hover:bg-slate-800 disabled:opacity-60" data-testid="tel-map-capture">
-                {busy === 'capture' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Radio className="h-3.5 w-3.5" />} {busy === 'capture' ? 'Waiting for the next message' : 'Capture a live message'}
+            {sourceId && (capLeft !== null ? (
+              <span className="inline-flex items-center gap-2 text-xs text-slate-300" role="status" data-testid="tel-map-capturing">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" /> Waiting for the next message{capLeft !== null && capLeft > 0 ? `, ${capLeft} s` : ''}
+                <button type="button" onClick={cancelCapture} className="rounded-md border border-slate-700 px-2 py-0.5 text-slate-200 hover:bg-slate-800" data-testid="tel-map-capture-cancel">Cancel</button>
+              </span>
+            ) : (
+              <button type="button" onClick={capture} className="inline-flex items-center gap-1 rounded-md border border-slate-700 px-2 py-1 text-xs text-slate-200 hover:bg-slate-800" data-testid="tel-map-capture">
+                <Radio className="h-3.5 w-3.5" /> Capture a live message
               </button>
-            )}
+            ))}
             <button type="button" onClick={suggest} disabled={!sample.trim() || busy === 'suggest'} title={!sample.trim() ? 'Paste or capture a sample first' : undefined} className="inline-flex items-center gap-1 rounded-md border border-cyan-500/50 px-2 py-1 text-xs text-cyan-200 hover:bg-cyan-500/10 disabled:opacity-50" data-testid="tel-map-suggest">
               {busy === 'suggest' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />} Suggest a mapping
             </button>
           </div>
+          {capErr && (
+            <div className="mb-2 flex flex-wrap items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-2.5 py-1.5 text-xs text-amber-100" role="alert" data-testid="tel-map-capture-error">
+              <span className="min-w-0 flex-1">{capErr}</span>
+              <button type="button" onClick={capture} className="rounded-md border border-amber-500/50 px-2 py-0.5 hover:bg-amber-500/10" data-testid="tel-map-capture-retry">Retry</button>
+              <button type="button" onClick={() => setCapErr(null)} className="rounded-md px-2 py-0.5 text-amber-200 hover:bg-amber-500/10">Dismiss</button>
+            </div>
+          )}
           <textarea value={sample} onChange={(e) => setSample(e.target.value)} rows={6} spellCheck={false} placeholder='{"asset": "pump-7", "ts": 1760000000000, "temperature_c": 61.5}' className={inputCls} data-testid="tel-map-sample" />
           <input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Topic or subject it arrived on, for example plant/line-2/pump-7" className={`${inputCls} mt-2`} data-testid="tel-map-subject" />
           <p className="mt-1 text-xs text-slate-500">Paste one message as it arrives, or capture one. Nothing is stored from the preview.</p>

@@ -253,6 +253,20 @@ CATALOGUE: dict[str, JobInfo] = {
             confirm="Lessons, feedback and closed groups older than each tenant's lesson retention are deleted for good.",
         ),
         JobInfo(
+            "alert_notification_retention",
+            "Alert notification clean-up",
+            "Deletes platform alert notifications older than the retention setting and keeps at most the newest few hundred per person.",
+            "An alert storm cannot fill the notifications table and slow sign-in down.",
+            "Retention and clean-up",
+            {
+                "expired": "old alert deleted|old alerts deleted",
+                "over_cap": "extra alert deleted|extra alerts deleted",
+                "indexes_built": "index built|indexes built",
+            },
+            "No alert notification was old enough to delete.",
+            confirm="Platform alert notifications past the retention setting, and the oldest past each person's limit, are deleted for good.",
+        ),
+        JobInfo(
             "prune_events",
             "Event clean-up",
             "Deletes delivered webhook attempts after 30 days and sent events after 7 days.",

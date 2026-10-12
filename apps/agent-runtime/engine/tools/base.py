@@ -357,6 +357,8 @@ class _DefaultedTool(BaseTool):
         self.name = inner.name
         self.config_fields = inner.config_fields
         self.risk_tier = getattr(inner, "risk_tier", "low")
+        # a wrapped tool still tells the chat it is waiting
+        self.streams_status = bool(getattr(inner, "streams_status", False))
         # Build a filtered schema that removes pre-set keys.
         props = dict((inner.input_schema or {}).get("properties") or {})
         required = list((inner.input_schema or {}).get("required") or [])

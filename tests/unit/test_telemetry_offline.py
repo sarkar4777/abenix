@@ -23,7 +23,7 @@ def conn(offline_after_s=0, cid="c1"):
 def test_the_silence_limit_is_learnt_from_the_device_and_can_be_set():
     s = Store(lambda *a: None)
     key = (T, "g", "n", "d")
-    assert s.offline_after(conn(), s.interval_s(key)) == ST.OFFLINE_CAP_S
+    assert s.offline_after(conn(), s.interval_s(key)) == ST.OFFLINE_UNKNOWN_S
     for i in range(6):
         s._arrival(key, 1000.0 + i * 2)
     assert s.interval_s(key) == 2
@@ -51,7 +51,7 @@ def test_a_quiet_fleet_raises_a_few_alerts_then_one_grouped():
     b = Batch()
     s.sweep(now, b)
     assert len(b.index) == 12
-    want = int((now - 2000 + ST.OFFLINE_CAP_S) * 1000)
+    want = int((now - 2000 + ST.OFFLINE_UNKNOWN_S) * 1000)
     assert all(x[2]["offline_at"] == want for x in b.index)
     single = [e for e in b.events if not e[2].get("grouped")]
     assert len(single) == ST.OFFLINE_EACH and len(b.alerts) == ST.OFFLINE_EACH
@@ -117,7 +117,9 @@ def test_after_a_restart_devices_left_online_are_checked_at_once():
         idx = {f: json.loads(v) for f, v in (await ing.r.hgetall(K.index(T))).items()}
         assert idx["logistics/DHL/SHP1"]["online"] is False
         # offline from when it went quiet, not from the scan
-        assert idx["logistics/DHL/SHP1"]["offline_at"] == old + ST.OFFLINE_CAP_S * 1000
+        assert (
+            idx["logistics/DHL/SHP1"]["offline_at"] == old + ST.OFFLINE_UNKNOWN_S * 1000
+        )
         assert idx["logistics/DHL/SHP2"]["online"] is True
         assert idx["site/pc1/"]["online"] is True
         offline = [e for e in ing.events if e[1] == "telemetry.device_offline"]
@@ -202,3 +204,26 @@ def test_a_shared_device_marked_offline_elsewhere_comes_back_online_here():
         assert not await s._is_online(c, T, "g", "n", "d")
 
     asyncio.run(go())
+
+
+def test_a_push_device_heard_once_goes_offline_in_minutes_not_a_quarter_hour():
+    s = Store(lambda *a: None)
+    c = ConnInfo(id="p1", tenant=T, name="Push", transport="http_push", shared=True)
+    key = (T, "weather", "WS-1", "")
+    now = time.time()
+    s._arrival(key, now - 400)
+    s.last_data[key] = (now - 400, c)
+    assert s.offline_after(c, s.interval_s(key)) == ST.OFFLINE_UNKNOWN_S
+    b = Batch()
+    s.sweep(now, b)
+    assert [x[2]["node"] for x in b.index] == ["WS-1"]
+    assert b.index[0][2]["offline_at"] == int((now - 400 + ST.OFFLINE_UNKNOWN_S) * 1000)
+
+
+def test_two_messages_use_the_gap_seen_so_far():
+    s = Store(lambda *a: None)
+    key = (T, "g", "n", "")
+    s._arrival(key, 1000.0)
+    s._arrival(key, 1010.0)
+    assert s.interval_s(key) == 10
+    assert s.offline_after(conn(), s.interval_s(key)) == 100

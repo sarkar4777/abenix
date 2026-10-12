@@ -300,6 +300,8 @@ export function checkCollector(c: CollectorSpec, t: CollectorType): Record<strin
       } else if ((f.min !== undefined && n < f.min) || (f.max !== undefined && n > f.max)) {
         p[f.key] = `${f.label} must be from ${f.min} to ${f.max}`;
       }
+    } else if (f.key === 'registers' && typeof v === 'string' && registerLinesProblem(v)) {
+      p[f.key] = registerLinesProblem(v) as string;
     } else if (f.pattern && typeof v === 'string' && !new RegExp(f.pattern).test(v)) {
       p[f.key] = `${f.label} should look like ${f.example}`;
     }
@@ -311,4 +313,49 @@ export function telemetryHref(g: Gateway, a?: AssetRow): string {
   if (a) return `/telemetry?group=${encodeURIComponent(a.group)}&node=${encodeURIComponent(a.node)}`;
   const grp = g.collectors?.[0]?.asset?.group;
   return grp ? `/telemetry?grp=${encodeURIComponent(String(grp))}` : '/telemetry';
+}
+
+// after a field loses focus its problem shows, the rest wait for their own blur or for save
+export function blurCheck(all: Record<string, string>, shownNow: Record<string, string> | undefined, key: string): Record<string, string> {
+  const next = { ...(shownNow || {}) };
+  if (all[key]) next[key] = all[key];
+  else delete next[key];
+  return next;
+}
+
+// while typing, only the problems already on screen update
+export function keepShown(all: Record<string, string>, shownNow: Record<string, string>): Record<string, string> {
+  return Object.fromEntries(Object.entries(all).filter(([k]) => k in shownNow));
+}
+
+// the field key behind an input in a collector form
+export function fieldKeyOf(testId: string, prefix: string): string | null {
+  if (!testId.startsWith(`${prefix}-`)) return null;
+  const rest = testId.slice(prefix.length + 1);
+  if (rest.startsWith('asset-')) return `asset.${rest.slice(6)}`;
+  if (rest === 'interval') return 'interval_s';
+  if (rest === 'drop' || rest.endsWith('-paste')) return null;
+  return rest;
+}
+
+const REG_TABLES = ['holding', 'input', 'coil', 'discrete'];
+const REG_TYPES = ['int16', 'uint16', 'int32', 'uint32', 'float32', 'int64', 'uint64', 'float64', 'bool'];
+
+// the first Modbus register line that will not work, said in plain words
+export function registerLinesProblem(text: string): string | null {
+  const lines = text.split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    const raw = lines[i].trim();
+    if (!raw || raw.startsWith('#')) continue;
+    const parts = raw.split(',').map((x) => x.trim());
+    const n = i + 1;
+    if (parts.length < 3) return `Line ${n} needs at least a name, a table and an address, such as voltage_v, holding, 0`;
+    const [name, table, address, type, scale] = parts;
+    if (!name) return `Line ${n} has no name`;
+    if (!REG_TABLES.includes(table.toLowerCase())) return `Line ${n}: the table "${table}" is not one of holding, input, coil or discrete`;
+    if (!/^\d+$/.test(address)) return `Line ${n}: the address "${address}" must be a whole number, such as 0`;
+    if (type && !REG_TYPES.includes(type.toLowerCase())) return `Line ${n}: the type "${type}" is not one of ${REG_TYPES.slice(0, 8).join(', ')}`;
+    if (scale && Number.isNaN(Number(scale))) return `Line ${n}: the scale "${scale}" must be a number, such as 0.1`;
+  }
+  return null;
 }

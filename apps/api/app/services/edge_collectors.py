@@ -901,33 +901,39 @@ def clean_settings(s: dict[str, Any]) -> tuple[dict[str, Any], dict[str, str]]:
 # install commands
 
 
-def image() -> str:
+def image(name: str = "edge-runtime") -> str:
+    """The edge image for a variant, the same on the install step and the Edge page."""
     explicit = os.environ.get("EDGE_COLLECTOR_IMAGE", "").strip()
-    if explicit:
+    if explicit and name == "edge-runtime":
         return explicit
+    tag = os.environ.get("EDGE_IMAGE_TAG", "").strip() or "latest"
     # same registry as the platform's own images on this cluster
     ref = os.environ.get("ML_MODEL_SERVING_IMAGE", "").strip()
     if ref and "/" in ref:
-        return ref.rsplit("/", 1)[0] + "/edge-runtime:latest"
-    return "ghcr.io/abenix/edge-runtime:latest"
+        return ref.rsplit("/", 1)[0] + f"/{name}:{tag}"
+    return f"ghcr.io/abenix/{name}:{tag}"
 
 
-def platform_urls() -> list[dict[str, str]]:
-    out = []
-    pub = os.environ.get("PUBLIC_API_BASE_URL", "").strip()
-    if pub:
-        out.append({"label": "The address people use", "url": pub.rstrip("/")})
-    internal = (
-        os.environ.get("CODE_RUNNER_API_URL", "").strip()
-        or os.environ.get("INTERNAL_API_URL", "").strip()
+def platform_urls(
+    public: str | None = None, request_base: str | None = None
+) -> list[dict[str, str]]:
+    """Addresses a gateway might use, the platform.public_api_url setting first, then this request's host."""
+    out: list[dict[str, str]] = []
+    seen: set[str] = set()
+
+    def add(label: str, url: str | None) -> None:
+        u = (url or "").strip().rstrip("/")
+        if u and u not in seen and url_problem(u) is None:
+            seen.add(u)
+            out.append({"label": label, "url": u})
+
+    add("The address people use", public)
+    add("The address people use", os.environ.get("PUBLIC_API_BASE_URL"))
+    add("The address this page reached", request_base)
+    add(
+        "From inside this Kubernetes cluster",
+        os.environ.get("CODE_RUNNER_API_URL") or os.environ.get("INTERNAL_API_URL"),
     )
-    if internal:
-        out.append(
-            {
-                "label": "From inside this Kubernetes cluster",
-                "url": internal.rstrip("/"),
-            }
-        )
     return out
 
 

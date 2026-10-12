@@ -1522,14 +1522,14 @@ if (result.isPaused()) {
             <p>An offshore wind farm, a pharma cold-storage warehouse, a refinery — all of them have hours where the network is gone or the data is too sensitive to leave the site. The edge runtime takes any Abenix agent flagged <code>edge_compatible</code>, packages it into a signed <code>.agent</code> bundle, and runs it next to the equipment.</p>
             <p><strong className="text-white">Three runtime variants ship.</strong> Same <code>.agent</code> bundle, same MQTT delivery topic, same HTTP contract — pick the one that matches the plant hardware:</p>
             <ul className="list-disc pl-5 space-y-1 text-[13px]">
-              <li><strong className="text-cyan-300">Python</strong> (~80 MB, <code>agentforge/edge-runtime</code>) — default, easiest to extend with tool shims, runs on any box that already has python3.12+.</li>
-              <li><strong className="text-orange-300">Rust</strong> (~25 MB, <code>agentforge/edge-runtime-rust</code>) — single static binary for rugged industrial PCs (Moxa UC-8580, Siemens RUGGEDCOM, Beckhoff CX, NVIDIA Jetson). No Python needed on the box.</li>
-              <li><strong className="text-slate-300">C</strong> (~12 MB, <code>agentforge/edge-runtime-c</code>) — musl static, for ultra-constrained gateways (Allen-Bradley CompactLogix, Phoenix Contact PLCnext, OpenWRT, ARM Cortex-A7 with 256 MB RAM).</li>
+              <li><strong className="text-cyan-300">Python</strong> (~80 MB, image <code>edge-runtime</code>) — default, easiest to extend with tool shims, runs on any box that already has python3.12+.</li>
+              <li><strong className="text-orange-300">Rust</strong> (~25 MB, image <code>edge-runtime-rust</code>) — single static binary for rugged industrial PCs (Moxa UC-8580, Siemens RUGGEDCOM, Beckhoff CX, NVIDIA Jetson). No Python needed on the box.</li>
+              <li><strong className="text-slate-300">C</strong> (~12 MB, image <code>edge-runtime-c</code>) — musl static, for ultra-constrained gateways (Allen-Bradley CompactLogix, Phoenix Contact PLCnext, OpenWRT, ARM Cortex-A7 with 256 MB RAM).</li>
             </ul>
             <p><strong className="text-white">Where to download.</strong> Open <code>/edge</code> in the sidebar — the top section shows all three variants with copy-to-clipboard <strong>Helm install</strong> and <strong>Docker pull</strong> commands. Or call <code>GET /api/edge/runtime/download</code> for the JSON manifest. Helm charts live at <code>infra/helm/edge-runtime/</code>, <code>infra/helm/edge-runtime-rust/</code>, <code>infra/helm/edge-runtime-c/</code>.</p>
             <p><strong className="text-white">How to create a gateway in AgentForge.</strong></p>
             <Steps items={[
-              'On <strong>/edge</strong>, click <strong>Mint edge token + pubkey</strong>. Copy the <code>af_…</code> token, which is the gateway&apos;s <code>PLATFORM_TOKEN</code>, and the signing public key. The token is shown once.',
+              'On <strong>/edge</strong>, click <strong>Add an edge gateway</strong>. Copy the <code>af_…</code> token, which is the gateway&apos;s <code>PLATFORM_TOKEN</code>, and the signing public key. The token is shown once.',
               'Helm-install the runtime variant on the plant gateway: <code>helm install abenix-edge ./infra/helm/edge-runtime --set platform_url=$URL --set platform_token=$AF_KEY --set gateway_id=$GW --set-file signing_pubkey=pubkey.pem</code>. (Or <code>edge-runtime-rust</code> / <code>edge-runtime-c</code>.)',
               'The pod boots, calls <code>POST /api/edge/gateways/register</code> every 60 s with <code>Authorization: Bearer af_…</code>. The first call inserts the row in <code>edge_gateways</code>. The gateway shows up in the platform UI under <strong>/edge → Registered gateways</strong> within ~60 s.',
               'Tick <strong>Edge compatible</strong> on the builder&apos;s Advanced tab. Set <code>edge_constraints</code> (max payload, max runtime, allowed MQTT publish and subscribe topics).',
@@ -1555,7 +1555,7 @@ if (result.isPaused()) {
                   <tr className="border-t border-slate-800/40">
                     <td className="px-2 py-1.5 font-mono text-cyan-300">PLATFORM_TOKEN</td>
                     <td className="px-2 py-1.5">af_* API key for /register + heartbeat</td>
-                    <td className="px-2 py-1.5"><a href="/edge" className="text-cyan-300 underline">/edge</a> &rarr; <em>Mint edge token + pubkey</em></td>
+                    <td className="px-2 py-1.5"><a href="/edge" className="text-cyan-300 underline">/edge</a> &rarr; <em>Add an edge gateway</em></td>
                     <td className="px-2 py-1.5 text-amber-300">runtime logs 401, gateway shows offline</td>
                   </tr>
                   <tr className="border-t border-slate-800/40">
@@ -1574,7 +1574,7 @@ if (result.isPaused()) {
               </table>
             </div>
             <p className="text-[12px] text-slate-400">
-              <strong>On a fresh Azure deploy</strong>, <code>scripts/deploy-azure.sh</code> mints the token, fetches the signing pubkey and passes both into the helm install. It installs the Python variant by default. Set <code>EDGE_RUNTIME_VARIANT</code> or <code>EDGE_RUNTIME_ALL_VARIANTS=true</code> for Rust and C. For a gateway you provision by hand (a real plant box), open <code>/edge</code>, click <strong>Mint edge token + pubkey</strong> and copy both values into the gateway&apos;s helm values or systemd env file. The token is shown once, store it before closing the dialog.
+              <strong>On a fresh Azure deploy</strong>, <code>scripts/deploy-azure.sh</code> mints the token, fetches the signing pubkey and passes both into the helm install. It installs the Python variant by default. Set <code>EDGE_RUNTIME_VARIANT</code> or <code>EDGE_RUNTIME_ALL_VARIANTS=true</code> for Rust and C. For a gateway you provision by hand (a real plant box), open <code>/edge</code>, click <strong>Add an edge gateway</strong> and copy both values into the gateway&apos;s helm values or systemd env file. The token is shown once, store it before closing the dialog.
             </p>
             <p className="text-[12px] text-slate-400">
               <strong>Without a cloud LLM key.</strong> The runtimes have no local-model path. Tool-only agents, such as a sensor loop, still run, and an LLM step returns <code>stub: true</code>.
@@ -2693,7 +2693,7 @@ spec:
               'Where offered, <strong>Test</strong> sends one request to the provider with the value and reports the answer.',
               '<strong>Clear tenant value</strong> or <strong>Clear platform value</strong> removes what was saved so the next source applies again.',
             ]} />
-            <p>Secrets are masked after saving and encrypted with the cluster key when one is set. The page header says which. A tool missing a required key tells the agent, in one sentence, which key to ask an admin for. The Tools Catalogue and the builder palette show a badge per tool: needs key, optional key or key set.</p>
+            <p>Secrets are masked after saving and encrypted with the cluster key when one is set. The page header says which. A tool missing a required key tells the agent, in one sentence, which key to ask an admin for. The Tools Catalogue and the builder palette show a badge per tool: Needs a key, Key optional or Settings ready.</p>
             <Callout tone="info">Not here: MCP tools keep credentials on their connection under MCP Servers, and code assets keep their own secrets in Code Runner. Source Watch sign-in credentials are set here, under Source Watch.</Callout>
           </div>
         ),

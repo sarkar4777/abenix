@@ -22,7 +22,11 @@ class NotificationType(str, enum.Enum):
 
 class Notification(UUIDMixin, TenantMixin, TimestampMixin, Base):
     __tablename__ = "notifications"
-    __table_args__ = (Index("ix_notifications_user_unread", "user_id", "is_read"),)
+    __table_args__ = (
+        Index("ix_notifications_user_unread", "user_id", "is_read"),
+        Index("ix_notifications_type_created", "type", "created_at"),
+        Index("ix_notifications_user_type_created", "user_id", "type", "created_at"),
+    )
 
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id"), index=True

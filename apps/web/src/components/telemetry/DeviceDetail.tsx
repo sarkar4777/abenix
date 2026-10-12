@@ -5,7 +5,8 @@ import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { AlertTriangle, Archive, ArrowLeft, BellPlus, Binary, Bot, Loader2, Search, Send } from 'lucide-react';
 import { ForgetOneDialog } from './ForgetDialogs';
-import { apiFetch } from '@/lib/api-client';
+import { apiFetch, isTransientError } from '@/lib/api-client';
+import LoadRetry from '@/components/shared/LoadRetry';
 import { useTelemetry, nodeStatus, type NodeEntry } from '@/lib/telemetry/store';
 import { addToBatch, emptyBatch } from '@/lib/telemetry/stream';
 import { pushDetail } from '@/lib/telemetry/useTelemetryFeed';
@@ -85,7 +86,7 @@ export default function DeviceDetail({
   const samples = useTelemetry((s) => s.samples[key]);
   const nodeMetrics = useTelemetry((s) => s.metrics[deviceKey(group, node, '')]);
   const [state, setState] = useState<'loading' | 'ready' | 'missing' | 'error'>('loading');
-  const [err, setErr] = useState<string | null>(null);
+  const [err, setErr] = useState<{ text: string; transient: boolean } | null>(null);
   const [q, setQ] = useState('');
   const [cmdOpen, setCmdOpen] = useState(false);
   const [forgetOpen, setForgetOpen] = useState(false);
@@ -100,7 +101,10 @@ export default function DeviceDetail({
       if (stop) return;
       if (res.error) {
         if (res.errorDetail?.code === 404) { setState('missing'); return; }
-        setErr(explainTelemetryError({ status: res.errorDetail?.code, code: res.errorDetail?.error_code, message: res.error }, 'load'));
+        setErr({
+          text: explainTelemetryError({ status: res.errorDetail?.code, code: res.errorDetail?.error_code, message: res.error }, 'load'),
+          transient: isTransientError(res.errorDetail),
+        });
         setState('error');
         return;
       }
@@ -113,6 +117,12 @@ export default function DeviceDetail({
     })();
     return () => { stop = true; };
   }, [group, node, device, reload, missing]);
+
+  useEffect(() => {
+    if (state !== 'error' || !err?.transient) return;
+    const t = setTimeout(() => setReload((n) => n + 1), 5000);
+    return () => clearTimeout(t);
+  }, [state, reload, err]);
 
   // the default charts are picked once a moment of data is in, then they stay put
   const [defaults, setDefaults] = useState<string[] | null>(null);
@@ -161,6 +171,15 @@ export default function DeviceDetail({
         <Link href={backHref} className="mb-3 inline-flex items-center gap-1 text-xs text-slate-400 hover:text-cyan-300"><ArrowLeft className="h-3 w-3" /> All assets</Link>
         <p className="text-base font-semibold text-white">{target} is not known to Abenix yet.</p>
         <p className="mt-1">An asset shows up with the first message that maps to it, for Sparkplug B that is its birth message. Check the name in the link, or go back to the list to pick one.</p>
+      </div>
+    );
+  }
+
+  if (state === 'error' && !entry && err?.transient) {
+    return (
+      <div data-testid="tel-device-error">
+        <Link href={backHref} className="mb-2 inline-flex items-center gap-1 text-xs text-slate-400 hover:text-cyan-300"><ArrowLeft className="h-3 w-3" /> All assets</Link>
+        <LoadRetry what={target} onRetry={() => setReload((n) => n + 1)} testId="tel-device-retry" />
       </div>
     );
   }
@@ -239,9 +258,13 @@ export default function DeviceDetail({
       )}
 
       {state === 'error' && (
-        <div className="rounded-xl border border-rose-500/30 bg-rose-500/5 p-3 text-sm text-rose-100" role="alert">
-          {err} <button type="button" className="ml-1 text-cyan-300 hover:underline" onClick={() => setReload((n) => n + 1)}>Try again</button>
-        </div>
+        err?.transient ? (
+          <LoadRetry what={`the latest values for ${target}`} onRetry={() => setReload((n) => n + 1)} testId="tel-device-values-retry" />
+        ) : (
+          <div className="rounded-xl border border-rose-500/30 bg-rose-500/5 p-3 text-sm text-rose-100" role="alert">
+            {err?.text} <button type="button" className="ml-1 text-cyan-300 hover:underline" onClick={() => setReload((n) => n + 1)}>Try again</button>
+          </div>
+        )
       )}
 
       {!device && devices.length > 0 && (
@@ -305,7 +328,7 @@ export default function DeviceDetail({
       )}
 
       {forgetOpen && (
-        <ForgetOneDialog group={group} node={node} device={device} onClose={() => setForgetOpen(false)} onDone={() => { setForgetOpen(false); onForgotten?.(); }} />
+        <ForgetOneDialog group={group} node={node} device={device} isOnline={online} onClose={() => setForgetOpen(false)} onDone={() => { setForgetOpen(false); onForgotten?.(); }} />
       )}
 
       {canCommand && cmdOpen && (

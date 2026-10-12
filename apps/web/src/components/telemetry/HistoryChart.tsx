@@ -86,6 +86,14 @@ export function withGaps(points: HistoryPoint[], minGapMs = 10_000): Array<{ t: 
   return out;
 }
 
+// where the stored values begin when the range reaches back further than them
+export function dataStartsText(firstT: number | undefined, from: number, rangeMs: number): string | null {
+  if (firstT === undefined || firstT - from < rangeMs * 0.1) return null;
+  const sameDay = new Date(firstT).toDateString() === new Date().toDateString();
+  const when = sameDay ? clock(firstT).slice(0, 5) : `${new Date(firstT).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} ${clock(firstT).slice(0, 5)}`;
+  return `Data starts ${when}`;
+}
+
 function tickFormat(ms: number, rangeMs: number): string {
   if (rangeMs > 24 * 60 * 60_000) return new Date(ms).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
   if (rangeMs > 60 * 60_000) return clock(ms).slice(0, 5);
@@ -156,6 +164,8 @@ export default function HistoryChart({
     return next;
   }, [data, boolean, unit]);
 
+  const startsText = dataStartsText(data.find((p) => p.v !== null)?.t, from, range.ms);
+
   if (history === null) {
     return (
       <div className="flex items-center justify-center gap-2 rounded-lg bg-slate-900/40 text-xs text-slate-400" style={{ height }} data-testid="tel-chart-loading">
@@ -174,8 +184,14 @@ export default function HistoryChart({
           )}
         </div>
       )}
+      {unit && !boolean && (
+        <span className="pointer-events-none absolute left-1 top-0 z-[1] text-[10px] text-slate-500" data-testid="tel-chart-unit">{unit}</span>
+      )}
+      {startsText && data.length > 0 && (
+        <span className="pointer-events-none absolute right-3 top-0 z-[1] rounded bg-slate-900/80 px-1 text-[10px] text-slate-400" data-testid="tel-chart-starts">{startsText}</span>
+      )}
       <ResponsiveContainer width="100%" height="100%">
-        <LineChart data={drawn} margin={{ top: 6, right: 12, bottom: compact ? 0 : 4, left: 4 }} syncId={syncId}>
+        <LineChart data={drawn} margin={{ top: unit && !boolean ? 16 : 6, right: 12, bottom: compact ? 0 : 4, left: 4 }} syncId={syncId}>
           <defs>
             <pattern id={hatchId} width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
               <line x1="0" y1="0" x2="0" y2="6" stroke="#475569" strokeWidth="1.5" strokeOpacity="0.5" />
@@ -218,7 +234,6 @@ export default function HistoryChart({
             ticks={boolean ? [0, 1] : domainY[0] === 0 && domainY[1] === 100 ? [0, 25, 50, 75, 100] : undefined}
             tickCount={boolean ? undefined : 5}
             tickFormatter={(v: number) => (boolean ? (v ? 'On' : 'Off') : formatNumber(v))}
-            label={unit && !boolean ? { value: unit, angle: -90, position: 'insideLeft', fill: '#64748b', fontSize: 11, dx: 4 } : undefined}
           />
           <Tooltip
             isAnimationActive={false}

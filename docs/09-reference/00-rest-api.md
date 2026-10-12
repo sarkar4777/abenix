@@ -440,7 +440,8 @@ Sparkplug B machines over MQTT. How to use it in [08-howto/17-telemetry](../08-h
 | `GET`, `POST` | `/api/telemetry/connections/{id}/keys` | `telemetry.manage` | Device and gateway keys. POST `{device_id, kind?, group?, allowed_nodes?, label?}` shows the key once |
 | `POST` | `/api/telemetry/connections/{id}/keys/bulk` | `telemetry.manage` | Keys from CSV with a `device_id` column, each shown once |
 | `DELETE` | `/api/telemetry/connections/{id}/keys/{key_id}` | `telemetry.manage` | Revoke a key |
-| `POST` | `/api/telemetry/connections/{id}/preview` | `telemetry.view` | `{payload or payload_base64 or capture, subject?, mapping?, decoder?, decoder_config?}` to `{records, errors, sample}`. Nothing is stored |
+| `POST` | `/api/telemetry/connections/{id}/preview` | `telemetry.view` | `{payload or payload_base64 or capture, subject?, mapping?, decoder?, decoder_config?}` to `{records, errors, sample}`. Nothing is stored. A capture gives up after 20 s with `SOURCE_OFF`, `SIGN_IN_FAILED`, `CANNOT_CONNECT` or `NOTHING_ARRIVED` |
+| `POST` | `/api/telemetry/connections/{id}/test-message` | `telemetry.manage` | Push sources. Sends one message built from the mapping, no token. `{stored, group, node, device, message, sample}` |
 | `POST` | `/api/telemetry/mapping/suggest` | `telemetry.view` | `{payload, subject?, decoder?}` to `{mapping, records, errors}` |
 | `GET` | `/api/telemetry/connections/{id}/inspector` | `telemetry.view` | The last 500 messages with what each decoded to or why it failed. `errors_only` |
 | `GET`, `DELETE` | `/api/telemetry/connections/{id}/dlq` | view, manage | Dead letters with the reason, or clear them |
@@ -1140,9 +1141,9 @@ Tool configuration detail in [08-howto/08-tool-configuration](../08-howto/08-too
 
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
-| `GET` | `/api/admin/alerts` | admin role | Current alerts from Alertmanager, or Prometheus when it is not reachable |
+| `GET` | `/api/admin/alerts` | admin role | Current alerts from Alertmanager, or Prometheus when it is not reachable. Filters `q`, `alertname`, `status`, `label=key:value` (repeats), `rule_id`. Adds `total` and `matched` |
 | `GET` | `/api/admin/alerts/rules` | admin role | Loaded Prometheus rules |
-| `POST` | `/api/admin/alerts/webhook` | webhook token | Alertmanager webhook. Sends each alert to admins and Slack |
+| `POST` | `/api/admin/alerts/webhook` | webhook token | Alertmanager webhook. Dedupes in Redis, answers `{received, queued, skipped, dropped}` and delivers to admins and Slack in the background |
 | `GET` | `/api/admin/cluster/summary` | admin role | Older cluster summary: nodes, pods by phase, PVCs, DB size |
 | `GET` | `/api/admin/cluster/overview` | admin role | Nodes with capacity, use and pressure, every service with ready counts, image, restarts and HPA or KEDA state, warning events from the last hour, which reads are allowed, and a health verdict with reasons. Cached 10 seconds |
 | `GET` | `/api/admin/cluster/database` | admin role | Database size and the largest tables. Cached 60 seconds |

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import useSWR from 'swr';
@@ -8,6 +8,7 @@ import { RefreshCw, Zap } from 'lucide-react';
 import PageHeader from '@/components/layout/PageHeader';
 import NoAccess from '@/components/layout/NoAccess';
 import ViewOnlyBanner from '@/components/shared/ViewOnlyBanner';
+import LoadRetry from '@/components/shared/LoadRetry';
 import { usePageTitle } from '@/hooks/usePageTitle';
 import { apiFetch } from '@/lib/api-client';
 import { holds, useMyPermissions } from '@/lib/capabilities';
@@ -31,7 +32,7 @@ function useNow(ms: number) {
 
 export default function RuleRoute() {
   const { id } = useParams<{ id: string }>();
-  const { perms, loading } = useMyPermissions();
+  const { perms, loading, failed: permsFailed, retry: retryPerms } = useMyPermissions();
   const canView = holds(perms?.capabilities, 'telemetry.view');
   const canManage = holds(perms?.capabilities, 'telemetry.manage');
   const now = useNow(10_000);
@@ -39,14 +40,22 @@ export default function RuleRoute() {
   const list = useSWR(canView ? '/api/telemetry/rules' : null, fetcher, { revalidateOnFocus: false });
   const rule = (res.data?.data ?? null) as Rule | null;
   usePageTitle(rule ? rule.name : 'Signal rule');
-  const initial = useMemo(() => (rule ? draftFromRule(rule) : null), [rule]);
+  const draftKey = rule ? `${rule.id}:${rule.updated_at ?? ''}` : '';
+  const initial = useMemo(() => (rule ? draftFromRule(rule) : null), [draftKey]);
   const others = useMemo(
     () => (Array.isArray(list.data?.data) ? (list.data!.data as Rule[]) : []).filter((r) => r.id !== id).map((r) => r.name),
     [list.data, id],
   );
+  const seen = useRef('');
+  const reloadRule = res.mutate;
+  const onNewest = useCallback((key: string) => {
+    if (seen.current && seen.current !== key) void reloadRule();
+    seen.current = key;
+  }, [reloadRule]);
   const readOnly = !canManage || (rule ? !rule.can_edit : false);
   const purpose = rule?.summary || 'A rule that watches live signals and acts when something happens.';
 
+  if (permsFailed) return <div className="mx-auto max-w-7xl"><LoadRetry what="your permissions" onRetry={retryPerms} testId="perms-retry" /></div>;
   if (loading && !perms) return <div className="mx-auto max-w-7xl"><div className="h-40 animate-pulse rounded-xl bg-slate-800/40" /></div>;
   if (perms && !canView) {
     return (
@@ -116,7 +125,7 @@ export default function RuleRoute() {
           />
           <section className="space-y-3" data-testid="rule-history">
             <h2 className="text-sm font-semibold text-white">Firing history</h2>
-            <FiringHistory ruleId={rule.id} now={now} emptyHint="This rule has not fired yet. Each firing, and what every step did, shows here." />
+            <FiringHistory ruleId={rule.id} now={now} onNewest={onNewest} emptyHint="This rule has not fired yet. Each firing, and what every step did, shows here." />
           </section>
         </>
       )}

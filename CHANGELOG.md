@@ -1,5 +1,59 @@
 # Changelog
 
+## v2.5.9 — 2026-10-12
+
+### Added
+- Send a test message to a push source from the server, built from its own mapping, with no token needed
+- Admins see the testbed's addresses and sign-ins, ready to copy into a new source
+- Alerts can be searched and filtered by name, status, label and signal rule
+- Approvals list who can approve each request, and machine command approvals name the person who asked
+- Chat shows when an agent's machine command is waiting for approval, and why it was denied
+- New setting platform.public_api_url for the address edge gateways use
+- Hourly clean-up of old platform alert notifications, with a per person limit
+- A Reconnecting banner shows while the server is busy, and pages say they couldn't load and are retrying, with a Retry button
+- Add a source offers Use the testbed's details, and Sources shows the testbed card at any time
+- Get started has a copy-link button for the page to send an admin
+
+### Changed
+- A machine command can be approved by the person who asked for it or by anyone who can send machine commands, and everyone who can is told. The card says who can approve and how many
+- Anyone who may send machine commands, and every admin, can approve one, the person who asked included. All of them are told
+- Alerts from many devices on one source arrive as one notification, only for that workspace's admins
+- Source kinds are listed with the most used first
+- The Edge page and the install commands use the same image
+- The Kafka form hides OAuth and TLS fields until the chosen security needs them, and each hint gives its example once
+- Asset pickers show the group whenever a name is used in more than one group, and template agents are named with it
+- Firing history shows a deviation as a percent above or below normal and a zone crossing as where it happened
+- Charts put the unit above the axis and say where the data starts when the range reaches back further
+- Forgetting an asset that is online asks once
+- Copied push code sends the same message the mapping expects, with a new idempotency key on each send
+- The rules page says how fast rules act in plain words
+- Tool badges read Settings ready, Needs a key or Key optional
+- The Assets tab badge says how many are offline
+
+### Fixed
+- An alert storm no longer takes every database connection and blocks sign-in
+- Sign-in, token refresh and the current user have their own database pool
+- Capturing a live message gives up after 20 seconds and says why
+- A push device heard only once goes offline after 5 minutes, not 15
+- Replaying dead letters updates the source's counters and diagnosis
+- Firing alerts no longer show a resolve time
+- A refused push token says where to get a new one
+- 1 message stored reads in the singular
+- A database timeout answers 503 with a retry hint, not 500
+- A busy server no longer signs people out. Reads retry by themselves and sign-in waits and reconnects
+- A change that fails says so in plain words and its button works again
+- Permissions that fail to load show a retry, never view only
+- An asset whose data failed to load no longer shows as offline and never seen
+- Show revoked lists the revoked device keys
+- A Kafka TLS failure gives Kafka advice
+- Opening the alert from a rule firing filters Alerts to that rule
+- Asset cards sit one to a row on a phone
+- A rule's header updates with its firing history
+- The edge wizard has Back after the install command, and register lines are checked when you leave the field
+- Add a source says Save, it goes live for push sources
+- Counts on telemetry and edge pages use the singular for one
+- Members on agent templates are told they can't send machine commands and who can grant it, with no dead-end links
+
 ## v2.5.8 — 2026-10-12
 
 ### Added

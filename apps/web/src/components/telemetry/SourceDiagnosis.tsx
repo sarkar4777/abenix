@@ -4,6 +4,7 @@ import { AlertTriangle, CheckCircle2, CircleDashed, PowerOff, XCircle } from 'lu
 import { describeTest } from '@/lib/telemetry/errors';
 import { addressOf, subjectSummary } from '@/lib/telemetry/sources';
 import type { Source } from './SourcesTab';
+import { pluralShown } from '@/lib/plural';
 
 export type DiagnosisAction = 'turn_on' | 'edit' | 'test' | 'problems' | 'mapping' | 'messages' | 'endpoint';
 export interface Diagnosis { tone: 'ok' | 'wait' | 'warn' | 'bad' | 'off'; text: string; action?: { kind: DiagnosisAction; label: string } }
@@ -16,7 +17,7 @@ export function diagnose(s: Source, opts: { canManage: boolean; assets: number }
     return { tone: 'off', text: `${s.name} is turned off, so nothing from it is read.${opts.canManage ? '' : ' An admin can turn it on.'}`, action: opts.canManage ? { kind: 'turn_on', label: 'Turn it on' } : undefined };
   }
   if (s.status === 'error') {
-    const why = s.last_error ? describeTest({ ok: false, connected: false, messages: 0, topics_seen: [], error: s.last_error }, addressOf(s.config, s.broker_url) || s.name).text : `${s.name} cannot connect.`;
+    const why = s.last_error ? describeTest({ ok: false, connected: false, messages: 0, topics_seen: [], error: s.last_error }, addressOf(s.config, s.broker_url) || s.name, s.transport).text : `${s.name} cannot connect.`;
     return { tone: 'bad', text: why, action: opts.canManage ? { kind: 'edit', label: 'Fix the settings' } : undefined };
   }
   if (!s.last_message_at) {
@@ -62,7 +63,7 @@ export default function SourceDiagnoses({ sources, canManage, assetsBySource, on
   const sorted = [...items].sort((a, b) => rank[a.d.tone] - rank[b.d.tone]);
   return (
     <ul className="space-y-2" data-testid="tel-diagnoses">
-      {sorted.length > MAX && <li className="text-xs text-slate-400">{sorted.length} sources need a look, the first {MAX} are below. Sources lists them all.</li>}
+      {sorted.length > MAX && <li className="text-xs text-slate-400">{pluralShown(sorted.length, (sorted.length).toLocaleString('en-US'), 'source')} need a look, the first {MAX} are below. Sources lists them all.</li>}
       {sorted.slice(0, MAX).map(({ s, d }) => {
         const Icon = ICON[d.tone];
         return (

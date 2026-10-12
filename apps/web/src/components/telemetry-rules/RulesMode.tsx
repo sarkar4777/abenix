@@ -24,7 +24,7 @@ export default function RulesMode({ mode, isAdmin, onChanged }: { mode: ModeDoc 
 
   async function set(next: string) {
     setBusy(true);
-    const res = await apiFetch('/api/telemetry/rules/mode', { method: 'PUT', body: JSON.stringify({ mode: next === 'default' ? null : next }), silent: true });
+    const res = await apiFetch('/api/telemetry/rules/mode', { method: 'PUT', body: JSON.stringify({ mode: next === 'default' ? null : next }), silent: true, throwOnError: false });
     setBusy(false);
     if (res.error) { toastError(res.error); return; }
     toastSuccess(next === 'pool' ? 'Rules move to the rules pool within a couple of seconds.' : 'Rules run where the platform default says, within a couple of seconds.');

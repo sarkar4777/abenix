@@ -212,7 +212,7 @@ Tables are `holding`, `input`, `coil` and `discrete`. Types are `int16`, `uint16
 **OPC UA nodes.** One node a line: node id, then the signal name and unit you want in Abenix.
 
 ```text
-ns=3;s=SlowDouble1, Boiler/Temp_C, C
+ns=2;s=Boiler.Temperature, Boiler/Temp_C, C
 ns=2;i=10853, Line/Speed_mps, m/s
 ```
 
@@ -228,7 +228,7 @@ On the Edge page (`/edge`) choose **Add an edge gateway**. The Get started guide
 
 1. **What it collects.** Pick one or more collectors. Each card says what it reads and what the box needs, such as a CAN interface.
 2. **Settings.** Name the gateway, then fill in each collector and the asset its readings go to. Every field has an example and is checked as you type. A DBC upload is read and summarised before you save.
-3. **Install.** Give the address the gateway uses to reach Abenix, make the command and copy the one for your box. Each carries a fresh enrolment token.
+3. **Install.** Give the address the gateway uses to reach Abenix, make the command and copy the one for your box. Each carries a fresh enrolment token. The address starts as the `platform.public_api_url` setting (Admin, Settings), then the address your browser reached.
 4. **First start.** The page waits, live, until the box enrols. After a minute it lists what to check. A token not used within 24 hours shows as expired. Make a new command.
 5. **First data.** Once the box enrols, its source appears under Telemetry -> Sources as "Edge" plus the gateway name. The page shows each collector's status and the first assets as their readings land.
 6. **Open in Telemetry.** The last step links to the group in Telemetry. Details on the gateway card lists the assets it writes later on.
@@ -237,7 +237,7 @@ The gateway also reports on itself as the asset `edge / <gateway id> / gateway`,
 
 ### Install
 
-The commands are generated for your gateway, with the image this cluster uses (`EDGE_COLLECTOR_IMAGE` on the API overrides it). They add what the collectors need: host networking for a local CAN interface, `--device` for serial ports and read-only mounts for tailed folders.
+The commands are generated for your gateway, with the image this cluster uses, the same one the Edge page lists (`EDGE_COLLECTOR_IMAGE` on the API overrides it, `EDGE_IMAGE_TAG` sets the tag, `latest` by default). They add what the collectors need: host networking for a local CAN interface, `--device` for serial ports and read-only mounts for tailed folders.
 
 **docker run**
 

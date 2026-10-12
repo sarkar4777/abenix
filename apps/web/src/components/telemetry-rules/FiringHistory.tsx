@@ -1,12 +1,13 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import useSWR from 'swr';
 import { CheckCircle2, ChevronDown, ChevronRight, CircleDashed, Clock, ExternalLink, MinusCircle, RefreshCw, XCircle } from 'lucide-react';
 import { apiFetch } from '@/lib/api-client';
-import { ACTION_INFO, ago, dayTime, fmt, type ActionKind, type ActionOutcome, type Firing } from './lib';
+import { ACTION_INFO, ago, dayTime, firingValueText, type ActionKind, type ActionOutcome, type Firing } from './lib';
 import { Badge } from './ui';
+import { firingStepLink } from '@/lib/alertsFilter';
 
 function fetcher(url: string) {
   return apiFetch<Firing[]>(url, { silent: true });
@@ -30,9 +31,11 @@ function took(ms?: number): string | null {
   return ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`;
 }
 
-function StepRow({ a, i }: { a: ActionOutcome; i: number }) {
+function StepRow({ a, i, ruleId }: { a: ActionOutcome; i: number; ruleId?: string | null }) {
   const [open, setOpen] = useState(false);
-  const link = (a.ref && typeof a.ref === 'object' && typeof (a.ref as { link?: unknown }).link === 'string') ? (a.ref as { link: string }).link : null;
+  const raw = (a.ref && typeof a.ref === 'object' && typeof (a.ref as { link?: unknown }).link === 'string') ? (a.ref as { link: string }).link : null;
+  const link = raw ? firingStepLink(raw, ruleId, (a.ref as { alertname?: unknown }).alertname) : null;
+  const linkText = link?.startsWith('/alerts') ? 'open the alert' : link?.startsWith('/decisions') ? 'open the decision' : 'open the run';
   const has = (a.input && Object.keys(a.input).length > 0) || (a.output !== undefined && a.output !== null);
   const dur = took(a.duration_ms);
   return (
@@ -46,7 +49,7 @@ function StepRow({ a, i }: { a: ActionOutcome; i: number }) {
           {dur && <span className="ml-1 text-slate-500">({dur})</span>}
           {link && (
             <Link href={link} className="ml-1 inline-flex items-center gap-0.5 text-cyan-300 hover:underline" data-testid="firing-step-link">
-              open the run <ExternalLink className="h-3 w-3" />
+              {linkText} <ExternalLink className="h-3 w-3" />
             </Link>
           )}
         </span>
@@ -94,11 +97,11 @@ export function FiringRow({ f, showRule, now }: { f: Firing; showRule?: boolean;
       </div>
       <p className="mt-1.5 text-sm text-slate-100">{f.detail}</p>
       {f.value !== null && f.value !== undefined && f.signal && (
-        <p className="mt-0.5 text-xs text-slate-500"><span className="font-mono">{f.signal}</span> = {Array.isArray(f.value) ? f.value.map((v) => fmt(v)).join(', ') : fmt(f.value)}</p>
+        <p className="mt-0.5 text-xs text-slate-500" data-testid="firing-value"><span className="font-mono">{f.signal}</span> {firingValueText(f)}</p>
       )}
       {f.actions.length > 0 ? (
         <ol className="mt-2 space-y-1" data-testid="firing-steps">
-          {f.actions.map((a, i) => <StepRow key={i} a={a} i={i} />)}
+          {f.actions.map((a, i) => <StepRow key={i} a={a} i={i} ruleId={f.rule_id} />)}
         </ol>
       ) : (
         <p className="mt-2 text-xs text-slate-500">No steps. It was recorded and sent to webhooks as telemetry.rule_fired.</p>
@@ -107,7 +110,7 @@ export function FiringRow({ f, showRule, now }: { f: Firing; showRule?: boolean;
   );
 }
 
-export default function FiringHistory({ ruleId, showRule, now, emptyHint }: { ruleId?: string; showRule?: boolean; now: number; emptyHint?: string }) {
+export default function FiringHistory({ ruleId, showRule, now, emptyHint, onNewest }: { ruleId?: string; showRule?: boolean; now: number; emptyHint?: string; onNewest?: (key: string) => void }) {
   const [status, setStatus] = useState('');
   const [limit, setLimit] = useState(30);
   const url = useMemo(() => {
@@ -119,6 +122,11 @@ export default function FiringHistory({ ruleId, showRule, now, emptyHint }: { ru
   const res = useSWR(url, fetcher, { refreshInterval: 4000, revalidateOnFocus: false, keepPreviousData: true });
   const rows = Array.isArray(res.data?.data) ? (res.data!.data as Firing[]) : null;
   const error = res.data?.error || (res.error ? 'The firing history could not load.' : null);
+  // the page header follows the newest firing and its state
+  const newest = rows?.length ? `${rows[0].id}:${rows[0].status}:${rows.filter((r) => r.status === 'firing').length}` : '';
+  useEffect(() => {
+    if (newest) onNewest?.(newest);
+  }, [newest, onNewest]);
 
   return (
     <div className="space-y-3" data-testid="firing-history">

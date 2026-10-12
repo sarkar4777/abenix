@@ -7,6 +7,7 @@ import { Car, CircuitBoard, Factory, Loader2, Plus, RefreshCw, Send, Wifi } from
 import PageHeader from '@/components/layout/PageHeader';
 import NextSteps from '@/components/shared/NextSteps';
 import ViewOnlyBanner from '@/components/shared/ViewOnlyBanner';
+import LoadRetry from '@/components/shared/LoadRetry';
 import { usePageTitle } from '@/hooks/usePageTitle';
 import { holds, useMyPermissions } from '@/lib/capabilities';
 import AddGatewayWizard, { type WizardStart } from '@/components/edge/AddGatewayWizard';
@@ -22,7 +23,7 @@ function EdgePage() {
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
-  const { perms, loading: permsLoading } = useMyPermissions();
+  const { perms, loading: permsLoading, failed: permsFailed, retry: retryPerms } = useMyPermissions();
   const canManage = holds(perms?.capabilities, 'telemetry.manage');
 
   const [gateways, setGateways] = useState<Gateway[] | null>(null);
@@ -109,6 +110,7 @@ function EdgePage() {
           }
         />
 
+        {permsFailed && <LoadRetry what="your permissions" onRetry={retryPerms} testId="perms-retry" />}
         {!permsLoading && !canManage && (
           <ViewOnlyBanner testId="edge-view-only">
             You can see the gateways and their health. Adding, changing, revoking or removing a gateway, and sending agents to one, needs Manage telemetry brokers. An admin can give you that under Admin, Permissions.

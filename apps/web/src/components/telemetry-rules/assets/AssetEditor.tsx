@@ -15,6 +15,7 @@ import {
   isDirty, keyFieldsText, locationText, newFieldRow, placeServerErrors, rowKey, statusOf, toPayload, typeLabel, validateDraft,
   type AssetDraft, type AssetRow, type DraftErrors, type LocKind,
 } from './lib';
+import { dayTime } from '@/components/telemetry-rules/lib';
 
 export type EditorState =
   | { kind: 'loading'; keyText: string }
@@ -176,7 +177,7 @@ function AssetDetail({ asset, reason, now, onClose }: { asset: AssetRow; reason:
             <span className="block space-y-0.5">{extra.map(([k, v]) => <span key={k} className="block"><span className="font-mono text-xs text-slate-400">{k}</span> {v}</span>)}</span>
           </Row>
         )}
-        {asset.updated_at && <Row label="Last changed">{new Date(asset.updated_at).toLocaleString()}</Row>}
+        {asset.updated_at && <Row label="Last changed">{dayTime(asset.updated_at)}</Row>}
       </dl>
       <div className="mt-4 flex justify-end">
         <button type="button" onClick={onClose} className="min-h-[40px] rounded-lg border border-slate-600 px-4 py-2 text-sm text-slate-200 hover:bg-slate-800" data-testid="asset-detail-close">Close</button>

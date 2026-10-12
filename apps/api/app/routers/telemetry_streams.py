@@ -7,6 +7,7 @@ import base64
 import hashlib
 import hmac
 import json
+import re
 import time
 import uuid
 from typing import Any
@@ -133,6 +134,19 @@ def inflate(raw: bytes, cap: int) -> bytes:
     return bytes(out)
 
 
+def old_token_words(token: str) -> str:
+    """Where to get a key that works, by the kind of key that was refused."""
+    if token.startswith((sources.DEVICE_PREFIX, sources.GATEWAY_PREFIX)):
+        return (
+            "That device key does not open this source. It may be revoked, or belong to another source. "
+            "Make a new one under Sources, Device keys."
+        )
+    return (
+        "That token does not open this source. It was replaced, or belongs to another source. "
+        "Get a new one under Sources, Endpoint and token, Get a new token, and give it to the sender."
+    )
+
+
 @router.post("/ingest/{connection_id}", status_code=202)
 async def ingest(
     connection_id: uuid.UUID,
@@ -171,12 +185,7 @@ async def ingest(
             and hmac.compare_digest(digest, c.ingest_token_hash)
         )
     if not ok:
-        return error(
-            "That key does not open this source. It may be revoked, or belong to another source. "
-            "Make a new one under the source's keys.",
-            401,
-            error_code="UNAUTHORIZED",
-        )
+        return error(old_token_words(token), 401, error_code="UNAUTHORIZED")
     if not c.enabled:
         return error(
             "This source is turned off, nothing was taken.", 409, error_code="DISABLED"
@@ -396,6 +405,83 @@ async def _decode(
     }
 
 
+CAPTURE_WAIT_S = 20.0
+_SIGN_IN = re.compile(
+    r"auth|sasl|scram|password|credential|not authori[sz]ed|access.?refused|"
+    r"access denied|401|403|login|sign.?in|bad user",
+    re.I,
+)
+
+
+def capture_refusal(status: dict[str, Any] | None, waited_s: float) -> JSONResponse:
+    """Why nothing was captured, in the source's own terms."""
+    st = (status or {}).get("status")
+    why = ((status or {}).get("last_error") or "").strip().rstrip(".")
+    why = f"{why}." if why else ""
+    if st == "disabled":
+        return error(
+            "This source is turned off, so no message can arrive. Turn it on and try again.",
+            409,
+            error_code="SOURCE_OFF",
+        )
+    if st == "error" and why and _SIGN_IN.search(why):
+        return error(
+            f"The source turned down Abenix's sign-in: {why} Check the user name and password on the source.",
+            408,
+            error_code="SIGN_IN_FAILED",
+        )
+    if st in ("error", "connecting"):
+        detail = f" The last error was: {why}" if why else ""
+        return error(
+            f"Abenix cannot connect to this source.{detail} Check the address and that the broker is running.",
+            408,
+            error_code="CANNOT_CONNECT",
+        )
+    return error(
+        f"Nothing arrived in {int(waited_s)} seconds. The source is connected, so check that something is sending to the topics it listens on.",
+        408,
+        error_code="NOTHING_ARRIVED",
+    )
+
+
+async def capture_next(
+    c: Any, row: dict[str, Any], wait_s: float = CAPTURE_WAIT_S
+) -> tuple[dict[str, Any] | None, JSONResponse | None]:
+    """The next live message on a source, or the reason none came within wait_s."""
+    from app.telemetry import reads
+
+    r = redis()
+
+    async def status() -> dict[str, Any] | None:
+        try:
+            return (await reads.connection_status(r, [c])).get(str(c.id))
+        except Exception:  # noqa: BLE001
+            return None
+
+    st = await status()
+    if (st or {}).get("status") == "disabled":
+        return None, capture_refusal(st, 0)
+    if (st or {}).get("status") == "error" and _SIGN_IN.search(
+        (st or {}).get("last_error") or ""
+    ):
+        return None, capture_refusal(st, 0)
+    since = int(time.time() * 1000)
+    started = time.monotonic()
+    while time.monotonic() - started < wait_s:
+        try:
+            head = await asyncio.wait_for(
+                r.lrange(K.inspector(row["tenant"], row["id"]), 0, 0), 2.0
+            )
+        except Exception:  # noqa: BLE001
+            head = []
+        if head:
+            cand = json.loads(head[0])
+            if cand.get("t", 0) >= since:
+                return cand, None
+        await asyncio.sleep(0.25)
+    return None, capture_refusal(await status(), wait_s)
+
+
 @router.post("/connections/{conn_id}/preview")
 async def preview(
     conn_id: uuid.UUID,
@@ -410,23 +496,9 @@ async def preview(
     row = pipeline.connection_row(c)
     await db.close()
     if body.get("capture"):
-        r = redis()
-        since = int(time.time() * 1000)
-        doc = None
-        for _ in range(40):
-            head = await r.lrange(K.inspector(row["tenant"], row["id"]), 0, 0)
-            if head:
-                cand = json.loads(head[0])
-                if cand.get("t", 0) >= since:
-                    doc = cand
-                    break
-            await asyncio.sleep(0.25)
-        if doc is None:
-            return error(
-                "Nothing arrived in 10 seconds. Check the connection is connected and its source is sending.",
-                408,
-                error_code="NOTHING_ARRIVED",
-            )
+        doc, refused = await capture_next(c, row)
+        if refused is not None:
+            return refused
         raw = (
             base64.b64decode(doc["payload"])
             if doc.get("encoding") == "base64"
@@ -471,6 +543,87 @@ async def preview(
         "size": len(env.payload),
     }
     return success(out)
+
+
+@router.post("/connections/{conn_id}/test-message")
+async def send_test_message(
+    conn_id: uuid.UUID,
+    request: Request,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """Push one message built from the source's mapping, from the server, with no token."""
+    from app.telemetry import test_message as TM
+
+    if not await access.has(db, user, "telemetry.manage"):
+        return forbidden(_manage_refusal())
+    c = await _conn(db, user, conn_id)
+    if c is None:
+        return error("Connection not found", 404, error_code="NOT_FOUND")
+    if c.transport != "http_push":
+        return error(
+            "Test messages are for push sources. For other sources, use Capture a live message.",
+            422,
+            error_code="NOT_PUSH",
+        )
+    if not c.enabled:
+        return error(
+            "This source is turned off, so the test message would not be taken. Turn it on first.",
+            409,
+            error_code="SOURCE_OFF",
+        )
+    row = pipeline.connection_row(c)
+    raw, ctype = TM.encode(TM.sample_doc(row["mapping"]), row["decoder"])
+    subject = (c.config or {}).get("subject") or "push"
+    headers = {"content-type": ctype, "x-abenix-test": "1"}
+    env = Envelope(row["id"], row["tenant"], subject, raw, headers=headers)
+    out = await _decode(row, env, None, None, None)
+    recs = out.get("records") or []
+    if not recs:
+        why = (out.get("errors") or [out.get("skip_reason")] or [None])[0]
+        return success(
+            {
+                "stored": False,
+                "message": (
+                    f"The test message did not make a reading under this source's mapping: {why}. Fix the mapping and send again."
+                    if why
+                    else "The test message did not make a reading under this source's mapping. Fix the mapping and send again."
+                ),
+                "sample": raw.decode("utf-8", "replace"),
+            }
+        )
+    await http_push.enqueue(
+        redis(),
+        str(c.id),
+        raw,
+        subject=subject,
+        headers=headers,
+        msg_id=f"test-{uuid.uuid4()}",
+        t_recv=time.time(),
+    )
+    await log_action(
+        db,
+        user.tenant_id,
+        user.id,
+        "telemetry.connection.test_message",
+        {"name": c.name},
+        request,
+        resource_type=access.KIND,
+        resource_id=str(c.id),
+    )
+    await db.commit()
+    first = recs[0]
+    where = "/".join(x for x in (first.get("node"), first.get("device")) if x)
+    return success(
+        {
+            "stored": True,
+            "group": first.get("group"),
+            "node": first.get("node"),
+            "device": first.get("device") or None,
+            "message": f"Test message sent. {where} shows up under Assets in a few seconds.",
+            "sample": raw.decode("utf-8", "replace"),
+        }
+    )
 
 
 @router.post("/mapping/suggest")
@@ -675,6 +828,13 @@ async def replay(
             await E.emit(db, t, kind, payload)
         await r.lrem(key, 1, raw_entry)
         replayed += 1
+    if replayed:
+        rk = K.conn_replayed(c.id)
+        try:
+            await r.hincrby(rk, "stored", replayed)
+            await r.expire(rk, 7 * 86400)
+        except Exception:  # noqa: BLE001
+            pass
     if history_rows:
         try:
             from app.telemetry import history

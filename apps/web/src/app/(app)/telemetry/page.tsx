@@ -7,6 +7,7 @@ import { Boxes, Compass, Inbox, Plug, Plus, RadioTower } from 'lucide-react';
 import PageHeader from '@/components/layout/PageHeader';
 import NoAccess from '@/components/layout/NoAccess';
 import ViewOnlyBanner from '@/components/shared/ViewOnlyBanner';
+import LoadRetry from '@/components/shared/LoadRetry';
 import { usePageTitle } from '@/hooks/usePageTitle';
 import { apiFetch } from '@/lib/api-client';
 import { holds, useMyPermissions } from '@/lib/capabilities';
@@ -31,6 +32,7 @@ import type { TransportDecl } from '@/lib/telemetry/sources';
 import type { AssetInfo } from '@/lib/telemetry/store';
 import { IngestHealth, LiveBadge, QuotaBanner } from '@/components/telemetry/IngestHealth';
 import { RANGES, type RangeId } from '@/components/telemetry/HistoryChart';
+import { pluralShown } from '@/lib/plural';
 
 type Tab = 'assets' | 'messages' | 'sources';
 const TABS: { id: Tab; label: string; icon: typeof Boxes }[] = [
@@ -62,7 +64,7 @@ function TelemetryPage() {
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
-  const { perms, loading: permsLoading } = useMyPermissions();
+  const { perms, loading: permsLoading, failed: permsFailed, retry: retryPerms } = useMyPermissions();
   const caps = perms?.capabilities;
   const canView = holds(caps, 'telemetry.view');
   const canManage = holds(caps, 'telemetry.manage');
@@ -127,7 +129,8 @@ function TelemetryPage() {
     const rows = Array.isArray(d) ? d : d && typeof d === 'object' && Array.isArray((d as { assets?: unknown }).assets) ? (d as { assets: unknown[] }).assets : null;
     if (rows) setAssets(rows as AssetInfo[]);
   }, [assetsRes.data, setAssets]);
-  const [guideOpen, setGuideOpen] = useState(false);
+  const guideParam = params.get('guide');
+  const [guideOpen, setGuideOpen] = useState(!!guideParam);
   const [wizard, setWizard] = useState<WizardStart | null>(null);
   const [bulkForget, setBulkForget] = useState<(Partial<BulkQuery> & { autoPreview?: boolean }) | null>(null);
   const [forgetTick, setForgetTick] = useState(0);
@@ -247,6 +250,9 @@ function TelemetryPage() {
     if (!seen) setGuideOpen(true);
   }, [canManage, sources]);
 
+  if (permsFailed) {
+    return <div className="mx-auto max-w-7xl"><LoadRetry what="your permissions" onRetry={retryPerms} testId="tel-perms-retry" /></div>;
+  }
   if (permsLoading && !perms) {
     return <div className="mx-auto max-w-7xl"><div className="h-40 animate-pulse rounded-xl bg-slate-800/40" /></div>;
   }
@@ -312,7 +318,7 @@ function TelemetryPage() {
           const problems = (sources || []).reduce((a, s) => a + (s.dlq_count ?? 0), 0);
           const broken = (sources || []).filter((c) => c.enabled && c.status === 'error').length;
           const badge = t.id === 'assets' ? totals.total - totals.online : t.id === 'messages' ? problems : broken;
-          const why = t.id === 'assets' ? `${badge} offline` : t.id === 'messages' ? `${badge} messages could not be stored` : `${badge} cannot connect`;
+          const why = t.id === 'assets' ? `${badge} offline` : t.id === 'messages' ? `${pluralShown(badge, (badge).toLocaleString('en-US'), 'message')} could not be stored` : `${badge} cannot connect`;
           return (
             <button
               key={t.id}
@@ -325,7 +331,7 @@ function TelemetryPage() {
               data-testid={`tel-tab-${t.id}`}
             >
               <Icon className="h-4 w-4" /> {t.label}
-              {badge > 0 && <span className={`rounded-full px-1.5 text-[11px] ${t.id === 'messages' ? 'bg-amber-500/20 text-amber-200' : 'bg-rose-500/20 text-rose-200'}`} title={why}>{badge}</span>}
+              {badge > 0 && <span className={`rounded-full px-1.5 text-[11px] ${t.id === 'messages' ? 'bg-amber-500/20 text-amber-200' : 'bg-rose-500/20 text-rose-200'}`} title={why} data-testid={`tel-tab-badge-${t.id}`}>{t.id === 'assets' ? `${badge} offline` : badge}</span>}
             </button>
           );
         })}
@@ -334,7 +340,11 @@ function TelemetryPage() {
       <div id={`tel-panel-${tab}`} role="tabpanel" className="min-w-0">
         {tab === 'assets' && (
           selected || nodeParam ? (
-            selected ? (
+            selected && !selectedEntry && rosterErr ? (
+              <LoadRetry what="this asset" onRetry={() => roster.mutate()} testId="tel-device-retry" />
+            ) : selected && !selectedEntry && !loaded ? (
+              <div className="h-60 animate-pulse rounded-xl bg-slate-800/40" data-testid="tel-device-resolving" />
+            ) : selected ? (
               <DeviceDetail
                 group={selected.group}
                 node={selected.node}
@@ -355,7 +365,7 @@ function TelemetryPage() {
                 backHref={`/telemetry${lastListQs.current ? `?${lastListQs.current}` : ''}`}
               />
             ) : rosterErr ? (
-              <p className="rounded-xl border border-rose-500/30 bg-rose-500/5 p-4 text-sm text-rose-100" role="alert">{rosterErr}</p>
+              <LoadRetry what="this asset" onRetry={() => roster.mutate()} testId="tel-device-retry" />
             ) : !loaded ? (
               <div className="h-60 animate-pulse rounded-xl bg-slate-800/40" data-testid="tel-device-resolving" />
             ) : (
@@ -393,7 +403,7 @@ function TelemetryPage() {
             </>
           )
         )}
-        <GetStarted open={guideOpen} onClose={() => setGuideOpen(false)} canManage={canManage} transports={transports} onSource={(s) => setWizard(s)} />
+        <GetStarted open={guideOpen} initialCat={guideParam} onClose={() => { setGuideOpen(false); if (guideParam) setParams({ guide: null }); }} canManage={canManage} transports={transports} onSource={(s) => setWizard(s)} />
         {bulkForget && (
           <BulkForgetDialog
             groups={Array.from(new Set(nodeList.map((n) => n.group))).sort()}
@@ -420,7 +430,12 @@ function TelemetryPage() {
             canManage={canManage}
             openSources={() => openSources(canManage)}
             active
-            reloadSources={() => { void conns.mutate(); }}
+            reloadSources={() => {
+              // the counters can trail a replay by a moment, look again shortly after
+              const again = () => { void conns.mutate(); void roster.mutate(); void healthRes.mutate(); };
+              again();
+              setTimeout(again, 2500);
+            }}
           />
         )}
         {tab === 'sources' && (
@@ -437,6 +452,8 @@ function TelemetryPage() {
             focus={params.get('focus') ? { id: params.get('focus')!, action: (params.get('faction') as 'edit' | 'mapping' | 'test' | 'endpoint') || 'edit' } : null}
             onFocusHandled={() => setParams({ focus: null, faction: null })}
             openGuide={() => setGuideOpen(true)}
+            testbed={testbed}
+            onTestbed={() => void onFirst('testbed')}
           />
         )}
       </div>

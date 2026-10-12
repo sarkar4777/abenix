@@ -20,9 +20,14 @@ export function holds(granted: readonly string[] | undefined, cap: string): bool
   return granted.includes(`${group}.*`);
 }
 
+// A failed load is "unknown, retrying", never a quiet downgrade to view only.
+// loading stays true until the permissions arrive, failed tells the page to say so.
 export function useMyPermissions() {
-  const { data, isLoading } = useApi<MyPermissions>('/api/me/permissions');
-  return { perms: data, loading: isLoading };
+  const { data, error, isLoading, mutate } = useApi<MyPermissions>('/api/me/permissions', {
+    refreshInterval: (latest: unknown) => (latest && (latest as { error?: unknown }).error ? 4000 : 0),
+  });
+  const failed = !data && !!error;
+  return { perms: data, loading: isLoading || failed, failed, retry: mutate };
 }
 
 export function useCapability(cap: string): { allowed: boolean; loading: boolean } {

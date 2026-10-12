@@ -48,7 +48,7 @@ describe('agent templates', () => {
   it('builds a command agent with approval on and the asset in its policy', () => {
     const t = templateById('machine-health-watcher')!;
     const b = buildFromTemplate(t, { key: 'testbed/meter-1/plc', name: 'Meter 1' }, ['Setpoint']);
-    expect(b.name).toBe('Machine health watcher for Meter 1');
+    expect(b.name).toBe('Machine health watcher for Meter 1 (testbed/meter-1)');
     const pol = b.tool_config.device_command.parameter_defaults.policy as Record<string, unknown>;
     expect(pol).toMatchObject({ assets: ['testbed/meter-1'], signals: ['Setpoint'], approval: 'always' });
     expect(b.system_prompt).toContain('Meter 1 (key testbed/meter-1/plc)');

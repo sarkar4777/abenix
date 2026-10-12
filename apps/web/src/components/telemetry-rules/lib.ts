@@ -483,7 +483,7 @@ export function fmt(v: unknown): string {
     if (Number.isInteger(v)) return String(v);
     return String(Math.round(v * 1000) / 1000);
   }
-  if (v === null || v === undefined || v === '') return '?';
+  if (v === null || v === undefined || v === '') return '–';
   return String(v);
 }
 
@@ -647,4 +647,29 @@ export function pointInPolygon(x: number, y: number, poly: number[][]): boolean 
 export function roundCoord(v: number, gnss: boolean): number {
   const k = gnss ? 1e6 : 100;
   return Math.round(v * k) / k;
+}
+
+// the reading behind a firing in words: a deviation as a percent from normal, a zone crossing as where
+export function firingValueText(f: Pick<Firing, 'value' | 'detail' | 'signal'>): string | null {
+  const v = f.value;
+  if (v === null || v === undefined) return null;
+  if (Array.isArray(v) && v.length === 2 && v.every((x) => typeof x === 'number')) {
+    const verb = /entered/i.test(f.detail || '') ? 'entered the zone at' : 'left the zone at';
+    return `${verb} ${fmt(v[0])}, ${fmt(v[1])}`;
+  }
+  const dev = /(\d+(?:\.\d+)?)\s?% (above|below)/i.exec(f.detail || '');
+  if (dev) return `${dev[1]}% ${dev[2].toLowerCase()} normal`;
+  return `= ${Array.isArray(v) ? v.map((x) => fmt(x)).join(', ') : fmt(v)}`;
+}
+
+export function speed(ms: number): string {
+  if (ms < 1) return 'under a millisecond';
+  if (ms < 1000) return `${Math.round(ms)} ms`;
+  return `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)} s`;
+}
+
+// how quickly the rules act, in words, the slowest of nearly every reading
+export function rulesSpeedText(lagMs: number | null): string {
+  if (lagMs === null) return '';
+  return lagMs < 1 ? 'Rules act on new readings at once.' : `Rules act on new readings within ${speed(lagMs)}.`;
 }

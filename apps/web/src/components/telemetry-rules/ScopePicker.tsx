@@ -6,6 +6,8 @@ import useSWR from 'swr';
 import { apiFetch } from '@/lib/api-client';
 import { ASSET_TYPES, type Scope } from './lib';
 import { Choice, Field, cls } from './ui';
+import { assetLabel, repeatedNames } from '@/lib/telemetry/assetLabel';
+import { pluralShown } from '@/lib/plural';
 
 interface AssetRow { key: string; group: string; node: string; device: string; display_name: string | null; type: string | null; tags: string[]; parts?: string[]; online?: boolean | null; live?: boolean }
 interface Meta { types?: Record<string, number>; tags?: Array<{ tag: string; count: number }> }
@@ -43,6 +45,7 @@ export default function ScopePicker({
     return 0;
   }, [assets, scope]);
 
+  const repeated = useMemo(() => repeatedNames(assets), [assets]);
   const set = (patch: Partial<Scope>) => onChange({ ...scope, ...patch });
 
   return (
@@ -56,7 +59,7 @@ export default function ScopePicker({
       {scope.kind === 'asset' && (
         <div className="grid gap-3 sm:grid-cols-2">
           <Field label="Asset" error={errors['scope.node'] || errors['scope.group']} htmlFor="scope-asset" testId="scope-asset-field"
-            help={loading ? 'Loading assets' : assets.length ? `${assets.length} assets are streaming or named.` : undefined}>
+            help={loading ? 'Loading assets' : assets.length ? `${pluralShown(assets.length, (assets.length).toLocaleString('en-US'), 'asset')} are streaming or named.` : undefined}>
             <select
               id="scope-asset"
               value={scope.group && scope.node ? `${scope.group}/${scope.node}` : ''}
@@ -73,7 +76,7 @@ export default function ScopePicker({
                 <optgroup key={g} label={g}>
                   {assets.filter((a) => a.group === g).map((a) => (
                     <option key={a.key} value={`${a.group}/${a.node}`}>
-                      {a.display_name ? `${a.display_name} (${a.node})` : a.node}{a.online === false ? ', offline' : ''}
+                      {assetLabel(a, repeated)}{a.online === false ? ', offline' : ''}
                     </option>
                   ))}
                 </optgroup>

@@ -2,6 +2,7 @@
 
 import { AlertTriangle, ChevronRight, Clock, Database, Radio, Send } from 'lucide-react';
 import { count, duration, isCollecting, statusOf, timeAgo, type Gateway } from './model';
+import { pluralShown } from '@/lib/plural';
 
 export function StatusChip({ status, testId }: { status: string; testId?: string }) {
   const s = statusOf(status);
@@ -32,11 +33,11 @@ export default function GatewayCard({ g, onOpen, onDeploy, canManage }: { g: Gat
         <span className="flex items-center gap-1.5"><Radio className="h-3 w-3 text-slate-500" /> {collecting ? `${g.collector_count} ${g.collector_count === 1 ? 'collector' : 'collectors'}` : 'Agents only'}</span>
         {collecting && g.enrolled_at && (
           <span className={`col-span-2 flex items-center gap-1.5 ${backlog ? 'text-amber-200' : ''}`}>
-            <Database className="h-3 w-3 text-slate-500" /> {!depth ? 'Buffer empty, all sent' : age >= 1 ? `${count(depth)} readings waiting, oldest ${duration(age)}` : `${count(depth)} readings about to be sent`}
+            <Database className="h-3 w-3 text-slate-500" /> {!depth ? 'Buffer empty, all sent' : age >= 1 ? `${pluralShown(depth, count(depth), 'reading')} waiting, oldest ${duration(age)}` : `${pluralShown(depth, count(depth), 'reading')} about to be sent`}
           </span>
         )}
         {(g.roles || []).includes('agents') && (
-          <span className="col-span-2 flex items-center gap-1.5"><Send className="h-3 w-3 text-slate-500" /> {g.deployed_agents?.length || 0} agents deployed</span>
+          <span className="col-span-2 flex items-center gap-1.5"><Send className="h-3 w-3 text-slate-500" /> {pluralShown(g.deployed_agents?.length || 0, (g.deployed_agents?.length || 0).toLocaleString('en-US'), 'agent')} deployed</span>
         )}
       </div>
       {(bad.length > 0 || g.problem || g.config_pending) && (

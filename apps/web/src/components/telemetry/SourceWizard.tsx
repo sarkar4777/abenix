@@ -7,7 +7,7 @@ import { useApi } from '@/hooks/useApi';
 import { apiFetch } from '@/lib/api-client';
 import { describeTest, explainTelemetryError, nameProblem } from '@/lib/telemetry/errors';
 import {
-  BLANK_MAPPING, fieldProblem, initialValues, isSecret, splitList, toPayload, withSubjects, type DecoderDecl, type FieldDecl, type Mapping, type TransportDecl,
+  BLANK_MAPPING, fieldProblem, fieldShown, initialValues, sortTransports, isSecret, splitList, toPayload, withSubjects, type DecoderDecl, type FieldDecl, type Mapping, type TransportDecl,
 } from '@/lib/telemetry/sources';
 import type { Connection, ConnectionTest } from '@/lib/telemetry/types';
 import { toastSuccess } from '@/stores/toastStore';
@@ -15,6 +15,7 @@ import FieldInput from './FieldInput';
 import MappingEditor, { mappingProblems } from './MappingEditor';
 import PushPanel from './PushPanel';
 import { TransportIcon } from './transportIcon';
+import { testbedServiceFor, testbedSummary, testbedValues, type TestbedInfo } from '@/lib/telemetry/testbed';
 
 type Step = 'transport' | 'settings' | 'decoder' | 'mapping' | 'finish';
 const STEPS: { id: Step; label: string }[] = [
@@ -64,6 +65,8 @@ export default function SourceWizard({ start, existingNames, teams, onClose, onS
   const { data: transports, error: tErr, isLoading: tLoading } = useApi<TransportDecl[]>('/api/telemetry/transports');
   const { data: decoders } = useApi<DecoderDecl[]>('/api/telemetry/decoders');
   const editing = start.source;
+  const { data: testbed } = useApi<TestbedInfo>(editing ? null : '/api/telemetry/testbed', { revalidateOnFocus: false });
+  const [fromTestbed, setFromTestbed] = useState<string | null>(null);
   const srcAny = editing as (Connection & { transport?: string; config?: Record<string, unknown>; decoder?: string; decoder_config?: Record<string, unknown>; mapping?: Mapping; strict?: boolean; ingest_url?: string }) | undefined;
   const [step, setStep] = useState<Step>(start.step ?? (editing ? 'settings' : start.transport ? 'settings' : 'transport'));
   const [transportId, setTransportId] = useState(srcAny?.transport ?? start.transport ?? (editing ? 'mqtt' : ''));
@@ -108,14 +111,23 @@ export default function SourceWizard({ start, existingNames, teams, onClose, onS
     if (decoder) setDecValues(initialValues(decoder.config_fields, srcAny?.decoder_config ?? {}));
   }, [decoder?.name]);
 
+  const liveFields = (transport?.config_fields || []).filter((f) => fieldShown(transportId, f, values));
+  const tbSvc = testbedServiceFor(testbed, transportId);
+  const useTestbed = () => {
+    if (!tbSvc) return;
+    setValues((v) => testbedValues(tbSvc, v));
+    if (!name.trim()) setName(`${tbSvc.name} from the testbed`);
+    if (tbSvc.decoder) setDecoderId(tbSvc.decoder);
+    setFromTestbed(testbedSummary(tbSvc) || tbSvc.name);
+  };
   const nameErr = nameProblem(name, existingNames.filter((n) => n !== editing?.name));
-  const fieldErrs = Object.fromEntries((transport?.config_fields || []).map((f) => [f.key, fieldProblem(f, values[f.key], kept.has(f.key))]).filter(([, e]) => e));
+  const fieldErrs = Object.fromEntries(liveFields.map((f) => [f.key, fieldProblem(f, values[f.key], kept.has(f.key))]).filter(([, e]) => e));
   const decErrs = Object.fromEntries((decoder?.config_fields || []).map((f) => [f.key, fieldProblem(f, decValues[f.key], kept.has(f.key))]).filter(([, e]) => e));
   const mapErrs = needsMapping(decoder) ? mappingProblems(mapping) : {};
   const isPush = transportId === 'http_push';
 
   function payload() {
-    const t = transport ? toPayload(transport.config_fields, values, kept) : { config: {}, secrets: {} };
+    const t = transport ? toPayload(liveFields, values, kept) : { config: {}, secrets: {} };
     const d = decoder ? toPayload(decoder.config_fields, decValues, kept) : { config: {}, secrets: {} };
     const subj = values.subjects;
     return {
@@ -140,7 +152,7 @@ export default function SourceWizard({ start, existingNames, teams, onClose, onS
       const p = payload();
       const res = await apiFetch<ConnectionTest & { subjects_seen?: string[]; sample?: unknown }>(editing ? `/api/telemetry/connections/${editing.id}/test` : '/api/telemetry/connections/test', { method: 'POST', body: JSON.stringify(editing ? { config: p.config, secrets: p.secrets } : p) });
       const d = res.data;
-      const r = describeTest({ ok: !!d?.ok, connected: !!d?.connected, messages: d?.messages ?? 0, topics_seen: d?.topics_seen ?? d?.subjects_seen ?? [], error: d?.error ?? null }, String(values.broker_url ?? values.url ?? values.bootstrap_servers ?? values.host ?? transport?.label ?? ''));
+      const r = describeTest({ ok: !!d?.ok, connected: !!d?.connected, messages: d?.messages ?? 0, topics_seen: d?.topics_seen ?? d?.subjects_seen ?? [], error: d?.error ?? null }, String(values.broker_url ?? values.url ?? values.bootstrap_servers ?? values.host ?? transport?.label ?? ''), transportId);
       setTest({ ...r, sample: d?.sample === undefined || d?.sample === null ? undefined : typeof d.sample === 'string' ? d.sample : JSON.stringify(d.sample, null, 2) });
     } catch (e) {
       setTest({ ok: false, text: explainTelemetryError(e, 'test') });
@@ -198,7 +210,7 @@ export default function SourceWizard({ start, existingNames, teams, onClose, onS
     try {
       const res = await apiFetch<ConnectionTest & { subjects_seen?: string[] }>(`/api/telemetry/connections/${savedId}/test`, { method: 'POST' });
       const d = res.data;
-      setTest(describeTest({ ok: !!d?.ok, connected: !!d?.connected, messages: d?.messages ?? 0, topics_seen: d?.topics_seen ?? d?.subjects_seen ?? [], error: d?.error ?? null }, String(values.broker_url ?? values.url ?? transport?.label ?? '')));
+      setTest(describeTest({ ok: !!d?.ok, connected: !!d?.connected, messages: d?.messages ?? 0, topics_seen: d?.topics_seen ?? d?.subjects_seen ?? [], error: d?.error ?? null }, String(values.broker_url ?? values.url ?? values.bootstrap_servers ?? transport?.label ?? ''), transportId));
     } catch (e) {
       setTest({ ok: false, text: explainTelemetryError(e, 'test') });
     } finally {
@@ -254,7 +266,7 @@ export default function SourceWizard({ start, existingNames, teams, onClose, onS
   const order = isPush ? PUSH_STEPS : STEPS;
   const idx = order.findIndex((s) => s.id === step);
   const visibleSteps = order.filter((s) => s.id !== 'mapping' || needsMapping(decoder));
-  const filtered = (transports || []).filter((t) => !q.trim() || `${t.label} ${t.transport} ${t.description ?? ''}`.toLowerCase().includes(q.trim().toLowerCase()));
+  const filtered = sortTransports(transports || []).filter((t) => !q.trim() || `${t.label} ${t.transport} ${t.description ?? ''}`.toLowerCase().includes(q.trim().toLowerCase()));
   const groupsOf = (fields: FieldDecl[]) => {
     const g = new Map<string, FieldDecl[]>();
     for (const f of fields) g.set(f.group || '', [...(g.get(f.group || '') ?? []), f]);
@@ -318,12 +330,20 @@ export default function SourceWizard({ start, existingNames, teams, onClose, onS
         {step === 'settings' && transport && (
           <div className="space-y-3">
             <p className="flex items-center gap-2 text-sm text-slate-300"><TransportIcon transport={transport.transport} className="h-4 w-4 text-cyan-300" /> {transport.label}{transport.description ? `. ${transport.description}` : ''}</p>
+            {tbSvc && !editing && (
+              <div className="flex flex-wrap items-center gap-2 rounded-lg border border-emerald-600/40 bg-emerald-500/5 px-3 py-2 text-sm text-emerald-100" data-testid="tel-src-testbed">
+                <span className="min-w-0 flex-1">{fromTestbed ? `Filled in from the testbed: ${fromTestbed}.` : `The testbed in this cluster runs ${tbSvc.name}. Fill in its address and sign-in to try it.`}</span>
+                <button type="button" onClick={useTestbed} className="rounded-md border border-emerald-500/50 px-2.5 py-1 text-xs font-medium text-emerald-100 hover:bg-emerald-500/10" data-testid="tel-src-use-testbed">
+                  {fromTestbed ? 'Fill in again' : "Use the testbed's details"}
+                </button>
+              </div>
+            )}
             <div>
               <label htmlFor="tel-src-name" className="mb-1 block text-xs font-medium text-slate-300">Name</label>
               <input id="tel-src-name" value={name} onChange={(e) => setName(e.target.value)} placeholder={isPush ? 'Payments webhook' : 'Site broker'} className={`w-full rounded-md border bg-slate-950 px-2.5 py-2 text-sm text-white placeholder:text-slate-600 ${shown && nameErr ? 'border-rose-500/60' : 'border-slate-700'}`} data-testid="tel-src-name" />
               {shown && nameErr && <p className="mt-1 text-xs text-rose-300" role="alert">{nameErr}</p>}
             </div>
-            {groupsOf(transport.config_fields).map(([g, fields]) => (
+            {groupsOf(liveFields).map(([g, fields]) => (
               <fieldset key={g || 'main'} className="space-y-3">
                 {g && <legend className="mb-1 text-[11px] uppercase tracking-wide text-slate-500">{g}</legend>}
                 {fields.map((f) => (
@@ -381,7 +401,7 @@ export default function SourceWizard({ start, existingNames, teams, onClose, onS
           <div className="space-y-3" data-testid="tel-wiz-finish">
             {isPush ? (
               <>
-                <PushPanel sourceId={savedId} token={token} ingestUrl={ingestUrl} onSent={(sample) => setPushSample(sample)} testBody={start.sample} />
+                <PushPanel sourceId={savedId} token={token} ingestUrl={ingestUrl} onSent={(sample) => setPushSample(sample)} testBody={start.sample} mapping={mapping} />
                 {needsMapping(decoder) && (
                   <div className="rounded-lg border border-slate-700/60 p-3 text-sm text-slate-300" data-testid="tel-push-next">
                     {pushSample
@@ -423,7 +443,7 @@ export default function SourceWizard({ start, existingNames, teams, onClose, onS
           {step !== 'finish' ? (
             <button type="button" onClick={next} disabled={!!busy || (step === 'transport' && !transportId)} title={step === 'transport' && !transportId ? 'Pick a kind of source first' : undefined} className="inline-flex min-h-[40px] items-center justify-center gap-1.5 rounded-lg bg-cyan-500 px-4 py-2 text-sm font-medium text-white hover:bg-cyan-400 disabled:opacity-60" data-testid="tel-wiz-next">
               {busy === 'save' && <Loader2 className="h-4 w-4 animate-spin" />}
-              {step === 'decoder' ? (savedId ? 'Save' : 'Save, still turned off') : step === 'mapping' ? 'Save the mapping' : 'Next'} <ArrowRight className="h-4 w-4" />
+              {step === 'decoder' ? (savedId ? 'Save' : isPush ? 'Save, it goes live' : 'Save, still turned off') : step === 'mapping' ? 'Save the mapping' : 'Next'} <ArrowRight className="h-4 w-4" />
             </button>
           ) : editing?.enabled || isPush ? (
             <button type="button" onClick={() => { onSaved(); onClose(); }} className="min-h-[40px] rounded-lg bg-cyan-500 px-4 py-2 text-sm font-medium text-white hover:bg-cyan-400" data-testid="tel-wiz-done">Done</button>

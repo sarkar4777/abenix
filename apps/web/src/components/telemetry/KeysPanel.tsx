@@ -8,10 +8,11 @@ import { useApi } from '@/hooks/useApi';
 import { apiFetch } from '@/lib/api-client';
 import { explainTelemetryError } from '@/lib/telemetry/errors';
 import { ago } from '@/lib/telemetry/format';
-import { BULK_MAX, deviceIdProblem, deviceSnippets, keysToCsv, parseKeysCsv, rowsToCsv, type DeviceKey } from '@/lib/telemetry/keys';
+import { BULK_MAX, deviceIdProblem, deviceSnippets, keysPath, keysToCsv, parseKeysCsv, rowsToCsv, type DeviceKey } from '@/lib/telemetry/keys';
 import { toastSuccess } from '@/stores/toastStore';
 import { useKept } from '@/lib/telemetry/kept';
 import { ingestEndpoint } from './PushPanel';
+import { pluralShown } from '@/lib/plural';
 
 const PAGE = 50;
 type Mode = 'list' | 'one' | 'bulk';
@@ -36,11 +37,11 @@ function Copy1({ text, label = 'Copy', testId }: { text: string; label?: string;
 
 // keys that let each device post as itself, made one at a time or thousands from a CSV
 export default function KeysPanel({ sourceId, sourceName, ingestUrl }: { sourceId: string; sourceName: string; ingestUrl?: string | null }) {
-  const { data, error, isLoading, mutate } = useApi<DeviceKey[]>(`/api/telemetry/connections/${sourceId}/keys`);
   const [mode, setMode] = useKept<Mode>(`keys:${sourceId}:mode`, 'list');
   const [q, setQ] = useState('');
   const [kind, setKind] = useState<'' | 'device' | 'gateway'>('');
   const [showRevoked, setShowRevoked] = useState(false);
+  const { data, error, isLoading, mutate } = useApi<DeviceKey[]>(keysPath(sourceId, showRevoked));
   const [page, setPage] = useState(0);
   const [revoke, setRevoke] = useState<DeviceKey | null>(null);
   const [busy, setBusy] = useState(false);
@@ -252,7 +253,7 @@ export default function KeysPanel({ sourceId, sourceName, ingestUrl }: { sourceI
       {mode === 'bulk' && (
         bulkMade ? (
           <div className="space-y-3 rounded-lg border border-amber-500/40 bg-amber-500/5 p-3" data-testid="tel-keys-bulk-made">
-            <p className="flex items-center gap-1.5 text-sm font-medium text-amber-100"><AlertTriangle className="h-4 w-4" /> {bulkMade.keys.length} keys made. Download them now, you will not see them again.</p>
+            <p className="flex items-center gap-1.5 text-sm font-medium text-amber-100"><AlertTriangle className="h-4 w-4" /> {pluralShown(bulkMade.keys.length, (bulkMade.keys.length).toLocaleString('en-US'), 'key')} made. Download them now, you will not see them again.</p>
             <button type="button" onClick={() => download(`${sourceName.replace(/\W+/g, '-').toLowerCase()}-device-keys.csv`, bulkMade.csv)} className="inline-flex items-center gap-1.5 rounded-lg bg-cyan-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-cyan-400" data-testid="tel-keys-download">
               <Download className="h-4 w-4" /> Download the keys as CSV
             </button>
@@ -285,7 +286,7 @@ export default function KeysPanel({ sourceId, sourceName, ingestUrl }: { sourceI
               </div>
             )}
             <button type="button" onClick={createBulk} disabled={busy || !parsed.rows.length || !!bad.length || !!parsed.problem} title={!parsed.rows.length ? 'Paste or upload a CSV first' : bad.length || parsed.problem ? 'Fix the lines marked above first' : undefined} className="inline-flex min-h-[38px] items-center gap-1.5 rounded-lg bg-cyan-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-cyan-400 disabled:opacity-50" data-testid="tel-keys-bulk-create">
-              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} Make {parsed.rows.length || ''} keys
+              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} {parsed.rows.length === 1 ? 'Make 1 key' : `Make ${parsed.rows.length || ''} keys`}
             </button>
           </div>
         )

@@ -69,7 +69,7 @@ import {
 import { useAuth } from '@/contexts/AuthContext';
 import { useSidebar } from '@/stores/sidebar';
 import { useIsMobile } from '@/hooks/useMediaQuery';
-import { holds, type MyPermissions } from '@/lib/capabilities';
+import { holds, useMyPermissions as useSharedPermissions, type MyPermissions } from '@/lib/capabilities';
 import { useNotificationStore } from '@/stores/notificationStore';
 import { usePlatformFeatures } from '@/hooks/usePlatformFeatures';
 import {
@@ -244,8 +244,7 @@ function useMiniStats() {
 }
 
 function useMyPermissions() {
-  const { data } = useApi<MyPermissions>('/api/me/permissions');
-  return data;
+  return useSharedPermissions().perms;
 }
 
 // waiting held content, refreshed when the socket says the queue changed

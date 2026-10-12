@@ -11,7 +11,7 @@ import { isActionGate, levelLabel, relTime, signoffApproval } from '@/lib/autono
 import { RELEASE_GATE, canSign, refreshInboxCounts, useInboxCounts, type SignableRow } from '@/lib/inbox';
 import {
   GATE_LABEL, LIFECYCLE_KINDS, approvalEffect, askedBecause, changesText, confirmApproveText, decisionLink,
-  needsApproveConfirm, requesterName, shortSummary, signoffError,
+  needsApproveConfirm, requesterName, commandApprovers, type Approver, shortSummary, signoffError,
 } from '@/lib/approvalText';
 import { toastSuccess } from '@/stores/toastStore';
 import ApprovalActionRow from '@/components/autonomy/ApprovalActionRow';
@@ -28,6 +28,9 @@ interface Row extends SignableRow {
   can_sign?: boolean;
   kind_label?: string | null;
   summary?: string | null;
+  approvers?: Approver[] | null;
+  approvers_total?: number | null;
+  can_self_approve?: boolean | null;
 }
 
 function evidenceLink(row: Row): { href: string; label: string } | null {
@@ -55,7 +58,7 @@ function promotionLine(row: Row): string {
 type Decide = (id: string, d: 'approve' | 'deny' | 'return', reason?: string) => Promise<string | null>;
 
 // a compact version of the Approvals page card, approve, deny or send back right here
-export function QuickRow({ row, busy, onDecide }: { row: Row; busy: boolean; onDecide: Decide }) {
+export function QuickRow({ row, busy, onDecide, meId }: { row: Row; busy: boolean; onDecide: Decide; meId?: string }) {
   const [err, setErr] = useState<string | null>(null);
   const [asking, setAsking] = useState<'deny' | 'return' | null>(null);
   const [confirming, setConfirming] = useState(false);
@@ -63,6 +66,7 @@ export function QuickRow({ row, busy, onDecide }: { row: Row; busy: boolean; onD
   const link = evidenceLink(row);
   const who = requesterName(row);
   const why = askedBecause(row);
+  const cmdWho = row.gate_kind === 'telemetry.command' ? commandApprovers(row, meId) : null;
   const changes = row.gate_kind === 'decision_publish' ? changesText(row) : null;
   // the server's label wins so Needs you and Approvals name a request the same way
   const label = row.kind_label || (row.gate_kind ? GATE_LABEL[row.gate_kind] : undefined) || undefined;
@@ -126,10 +130,12 @@ export function QuickRow({ row, busy, onDecide }: { row: Row; busy: boolean; onD
           {why && <p className="mt-1 break-words text-xs text-slate-400" data-testid="inbox-why">Asked because: “{why}”</p>}
           <div className="mt-1 flex flex-wrap gap-3 text-[11px] text-slate-500">
             {(who || row.created_at) && (
-              <span data-testid="inbox-requester">Asked{who ? ` by ${who}` : ''}{row.created_at ? ` ${relTime(row.created_at)}` : ''}</span>
+              <span data-testid="inbox-requester">{cmdWho?.mine ? 'You asked' : `Asked${who ? ` by ${who}` : ''}`}{row.created_at ? ` ${relTime(row.created_at)}` : ''}</span>
             )}
             {link && <Link href={link.href} className="text-cyan-300 hover:underline" data-testid="inbox-evidence">{link.label}</Link>}
           </div>
+          {cmdWho?.mine && <p className="mt-1 text-[11px] text-slate-200" data-testid="inbox-command-mine">{cmdWho.mine}</p>}
+          {cmdWho?.who && <p className="mt-0.5 text-[11px] text-slate-400" data-testid="inbox-command-approvers">{cmdWho.who}.</p>}
         </div>
         <div className="flex w-full shrink-0 flex-wrap gap-2 sm:w-auto">
           <button
@@ -267,7 +273,7 @@ export default function ApprovalsPanel({
             busy={busyId === row.id}
           />
         ) : (
-          <QuickRow key={row.id} row={row} busy={busyId === row.id} onDecide={decide} />
+          <QuickRow key={row.id} row={row} busy={busyId === row.id} onDecide={decide} meId={me.id} />
         ),
       )}
     </div>

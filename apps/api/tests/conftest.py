@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "packages" / "db"))
 from models.base import Base
 
 from app.core.config import settings
-from app.core.deps import get_db
+from app.core.deps import get_db, get_priority_db
 from app.main import app
 
 engine = create_async_engine(settings.database_url, echo=False)
@@ -61,6 +61,7 @@ async def client(db_session: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
         yield db_session
 
     app.dependency_overrides[get_db] = _override_get_db
+    app.dependency_overrides[get_priority_db] = _override_get_db
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"
     ) as ac:

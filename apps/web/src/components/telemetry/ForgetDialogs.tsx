@@ -11,9 +11,10 @@ import { toastSuccess } from '@/stores/toastStore';
 const KEPT = 'Its history is kept, so charts and reports still show it. If it reports again it comes back on its own.';
 
 // one asset or part: confirm, and a second confirm if it is still online
-export function ForgetOneDialog({ group, node, device, onClose, onDone }: { group: string; node: string; device: string; onClose: () => void; onDone: () => void }) {
+export function ForgetOneDialog({ group, node, device, onClose, onDone, isOnline }: { group: string; node: string; device: string; onClose: () => void; onDone: () => void; isOnline?: boolean }) {
   const [busy, setBusy] = useState(false);
-  const [online, setOnline] = useState<string | null>(null);
+  // known online up front, so there is one question, not two
+  const [online, setOnline] = useState<string | null>(isOnline ? 'It is sending right now, so it shows up again with its next message.' : null);
   const [err, setErr] = useState<string | null>(null);
   const target = device ? `${node} / ${device}` : node;
   const what = device ? 'this part' : 'this asset and all its parts';
@@ -38,9 +39,9 @@ export function ForgetOneDialog({ group, node, device, onClose, onDone }: { grou
         onConfirm={() => go(true)}
         loading={busy}
         icon={Archive}
-        title={`${target} is online. Forget it anyway?`}
-        description={`${online} Forget it anyway only if it has really stopped, or to clear it before it is moved or renamed. ${KEPT}`}
-        confirmLabel="Forget anyway"
+        title={`${target} is online. Forget it?`}
+        description={`${online} Forget it only if it has really stopped, or to clear it before it is moved or renamed. ${KEPT}`}
+        confirmLabel="Forget it"
         confirmTestId="tel-forget-force"
       >
         {err && <p className="text-xs text-rose-300" role="alert">{err}</p>}

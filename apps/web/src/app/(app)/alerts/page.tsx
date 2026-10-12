@@ -10,6 +10,9 @@ import { useApi } from '@/hooks/useApi';
 import PageHeader from '@/components/layout/PageHeader';
 import { fetchAllAgents } from '@/lib/fetch-all-agents';
 import { LLM_AUTH_FOR_USERS, adviceCode, failureTitle } from '@/components/alerts/failureAdvice';
+import { alertNames, filterAlerts, resolvesText, type AlertFilter } from '@/lib/alertsFilter';
+
+const ALERT_PAGE = 50;
 
 const GRAFANA_URL = (process.env.NEXT_PUBLIC_GRAFANA_URL || 'http://localhost:3010').replace(/\/$/, '');
 
@@ -175,6 +178,14 @@ export default function AlertsPage() {
   // Only admins may read /api/admin/alerts, a null key skips the fetch.
   const { data: platform, error: platformError, mutate: refreshPlatform } =
     useApi<PlatformAlertsResponse>(isAdmin ? '/api/admin/alerts' : null, { refreshInterval: 60_000 });
+  const [af, setAf] = useState<AlertFilter>({});
+  const [alertLimit, setAlertLimit] = useState(ALERT_PAGE);
+  // links from a rule firing arrive with the rule and alert name already picked
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search);
+    const st = p.get('status');
+    setAf({ q: p.get('q') || '', alertname: p.get('alertname') || '', rule: p.get('rule') || '', status: st === 'firing' || st === 'muted' ? st : '' });
+  }, []);
   const firing = (platform?.alerts || []).filter(a => a.state === 'firing');
   // Alertmanager also reports silenced / inhibited alerts, Prometheus never does.
   const muted = (platform?.alerts || []).filter(a => a.state === 'silenced' || a.state === 'inhibited');
@@ -284,12 +295,50 @@ export default function AlertsPage() {
                 Alert backends unavailable: {platformError}
               </div>
             )}
+            {(firing.length + muted.length) > 0 && (
+              <div className="flex flex-wrap items-center gap-2" data-testid="platform-alerts-filters">
+                <input
+                  value={af.q || ''}
+                  onChange={(e) => { setAf((x) => ({ ...x, q: e.target.value })); setAlertLimit(ALERT_PAGE); }}
+                  placeholder="Search, or a label like group=DSV"
+                  aria-label="Search platform alerts"
+                  className="min-w-[12rem] flex-1 sm:max-w-sm rounded-lg border border-slate-700 bg-slate-900 px-3 py-1.5 text-sm text-white placeholder:text-slate-500"
+                  data-testid="platform-alerts-search"
+                />
+                <select value={af.alertname || ''} onChange={(e) => { setAf((x) => ({ ...x, alertname: e.target.value })); setAlertLimit(ALERT_PAGE); }} aria-label="Alert name" className="rounded-lg border border-slate-700 bg-slate-900 px-2 py-1.5 text-sm text-slate-200" data-testid="platform-alerts-name">
+                  <option value="">Every alert</option>
+                  {alertNames([...firing, ...muted]).map((n) => <option key={n.name} value={n.name}>{n.name} ({n.count})</option>)}
+                </select>
+                <select value={af.status || ''} onChange={(e) => { setAf((x) => ({ ...x, status: e.target.value as AlertFilter['status'] })); setAlertLimit(ALERT_PAGE); }} aria-label="Status" className="rounded-lg border border-slate-700 bg-slate-900 px-2 py-1.5 text-sm text-slate-200" data-testid="platform-alerts-status">
+                  <option value="">Firing and silenced</option>
+                  <option value="firing">Firing</option>
+                  <option value="muted">Silenced</option>
+                </select>
+                {af.rule && (
+                  <button type="button" onClick={() => setAf((x) => ({ ...x, rule: '' }))} className="rounded-full border border-cyan-500/40 bg-cyan-500/10 px-2 py-0.5 text-xs text-cyan-200" data-testid="platform-alerts-rule-chip">
+                    One signal rule only ×
+                  </button>
+                )}
+              </div>
+            )}
             {!platformError && firing.length === 0 && (
               <div className="bg-slate-800/30 border border-slate-700/50 rounded-xl p-4 text-xs text-slate-400">
                 No platform alerts firing.
               </div>
             )}
-            {[...firing, ...muted].map(a => {
+            {(() => {
+              const matched = filterAlerts([...firing, ...muted], af);
+              return (
+                <>
+                  {(firing.length + muted.length) > 0 && matched.length === 0 && (
+                    <div className="bg-slate-800/30 border border-slate-700/50 rounded-xl p-4 text-xs text-slate-400" data-testid="platform-alerts-none">
+                      No alerts match these filters. <button type="button" className="text-cyan-300 hover:underline" onClick={() => setAf({})}>Clear the filters</button>
+                    </div>
+                  )}
+                  {matched.length > alertLimit && (
+                    <p className="text-xs text-slate-500">Showing {alertLimit} of {matched.length.toLocaleString('en-US')}.</p>
+                  )}
+                  {matched.slice(0, alertLimit).map(a => {
               const sev = (a.severity || 'info').toLowerCase();
               const isMuted = a.state === 'silenced' || a.state === 'inhibited';
               return (
@@ -313,7 +362,7 @@ export default function AlertsPage() {
                   </div>
                   <div className="sm:text-right shrink-0 text-[11px] text-slate-400">
                     <div>since {relTime(a.active_since)}</div>
-                    {a.ends_at && <div>resolves {relTime(a.ends_at)}</div>}
+                    {resolvesText(a.state, a.ends_at) && <div>{resolvesText(a.state, a.ends_at)}</div>}
                     {a.runbook && (
                       <a href={a.runbook} target="_blank" rel="noopener" className="text-cyan-400 hover:underline inline-flex items-center gap-1">
                         runbook <ExternalLink className="w-2.5 h-2.5" />
@@ -323,6 +372,12 @@ export default function AlertsPage() {
                 </div>
               );
             })}
+                  {matched.length > alertLimit && (
+                    <button type="button" onClick={() => setAlertLimit((n) => n + 200)} className="w-full rounded-lg border border-slate-700 py-2 text-sm text-slate-300 hover:bg-slate-800" data-testid="platform-alerts-more">Show more</button>
+                  )}
+                </>
+              );
+            })()}
           </section>
         )}
 

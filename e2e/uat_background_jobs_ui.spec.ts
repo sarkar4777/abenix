@@ -160,7 +160,7 @@ test('the jobs page is in the sidebar and explains every job', async ({ page }) 
   const wanted = [
     'check_due_triggers', 'eval_schedules', 'escalate_approvals', 'watch_sources', 'improvements_watch',
     'moderation_retention', 'lesson_retention', 'prune_events', 'nightly_archive', 'reset_monthly_quotas',
-    'sweep_stale_executions', 'score_drift_backlog',
+    'sweep_stale_executions', 'score_drift_backlog', 'alert_notification_retention',
   ];
   for (const id of wanted) {
     const card = page.getByTestId(`job-card-${id}`);

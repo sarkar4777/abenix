@@ -62,6 +62,8 @@ Anything outside the policy is refused with a plain message the agent reads, suc
 
 When an owner gives the agent an **Earned Autonomy** grant for device_command, the grant's level decides instead of the policy's approval setting. That is how the gate lifts as the agent earns trust.
 
+**Who approves a command.** The person who asked and everyone who may send machine commands, the Machine operators set and admins. All of them are told. The person who asked can approve it with no extra step, and the audit log records it as `approval.approved_by_requester`. A risk tier rule that keeps the author from signing still applies. Approval rows carry `approvers` (`id`, `name`, `is_requester`), `approvers_total` and `can_self_approve`. While the agent waits, chat gets a `tool_status` event with `status: waiting_approval` and the `approval_id`. After a deny the `tool_result` carries `metadata.status: denied` and the reason.
+
 Every command is in the audit log twice: `telemetry.command` with the value and reason as for any command, and `telemetry.agent_command` with the agent, the run, the person it ran for, the approval and who approved it.
 
 ## 3. Run it from a rule

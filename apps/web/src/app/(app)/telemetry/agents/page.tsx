@@ -8,12 +8,14 @@ import { Bot, CheckCircle2, ExternalLink, Loader2, Plus, RefreshCw, Send, Shield
 import PageHeader from '@/components/layout/PageHeader';
 import NoAccess from '@/components/layout/NoAccess';
 import ViewOnlyBanner from '@/components/shared/ViewOnlyBanner';
+import LoadRetry from '@/components/shared/LoadRetry';
 import { usePageTitle } from '@/hooks/usePageTitle';
 import { apiFetch } from '@/lib/api-client';
 import { holds, useMyPermissions } from '@/lib/capabilities';
 import { fetchDefaultModel } from '@/lib/models';
-import { AGENT_TEMPLATES, buildFromTemplate, templateHref, type AgentTemplate, type TemplateAsset } from '@/lib/telemetry/agentTemplates';
+import { AGENT_TEMPLATES, answerWords, buildFromTemplate, templateHref, type AgentTemplate, type TemplateAsset } from '@/lib/telemetry/agentTemplates';
 import type { Target, TargetSignal } from '@/lib/telemetry/commandPolicy';
+import { agentAssetLabel } from '@/lib/telemetry/assetLabel';
 
 const PURPOSE = 'Start an agent that reads your streams, reasons about them and, when you allow it, acts on your assets through governed commands.';
 
@@ -47,22 +49,24 @@ function TemplateCard({ t, picked, asset, signals, canCreate, createWhy, canComm
           <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-300" aria-hidden />
           <span>
             Can send commands, and a person approves every one at first.{' '}
-            {asset ? <>It may command {asset.name || asset.key}{signals.length ? `, signals ${signals.join(', ')}` : ', you pick the signals in the builder'}.</> : 'You pick the assets and signals in the builder.'}
-            {!canCommand && ' You do not have Send machine commands, so runs you start will be refused until an admin adds you to Machine operators.'}
+            {asset ? <>It may command {agentAssetLabel(asset.key, asset.name)}{signals.length ? `, signals ${signals.join(', ')}` : ', you pick the signals in the builder'}.</> : 'You pick the assets and signals in the builder.'}
+            {!canCommand && <span className="block mt-1 text-amber-200" data-testid={`agent-template-no-command-${t.id}`}>You can&apos;t send machine commands, so commands from runs you start are refused. An admin can give you Send machine commands under Admin, Permissions, with the Machine operators set.</span>}
           </span>
         </p>
       ) : (
         <p className="mt-3 text-xs text-slate-400">Only reads. It never changes anything.</p>
       )}
-      <p className="mt-2 text-[11px] text-slate-500">Answers with <code className="break-all text-slate-400">{t.output}</code>, so later rule steps can use it.</p>
+      <p className="mt-2 text-[11px] text-slate-500" data-testid={`agent-template-answer-${t.id}`}>{answerWords(t.output)}</p>
       <div className="mt-auto flex flex-wrap gap-2 pt-4">
-        <button type="button" onClick={() => onCreate(t)} disabled={!canCreate || busy} title={!canCreate ? createWhy : `Create ${t.name}${asset ? ` for ${asset.name || asset.key}` : ''}`}
+        <button type="button" onClick={() => onCreate(t)} disabled={!canCreate || busy} title={!canCreate ? createWhy : `Create ${t.name}${asset ? ` for ${agentAssetLabel(asset.key, asset.name)}` : ''}`}
           className="inline-flex min-h-[40px] items-center gap-1.5 rounded-lg bg-cyan-500 px-3 text-sm font-medium text-white hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-50" data-testid={`agent-template-create-${t.id}`}>
           {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} Create agent
         </button>
-        <Link href={templateHref(t.id, asset)} className="inline-flex min-h-[40px] items-center gap-1.5 rounded-lg border border-slate-700 px-3 text-sm text-slate-200 hover:bg-slate-800" data-testid={`agent-template-open-${t.id}`}>
-          Open in the builder first
-        </Link>
+        {canCreate && (
+          <Link href={templateHref(t.id, asset)} className="inline-flex min-h-[40px] items-center gap-1.5 rounded-lg border border-slate-700 px-3 text-sm text-slate-200 hover:bg-slate-800" data-testid={`agent-template-open-${t.id}`}>
+            Open in the builder first
+          </Link>
+        )}
       </div>
     </li>
   );
@@ -71,7 +75,7 @@ function TemplateCard({ t, picked, asset, signals, canCreate, createWhy, canComm
 function AgentsPage() {
   usePageTitle('Agents for your assets');
   const params = useSearchParams();
-  const { perms, loading: permsLoading } = useMyPermissions();
+  const { perms, loading: permsLoading, failed: permsFailed, retry: retryPerms } = useMyPermissions();
   const caps = perms?.capabilities;
   const canView = holds(caps, 'telemetry.view');
   const canCreate = perms ? perms.features?.create_agents !== false : false;
@@ -136,6 +140,7 @@ function AgentsPage() {
     setCreated({ id: res.data.id, name: res.data.name || b.name, template: tpl });
   }
 
+  if (permsFailed) return <div className="mx-auto max-w-6xl"><LoadRetry what="your permissions" onRetry={retryPerms} testId="perms-retry" /></div>;
   if (permsLoading && !perms) return <div className="mx-auto max-w-6xl"><div className="h-40 animate-pulse rounded-xl bg-slate-800/40" /></div>;
   if (perms && !canView) {
     return (
@@ -160,7 +165,7 @@ function AgentsPage() {
           onClick: () => void create(AGENT_TEMPLATES[0]),
           disabled: !canCreate || !!busy,
           busy: busy === AGENT_TEMPLATES[0].id,
-          title: canCreate ? `Create a Machine health watcher${asset ? ` for ${asset.name || asset.key}` : ''}` : 'Your role cannot create agents. Ask an admin.',
+          title: canCreate ? `Create a Machine health watcher${asset ? ` for ${agentAssetLabel(asset.key, asset.name)}` : ''}` : 'Your role cannot create agents. Ask an admin.',
           testId: 'telemetry-agents-primary',
         }}
         secondaryAction={{ label: 'Signal rules', icon: Zap, href: '/telemetry/rules', testId: 'telemetry-agents-rules' }}
@@ -178,7 +183,12 @@ function AgentsPage() {
       />
 
       {perms && !canCreate && (
-        <ViewOnlyBanner testId="telemetry-agents-view-only">You can see the templates. Your role cannot create agents, ask an admin.</ViewOnlyBanner>
+        <ViewOnlyBanner testId="telemetry-agents-view-only">You can see the templates. Your role can&apos;t create agents, an admin can change that under Settings, Team.</ViewOnlyBanner>
+      )}
+      {perms && canCreate && t && !t.can_command && (
+        <p className="rounded-xl border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-sm text-amber-100" role="note" data-testid="telemetry-agents-no-command">
+          You can create these agents, but you can&apos;t send machine commands. The agents that command assets will have their commands refused when you run them. An admin can give you Send machine commands under Admin, Permissions, with the Machine operators set.
+        </p>
       )}
 
       <section className="rounded-xl border border-slate-700/60 bg-slate-900/40 p-4" data-testid="telemetry-agents-asset">
@@ -195,7 +205,7 @@ function AgentsPage() {
                 className="min-h-[40px] w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white disabled:opacity-60" data-testid="telemetry-agents-asset-select">
                 <option value="">{t ? 'Any asset, named when it runs' : 'Loading assets'}</option>
                 {asset && t && !t.assets.some((a) => `${a.group}/${a.node}` === asset.key) && <option value={asset.key}>{asset.name || asset.key}</option>}
-                {(t?.assets || []).map((a) => <option key={a.key} value={`${a.group}/${a.node}`}>{a.name} ({a.group}/{a.node}){a.online === false ? ', offline' : ''}</option>)}
+                {(t?.assets || []).map((a) => <option key={a.key} value={`${a.group}/${a.node}`}>{agentAssetLabel(`${a.group}/${a.node}`, a.name)}{a.online === false ? ', offline' : ''}</option>)}
               </select>
             )}
             <p className="mt-1 text-xs text-slate-500">

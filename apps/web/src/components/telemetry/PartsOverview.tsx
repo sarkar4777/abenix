@@ -10,6 +10,7 @@ import type { HistoryPoint, Metric } from '@/lib/telemetry/types';
 import { Sparkline, StatusDot } from './bits';
 import { RANGES, type RangeId } from './HistoryChart';
 import { nodeHref } from './NodeCard';
+import { pluralShown } from '@/lib/plural';
 
 const HistoryChart = dynamic(() => import('./HistoryChart'), {
   ssr: false,
@@ -82,7 +83,7 @@ export default function PartsOverview({ group, node, entry, now, rangeId, setRan
                   <span className="w-28 text-xs tabular-nums text-slate-300">{p.rate.value} <span className="text-slate-500">{p.rate.unit}</span></span>
                   <span className="w-24 text-xs text-slate-500">{p.online ? ago(p.lastSeen, now) : `offline ${ago(p.lastSeen, now)}`}</span>
                   <span className="flex min-w-0 flex-1 flex-wrap items-center gap-x-4 gap-y-1">
-                    {p.headline.length === 0 && <span className="text-xs text-slate-500">{p.metricCount ? `${p.metricCount} values, none numeric` : 'No values reported yet'}</span>}
+                    {p.headline.length === 0 && <span className="text-xs text-slate-500">{p.metricCount ? `${pluralShown(p.metricCount, (p.metricCount).toLocaleString('en-US'), 'value')}, none numeric` : 'No values reported yet'}</span>}
                     {p.headline.map((m) => {
                       const info = splitMetric(m.name);
                       return (

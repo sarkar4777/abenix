@@ -41,6 +41,11 @@ SOLE_OPERATOR_SETTING = "sole_operator_signoff"
 # approving one of these sends a command to a machine
 COMMAND_KINDS = ("telemetry.command",)
 MIN_REASON = 10
+COMMAND_REFUSAL = (
+    "Approving a machine command sends it, so it needs the "
+    '"Send machine commands" permission. An admin can add you to '
+    "Machine operators under Admin, Permissions."
+)
 SYSTEM_USER_EMAIL = "system@abenix.dev"
 
 
@@ -62,8 +67,9 @@ def can_sign(
     gate_kind: str | None,
 ) -> bool:
     """The same test approver_denial applies, leaving out who asked."""
-    if gate_kind in COMMAND_KINDS and not holds(granted, "telemetry.command"):
-        return False
+    if gate_kind in COMMAND_KINDS:
+        # anyone who may send machine commands may approve one, admins included
+        return holds(granted, "telemetry.command")
     if not all(holds(granted, c) for c in required_capabilities(policy, gate_kind)):
         if policy or gate_kind in DECISION_KINDS:
             return False
@@ -134,6 +140,30 @@ def eligible_from(
         for u, caps in people
         if str(u.id) != req and can_sign(_role(u), caps, policy, gate_kind)
     ]
+
+
+def command_approvers(
+    people: list[tuple[User, frozenset[str]]],
+    policy: dict[str, Any] | None,
+    requester_id: Any,
+) -> tuple[list[dict[str, Any]], bool]:
+    """Everyone who may approve a machine command, the requester first, and whether the requester may."""
+    req = str(requester_id) if requester_id else None
+    self_ok = False
+    out: list[dict[str, Any]] = []
+    for u, caps in people:
+        if not holds(caps, "telemetry.command"):
+            continue
+        mine = req is not None and str(u.id) == req
+        if mine:
+            if (policy or {}).get("exclude_requester"):
+                continue
+            self_ok = True
+        out.append(
+            {"id": str(u.id), "name": u.full_name or u.email, "is_requester": mine}
+        )
+    out.sort(key=lambda p: (not p["is_requester"], (p["name"] or "").lower()))
+    return out, self_ok
 
 
 def person_json(u: User) -> dict[str, Any]:
@@ -373,6 +403,15 @@ def sign_check(
     decision = gate_kind in DECISION_KINDS
     if any(str(s.get("user_id")) == me for s in signoffs or []):
         return ("ALREADY_SIGNED", "You have already signed this.")
+    if gate_kind in COMMAND_KINDS:
+        if not holds(granted, "telemetry.command"):
+            return ("MISSING_PERMISSION", COMMAND_REFUSAL)
+        if (policy or {}).get("exclude_requester") and str(requested_by) == me:
+            return (
+                "OWN_REQUEST",
+                "You asked for this, so someone else has to approve it.",
+            )
+        return None
     if decision and not holds(granted, "decisions.review"):
         return ("NOT_REVIEWER", REVIEWER_REFUSAL)
     if (

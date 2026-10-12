@@ -15,6 +15,7 @@ import SourceWizard, { type WizardStart } from './SourceWizard';
 import type { Source } from './SourcesTab';
 import { TransportIcon } from './transportIcon';
 import { diagnose } from './SourceDiagnosis';
+import { pluralShown } from '@/lib/plural';
 
 export type MessagesView = 'recent' | 'problems' | 'frames';
 
@@ -201,7 +202,9 @@ export default function MessagesTab({
         <div className="overflow-hidden rounded-xl border border-slate-700/60 bg-slate-950/60" data-testid={v === 'problems' ? 'tel-dlq' : 'tel-msgs'}>
           {v === 'problems' && (
             <p className="border-b border-slate-800 px-3 py-2 text-xs text-slate-400">
-              Messages that could not be decoded or mapped wait here with the reason. Fix the mapping from one of them, then replay them all.
+              {canManage
+                ? 'Messages that could not be decoded or mapped wait here with the reason. Fix the mapping from one of them, then replay them all.'
+                : 'Messages that could not be decoded or mapped wait here with the reason. You can open each one to see what arrived and why it failed, and send that to whoever manages the source. Fixing the mapping and replaying needs Manage telemetry brokers.'}
             </p>
           )}
           {err && !(msgs && msgs.length) ? (
@@ -249,7 +252,7 @@ export default function MessagesTab({
           loading={replaying}
           icon={Trash2}
           title={`Clear the problems from ${src.name}?`}
-          description={`The ${msgs?.length ?? 0} messages waiting here are deleted and cannot be replayed afterwards. Do this when they are not needed, for example after a test. This is recorded in the audit log.`}
+          description={`The ${pluralShown(msgs?.length ?? 0, (msgs?.length ?? 0).toLocaleString('en-US'), 'message')} waiting here are deleted and cannot be replayed afterwards. Do this when they are not needed, for example after a test. This is recorded in the audit log.`}
           confirmLabel="Clear them"
           confirmTestId="tel-dlq-clear-confirm"
         >
@@ -266,7 +269,7 @@ export default function MessagesTab({
           variant="warning"
           icon={RotateCcw}
           title={`Replay the problems from ${src.name}?`}
-          description={`Each of the ${msgs?.length ?? 0} messages goes through the current mapping again. The ones that now work are stored with their own times, the rest stay here with the new reason. This is recorded in the audit log.`}
+          description={`Each of the ${pluralShown(msgs?.length ?? 0, (msgs?.length ?? 0).toLocaleString('en-US'), 'message')} goes through the current mapping again. The ones that now work are stored with their own times, the rest stay here with the new reason. This is recorded in the audit log.`}
           confirmLabel="Replay them"
           confirmTestId="tel-dlq-replay-confirm"
         >

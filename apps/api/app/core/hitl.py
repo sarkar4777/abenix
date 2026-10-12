@@ -220,17 +220,19 @@ async def approver_denial(
     decision = gate_kind in DECISION_KINDS
     if decision and not await has_capability(db, user, "decisions.review"):
         return Refusal(REVIEWER_REFUSAL, "decisions.review")
-    from app.core.approvers import COMMAND_KINDS
+    from app.core.approvers import COMMAND_KINDS, COMMAND_REFUSAL
 
-    if gate_kind in COMMAND_KINDS and not await has_capability(
-        db, user, "telemetry.command"
-    ):
-        return Refusal(
-            "Approving a machine command sends it, so it needs the "
-            '"Send machine commands" permission. An admin can add you to '
-            "Machine operators under Admin, Permissions.",
-            "telemetry.command",
-        )
+    if gate_kind in COMMAND_KINDS:
+        # the requester and every machine operator or admin may approve a command
+        if not await has_capability(db, user, "telemetry.command"):
+            return Refusal(COMMAND_REFUSAL, "telemetry.command")
+        if (policy or {}).get("exclude_requester") and is_self_approval(
+            user, requester_id
+        ):
+            return Refusal(
+                "You requested this change, so someone else has to approve it."
+            )
+        return None
     if policy:
         cap = str(policy.get("capability") or "approvals.sign")
         if not await has_capability(db, user, cap):

@@ -66,8 +66,50 @@ engine = create_async_engine(
 async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 
+def _side_connect_args(statement_timeout_ms: str) -> dict:
+    args = dict(_connect_args)
+    if "+asyncpg" in _db_url:
+        args["server_settings"] = {
+            **_connect_args.get("server_settings", {}),
+            "statement_timeout": statement_timeout_ms,
+        }
+    return args
+
+
+# sign-in, /auth/me and readiness get their own pool so nothing else can starve them
+priority_engine = create_async_engine(
+    _db_url,
+    connect_args=_side_connect_args(_os.environ.get("DB_PRIORITY_STMT_MS", "10000")),
+    pool_size=int(_os.environ.get("DB_PRIORITY_POOL_SIZE", "2")),
+    max_overflow=int(_os.environ.get("DB_PRIORITY_MAX_OVERFLOW", "2")),
+    pool_pre_ping=True,
+    pool_recycle=3600,
+    pool_timeout=10,
+)
+priority_session = async_sessionmaker(
+    priority_engine, class_=AsyncSession, expire_on_commit=False
+)
+
+# alert fan-out and sweeps, small and with a statement timeout so a slow query gives up
+bg_engine = create_async_engine(
+    _db_url,
+    connect_args=_side_connect_args(_os.environ.get("DB_BG_STMT_MS", "15000")),
+    pool_size=int(_os.environ.get("DB_BG_POOL_SIZE", "2")),
+    max_overflow=int(_os.environ.get("DB_BG_MAX_OVERFLOW", "1")),
+    pool_pre_ping=True,
+    pool_recycle=3600,
+    pool_timeout=60,
+)
+bg_session = async_sessionmaker(bg_engine, class_=AsyncSession, expire_on_commit=False)
+
+
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     async with async_session() as session:
+        yield session
+
+
+async def get_priority_db() -> AsyncGenerator[AsyncSession, None]:
+    async with priority_session() as session:
         yield session
 
 
@@ -275,6 +317,16 @@ async def get_current_user(
 
         await sessions.touch(sid)
     return user
+
+
+async def get_current_user_priority(
+    authorization: Annotated[str | None, Header()] = None,
+    x_api_key: Annotated[str | None, Header()] = None,
+    x_abenix_subject: Annotated[str | None, Header()] = None,
+    db: AsyncSession = Depends(get_priority_db),
+) -> User:
+    """get_current_user on the priority pool, for /auth/me."""
+    return await get_current_user(authorization, x_api_key, x_abenix_subject, db)
 
 
 async def get_current_tenant(

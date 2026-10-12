@@ -10,9 +10,10 @@ import { useEscapeToClose } from '@/hooks/useEscapeToClose';
 import CollectorForm from './CollectorForm';
 import InstallPanel from './InstallPanel';
 import {
-  checkCollector, defaultsFor, duration, edgeCall, telemetryHref, timeAgo,
+  checkCollector, keepShown, blurCheck, defaultsFor, duration, edgeCall, telemetryHref, timeAgo,
   type Catalog, type CollectorSpec, type CollectorType, type Gateway, type InstallOut,
 } from './model';
+import { pluralShown } from '@/lib/plural';
 
 const ICONS: Record<string, LucideIcon> = { can: Car, modbus: Factory, opcua: Cpu, nmea_gps: MapPin, mqtt_bridge: Radio, file_tail: FileText };
 const CATEGORY: Record<string, string> = { vehicle: 'Trucks, vans and machines', plc: 'Machinery and PLCs', sensor: 'Sensors and hubs', software: 'Files and programs' };
@@ -276,11 +277,12 @@ export default function AddGatewayWizard({ open, onClose, catalog, start, onChan
                     idx={i}
                     assetHelp={catalog.asset_help}
                     problems={problems[i] || {}}
+                    onFieldBlur={(key) => setProblems((prev) => ({ ...prev, [i]: blurCheck(checkCollector(c, t), prev[i], key) }))}
                     onChange={(next) => {
                       const copy = specs.slice();
                       copy[i] = next;
                       setSpecs(copy);
-                      if (problems[i]) setProblems({ ...problems, [i]: checkCollector(next, t) });
+                      if (problems[i]) setProblems({ ...problems, [i]: keepShown(checkCollector(next, t), problems[i]) });
                     }}
                     onRemove={() => {
                       const copy = specs.filter((_, j) => j !== i);
@@ -367,11 +369,11 @@ export default function AddGatewayWizard({ open, onClose, catalog, start, onChan
                     {assets.slice(0, 8).map((a) => (
                       <li key={`${a.group}/${a.node}/${a.device}`}>
                         <Link href={telemetryHref(gw, a)} className="font-mono text-cyan-300 hover:underline">{a.group} / {a.node}{a.device ? ` / ${a.device}` : ''}</Link>
-                        <span className="text-slate-500"> · {a.metric_count ?? 0} signals</span>
+                        <span className="text-slate-500"> · {pluralShown(a.metric_count ?? 0, (a.metric_count ?? 0).toLocaleString('en-US'), 'signal')}</span>
                       </li>
                     ))}
                   </ul>
-                  <p className="mt-2 text-[11px] text-slate-400">Buffer: {gw.buffer?.depth ?? 0} readings waiting, oldest {duration(gw.buffer?.oldest_age_s)}.</p>
+                  <p className="mt-2 text-[11px] text-slate-400">Buffer: {pluralShown(gw.buffer?.depth ?? 0, (gw.buffer?.depth ?? 0).toLocaleString('en-US'), 'reading')} waiting, oldest {duration(gw.buffer?.oldest_age_s)}.</p>
                 </div>
               )}
             </div>
@@ -382,7 +384,7 @@ export default function AddGatewayWizard({ open, onClose, catalog, start, onChan
 
         <div className="flex flex-col-reverse gap-2 border-t border-slate-800 p-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            {step > 0 && step !== 3 && step !== 4 && !(step === 2 && install) && (
+            {step > 0 && step !== 3 && step !== 4 && (
               <button type="button" onClick={() => setStep(step - 1)} className="inline-flex min-h-[40px] w-full items-center justify-center gap-1.5 rounded-lg border border-slate-700 px-4 py-2 text-sm text-slate-200 hover:bg-slate-800 sm:w-auto" data-testid="edge-wizard-back">
                 <ArrowLeft className="h-4 w-4" /> Back
               </button>

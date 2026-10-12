@@ -62,45 +62,101 @@ export class ApiError extends Error {
   }
 }
 
-let isRefreshing = false;
-let refreshQueue: Array<(token: string | null) => void> = [];
+export const BUSY_MESSAGE = 'The server is busy right now. Try again in a moment.';
+export const UNREACHABLE_MESSAGE = "Can't reach the server. Check your connection and try again.";
 
-async function refreshAccessToken(): Promise<string | null> {
-  if (isRefreshing) {
-    return new Promise((resolve) => refreshQueue.push(resolve));
-  }
-  isRefreshing = true;
+export function isTransientError(detail: { code?: number; status?: number; error_code?: string; errorCode?: string } | null | undefined): boolean {
+  if (!detail) return false;
+  const code = detail.code ?? detail.status;
+  const ec = detail.error_code ?? detail.errorCode;
+  return ec === 'NETWORK_ERROR' || ec === 'SERVER_BUSY' || code === 0 || code === 502 || code === 503 || code === 504;
+}
+
+const RETRY_STATUSES = new Set([502, 503, 504]);
+let retryDelays = [500, 1500, 3500];
+
+export function setApiRetryDelays(delays: number[]) {
+  retryDelays = delays;
+}
+
+export type ApiConnection = 'ok' | 'reconnecting';
+type ConnectionListener = (state: ApiConnection) => void;
+const connectionListeners = new Set<ConnectionListener>();
+let connection: ApiConnection = 'ok';
+
+export function getApiConnection(): ApiConnection {
+  return connection;
+}
+
+export function onApiConnection(listener: ConnectionListener) {
+  connectionListeners.add(listener);
+  return () => {
+    connectionListeners.delete(listener);
+  };
+}
+
+export function setApiConnection(state: ApiConnection) {
+  if (state === connection) return;
+  connection = state;
+  connectionListeners.forEach((fn) => fn(state));
+}
+
+const BUSY_CODES = new Set(['BUSY', 'SERVER_BUSY', 'SERVICE_UNAVAILABLE', 'GATEWAY_TIMEOUT', 'BAD_GATEWAY', 'OVERLOADED']);
+
+// a 502-504 from a proxy or a starved pool is busy, one with its own error code is a real answer
+export async function isBusyResponse(r: Response): Promise<boolean> {
+  if (!RETRY_STATUSES.has(r.status)) return false;
+  let body: any = null;
+  try { body = await r.clone().json(); } catch { return true; }
+  const err = body && typeof body === 'object' ? body.error : null;
+  const code = err && typeof err === 'object' ? err.error_code : null;
+  if (code) return BUSY_CODES.has(String(code).toUpperCase());
+  const msg = typeof err === 'string' ? err : err && typeof err === 'object' ? String(err.message ?? '') : String(body?.detail ?? '');
+  return !msg || /busy|unavailable|timed? ?out|bad gateway|overload/i.test(msg);
+}
+
+function sleep(ms: number) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+export type RefreshResult =
+  | { kind: 'ok'; token: string }
+  | { kind: 'invalid' }
+  | { kind: 'unavailable' };
+
+let refreshing: Promise<RefreshResult> | null = null;
+
+async function doRefresh(): Promise<RefreshResult> {
   const rt = getRefreshToken();
-  if (!rt) {
-    isRefreshing = false;
-    refreshQueue.forEach((cb) => cb(null));
-    refreshQueue = [];
-    return null;
-  }
+  if (!rt) return { kind: 'invalid' };
+  let res: Response;
   try {
-    const res = await fetch(`${API_URL}/api/auth/refresh`, {
+    res = await fetch(`${API_URL}/api/auth/refresh`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ refresh_token: rt }),
     });
-    const json = await res.json();
-    const newToken = json.data?.access_token || null;
-    if (newToken) {
-      localStorage.setItem('access_token', newToken);
-      if (json.data?.refresh_token) {
-        localStorage.setItem('refresh_token', json.data.refresh_token);
-      }
-    }
-    isRefreshing = false;
-    refreshQueue.forEach((cb) => cb(newToken));
-    refreshQueue = [];
-    return newToken;
   } catch {
-    isRefreshing = false;
-    refreshQueue.forEach((cb) => cb(null));
-    refreshQueue = [];
-    return null;
+    return { kind: 'unavailable' };
   }
+  if (!res || res.status >= 500 || res.status === 429) return { kind: 'unavailable' };
+  let json: any = {};
+  try { json = await res.json(); } catch { /* empty body */ }
+  const newToken = res.ok ? json?.data?.access_token || null : null;
+  if (!newToken) return { kind: 'invalid' };
+  localStorage.setItem('access_token', newToken);
+  if (json.data?.refresh_token) localStorage.setItem('refresh_token', json.data.refresh_token);
+  return { kind: 'ok', token: newToken };
+}
+
+// one refresh at a time, every caller waits on the same answer
+export function refreshSession(): Promise<RefreshResult> {
+  if (!refreshing) {
+    refreshing = doRefresh().finally(() => {
+      refreshing = null;
+    });
+  }
+  return refreshing;
 }
 
 const MUTATION_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
@@ -110,16 +166,12 @@ export async function apiFetch<T = unknown>(
   options: FetchOptions = {},
 ): Promise<ApiResponse<T>> {
   const { silent, throwOnError, ...fetchOpts } = options;
-  const shouldThrow = throwOnError ?? MUTATION_METHODS.has(
-    String(fetchOpts.method || 'GET').toUpperCase()
-  );
+  const method = String(fetchOpts.method || 'GET').toUpperCase();
+  const isMutation = MUTATION_METHODS.has(method);
+  const idempotent = method === 'GET' || method === 'HEAD';
+  const shouldThrow = throwOnError ?? isMutation;
   const token = getToken();
-  // Skip the request entirely when no token is present. SWR sometimes
-  // fires the fetcher before the login flow stores the access_token,
-  // and an unauthenticated request to a protected endpoint returns 401
-  // — which the browser surfaces as a CORS error if the upstream did
-  // not attach the right headers. Short-circuiting here avoids the
-  // race and the misleading console error.
+  // SWR can fire before login stores the token, skip rather than send a doomed 401
   const isPublicPath =
     path.startsWith('/api/auth/') ||
     path.startsWith('/api/health') ||
@@ -139,51 +191,77 @@ export async function apiFetch<T = unknown>(
     headers['Content-Type'] = 'application/json';
   }
 
-  let res: Response;
-  try {
-    res = await fetch(`${API_URL}${path}`, { ...fetchOpts, headers });
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : 'Network error';
-    if (!silent) emitToast(`Connection failed: ${msg}`, 'error');
-    const detail: ApiErrorDetail = { message: msg, code: 0, error_code: 'NETWORK_ERROR' };
+  const fail = (detail: ApiErrorDetail, toast: ToastType | null): ApiResponse<T> => {
+    if (toast && !silent) emitToast(detail.message, toast);
     if (shouldThrow) throw new ApiError(detail);
-    return { data: null, error: msg, errorDetail: detail, meta: null };
+    return { data: null, error: detail.message, errorDetail: detail, meta: null };
+  };
+  // reads leave the reconnecting banner to speak, writes get a toast
+  const busyToast: ToastType | null = isMutation ? 'error' : null;
+
+  const send = async (): Promise<Response | Error> => {
+    const attempts = idempotent ? retryDelays.length + 1 : 1;
+    let last: Response | Error = new Error('Network error');
+    for (let i = 0; i < attempts; i++) {
+      if (i > 0) await sleep(retryDelays[i - 1]);
+      try {
+        const r = await fetch(`${API_URL}${path}`, { ...fetchOpts, headers });
+        if (!r) throw new Error('Network error');
+        last = r;
+        if (!(await isBusyResponse(r))) return r;
+      } catch (err) {
+        if ((err as { name?: string } | null)?.name === 'AbortError') throw err;
+        last = err instanceof Error ? err : new Error('Network error');
+      }
+      setApiConnection('reconnecting');
+    }
+    return last;
+  };
+
+  let res = await send();
+  if (res instanceof Error) {
+    return fail({ message: UNREACHABLE_MESSAGE, code: 0, error_code: 'NETWORK_ERROR' }, busyToast);
   }
 
-  // Auto-refresh on 401
   if (res.status === 401 && token) {
-    const newToken = await refreshAccessToken();
-    if (newToken) {
-      headers['Authorization'] = `Bearer ${newToken}`;
-      res = await fetch(`${API_URL}${path}`, { ...fetchOpts, headers });
+    const refreshed = await refreshSession();
+    if (refreshed.kind === 'ok') {
+      headers['Authorization'] = `Bearer ${refreshed.token}`;
+      res = await send();
+      if (res instanceof Error) {
+        return fail({ message: UNREACHABLE_MESSAGE, code: 0, error_code: 'NETWORK_ERROR' }, busyToast);
+      }
+    } else if (refreshed.kind === 'unavailable') {
+      // a busy refresh is not a sign-out, keep the tokens and let the caller retry
+      setApiConnection('reconnecting');
+      return fail({ message: BUSY_MESSAGE, code: 503, error_code: 'SERVER_BUSY' }, busyToast);
     } else {
       localStorage.removeItem('access_token');
       localStorage.removeItem('refresh_token');
       if (typeof window !== 'undefined') {
         window.location.href = signInUrl(currentPath(), { expired: true });
       }
-      const detail: ApiErrorDetail = { message: 'Session expired', code: 401, error_code: 'SESSION_EXPIRED' };
-      if (shouldThrow) throw new ApiError(detail);
-      return { data: null, error: 'Session expired', errorDetail: detail, meta: null };
+      return fail({ message: 'Session expired', code: 401, error_code: 'SESSION_EXPIRED' }, null);
     }
   }
+
+  if (await isBusyResponse(res)) {
+    return fail({ message: BUSY_MESSAGE, code: res.status, error_code: 'SERVER_BUSY' }, busyToast);
+  }
+  setApiConnection('ok');
 
   let json: any = {};
   try { json = await res.json(); } catch { /* non-JSON 204 etc. */ }
 
-  // Rate limit
   if (res.status === 429) {
-    const retryAfter = res.headers.get('Retry-After');
+    const retryAfter = res.headers?.get?.('Retry-After');
     const msg = retryAfter
-      ? `Rate limited. Try again in ${retryAfter}s.`
+      ? `Too many requests. Try again in ${retryAfter} s.`
       : 'Too many requests. Please slow down.';
-    if (!silent) emitToast(msg, 'warning');
-    const detail: ApiErrorDetail = { message: msg, code: 429, error_code: 'RATE_LIMITED' };
-    if (shouldThrow) throw new ApiError(detail);
-    return { data: null, error: msg, errorDetail: detail, meta: null };
+    return fail({ message: msg, code: 429, error_code: 'RATE_LIMITED' }, 'warning');
   }
 
-  // Non-2xx — structured envelope if backend supplied one, else synthesise.
+  // Non-2xx, structured envelope if the backend supplied one
   if (!res.ok) {
     const errObj = (json && typeof json.error === 'object' && json.error) ? json.error : null;
     const msg = (errObj?.message as string)
@@ -195,9 +273,7 @@ export async function apiFetch<T = unknown>(
       error_code: errObj?.error_code,
       details: errObj?.details,
     };
-    if (res.status >= 500 && !silent) emitToast(msg, 'error');
-    if (shouldThrow) throw new ApiError(detail);
-    return { data: null, error: msg, errorDetail: detail, meta: null };
+    return fail(detail, res.status >= 500 ? 'error' : null);
   }
 
   return {

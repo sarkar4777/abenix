@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Copy, Loader2, RefreshCw } from 'lucide-react';
 import { edgeCall, type Gateway, type InstallOut } from './model';
+import { dayTime } from '@/components/telemetry-rules/lib';
 
 const TABS = [
   { id: 'docker_run', label: 'Docker', help: 'One command on any Linux box with Docker. The data volume keeps the buffer and the gateway key across restarts.' },
@@ -106,7 +107,7 @@ export default function InstallPanel({ gateway, install, onInstall, canManage }:
           <div className="flex items-start gap-2 rounded-md border border-amber-600/40 bg-amber-900/20 p-2.5 text-[12px] text-amber-100">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
             <p className="min-w-0">
-              The command holds a one-time enrolment token. It works once, until {new Date(install.expires_at).toLocaleString()}. After the gateway enrols it gets its own key and the token is useless. Making a new command cancels this one.
+              The command holds a one-time enrolment token. It works once, until {dayTime(install.expires_at)}. After the gateway enrols it gets its own key and the token is useless. Making a new command cancels this one.
             </p>
           </div>
           <div className="scrollbar-none flex gap-1 overflow-x-auto border-b border-slate-800" role="tablist" aria-label="How to install">

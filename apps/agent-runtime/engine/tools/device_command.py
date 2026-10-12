@@ -55,6 +55,16 @@ async def _progress(execution_id: str, meta: dict[str, Any]) -> None:
         pass
 
 
+def _status(data: dict[str, Any]) -> None:
+    """A live tool_status event on the chat stream, a no-op outside one."""
+    try:
+        from engine import autonomy
+
+        autonomy.emit("tool_status", data)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def wake_channel(approval_id: str) -> str:
     # the API publishes here the moment a person decides
     return f"approval:{approval_id}:resolved"
@@ -135,6 +145,8 @@ async def wait_for(
 
 class DeviceCommandTool(BaseTool):
     name = "device_command"
+    # tells the chat it is waiting for an approval while the call is open
+    streams_status = True
     risk_tier = "medium"
     effect = EFFECT
     description = (
@@ -263,12 +275,22 @@ class DeviceCommandTool(BaseTool):
                     "link": approval.get("link"),
                 },
             )
+            _status(
+                {
+                    "name": "device_command",
+                    "status": "waiting_approval",
+                    "approval_id": aid,
+                    "message": "Waiting for approval. Open Approvals to approve or deny it.",
+                    "link": approval.get("link"),
+                }
+            )
             limit = _int(self.cfg("TELEMETRY_COMMAND_APPROVAL_WAIT_S"), 1800)
             limit = max(10, min(limit, int(approval.get("expires_seconds") or 1800)))
             w0 = time.time()
             final = await wait_for(aid, limit, info["execution_id"])
             approval_wait_ms = int((time.time() - w0) * 1000)
             st = final.get("status") or "expired"
+            _status({"name": "device_command", "status": st, "approval_id": aid})
             if st != "approved":
                 who = _signer(final, "deny") or _signer(final, "return")
                 name = who.get("user_name") or "A reviewer"
@@ -282,7 +304,15 @@ class DeviceCommandTool(BaseTool):
                 return ToolResult(
                     content=text + " Do not tell the user it was done.",
                     is_error=True,
-                    metadata={"approval_id": aid, "decision": st},
+                    metadata={
+                        "approval_id": aid,
+                        "decision": st,
+                        "status": (
+                            "denied" if st in ("denied", "returned") else "expired"
+                        ),
+                        "reason": why or None,
+                        "decided_by": who.get("user_name"),
+                    },
                 )
             body["approval_id"] = aid
         target = prop.get("target") or {}

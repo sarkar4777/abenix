@@ -88,6 +88,12 @@ also from a `.env` at the repo root when one exists.
 | `DB_POOL_SIZE` | `10` | Per uvicorn worker |
 | `DB_MAX_OVERFLOW` | `5` | Per uvicorn worker |
 | `DB_POOL_TIMEOUT` | `20` | Seconds a request waits for a connection |
+| `DB_PRIORITY_POOL_SIZE` / `DB_PRIORITY_MAX_OVERFLOW` | `2` / `2` | Separate pool for sign-in, token refresh, `/api/auth/me` and readiness, so a busy main pool never locks people out |
+| `DB_PRIORITY_STMT_MS` | `10000` | Statement timeout on the priority pool |
+| `DB_BG_POOL_SIZE` / `DB_BG_MAX_OVERFLOW` | `2` / `1` | Pool for alert delivery and the alert notification clean-up |
+| `DB_BG_STMT_MS` | `15000` | Statement timeout on the background pool |
+| `ALERT_WEBHOOK_MAX_ALERTS` | `200` | Most alerts one webhook call handles after grouping. The rest are dropped and counted |
+| `ALERT_WEBHOOK_QUEUE_MAX` | `20` | Webhook batches waiting for delivery per API worker. Past this a batch is dropped and counted |
 | `SQL_ECHO` | off | `1`, `true` or `yes` logs every statement |
 | `IP_WHITELIST` | empty | Comma-separated IPs or CIDRs. Empty allows every client |
 | `IS_LOCAL_DEV` | off | `1`, `true` or `yes` bypasses the rate limiter and raises its defaults to 5000 a minute |
@@ -172,7 +178,7 @@ Tenants can override the three `SANDBOXED_JOB_*` switches from
 | `PROMETHEUS_URL` | `http://abenix-prometheus.abenix.svc.cluster.local:9090` | Fallback source for `/api/admin/alerts` and the `/rules` proxy. Chart from `alerting.prometheusUrl` |
 | `ALERTMANAGER_URL` | empty | Primary source for `/api/admin/alerts`. Chart sets `http://<release>-alertmanager.<ns>.svc.cluster.local:9093` when `alerting.alertmanager.enabled` |
 | `ALERT_WEBHOOK_TOKEN` | empty | Bearer token Alertmanager presents on `POST /api/admin/alerts/webhook`. Unset means the webhook answers 503. Chart generates one and keeps it |
-| `PLATFORM_ALERT_DEDUPE_MINUTES` | `30` | Same fingerprint is not re-notified inside this window. Chart from `alerting.dedupeMinutes` |
+| `PLATFORM_ALERT_DEDUPE_MINUTES` | `30` | Same fingerprint and status, or the same source for device-offline alerts, is not re-notified inside this window. Held in Redis. Chart from `alerting.dedupeMinutes` |
 | `ABENIX_SLACK_WEBHOOK_URL` | empty | Operator Slack channel for platform alerts, in addition to per-tenant hooks |
 | `SMTP_HOST` | empty | Outbound email for notifications, password resets and invites. Empty disables email. Helm `smtp.host` |
 | `SMTP_PORT` | `587` | 465 means implicit TLS |

@@ -185,7 +185,8 @@ test('a first-time admin is guided to a live stream over HTTP, with device keys'
   await expect(page.getByTestId('tel-push-token')).toBeVisible();
   await expect(page.getByTestId('tel-push-snippet')).toContainText('Idempotency-Key');
   await page.getByTestId('tel-push-test').click();
-  await expect(page.getByTestId('tel-push-result')).toContainText('Accepted', { timeout: 15_000 });
+  // stored, or arrived and waiting for the mapping set up next
+  await expect(page.getByTestId('tel-push-result')).toContainText(/Accepted|Stored as|arrived|mapping/, { timeout: 15_000 });
   await shot(page, '04-push-endpoint');
   await page.getByTestId('tel-push-map').click();
   await expect(wiz).toHaveAttribute('data-step', 'mapping');
@@ -442,9 +443,11 @@ test('admin forgets the UAT assets, one from its page and the rest in bulk', asy
     await forget.click();
     await expect(page.getByRole('dialog')).toContainText('history is kept');
     await shot(page, '16-forget-confirm');
-    await page.getByTestId('tel-forget-confirm').click();
+    // an online asset asks once, with the force button, an offline one with the plain confirm
+    const confirmBtn = page.getByTestId('tel-forget-confirm').or(page.getByTestId('tel-forget-force'));
+    await confirmBtn.first().click();
     const force = page.getByTestId('tel-forget-force');
-    if (await force.isVisible({ timeout: 5_000 }).catch(() => false)) await force.click();
+    if (await force.isVisible({ timeout: 3_000 }).catch(() => false)) await force.click();
     await expect(page).toHaveURL(/\/telemetry(\?|$)/, { timeout: 15_000 });
     await expect(page.getByTestId('tel-device-title')).toHaveCount(0);
   }

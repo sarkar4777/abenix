@@ -32,6 +32,11 @@ export function explainTelemetryError(e: unknown, action: TelemetryAction, ctx: 
   const c = (code || '').toUpperCase();
   const msg = message || '';
   if (c === 'NETWORK_ERROR' || status === 0) return 'Could not reach Abenix. Check your network connection, then try again.';
+  if (c === 'SERVER_BUSY' || c === 'BUSY' || (!c && (status === 502 || status === 503 || status === 504))) {
+    return ['load', 'history', 'frames'].includes(action)
+      ? 'Abenix is busy right now. Retrying on its own, or press Try again.'
+      : 'Abenix is busy right now and this did not go through. Try again in a moment.';
+  }
   if (c === 'SESSION_EXPIRED' || c === 'NO_TOKEN' || status === 401) return 'Your session has ended. Sign in again to carry on.';
   if (c === 'BROKER_UNREACHABLE') return 'Abenix could not reach the broker to send this. Check the connection on the Connections tab, then try again.';
   if (c === 'HISTORY_UNAVAILABLE') return 'Stored history is not available right now, so the chart shows only the live values since you opened this page. Try again in a minute.';
@@ -73,19 +78,41 @@ export function hostOf(url: string): string {
 }
 
 // the test result in one or two plain sentences
-export function describeTest(t: ConnectionTest, brokerUrl: string): { ok: boolean; text: string } {
+const TLS_HINT: Record<string, string> = {
+  kafka: 'Check the security protocol is SSL or SASL_SSL, the port is the TLS listener and the broker certificate is valid.',
+  mqtt: 'Check the broker takes mqtts on this port and has a valid certificate.',
+  amqp: 'Check the broker takes amqps on this port and has a valid certificate.',
+  nats: 'Check the server has TLS switched on for this port and a valid certificate.',
+  opcua: 'Check the security policy and mode match the server, and that the server trusts the client certificate.',
+  websocket: 'Check the address starts with wss:// and the server certificate is valid.',
+};
+
+function transportFamily(transport?: string | null): string {
+  const t = (transport || '').toLowerCase();
+  if (t.startsWith('kafka')) return 'kafka';
+  if (t.startsWith('mqtt') || t.startsWith('sparkplug')) return 'mqtt';
+  if (t.startsWith('amqp') || t.startsWith('rabbit')) return 'amqp';
+  if (t.startsWith('nats')) return 'nats';
+  if (t.startsWith('opc')) return 'opcua';
+  if (t.startsWith('ws') || t.startsWith('websocket')) return 'websocket';
+  return t;
+}
+
+export function describeTest(t: ConnectionTest, brokerUrl: string, transport?: string | null): { ok: boolean; text: string } {
   const host = hostOf(brokerUrl);
+  const fam = transportFamily(transport || (/^mqtts?:/i.test(brokerUrl) ? 'mqtt' : ''));
   if (t.connected || t.ok) {
     const topics = t.topics_seen?.length ?? 0;
     if (t.messages > 0) {
       return { ok: true, text: `Connected to ${host}. ${t.messages} message${t.messages === 1 ? '' : 's'} arrived in 5 seconds on ${topics} topic${topics === 1 ? '' : 's'}.` };
     }
-    return { ok: true, text: `Connected to ${host}, but no messages arrived in 5 seconds. Check that a machine is publishing on the topics listed, or widen them, for example to spBv1.0/#.` };
+    const widen = fam === 'mqtt' ? ', or widen them, for example to spBv1.0/#' : fam === 'nats' ? ', or widen them, for example to plant.>' : '';
+    return { ok: true, text: `Connected to ${host}, but no messages arrived in 5 seconds. Check that a machine is publishing on the ${fam === 'nats' ? 'subjects' : 'topics'} listed${widen}.` };
   }
   const e = t.error || '';
   if (isPlain(e)) return { ok: false, text: e };
   if (/not authori[sz]ed|bad user ?name|password|auth/i.test(e)) return { ok: false, text: `The broker at ${host} refused the username or password. Check them and save again.` };
-  if (/tls|ssl|certificate|handshake/i.test(e)) return { ok: false, text: `The secure connection to ${host} failed. Check the broker takes mqtts on this port and has a valid certificate.` };
+  if (/tls|ssl|certificate|handshake/i.test(e)) return { ok: false, text: `The secure connection to ${host} failed. ${TLS_HINT[fam] ?? 'Check the port is the secure one and the server certificate is valid.'}` };
   if (/getaddrinfo|name or service|resolve|nodename|unknown host/i.test(e)) return { ok: false, text: `The address ${host} could not be found. Check the spelling of the host name.` };
   if (/refused/i.test(e)) return { ok: false, text: `The broker at ${host} refused the connection. Check the port and that the broker is running.` };
   if (/time ?out|timed out/i.test(e)) return { ok: false, text: `The broker at ${host} did not answer within 5 seconds. Check the address, the port and any firewall in between.` };
@@ -147,4 +174,17 @@ export const REASON_MIN = 5;
 export function reasonProblem(raw: string): string | null {
   if (raw.trim().length < REASON_MIN) return `Say why you are sending this, at least ${REASON_MIN} characters. It goes on the audit log with your name.`;
   return null;
+}
+
+export const CAPTURE_SECONDS = 20;
+
+// why a live capture came back empty, in the words of what to do next
+export function captureReason(e: unknown): string {
+  const { status, code, message } = errLike(e);
+  const c = (code || '').toUpperCase();
+  if (c === 'SOURCE_OFF' || c === 'SOURCE_DISABLED') return 'The source is turned off, so nothing can arrive. Turn it on under Sources, then try again.';
+  if (c === 'CANNOT_CONNECT' || c === 'BROKER_UNREACHABLE') return `Abenix cannot connect to the source.${isPlain(message) ? ` ${message}` : ''} Check its address and port in the settings, then try again.`;
+  if (c === 'SIGN_IN_FAILED' || c === 'AUTH_FAILED') return 'The source refused the sign-in. Check the user name, password and sign-in method in the settings, then try again.';
+  if (c === 'NOTHING_ARRIVED' || c === 'CAPTURE_TIMEOUT' || status === 408) return `Nothing arrived in ${CAPTURE_SECONDS} seconds. Check that something is sending on the topics this source reads, then try again.`;
+  return explainTelemetryError(e, 'load');
 }

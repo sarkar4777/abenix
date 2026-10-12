@@ -5,8 +5,8 @@ import { CheckCircle2, Copy, KeyRound, Loader2, Send, XCircle } from 'lucide-rea
 import ConfirmModal from '@/components/ui/ConfirmModal';
 import { API_URL, apiFetch } from '@/lib/api-client';
 import { explainTelemetryError } from '@/lib/telemetry/errors';
-import { pushSnippets } from '@/lib/telemetry/sources';
-import { ingestError } from '@/lib/telemetry/keys';
+import { pushSnippets, pushSubject, withSubject, type Mapping } from '@/lib/telemetry/sources';
+import { ingestError, testMessageError } from '@/lib/telemetry/keys';
 import { useKept } from '@/lib/telemetry/kept';
 
 type Lang = 'curl' | 'python' | 'js';
@@ -32,7 +32,7 @@ function CopyButton({ text, label, testId }: { text: string; label: string; test
 }
 
 // where another system sends its data, the token once, and code to paste
-export default function PushPanel({ sourceId, token: firstToken, ingestUrl, onSent, testBody }: { sourceId: string | null; token: string | null; ingestUrl?: string | null; onSent?: (sample: string) => void; testBody?: string }) {
+export default function PushPanel({ sourceId, token: firstToken, ingestUrl, onSent, testBody, mapping }: { sourceId: string | null; token: string | null; ingestUrl?: string | null; onSent?: (sample: string) => void; testBody?: string; mapping?: Partial<Mapping> | null }) {
   const [token, setToken] = useKept<string | null>(`push:${sourceId}:token`, firstToken);
   const [lang, setLang] = useState<Lang>('curl');
   const [rotating, setRotating] = useState(false);
@@ -41,7 +41,7 @@ export default function PushPanel({ sourceId, token: firstToken, ingestUrl, onSe
   const [sending, setSending] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null);
   const endpoint = ingestEndpoint(sourceId, ingestUrl);
-  const snip = pushSnippets(endpoint, token ?? '');
+  const snip = pushSnippets(endpoint, token ?? '', { sample: testBody, mapping });
 
   async function rotate() {
     if (!sourceId) return;
@@ -58,27 +58,50 @@ export default function PushPanel({ sourceId, token: firstToken, ingestUrl, onSe
     }
   }
 
+  function testSample(): string {
+    let sample = JSON.stringify({ asset: 'test-asset', temperature_c: 21.5, pressure_bar: 1.01, ts: Date.now() });
+    if (testBody) { try { sample = JSON.stringify(JSON.parse(testBody)); } catch { /* keep the generic one */ } }
+    return sample;
+  }
+
+  // through the token, for an older server without the test endpoint
+  async function sendWithToken(sample: string, subject: string): Promise<{ ok: boolean; text: string }> {
+    const res = await fetch(withSubject(endpoint, subject), {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', 'Idempotency-Key': `test-${Date.now()}-${Math.random().toString(36).slice(2, 8)}` },
+      body: sample,
+    });
+    if (res.ok) return { ok: true, text: 'Accepted. It shows under Messages straight away, and on the Assets tab once the mapping places it.' };
+    const body = await res.json().catch(() => null);
+    return { ok: false, text: ingestError(res.status, body?.error?.error_code) };
+  }
+
   async function sendTest() {
-    if (!token) return;
+    if (!sourceId) return;
     setSending(true);
     setResult(null);
+    const sample = testSample();
+    const subject = pushSubject(mapping) ?? 'test/test-device';
     try {
-      let sample = JSON.stringify({ asset: 'test-asset', temperature_c: 21.5, pressure_bar: 1.01, ts: Date.now() });
-      if (testBody) { try { sample = JSON.stringify(JSON.parse(testBody)); } catch { /* keep the generic one */ } }
-      // with the shared token the asset comes from the subject, a device key brings its own
-      const res = await fetch(`${endpoint}${endpoint.includes('?') ? '&' : '?'}subject=${encodeURIComponent('test/test-device')}`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: sample,
-      });
-      if (res.ok) {
-        setResult({ ok: true, text: testBody ? 'Accepted. It shows under Messages straight away, and on the Assets tab once the mapping places it.' : 'Accepted. It shows under Messages straight away, and on the Assets tab in a moment as test-asset.' });
-        onSent?.(JSON.stringify(JSON.parse(sample), null, 2));
+      const res = await apiFetch<{ stored?: boolean; group?: string; node?: string; device?: string; message?: string }>(
+        `/api/telemetry/connections/${sourceId}/test-message`,
+        { method: 'POST', body: JSON.stringify({ payload: sample, subject }), silent: true, throwOnError: false },
+      );
+      let out: { ok: boolean; text: string };
+      if ((res.errorDetail?.code === 404 || res.errorDetail?.code === 405) && token) {
+        out = await sendWithToken(sample, subject);
+      } else if (res.error) {
+        out = { ok: false, text: testMessageError(res.errorDetail?.code ?? 0, res.errorDetail?.error_code, res.error) };
+      } else {
+        const d = res.data || {};
+        const where = d.node ? `${d.group ? `${d.group} / ` : ''}${d.node}${d.device ? ` / ${d.device}` : ''}` : null;
+        out = d.stored === false
+          ? { ok: false, text: d.message || 'It arrived but was not stored, the mapping does not place it yet. Set up the mapping next, Messages, Problems also says why.' }
+          : { ok: true, text: d.message || (where ? `Stored as ${where}. It shows on the Assets tab now.` : 'Accepted. It shows under Messages straight away, and on the Assets tab once the mapping places it.') };
       }
-      else {
-        const body = await res.json().catch(() => null);
-        setResult({ ok: false, text: ingestError(res.status, body?.error?.error_code) });
-      }
+      setResult(out);
+      // it arrived even when the mapping did not place it, so the mapping step gets the sample
+      if (out.ok || (!res.error && res.data)) onSent?.(JSON.stringify(JSON.parse(sample), null, 2));
     } catch {
       setResult({ ok: false, text: ingestError(0) });
     } finally {
@@ -125,10 +148,9 @@ export default function PushPanel({ sourceId, token: firstToken, ingestUrl, onSe
         </div>
         <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-all rounded-md border border-slate-700 bg-slate-950 p-2.5 font-mono text-[11px] text-slate-200" data-testid="tel-push-snippet">{snip[lang]}</pre>
       </div>
-      <button type="button" onClick={sendTest} disabled={!token || sending} title={!token ? 'Needs the token, rotate it to get one' : undefined} className="inline-flex min-h-[38px] items-center gap-1.5 rounded-lg border border-slate-600 px-3 py-1.5 text-sm text-slate-200 hover:bg-slate-800 disabled:opacity-50" data-testid="tel-push-test">
+      <button type="button" onClick={sendTest} disabled={!sourceId || sending} className="inline-flex min-h-[38px] items-center gap-1.5 rounded-lg border border-slate-600 px-3 py-1.5 text-sm text-slate-200 hover:bg-slate-800 disabled:opacity-50" data-testid="tel-push-test">
         {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />} Send a test message
       </button>
-      {!token && <p className="text-xs text-slate-500">Sending a test needs the token, which this page only has right after it was made or rotated.</p>}
       {result && (
         <p className={`flex items-start gap-1.5 rounded-lg border px-3 py-2 text-sm ${result.ok ? 'border-emerald-500/30 bg-emerald-500/5 text-emerald-100' : 'border-rose-500/30 bg-rose-500/5 text-rose-100'}`} role="status" data-testid="tel-push-result">
           {result.ok ? <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" /> : <XCircle className="mt-0.5 h-4 w-4 shrink-0" />} {result.text}

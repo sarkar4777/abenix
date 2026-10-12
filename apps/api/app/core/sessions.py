@@ -105,7 +105,7 @@ async def is_live(db: AsyncSession, sid: Any, user_id: Any = None) -> bool:
 
 
 async def touch(sid: Any) -> None:
-    """Record activity at most once a minute per session, on its own connection."""
+    """Record activity at most once a minute per session, off the request path."""
     key = str(sid)
     now = time.monotonic()
     if now - _touched.get(key, 0.0) < TOUCH_EVERY:
@@ -113,6 +113,18 @@ async def touch(sid: Any) -> None:
     _touched[key] = now
     if len(_touched) > 50_000:
         _touched.clear()
+    import asyncio
+
+    # a busy pool must not hold up the request that only wanted to be seen
+    task = asyncio.get_running_loop().create_task(_write_touch(sid))
+    _touch_tasks.add(task)
+    task.add_done_callback(_touch_tasks.discard)
+
+
+_touch_tasks: set = set()
+
+
+async def _write_touch(sid: Any) -> None:
     try:
         from app.core.deps import async_session
 

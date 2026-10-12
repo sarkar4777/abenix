@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { List, type RowComponentProps } from 'react-window';
 import { AlertTriangle, Archive, LayoutGrid, Plug, Radio, Rows3, Search, X } from 'lucide-react';
@@ -18,19 +18,19 @@ export const PLAIN_GRID_MAX = 24;
 const GAP = 12;
 const ROW_H = 40;
 
-export function useWidth<T extends HTMLElement>(): [React.RefObject<T>, number] {
-  const ref = useRef<T>(null);
+// a callback ref, so a grid that mounts after a loading state is still measured
+export function useWidth<T extends HTMLElement>(): [(el: T | null) => void, number] {
+  const [el, setEl] = useState<T | null>(null);
   const [w, setW] = useState(0);
   useLayoutEffect(() => {
-    const el = ref.current;
     if (!el) return;
     setW(el.clientWidth);
     if (typeof ResizeObserver === 'undefined') return;
     const ro = new ResizeObserver(() => setW(el.clientWidth));
     ro.observe(el);
     return () => ro.disconnect();
-  }, []);
-  return [ref, w];
+  }, [el]);
+  return [setEl, w];
 }
 
 export function columnsFor(width: number): number {
@@ -155,7 +155,7 @@ export default function DevicesTab(p: DevicesTabProps) {
   }, [all]);
   const offline = useMemo(() => offlineItems(list), [list]);
   const [wrapRef, width] = useWidth<HTMLDivElement>();
-  const cols = columnsFor(width || 1200);
+  const cols = columnsFor(width || (typeof window !== 'undefined' ? window.innerWidth : 1200));
   const [q, setQ] = useState(filter.q);
   useEffect(() => setQ(filter.q), [filter.q]);
   useEffect(() => {

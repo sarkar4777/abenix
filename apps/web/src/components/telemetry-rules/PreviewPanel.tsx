@@ -5,6 +5,7 @@ import { CartesianGrid, Line, LineChart, ReferenceArea, ReferenceLine, Responsiv
 import { History, Loader2, RefreshCw } from 'lucide-react';
 import { apiFetch } from '@/lib/api-client';
 import { boundsOf, clockTime, fmt, previewBody, previewReady, type Condition, type Preview, type PreviewAsset, type RuleDraft } from './lib';
+import { pluralShown } from '@/lib/plural';
 
 const HOURS = [1, 6, 24] as const;
 
@@ -102,7 +103,7 @@ export default function PreviewPanel({ draft }: { draft: RuleDraft }) {
     const my = ++seq.current;
     const t = setTimeout(async () => {
       setBusy(true);
-      const r = await apiFetch<Preview>('/api/telemetry/rules/preview', { method: 'POST', body, silent: true });
+      const r = await apiFetch<Preview>('/api/telemetry/rules/preview', { method: 'POST', body, silent: true, throwOnError: false });
       if (my !== seq.current) return;
       setBusy(false);
       if (r.error || !r.data) {
@@ -147,12 +148,12 @@ export default function PreviewPanel({ draft }: { draft: RuleDraft }) {
       ) : (
         <div className="space-y-3">
           <p className={`text-sm font-medium ${res.fired ? 'text-amber-100' : 'text-slate-200'}`} data-testid="preview-summary" data-fired={res.fired}>{res.summary}</p>
-          {res.truncated && <p className="text-xs text-slate-500">Only the first assets are shown. The rule watches {res.targets} assets.</p>}
+          {res.truncated && <p className="text-xs text-slate-500">Only the first assets are shown. The rule watches {pluralShown(res.targets, (res.targets).toLocaleString('en-US'), 'asset')}.</p>}
           {shown.map((a) => (
             <div key={a.key} className="rounded-lg border border-slate-700/50 bg-slate-950/40 p-2" data-testid="preview-asset" data-key={a.key}>
               <div className="mb-1 flex flex-wrap items-baseline gap-x-2 text-xs">
                 <span className="font-medium text-slate-100">{a.name}</span>
-                <span className="text-slate-500">{a.samples.toLocaleString('en-US')} readings</span>
+                <span className="text-slate-500">{pluralShown(a.samples, a.samples.toLocaleString('en-US'), 'reading')}</span>
                 <span className={a.firings.length ? 'text-rose-300' : 'text-slate-500'}>{a.firings.length ? `fired ${a.firings.length}` : 'no firing'}</span>
               </div>
               {draft.condition.kind === 'geofence'

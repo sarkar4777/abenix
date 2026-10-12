@@ -879,6 +879,18 @@ def start_scheduler() -> None:
         next_run_time=datetime.now(timezone.utc) + timedelta(seconds=120),
     )
 
+    scheduler.add_job(
+        _tracked("alert_notification_retention", alert_notification_retention),
+        trigger="interval",
+        minutes=60,
+        id="alert_notification_retention",
+        name="Delete old platform alert notifications",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=60),
+    )
+
     # Platform alerts arrive by Alertmanager webhook (routers/admin_alerts.py),
     # the Prometheus poller that used to run here is gone.
 
@@ -1036,6 +1048,36 @@ async def moderation_review_tick() -> dict[str, int] | None:
     except Exception:
         logger.exception("moderation review tick failed")
         return None
+
+
+async def alert_notification_retention() -> dict[str, int] | None:
+    """One replica at a time, held in Redis so no main-pool connection sits on a lock."""
+    from app.core import notifications as notif
+    from app.core.hitl import get_redis
+
+    lock = "lock:alert-notification-retention"
+    r = None
+    try:
+        r = await get_redis()
+        if not await r.set(lock, "1", nx=True, ex=1800):
+            return None
+    except Exception as e:  # noqa: BLE001
+        logger.warning("alert retention runs without a lock: %s", e)
+        r = None
+    try:
+        out = await notif.prune_system_alerts()
+        if any(out.values()):
+            logger.info("alert notification retention: %s", out)
+        return out
+    except Exception:
+        logger.exception("alert notification retention failed")
+        return None
+    finally:
+        if r is not None:
+            try:
+                await r.delete(lock)
+            except Exception:  # noqa: BLE001
+                pass
 
 
 async def moderation_retention() -> dict[str, int] | None:

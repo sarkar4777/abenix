@@ -85,7 +85,7 @@ export function deviceSnippets(endpoint: string, key: string, deviceId: string):
     { py: 'str(uuid.uuid4())', js: 'crypto.randomUUID()' },
   );
   return {
-    curl: `curl -X POST '${endpoint}' \\\n  -H 'Authorization: Bearer ${k}' \\\n  -H 'Content-Type: application/json' \\\n  -H 'Idempotency-Key: ${deviceId}-1760175000000' \\\n  -d '{"ts": 1760175000000, "speed_kmh": 48, "fuel_pct": 63}'`,
+    curl: `curl -X POST '${endpoint}' \\\n  -H 'Authorization: Bearer ${k}' \\\n  -H 'Content-Type: application/json' \\\n  -H "Idempotency-Key: ${deviceId}-$(date +%s)-$RANDOM" \\\n  -d '{"ts": 1760175000000, "speed_kmh": 48, "fuel_pct": 63}'`,
     python: sdk.python.replace('import asyncio\n', 'import asyncio\nimport time\nimport uuid\n'),
     js: sdk.js,
   };
@@ -94,7 +94,7 @@ export function deviceSnippets(endpoint: string, key: string, deviceId: string):
 // what a push to the ingest address got back, for the person testing it
 export function ingestError(status: number, code?: string | null): string {
   const c = (code || '').toUpperCase();
-  if (status === 401 || c === 'UNAUTHORIZED') return 'The key or token was refused. Check it was copied whole, and that it has not been revoked or rotated.';
+  if (status === 401 || c === 'UNAUTHORIZED') return 'The key or token was refused. It may be an old one, a token stops working once it is rotated. Get a new source token under Telemetry, Sources, Endpoint and token, or check the device key under Device keys.';
   if (status === 403) return 'This key may only write as its own device. Send it from that device, or use a gateway key for many assets.';
   if (status === 409 || c === 'DISABLED') return 'The source is turned off, so nothing is accepted. Turn it on under Sources, then send again.';
   if (status === 413 || c === 'PAYLOAD_TOO_LARGE') return 'The message is over the size limit, 1 MB unless an admin changed it. Send smaller batches.';
@@ -102,4 +102,20 @@ export function ingestError(status: number, code?: string | null): string {
   if (status === 429) return 'Too many messages right now, the workspace is over its limit. Try again in a moment.';
   if (status === 0) return 'Could not reach Abenix from this browser. Check your network connection.';
   return 'Abenix did not take the message. Check the source is on, then try again.';
+}
+
+export function keysPath(sourceId: string, includeRevoked: boolean): string {
+  return `/api/telemetry/connections/${sourceId}/keys${includeRevoked ? '?include_revoked=true' : ''}`;
+}
+
+// what the server-side test send got back, for the person pressing the button
+export function testMessageError(status: number, code?: string | null, message?: string | null): string {
+  const c = (code || '').toUpperCase();
+  if (c === 'SOURCE_OFF' || status === 409) return 'The source is turned off, so the test was not sent. Turn it on under Sources, then send again.';
+  if (c === 'NOT_PUSH' || status === 422) return 'A test message is only for sources that receive over HTTP. For this one, check it is connected and use Capture a live message.';
+  if (status === 403) return 'Sending a test needs Manage telemetry brokers. An admin can send it, or give you that permission under Admin, Permissions.';
+  if (status === 404) return 'This source no longer exists. Someone may have deleted it. Refresh the page.';
+  if (c === 'SERVER_BUSY' || status === 503 || status === 502 || status === 504) return 'Abenix is busy right now and the test was not sent. Try again in a moment.';
+  if (status === 0) return ingestError(0);
+  return message && /^[A-Z].*[.!?]$/.test(message) ? message : 'The test could not be sent. Try again, and if it keeps happening an admin can check the Alerts page.';
 }

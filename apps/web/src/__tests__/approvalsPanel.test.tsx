@@ -132,3 +132,28 @@ describe('Needs you approvals', () => {
     expect(screen.getByTestId('inbox-approvals-empty')).toBeInTheDocument();
   });
 });
+
+describe('machine command approvers', () => {
+  const approvers = [
+    { id: 'me', name: 'Me', is_requester: true },
+    { id: 'u3', name: 'Ana' },
+    { id: 'u4', name: 'Raj' },
+    { id: 'u5', name: 'Kim' },
+    { id: 'u6', name: 'Lee' },
+    { id: 'u7', name: 'Sam' },
+  ];
+  it('tells the requester they can approve their own command, and who else can', async () => {
+    rows = [row({ gate_kind: 'telemetry.command', title: 'Set Setpoint_kW to 30', requested_by: 'me', requested_by_name: 'Me', approvers, can_self_approve: true, payload: {} })];
+    render(<ApprovalsPanel me={ME} caps={[]} />);
+    expect(await screen.findByTestId('inbox-command-mine')).toHaveTextContent('You asked for this. You can approve it, or anyone listed can.');
+    expect(screen.getByTestId('inbox-command-approvers')).toHaveTextContent('Who can approve: you and Ana, Raj (+3).');
+    expect(screen.getByTestId('inbox-requester')).toHaveTextContent(/^You asked/);
+  });
+  it('names who asked on someone else\'s command', async () => {
+    rows = [row({ gate_kind: 'telemetry.command', title: 'Set Mode', requested_by: 'u3', requested_by_name: 'Ana', approvers: [{ id: 'u3', name: 'Ana', is_requester: true }, { id: 'me', name: 'Me' }], payload: {} })];
+    render(<ApprovalsPanel me={ME} caps={[]} />);
+    expect(await screen.findByTestId('inbox-requester')).toHaveTextContent('Asked by Ana');
+    expect(screen.queryByTestId('inbox-command-mine')).toBeNull();
+    expect(screen.getByTestId('inbox-command-approvers')).toHaveTextContent('Who can approve: you and Ana (asked).');
+  });
+});

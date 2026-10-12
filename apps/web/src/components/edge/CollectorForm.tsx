@@ -2,7 +2,8 @@
 
 import { useRef, useState } from 'react';
 import { CheckCircle2, FileUp, Loader2, Trash2, X } from 'lucide-react';
-import { MASK, edgeCall, requiredNow, shown, type CollectorSpec, type CollectorType, type FieldDecl } from './model';
+import { MASK, edgeCall, fieldKeyOf, requiredNow, shown, type CollectorSpec, type CollectorType, type FieldDecl } from './model';
+import { pluralShown } from '@/lib/plural';
 
 const INPUT = 'w-full min-w-0 rounded-md border bg-slate-950 px-2.5 py-2 text-sm text-white placeholder:text-slate-600 focus:outline-none focus:ring-1 focus:ring-cyan-500';
 
@@ -85,7 +86,7 @@ function DbcField({ id, value, onChange, stored, disabled }: { id: string; value
         <p className="mt-1 flex items-start gap-1 text-[11px] text-emerald-300" data-testid={`${id}-ok`}>
           <CheckCircle2 className="mt-0.5 h-3 w-3 shrink-0" />
           <span className="min-w-0 break-words">
-            {check.count} messages, such as {check.messages.slice(0, 3).map((m) => `${m.name}${m.pgn ? ` (PGN ${m.pgn})` : ''}`).join(', ')}
+            {pluralShown(check.count, (check.count).toLocaleString('en-US'), 'message')}, such as {check.messages.slice(0, 3).map((m) => `${m.name}${m.pgn ? ` (PGN ${m.pgn})` : ''}`).join(', ')}
           </span>
         </p>
       )}
@@ -164,7 +165,7 @@ export function FieldControl({ f, c, t, idPrefix, problem, onChange, disabled }:
   );
 }
 
-export default function CollectorForm({ t, c, onChange, problems, idx, onRemove, disabled, assetHelp }: {
+export default function CollectorForm({ t, c, onChange, problems, idx, onRemove, disabled, assetHelp, onFieldBlur }: {
   t: CollectorType;
   c: CollectorSpec;
   onChange: (next: CollectorSpec) => void;
@@ -173,6 +174,7 @@ export default function CollectorForm({ t, c, onChange, problems, idx, onRemove,
   onRemove?: () => void;
   disabled?: boolean;
   assetHelp: string;
+  onFieldBlur?: (key: string) => void;
 }) {
   const p = `edge-c${idx}`;
   const set = (k: string, v: unknown) => onChange({ ...c, [k]: v });
@@ -184,7 +186,15 @@ export default function CollectorForm({ t, c, onChange, problems, idx, onRemove,
   const partLabel = t.device_from_bus ? 'Part (empty names each ECU)' : 'Part';
 
   return (
-    <section className="rounded-lg border border-slate-700/60 bg-slate-900/40 p-3 sm:p-4" data-testid={`edge-collector-${idx}`} aria-label={`${t.label} settings`}>
+    <section
+      className="rounded-lg border border-slate-700/60 bg-slate-900/40 p-3 sm:p-4"
+      data-testid={`edge-collector-${idx}`}
+      aria-label={`${t.label} settings`}
+      onBlur={(e) => {
+        const key = fieldKeyOf((e.target as HTMLElement).getAttribute('data-testid') || '', p);
+        if (key && onFieldBlur) onFieldBlur(key);
+      }}
+    >
       <div className="mb-3 flex items-start justify-between gap-2">
         <div className="min-w-0">
           <p className="text-[11px] uppercase tracking-wider text-cyan-300">{t.label}</p>

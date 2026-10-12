@@ -363,6 +363,13 @@ def _serialize_notification(n: Notification) -> dict:
     }
 
 
+def _tenant_uuid(raw: Any) -> uuid.UUID | None:
+    try:
+        return uuid.UUID(str(raw)) if raw else None
+    except (TypeError, ValueError):
+        return None
+
+
 async def notify_platform_alert(
     db: AsyncSession,
     *,
@@ -375,12 +382,13 @@ async def notify_platform_alert(
     fingerprint: str | None = None,
     status: str = "firing",
     source: str = "prometheus",
+    admins_cache: dict | None = None,
 ) -> int:
-    """Fan a platform alert out to every active admin and to Slack.
+    """Fan a platform alert out to the admins it concerns and to Slack.
 
-    In-app rows go through create_notification with push=False and a manual
-    WS push, so one alert produces one Slack post per distinct webhook rather
-    than one per admin. Returns the number of admin notifications written.
+    An alert labelled with a tenant_id goes to that workspace's admins only,
+    others go to every active admin. Rows are written in one flush, one Slack
+    post per distinct webhook. Returns the number of admin notifications written.
     """
     from sqlalchemy import select
     from models.notification import NotificationType
@@ -409,44 +417,49 @@ async def notify_platform_alert(
         "labels": labels or {},
     }
 
-    admins = (
-        (
-            await db.execute(
-                select(User).where(
-                    User.role == UserRole.ADMIN, User.is_active.is_(True)
-                )
-            )
+    from datetime import datetime, timezone
+
+    tenant_scope = _tenant_uuid((labels or {}).get("tenant_id"))
+    cache_key = str(tenant_scope or "*")
+    admins = (admins_cache or {}).get(cache_key)
+    if admins is None:
+        stmt = select(User.id, User.tenant_id).where(
+            User.role == UserRole.ADMIN, User.is_active.is_(True)
         )
-        .scalars()
-        .all()
-    )
-    written = 0
-    tenant_ids = set()
-    for admin in admins:
+        if tenant_scope is not None:
+            stmt = stmt.where(User.tenant_id == tenant_scope)
+        admins = [tuple(r) for r in (await db.execute(stmt)).all()]
+        if admins_cache is not None:
+            admins_cache[cache_key] = admins
+    now = datetime.now(timezone.utc)
+    rows = [
+        Notification(
+            id=uuid.uuid4(),
+            tenant_id=tenant_id,
+            user_id=user_id,
+            type=NotificationType.SYSTEM_ALERT.value,
+            title=title,
+            message=body,
+            link=link,
+            metadata_=metadata,
+            is_read=False,
+            created_at=now,
+        )
+        for user_id, tenant_id in admins
+    ]
+    if rows:
+        db.add_all(rows)
+        await db.flush()
+        _emit_notif_metric("in_app", "warning")
+    written = len(rows)
+    tenant_ids = {r.tenant_id for r in rows}
+    for n in rows:
         try:
-            n = await create_notification(
-                db,
-                tenant_id=admin.tenant_id,
-                user_id=admin.id,
-                type=NotificationType.SYSTEM_ALERT.value,
-                title=title,
-                message=body,
-                link=link,
-                metadata=metadata,
-                push=False,
+            await ws_manager.send_to_user(
+                n.user_id, "notification", _serialize_notification(n)
             )
-            if n is None:
-                continue
-            written += 1
-            tenant_ids.add(admin.tenant_id)
-            try:
-                await ws_manager.send_to_user(
-                    admin.id, "notification", _serialize_notification(n)
-                )
-            except Exception as e:
-                logger.debug("ws push failed: %s", e)
         except Exception as e:
-            logger.warning("platform alert notify failed for %s: %s", admin.id, e)
+            logger.debug("ws push failed: %s", e)
 
     webhooks: set[str] = set()
     platform_hook = (os.environ.get("ABENIX_SLACK_WEBHOOK_URL") or "").strip()
@@ -478,3 +491,127 @@ async def notify_platform_alert(
                 "slack", "error" if sev in ("critical", "error") else "warning"
             )
     return written
+
+
+RETENTION_BATCH = 5000
+ALERT_INDEXES = {
+    "ix_notifications_type_created": "(type, created_at)",
+    "ix_notifications_user_type_created": "(user_id, type, created_at)",
+}
+
+
+async def ensure_alert_indexes() -> list[str]:
+    """Build the alert indexes the migration had to skip, concurrently. Returns what it built."""
+    from sqlalchemy import text
+
+    from app.core.deps import bg_engine
+
+    built: list[str] = []
+    async with bg_engine.connect() as conn:
+        conn = await conn.execution_options(isolation_level="AUTOCOMMIT")
+        rows = (
+            await conn.execute(
+                text(
+                    "SELECT c.relname, i.indisvalid FROM pg_index i"
+                    " JOIN pg_class c ON c.oid = i.indexrelid"
+                    " WHERE c.relname = ANY(:names)"
+                ),
+                {"names": list(ALERT_INDEXES)},
+            )
+        ).all()
+        have = {name: valid for name, valid in rows}
+        await conn.execute(text("SET statement_timeout = 0"))
+        await conn.execute(text("SET lock_timeout = '10s'"))
+        try:
+            for name, cols in ALERT_INDEXES.items():
+                if have.get(name) is True:
+                    continue
+                try:
+                    if name in have:
+                        await conn.execute(
+                            text(f"DROP INDEX CONCURRENTLY IF EXISTS {name}")
+                        )
+                    await conn.execute(
+                        text(
+                            f"CREATE INDEX CONCURRENTLY IF NOT EXISTS {name} ON notifications {cols}"
+                        )
+                    )
+                    built.append(name)
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("alert index %s not built yet: %s", name, e)
+                    try:
+                        await conn.execute(
+                            text(f"DROP INDEX CONCURRENTLY IF EXISTS {name}")
+                        )
+                    except Exception:  # noqa: BLE001
+                        pass
+        finally:
+            await conn.execute(text("RESET statement_timeout"))
+            await conn.execute(text("RESET lock_timeout"))
+    return built
+
+
+async def prune_system_alerts(max_batches: int = 400) -> dict[str, int]:
+    """Cap system_alert rows per person, then delete old ones, in small batches."""
+    import asyncio
+    from datetime import datetime, timedelta, timezone
+
+    from sqlalchemy import text
+
+    from app.core.deps import bg_session
+    from app.core.platform_settings import get_int_setting
+
+    days = await get_int_setting("notifications.system_alert_retention_days", 14)
+    keep = await get_int_setting("notifications.system_alert_max_per_user", 500)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    out = {"over_cap": 0, "expired": 0}
+    batches = 0
+
+    async def _batch(sql: str, params: dict) -> int:
+        async with bg_session() as db:
+            r = await db.execute(text(sql), params)
+            await db.commit()
+            return r.rowcount or 0
+
+    # per person first, through the user_id index, so a storm shrinks without a full scan
+    async with bg_session() as db:
+        users = [r[0] for r in (await db.execute(text("SELECT id FROM users"))).all()]
+    for user_id in users:
+        while batches < max_batches:
+            try:
+                n = await _batch(
+                    "DELETE FROM notifications WHERE id IN (SELECT id FROM notifications"
+                    " WHERE user_id = :u AND type = 'system_alert'"
+                    " ORDER BY created_at DESC OFFSET :keep LIMIT :n)",
+                    {"u": user_id, "keep": keep, "n": RETENTION_BATCH},
+                )
+            except Exception as e:  # noqa: BLE001
+                logger.warning("alert cap for %s stopped: %s", user_id, e)
+                break
+            batches += 1
+            out["over_cap"] += n
+            if n < RETENTION_BATCH:
+                break
+            await asyncio.sleep(0.2)
+
+    while batches < max_batches:
+        try:
+            n = await _batch(
+                "DELETE FROM notifications WHERE id IN (SELECT id FROM notifications"
+                " WHERE type = 'system_alert' AND created_at < :cutoff LIMIT :n)",
+                {"cutoff": cutoff, "n": RETENTION_BATCH},
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.warning("alert retention stopped: %s", e)
+            break
+        batches += 1
+        out["expired"] += n
+        if n < RETENTION_BATCH:
+            break
+        await asyncio.sleep(0.2)
+
+    try:
+        out["indexes_built"] = len(await ensure_alert_indexes())
+    except Exception as e:  # noqa: BLE001
+        logger.warning("alert indexes not checked: %s", e)
+    return out

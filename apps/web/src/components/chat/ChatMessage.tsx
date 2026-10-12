@@ -27,13 +27,20 @@ function ToolCallCard({ block }: { block: ToolBlock }) {
           <Wrench className="w-4 h-4 text-cyan-400" />
           <span className="text-sm font-mono text-cyan-400">{block.name}</span>
           {block.result !== undefined && (
-            block.isError ? (
+            block.denied !== undefined && block.denied !== null ? (
+              <span className="text-xs text-amber-300/90" data-testid="tool-call-denied">denied{block.denied ? `: ${block.denied}` : ''}</span>
+            ) : block.isError ? (
               <span className="text-xs text-red-400/80" data-testid="tool-call-failed">failed</span>
             ) : (
               <span className="text-xs text-emerald-400/70">completed</span>
             )
           )}
-          {block.result === undefined && !block.autonomy && (
+          {block.result === undefined && block.waiting && (
+            <span className="flex items-center gap-1 text-xs text-amber-300/90" data-testid="tool-call-waiting">
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-400" /> waiting for approval
+            </span>
+          )}
+          {block.result === undefined && !block.autonomy && !block.waiting && (
             <span className="flex items-center gap-1 text-xs text-amber-400/70">
               <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
               running
@@ -46,6 +53,12 @@ function ToolCallCard({ block }: { block: ToolBlock }) {
           <ChevronDown className="w-4 h-4 text-slate-500" />
         )}
       </button>
+      {block.result === undefined && block.waiting && (
+        <p className="mt-2 text-xs text-amber-100" data-testid="tool-call-waiting-note">
+          {block.waiting.message || 'Waiting for approval.'}{' '}
+          <Link href={block.waiting.approvalId ? `/approvals#${encodeURIComponent(block.waiting.approvalId)}` : '/approvals'} className="text-cyan-300 hover:underline" data-testid="tool-call-open-approvals">Open Approvals</Link>
+        </p>
+      )}
       {block.autonomy && (
         <div className="mt-2">
           <ActionBadge meta={block.autonomy} testId="chat-autonomy-badge" />

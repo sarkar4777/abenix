@@ -191,6 +191,27 @@ DEFAULTS: dict[str, dict[str, Any]] = {
         "min": 1,
         "max": 100,
     },
+    "platform.public_api_url": {
+        "value": "",
+        "category": "platform",
+        "description": "The address people and edge gateways use to reach the Abenix API, such as https://abenix.example.com. Edge install commands use it first. Empty uses the address the browser reached.",
+    },
+    "notifications.system_alert_retention_days": {
+        "value": "14",
+        "category": "notifications",
+        "description": "Days platform alert notifications are kept. Older ones are deleted every hour. 1-365.",
+        "kind": "int",
+        "min": 1,
+        "max": 365,
+    },
+    "notifications.system_alert_max_per_user": {
+        "value": "500",
+        "category": "notifications",
+        "description": "Most platform alert notifications kept per person. The oldest past this are deleted every hour. 50-100000.",
+        "kind": "int",
+        "min": 50,
+        "max": 100000,
+    },
     "llm.subscription.enabled": {
         "value": "false",
         "category": "claude_subscription",

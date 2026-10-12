@@ -24,7 +24,7 @@ import {
 import ChatMessage from '@/components/chat/ChatMessage';
 import ConfirmModal from '@/components/ui/ConfirmModal';
 import { holdBlockFrom, type ChatMessage as ChatMsg, type ContentBlock } from '@/stores/chatStore';
-import { connectToAgentStream, errorRepeatsReply, type DoneData, type ModerationData, type ToolAutonomyData, type ToolCallData, type ToolResultData } from '@/lib/chat';
+import { connectToAgentStream, deniedReason, errorRepeatsReply, withToolStatus, type DoneData, type ModerationData, type ToolAutonomyData, type ToolCallData, type ToolResultData, type ToolStatusData } from '@/lib/chat';
 import type { HoldView } from '@/components/moderation/HeldNotice';
 import { autonomyMetaOf } from '@/lib/autonomy';
 import { fetchAllAgents, sortForPicker } from '@/lib/fetch-all-agents';
@@ -434,7 +434,8 @@ export default function ChatPage() {
         for (let i = blocks.length - 1; i >= 0; i--) {
           const b = blocks[i];
           if (b.type === 'tool' && b.name === tr.name && b.result === undefined) {
-            blocks[i] = { ...b, result: tr.result, autonomy: autonomyMetaOf(tr) ?? b.autonomy };
+            const denied = deniedReason(tr);
+            blocks[i] = { ...b, result: tr.result, isError: Boolean(tr.is_error) && denied === null, denied, waiting: null, autonomy: autonomyMetaOf(tr) ?? b.autonomy };
             break;
           }
         }
@@ -452,6 +453,10 @@ export default function ChatPage() {
         }
         currentBlocks = blocks;
         setStreamingBlocks(blocks);
+      },
+      onToolStatus: (ts: ToolStatusData) => {
+        currentBlocks = withToolStatus(currentBlocks, ts);
+        setStreamingBlocks(currentBlocks);
       },
       onReplyChecking: () => setReplyStatus('Checking the reply before it is shown…'),
       onModeration: (data: ModerationData) => {

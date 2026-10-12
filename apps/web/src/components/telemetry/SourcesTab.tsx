@@ -12,7 +12,7 @@ import { useApi } from '@/hooks/useApi';
 import { apiFetch } from '@/lib/api-client';
 import { describeTest, explainTelemetryError, statusText } from '@/lib/telemetry/errors';
 import { ago, rate } from '@/lib/telemetry/format';
-import { addressOf, subjectSummary, type DecoderDecl, type TransportDecl } from '@/lib/telemetry/sources';
+import { addressOf, subjectSummary, type DecoderDecl, type Mapping, type TransportDecl } from '@/lib/telemetry/sources';
 import type { Connection, ConnectionTest } from '@/lib/telemetry/types';
 import { toastError, toastSuccess } from '@/stores/toastStore';
 import SourceWizard, { type WizardStart } from './SourceWizard';
@@ -20,6 +20,7 @@ import PushPanel from './PushPanel';
 import KeysPanel from './KeysPanel';
 import { forgetKept } from '@/lib/telemetry/kept';
 import { TransportIcon } from './transportIcon';
+import type { TestbedInfo } from '@/lib/telemetry/testbed';
 
 export type Source = Connection & {
   transport?: string;
@@ -48,7 +49,7 @@ function Tone({ tone, children }: { tone: 'ok' | 'wait' | 'bad' | 'off'; childre
 const btn = 'inline-flex min-h-[34px] items-center gap-1 rounded-md border border-slate-700 px-2.5 py-1 text-xs text-slate-200 hover:bg-slate-800 disabled:opacity-60';
 
 export default function SourcesTab({
-  rows, loading, error, reload, canManage, addRequest, onAddHandled, openMessages, now, focus, onFocusHandled, openGuide,
+  rows, loading, error, reload, canManage, addRequest, onAddHandled, openMessages, now, focus, onFocusHandled, openGuide, testbed, onTestbed,
 }: {
   rows: Source[] | null; loading: boolean; error: string | null; reload: () => void; canManage: boolean;
   // set by the page header or an empty state, a transport to start with or "any"
@@ -57,6 +58,8 @@ export default function SourcesTab({
   focus?: { id: string; action: 'edit' | 'mapping' | 'test' | 'endpoint' } | null;
   onFocusHandled?: () => void;
   openGuide?: () => void;
+  testbed?: TestbedInfo | null;
+  onTestbed?: () => void;
 }) {
   const [wizard, setWizard] = useState<WizardStart | null>(null);
   const [tests, setTests] = useState<Record<string, { busy: boolean; ok?: boolean; text?: string }>>({});
@@ -104,7 +107,7 @@ export default function SourcesTab({
     try {
       const res = await apiFetch<ConnectionTest & { subjects_seen?: string[] }>(`/api/telemetry/connections/${c.id}/test`, { method: 'POST' });
       const d = res.data;
-      const r = describeTest({ ok: !!d?.ok, connected: !!d?.connected, messages: d?.messages ?? 0, topics_seen: d?.topics_seen ?? d?.subjects_seen ?? [], error: d?.error ?? null }, addressOf(c.config, c.broker_url) || c.name);
+      const r = describeTest({ ok: !!d?.ok, connected: !!d?.connected, messages: d?.messages ?? 0, topics_seen: d?.topics_seen ?? d?.subjects_seen ?? [], error: d?.error ?? null }, addressOf(c.config, c.broker_url) || c.name, c.transport);
       setTests((t) => ({ ...t, [c.id]: { busy: false, ok: r.ok, text: r.text } }));
     } catch (e) {
       setTests((t) => ({ ...t, [c.id]: { busy: false, ok: false, text: explainTelemetryError(e, 'test') } }));
@@ -147,6 +150,20 @@ export default function SourcesTab({
         </ViewOnlyBanner>
       )}
 
+      {canManage && testbed?.installed && list.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-emerald-600/40 bg-emerald-500/5 px-3 py-2 text-sm text-emerald-100" data-testid="tel-sources-testbed">
+          <Zap className="h-4 w-4 shrink-0 text-emerald-300" aria-hidden />
+          <span className="min-w-0 flex-1">
+            The testbed runs {testbed.services?.length ?? 'some'} sample {testbed.services?.length === 1 ? 'stream' : 'streams'} in this cluster. Add them all as sources, or pick &quot;Use the testbed&apos;s details&quot; when you add one.
+          </span>
+          {onTestbed && (
+            <button type="button" onClick={onTestbed} className="rounded-md border border-emerald-500/50 px-2.5 py-1 text-xs font-medium text-emerald-100 hover:bg-emerald-500/10" data-testid="tel-sources-testbed-add">
+              Add the testbed sources
+            </button>
+          )}
+        </div>
+      )}
+
       {list.length > 0 && (
         <div className="flex flex-wrap items-center gap-2">
           {list.length > 6 && (
@@ -167,7 +184,7 @@ export default function SourcesTab({
       ) : loading && !rows ? (
         <div className="space-y-2" aria-busy="true">{[0, 1].map((i) => <div key={i} className="h-28 animate-pulse rounded-xl bg-slate-800/40" />)}</div>
       ) : !list.length ? (
-        <FirstSources canManage={canManage} onPick={(t) => (t === 'guide' ? openGuide?.() : setWizard(t === 'any' ? {} : { transport: t }))} transports={transports} />
+        <FirstSources canManage={canManage} onPick={(t) => (t === 'guide' ? openGuide?.() : t === 'testbed' ? onTestbed?.() : setWizard(t === 'any' ? {} : { transport: t }))} transports={transports} testbed={testbed} />
       ) : (
         <ul className="space-y-2" data-testid="tel-conn-list">
           {shown.map((c) => {
@@ -210,7 +227,7 @@ export default function SourcesTab({
                   </dl>
                 </div>
                 {c.enabled && c.status === 'error' && c.last_error && (
-                  <p className="mt-2 rounded-md border border-rose-500/30 bg-rose-500/5 px-2 py-1.5 text-xs text-rose-100" data-testid="tel-conn-last-error">{describeTest({ ok: false, connected: false, messages: 0, topics_seen: [], error: c.last_error }, addressOf(c.config, c.broker_url) || c.name).text}</p>
+                  <p className="mt-2 rounded-md border border-rose-500/30 bg-rose-500/5 px-2 py-1.5 text-xs text-rose-100" data-testid="tel-conn-last-error">{describeTest({ ok: false, connected: false, messages: 0, topics_seen: [], error: c.last_error }, addressOf(c.config, c.broker_url) || c.name, c.transport).text}</p>
                 )}
                 {c.clock_skew_ms && Math.abs(c.clock_skew_ms) > 5000 ? (
                   <p className="mt-2 rounded-md border border-amber-500/30 bg-amber-500/5 px-2 py-1.5 text-xs text-amber-100">Times in its messages are {Math.round(Math.abs(c.clock_skew_ms) / 1000)} s {c.clock_skew_ms > 0 ? 'ahead of' : 'behind'} the time they arrive. Check the sender&apos;s clock, or the time format in the mapping.</p>
@@ -256,7 +273,7 @@ export default function SourcesTab({
 
       {push && (
         <ResponsiveModal open onClose={() => { forgetKept(`push:${push.id}`); setPush(null); }} title={`Send data to ${push.name}`} icon={<Webhook className="h-4 w-4" />} maxWidth="max-w-xl">
-          <PushPanel sourceId={push.id} token={null} ingestUrl={push.ingest_url} />
+          <PushPanel sourceId={push.id} token={null} ingestUrl={push.ingest_url} mapping={(push as Source & { mapping?: Partial<Mapping> }).mapping} />
         </ResponsiveModal>
       )}
 
@@ -304,7 +321,7 @@ const FIRST: Array<{ transport: string; title: string; text: string }> = [
   { transport: 'kafka', title: 'Stream from Kafka', text: 'Events from your own services, on Kafka, Redpanda or Event Hubs.' },
 ];
 
-export interface TestbedInfo { installed?: boolean; services?: Array<{ name: string; transport?: string; reachable?: boolean }> }
+export type { TestbedInfo };
 
 export function FirstSources({ canManage, onPick, transports, testbed }: { canManage: boolean; onPick: (t: string) => void; transports?: TransportDecl[] | null; testbed?: TestbedInfo | null }) {
   const have = (t: string) => !transports || transports.some((x) => x.transport === t);

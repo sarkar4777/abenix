@@ -20,6 +20,8 @@ from app.telemetry.decoders.base import Metric, Record
 OFFLINE_FLOOR_S = 60
 OFFLINE_CAP_S = 900
 OFFLINE_GAPS = 9
+# a device heard once has no pace yet, 15 minutes read as never to someone testing a push
+OFFLINE_UNKNOWN_S = 300
 # per source, the first few offline events in a minute go one by one, the rest as one
 OFFLINE_EACH = 5
 OFFLINE_WINDOW_S = 60
@@ -545,8 +547,11 @@ class Store:
     def interval_s(self, key: tuple[str, str, str, str]) -> float | None:
         """The device's usual gap between messages, once there are a few."""
         gaps = self.gaps.get(key)
-        if not gaps or len(gaps) < 3:
+        if not gaps:
             return None
+        if len(gaps) < 3:
+            # too few for a median, the longest gap so far errs towards staying online
+            return max(gaps)
         return statistics.median(gaps)
 
     def offline_after(self, conn: ConnInfo, interval: float | None) -> float:
@@ -555,7 +560,7 @@ class Store:
         if self.default_offline_s:
             return float(self.default_offline_s)
         if interval is None:
-            return float(OFFLINE_CAP_S)
+            return float(OFFLINE_UNKNOWN_S)
         return min(float(OFFLINE_CAP_S), max(float(OFFLINE_FLOOR_S), 10 * interval))
 
     def drop_connection(self, cid: str) -> None:

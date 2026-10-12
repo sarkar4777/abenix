@@ -73,8 +73,8 @@ export default function RuleBuilder({
     setBusy(true);
     const body = JSON.stringify(draftPayload(draft));
     const res = ruleId
-      ? await apiFetch<Rule>(`/api/telemetry/rules/${ruleId}`, { method: 'PATCH', body, silent: true })
-      : await apiFetch<Rule>('/api/telemetry/rules', { method: 'POST', body, silent: true });
+      ? await apiFetch<Rule>(`/api/telemetry/rules/${ruleId}`, { method: 'PATCH', body, silent: true, throwOnError: false })
+      : await apiFetch<Rule>('/api/telemetry/rules', { method: 'POST', body, silent: true, throwOnError: false });
     setBusy(false);
     setConfirmCmd(false);
     if (res.error || !res.data) {
@@ -92,7 +92,7 @@ export default function RuleBuilder({
   async function del() {
     if (!ruleId) return;
     setBusy(true);
-    const res = await apiFetch(`/api/telemetry/rules/${ruleId}`, { method: 'DELETE', silent: true });
+    const res = await apiFetch(`/api/telemetry/rules/${ruleId}`, { method: 'DELETE', silent: true, throwOnError: false });
     setBusy(false);
     setConfirmDelete(false);
     if (res.error) { toastError(res.error); return; }
@@ -104,7 +104,7 @@ export default function RuleBuilder({
   async function test() {
     if (!ruleId) return;
     setTesting(true);
-    const res = await apiFetch(`/api/telemetry/rules/${ruleId}/test`, { method: 'POST', silent: true });
+    const res = await apiFetch(`/api/telemetry/rules/${ruleId}/test`, { method: 'POST', silent: true, throwOnError: false });
     setTesting(false);
     if (res.error) { toastError(res.error); return; }
     toastSuccess('Test sent. Its steps run now, commands are skipped. It shows in the history below as a test.');

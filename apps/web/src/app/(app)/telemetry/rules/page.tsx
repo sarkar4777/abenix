@@ -8,13 +8,14 @@ import { BellRing, Boxes, ChevronRight, FlaskConical, ListChecks, Loader2, Plus,
 import PageHeader from '@/components/layout/PageHeader';
 import NoAccess from '@/components/layout/NoAccess';
 import ViewOnlyBanner from '@/components/shared/ViewOnlyBanner';
+import LoadRetry from '@/components/shared/LoadRetry';
 import ConfirmModal from '@/components/ui/ConfirmModal';
 import { usePageTitle } from '@/hooks/usePageTitle';
 import { apiFetch } from '@/lib/api-client';
 import { holds, useMyPermissions } from '@/lib/capabilities';
 import { toastError, toastSuccess } from '@/stores/toastStore';
 import FiringHistory from '@/components/telemetry-rules/FiringHistory';
-import { TEMPLATES, ago, type Rule } from '@/components/telemetry-rules/lib';
+import { TEMPLATES, ago, rulesSpeedText, speed, type Rule } from '@/components/telemetry-rules/lib';
 import { Badge, severityTone } from '@/components/telemetry-rules/ui';
 import RulesMode, { type ModeDoc } from '@/components/telemetry-rules/RulesMode';
 
@@ -90,7 +91,7 @@ function RulesPage() {
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
-  const { perms, loading: permsLoading } = useMyPermissions();
+  const { perms, loading: permsLoading, failed: permsFailed, retry: retryPerms } = useMyPermissions();
   const caps = perms?.capabilities;
   const canView = holds(caps, 'telemetry.view');
   const canManage = holds(caps, 'telemetry.manage');
@@ -128,7 +129,7 @@ function RulesPage() {
 
   async function toggle(r: Rule) {
     setBusy(true);
-    const out = await apiFetch<Rule>(`/api/telemetry/rules/${r.id}`, { method: 'PATCH', body: JSON.stringify({ enabled: !r.enabled }), silent: true });
+    const out = await apiFetch<Rule>(`/api/telemetry/rules/${r.id}`, { method: 'PATCH', body: JSON.stringify({ enabled: !r.enabled }), silent: true, throwOnError: false });
     setBusy(false);
     if (out.error) { toastError(out.error); return; }
     toastSuccess(r.enabled ? `${r.name} is off. It stops watching within a couple of seconds.` : `${r.name} is on and watching the stream.`);
@@ -136,7 +137,7 @@ function RulesPage() {
   }
   async function test(r: Rule) {
     setBusy(true);
-    const out = await apiFetch(`/api/telemetry/rules/${r.id}/test`, { method: 'POST', silent: true });
+    const out = await apiFetch(`/api/telemetry/rules/${r.id}/test`, { method: 'POST', silent: true, throwOnError: false });
     setBusy(false);
     if (out.error) { toastError(out.error); return; }
     toastSuccess('Test sent. Its steps run now, commands are skipped. See Firing history.');
@@ -144,7 +145,7 @@ function RulesPage() {
   async function del() {
     if (!deleting) return;
     setBusy(true);
-    const out = await apiFetch(`/api/telemetry/rules/${deleting.id}`, { method: 'DELETE', silent: true });
+    const out = await apiFetch(`/api/telemetry/rules/${deleting.id}`, { method: 'DELETE', silent: true, throwOnError: false });
     setBusy(false);
     if (out.error) { toastError(out.error); return; }
     toastSuccess(`${deleting.name} deleted.`);
@@ -152,6 +153,7 @@ function RulesPage() {
     void res.mutate();
   }
 
+  if (permsFailed) return <div className="mx-auto max-w-6xl"><LoadRetry what="your permissions" onRetry={retryPerms} testId="perms-retry" /></div>;
   if (permsLoading && !perms) return <div className="mx-auto max-w-6xl"><div className="h-40 animate-pulse rounded-xl bg-slate-800/40" /></div>;
   if (perms && !canView) {
     return (
@@ -206,8 +208,8 @@ function RulesPage() {
           </button>
         ))}
         {rules && rules.length > 0 && evalLag !== null && (
-          <span className="ml-auto pb-1 text-[11px] text-slate-500" data-testid="rules-health" title="How long from a reading arriving to the rule deciding, and the ingest's own time to store it">
-            Checked live: decides in {evalLag ? `${evalLag.toFixed(1)} ms` : 'under a millisecond'} (p99), ingest {ingestP99 ? `${ingestP99.toFixed(1)} ms` : 'idle'}
+          <span className="ml-auto pb-1 text-[11px] text-slate-500" data-testid="rules-health" title={ingestP99 ? `Storing a reading takes up to ${speed(ingestP99)}.` : undefined}>
+            {rulesSpeedText(evalLag)}
           </span>
         )}
       </div>

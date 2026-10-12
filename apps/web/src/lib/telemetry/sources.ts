@@ -161,11 +161,44 @@ const EXAMPLES: Array<[RegExp, string, string]> = [
 ];
 
 // help and an example for any field, so no field arrives without them
+const SEPARATOR = /[,;]?\s*(?:\(?\s*)?(?:comma(?:s)?|newline|new line)(?:\s+or\s+(?:comma|newline|new line))?[\s-]*separated\)?|,?\s*separated by (?:commas|new lines|newlines)(?: or (?:commas|new lines|newlines))?/gi;
+
 export function fieldHelp(f: FieldDecl): { help: string; example: string } {
   const hit = EXAMPLES.find(([re]) => re.test(f.key.toLowerCase()));
   const dflt = f.default !== undefined && f.default !== null && String(f.default) !== '' ? String(f.default) : '';
-  const example = f.placeholder || dflt || (hit ? hit[1] : f.kind === 'int' ? '10' : f.kind === 'url' ? 'https://example.com' : '');
-  return { help: f.description || (hit ? hit[2] : ''), example: f.kind === 'secret' || f.kind === 'bool' || f.kind === 'select' ? '' : example };
+  let help = f.description || (hit ? hit[2] : '');
+  // the server's own example wins, and is said once
+  let fromDesc = '';
+  const at = help.search(/\bExample:/);
+  if (at >= 0) {
+    fromDesc = help.slice(at + 'Example:'.length).trim().replace(/\.$/, '');
+    help = help.slice(0, at).trim();
+  }
+  // lists take commas or new lines, the field says so once
+  if (f.kind === 'list') help = help.replace(SEPARATOR, '').replace(/\s+\./g, '.').replace(/\s{2,}/g, ' ').trim();
+  const example = f.placeholder || fromDesc || dflt || (hit ? hit[1] : f.kind === 'int' ? '10' : f.kind === 'url' ? 'https://example.com' : '');
+  return { help, example: f.kind === 'secret' || f.kind === 'bool' || f.kind === 'select' ? '' : example };
+}
+
+export const LIST_HINT = 'One per line, or separated by commas.';
+
+// fields that only matter for some choices stay out of the way until they do
+export function fieldShown(transport: string, f: FieldDecl, values: Record<string, unknown>): boolean {
+  const k = f.key;
+  if (transport === 'kafka') {
+    const proto = String(values.security_protocol || 'PLAINTEXT').toUpperCase();
+    const mech = String(values.sasl_mechanism || 'PLAIN').toUpperCase();
+    const sasl = proto.startsWith('SASL');
+    if (k === 'sasl_mechanism') return sasl;
+    if (k === 'username' || k === 'password') return sasl && mech !== 'OAUTHBEARER';
+    if (k.startsWith('oauth_')) return sasl && mech === 'OAUTHBEARER';
+    if (k.startsWith('tls_')) return proto.includes('SSL');
+  }
+  if (transport === 'mqtt' && k.startsWith('tls_')) {
+    const url = String(values.broker_url || '');
+    return !url || /^(mqtts|ssl|wss):/i.test(url);
+  }
+  return true;
 }
 
 export function fieldLabel(f: FieldDecl): string {
@@ -293,20 +326,66 @@ export function splitIngest(endpoint: string): { base: string; id: string } {
   return m ? { base: m[1], id: m[2] } : { base: endpoint, id: '<source id>' };
 }
 
-export function sdkSnippets(endpoint: string, key: string, body: { py: string; js: string }, idem: { py: string; js: string }): { python: string; js: string } {
+export function sdkSnippets(endpoint: string, key: string, body: { py: string; js: string }, idem: { py: string; js: string }, subject?: string | null): { python: string; js: string } {
   const { base, id } = splitIngest(endpoint);
+  const pySubj = subject ? `\n        subject="${subject}",` : '';
+  const jsSubj = subject ? `subject: '${subject}', ` : '';
   return {
-    python: `import asyncio\nfrom abenix_sdk import Abenix\n\n\nasync def main():\n    # pushing needs only the key below, not an API key\n    forge = Abenix(api_key="", base_url="${base}")\n    await forge.telemetry.ingest(\n        "${id}",\n        ${body.py},\n        token="${key}",\n        idempotency_key=${idem.py},\n    )\n\n\nasyncio.run(main())`,
-    js: `import { Abenix } from '@abenix/sdk';\n\n// pushing needs only the key below, not an API key\nconst forge = new Abenix({ apiKey: '', baseUrl: '${base}' });\nawait forge.telemetry.ingest(\n  '${id}',\n  ${body.js},\n  { token: '${key}', idempotencyKey: ${idem.js} },\n);`,
+    python: `import asyncio\nfrom abenix_sdk import Abenix\n\n\nasync def main():\n    # pushing needs only the key below, not an API key\n    forge = Abenix(api_key="", base_url="${base}")\n    await forge.telemetry.ingest(\n        "${id}",\n        ${body.py},\n        token="${key}",${pySubj}\n        idempotency_key=${idem.py},\n    )\n\n\nasyncio.run(main())`,
+    js: `import { Abenix } from '@abenix/sdk';\n\n// pushing needs only the key below, not an API key\nconst forge = new Abenix({ apiKey: '', baseUrl: '${base}' });\nawait forge.telemetry.ingest(\n  '${id}',\n  ${body.js},\n  { token: '${key}', ${jsSubj}idempotencyKey: ${idem.js} },\n);`,
   };
 }
 
-export function pushSnippets(endpoint: string, token: string): { curl: string; python: string; js: string } {
+// a JSON value written as a Python literal
+export function pyLiteral(v: unknown): string {
+  if (v === null || v === undefined) return 'None';
+  if (v === true) return 'True';
+  if (v === false) return 'False';
+  if (typeof v === 'number') return String(v);
+  if (typeof v === 'string') return JSON.stringify(v);
+  if (Array.isArray(v)) return `[${v.map(pyLiteral).join(', ')}]`;
+  return `{${Object.entries(v as Record<string, unknown>).map(([k, x]) => `${JSON.stringify(k)}: ${pyLiteral(x)}`).join(', ')}}`;
+}
+
+const DEFAULT_PUSH = { asset: 'pump-7', temperature_c: 61.5, pressure_bar: 4.2 };
+
+function parseSample(sample?: string | null): Record<string, unknown> | null {
+  if (!sample) return null;
+  try {
+    const o = JSON.parse(sample);
+    return o && typeof o === 'object' && !Array.isArray(o) ? (o as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
+// a mapping that names its asset from the topic needs a subject on the push
+export function pushSubject(mapping?: Partial<Mapping> | null): string | null {
+  if (!mapping) return null;
+  const node = (mapping.node ?? '').trim();
+  if (node && !node.includes('{subject')) return null;
+  const group = (mapping.group ?? '').trim();
+  const g = group && !group.startsWith('$') && !group.includes('{') ? group : 'site';
+  return `${g}/device-1`;
+}
+
+export function withSubject(endpoint: string, subject: string | null): string {
+  if (!subject) return endpoint;
+  return `${endpoint}${endpoint.includes('?') ? '&' : '?'}subject=${encodeURIComponent(subject)}`;
+}
+
+// copy-ready code that sends the same message the mapping expects, with a fresh idempotency key per send
+export function pushSnippets(endpoint: string, token: string, opts: { sample?: string | null; mapping?: Partial<Mapping> | null } = {}): { curl: string; python: string; js: string } {
   const tok = token || '<your source token>';
-  const sample = '{"asset": "pump-7", "temperature_c": 61.5, "pressure_bar": 4.2}';
+  const body = parseSample(opts.sample) ?? DEFAULT_PUSH;
+  const subject = pushSubject(opts.mapping);
+  const url = withSubject(endpoint, subject);
+  const json = JSON.stringify(body);
+  const sdk = sdkSnippets(endpoint, tok, { py: pyLiteral(body), js: json }, { py: 'str(uuid.uuid4())', js: 'crypto.randomUUID()' }, subject);
   return {
-    curl: `curl -X POST '${endpoint}' \\\n  -H 'Authorization: Bearer ${tok}' \\\n  -H 'Content-Type: application/json' \\\n  -H 'Idempotency-Key: pump-7-1760175000000' \\\n  -d '${sample}'`,
-    ...sdkSnippets(endpoint, tok, { py: '{"asset": "pump-7", "temperature_c": 61.5, "pressure_bar": 4.2}', js: "{ asset: 'pump-7', temperature_c: 61.5, pressure_bar: 4.2 }" }, { py: '"pump-7-1760175000000"', js: "'pump-7-1760175000000'" }),
+    curl: `curl -X POST '${url}' \\\n  -H 'Authorization: Bearer ${tok}' \\\n  -H 'Content-Type: application/json' \\\n  -H "Idempotency-Key: $(date +%s)-$RANDOM" \\\n  -d '${json.replace(/'/g, "'\\''")}'`,
+    python: sdk.python.replace('import asyncio\n', 'import asyncio\nimport uuid\n'),
+    js: sdk.js,
   };
 }
 
@@ -329,4 +408,12 @@ export function localSuggest(sample: string): Partial<Mapping> | null {
     timestamp: { path: tsKey ? `$.${tsKey}` : '', format },
     signals: { include: [], exclude: [idKey, tsKey].filter(Boolean).map((k) => `$.${k}`), flatten: true, units: {} },
   };
+}
+
+// the kinds people reach for most come first, the rest by name
+const KIND_ORDER = ['http_push', 'mqtt', 'kafka', 'opcua', 'modbus_tcp', 'amqp', 'nats', 'websocket'];
+
+export function sortTransports<T extends { transport: string; label?: string }>(list: T[]): T[] {
+  const rank = (t: T) => { const i = KIND_ORDER.indexOf(t.transport); return i < 0 ? KIND_ORDER.length : i; };
+  return list.slice().sort((a, b) => rank(a) - rank(b) || (a.label || a.transport).localeCompare(b.label || b.transport));
 }

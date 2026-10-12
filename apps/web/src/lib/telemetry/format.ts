@@ -95,6 +95,7 @@ export function formatValue(v: MetricValue): string {
   if (typeof v === 'boolean') return v ? 'On' : 'Off';
   if (typeof v === 'number') return Number.isFinite(v) ? formatNumber(v) : 'No value';
   const s = String(v);
+  if (!s.trim()) return '–';
   return s.length > 80 ? `${s.slice(0, 77)}...` : s;
 }
 
