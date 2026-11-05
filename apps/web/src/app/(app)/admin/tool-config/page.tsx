@@ -7,6 +7,7 @@ import { KeyRound, Lock, Unlock, Search, ExternalLink, RotateCcw, FlaskConical, 
 import { apiFetch } from '@/lib/api-client';
 import type { ToolCredentialSource } from '@/components/CredentialBadge';
 import PageHeader from '@/components/layout/PageHeader';
+import { usePlatformOperator } from '@/hooks/usePlatformFeatures';
 import { AccessGate } from '@/components/layout/NoAccess';
 import UnencryptedSecretsBanner from '@/components/shared/UnencryptedSecretsBanner';
 
@@ -98,6 +99,7 @@ function ToolConfigPage() {
   const [rowMsg, setRowMsg] = useState<Record<string, { ok: boolean; text: string }>>({});
   const [query, setQuery] = useState('');
   const [onlyMissing, setOnlyMissing] = useState(false);
+  const operator = usePlatformOperator();
 
   async function load(s: Scope) {
     setLoading(true);
@@ -224,14 +226,16 @@ function ToolConfigPage() {
     );
   }
 
-  const scopeBtn = (s: Scope, label: string, Icon: typeof Building2) => (
+  const scopeBtn = (s: Scope, label: string, Icon: typeof Building2, locked = false) => (
     <button
       type="button"
       onClick={() => switchScope(s)}
+      disabled={locked}
+      title={locked ? `Platform values apply to every workspace on this deployment, so only a platform operator can change them. ${operator.rule || ''}`.trim() : undefined}
       aria-pressed={scope === s}
       data-testid={`tool-config-scope-${s}`}
       className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition ${
-        scope === s ? 'bg-cyan-500 text-white' : 'text-slate-300 hover:text-white hover:bg-slate-800/70'
+        scope === s ? 'bg-cyan-500 text-white' : 'text-slate-300 hover:text-white hover:bg-slate-800/70 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent'
       }`}
     >
       <Icon className="w-3.5 h-3.5" /> {label}
@@ -255,7 +259,7 @@ function ToolConfigPage() {
           title: onlyMissing ? 'Already showing only unset values' : undefined,
         }}
         steps={[
-          'Each tool lists the values it needs. Required ones are flagged when they are missing.',
+          'Each tool lists the values it needs. A tool without its required values stays off until you add them, and every other tool still works.',
           `Save a value and agents use it within ${cat.propagation_seconds} seconds, with no redeploy.`,
           'A value saved for this workspace wins over the platform value, which wins over the server settings and the built in defaults.',
           'Clear a value and the next one down applies again.',
@@ -264,7 +268,7 @@ function ToolConfigPage() {
         <div className="flex flex-wrap items-center gap-3">
           <div className="inline-flex items-center gap-1 p-1 rounded-lg border border-slate-700 bg-slate-900/60" role="group" aria-label="Scope" data-testid="tool-config-scope">
             {scopeBtn('tenant', 'This tenant', Building2)}
-            {scopeBtn('platform', 'Platform', Globe)}
+            {scopeBtn('platform', 'Platform', Globe, operator.readOnly)}
           </div>
           <p className="text-xs text-slate-400" data-testid="tool-config-scope-help">{SCOPE_HELP[scope]}</p>
         </div>
@@ -273,10 +277,13 @@ function ToolConfigPage() {
             {cat.key_count} values across {cat.tool_count} tools
           </span>
           <span
-            className={`px-2 py-1 rounded border ${cat.missing_required ? 'border-rose-500/30 bg-rose-500/10 text-rose-300' : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'}`}
+            className={`px-2 py-1 rounded border ${cat.missing_required ? 'border-slate-700 bg-slate-800/50 text-slate-300' : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'}`}
+            title={cat.missing_required ? 'Add these only for the tools you plan to use. Nothing is broken if you leave them.' : undefined}
             data-testid="tool-config-missing-required"
           >
-            {cat.missing_required} required value{cat.missing_required === 1 ? '' : 's'} missing
+            {cat.missing_required
+              ? `Optional setup. ${cat.missing_required} required value${cat.missing_required === 1 ? ' is' : 's are'} not set for tools you may not use`
+              : 'No required values are missing'}
           </span>
           <span
             className={`inline-flex items-center gap-1 px-2 py-1 rounded border ${cat.encrypted_at_rest ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-amber-500/30 bg-amber-500/10 text-amber-300'}`}

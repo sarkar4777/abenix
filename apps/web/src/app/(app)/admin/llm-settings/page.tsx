@@ -9,6 +9,8 @@ import ModelPicker from '@/components/ModelPicker';
 import SettingInput, { type SettingChoice } from '@/components/settings/SettingInput';
 import PageHeader from '@/components/layout/PageHeader';
 import { AccessGate } from '@/components/layout/NoAccess';
+import OperatorOnlyNote from '@/components/shared/OperatorOnlyNote';
+import { usePlatformOperator } from '@/hooks/usePlatformFeatures';
 
 type Setting = {
   key: string;
@@ -64,6 +66,7 @@ const CATEGORY_META: Record<string, { label: string; icon: React.ReactNode; hint
 
 
 function LlmSettingsPage() {
+  const { readOnly, rule } = usePlatformOperator();
   const [data, setData] = useState<ApiResp | null>(null);
   const [pending, setPending] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
@@ -246,7 +249,7 @@ function LlmSettingsPage() {
         icon={Cpu}
         storageKey="admin-llm-settings"
         docSlug="09-reference/04-platform-settings"
-        primaryAction={{
+        primaryAction={readOnly ? undefined : {
           label: saving ? 'Saving…' : `Save${dirty ? ` (${Object.keys(pending).length})` : ''}`,
           icon: Save,
           onClick: save,
@@ -254,7 +257,7 @@ function LlmSettingsPage() {
           title: !dirty ? 'Change a setting first' : undefined,
           testId: 'save-settings',
         }}
-        secondaryAction={{
+        secondaryAction={readOnly ? undefined : {
           label: 'Reset all',
           icon: RotateCcw,
           onClick: resetAll,
@@ -275,6 +278,9 @@ function LlmSettingsPage() {
         </div>
       )}
 
+      {readOnly && <OperatorOnlyNote what="Model selection" rule={rule} />}
+
+      <fieldset disabled={readOnly} className="m-0 min-w-0 space-y-5 border-0 p-0">
       {/* Claude subscription — an alternative to per-provider API keys.
           Lives above the per-feature cards because when it's exclusive it
           decides what every one of them actually runs on. */}
@@ -321,7 +327,7 @@ function LlmSettingsPage() {
                 ? `Currently set (${sub.token_masked}) from ${sub.token_source === 'environment' ? 'the environment' : 'platform settings'}. Paste a new value to rotate, or save an empty field to clear it.`
                 : 'No token stored. Paste one to enable subscription mode.'}
             </p>
-            <div className="flex items-center gap-2">
+            {!readOnly && <div className="flex items-center gap-2">
               <input
                 type="password"
                 value={tokenDraft}
@@ -347,7 +353,7 @@ function LlmSettingsPage() {
               >
                 {verifying ? 'Verifying…' : 'Verify'}
               </button>
-            </div>
+            </div>}
             {verifyMsg && (
               <p
                 data-testid="subscription-verify-result"
@@ -542,6 +548,7 @@ function LlmSettingsPage() {
           );
         })}
       </div>
+      </fieldset>
 
       {/* Footer note */}
       <div className="rounded-lg border border-slate-700/40 bg-slate-900/30 p-4 text-xs text-slate-400">

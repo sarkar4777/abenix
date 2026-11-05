@@ -48,6 +48,7 @@ const DynamicMiniMap = dynamic(
 import { nodeTypes } from '@/components/builder/nodes';
 import ToolPalette from '@/components/builder/ToolPalette';
 import AgentConfigPanel, { AGENT_CATEGORIES, normalizeToolConfig } from '@/components/builder/AgentConfigPanel';
+import ConfigWarnings from '@/components/builder/ConfigWarnings';
 import BuilderTopBar, { type BuilderMode } from '@/components/builder/BuilderTopBar';
 import PipelineCanvas from '@/components/builder/pipeline/PipelineCanvas';
 import PipelineToolbar from '@/components/builder/pipeline/PipelineToolbar';
@@ -262,6 +263,7 @@ export default function BuilderPage() {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saveErrorLink, setSaveErrorLink] = useState<string | null>(null);
+  const [configWarnings, setConfigWarnings] = useState<string[]>([]);
   const [dirty, setDirty] = useState(false);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [mcpExtensions, setMcpExtensions] = useState<MCPExtensions | undefined>(undefined);
@@ -854,6 +856,7 @@ export default function BuilderPage() {
     setSaving(true);
     setSaveError(null);
     setSaveErrorLink(null);
+    setConfigWarnings([]);
 
     // Build model_config depending on mode
     const modelConfig: Record<string, unknown> = {
@@ -965,6 +968,7 @@ export default function BuilderPage() {
         setAgentId(json.data.id);
         router.replace(`/builder?agent=${json.data.id}`);
       }
+      setConfigWarnings(Array.isArray(json.data.warnings) ? json.data.warnings : []);
       const refused: { id: string; reason: string }[] = json.data.kb_grants_refused || [];
       if (refused.length) {
         setSaveError(`Saved, but ${refused.length} knowledge base${refused.length > 1 ? 's were' : ' was'} not attached: ${refused[0].reason}. Ask its owner to share it with you as admin.`);
@@ -1061,7 +1065,7 @@ export default function BuilderPage() {
         setEdges(buildInitialEdges(tools));
         setDirty(true);
         // the empty canvas was fitted to one node, so the new tools land off screen
-        setTimeout(() => reactFlowRef.current?.fitView({ padding: 0.2, duration: 200 }), 50);
+        setTimeout(() => reactFlowRef.current?.fitView({ maxZoom: 1, padding: 0.2, duration: 200 }), 50);
       }, 100);
       return; // Don't set dirty here — setTimeout will do it
     }
@@ -1154,6 +1158,9 @@ export default function BuilderPage() {
             <button onClick={() => setSaveError(null)} aria-label="Dismiss" className="text-amber-300 hover:text-white">×</button>
           </div>
         )}
+{configWarnings.length > 0 && (
+        <ConfigWarnings warnings={configWarnings} onDismiss={() => setConfigWarnings([])} />
+      )}
         <div className="flex-1 overflow-y-auto p-4 space-y-5">
           {/* Agent Name */}
           <div>
@@ -1309,6 +1316,9 @@ export default function BuilderPage() {
           <button onClick={() => setSaveError(null)} aria-label="Dismiss" className="text-amber-300 hover:text-white">×</button>
         </div>
       )}
+{configWarnings.length > 0 && (
+        <ConfigWarnings warnings={configWarnings} onDismiss={() => setConfigWarnings([])} />
+      )}
       <div className="flex-1 flex min-h-0">
         {builderMode === 'agent' ? (
           <>
@@ -1332,6 +1342,7 @@ export default function BuilderPage() {
                 deleteKeyCode={['Backspace', 'Delete']}
                 style={flowStyle}
                 fitView
+                fitViewOptions={{ maxZoom: 1, padding: 0.4 }}
                 proOptions={{ hideAttribution: true }}
                 connectionLineStyle={{ stroke: '#06B6D4', strokeWidth: 2 }}
               >
@@ -1348,16 +1359,16 @@ export default function BuilderPage() {
 
               {/* Empty state hint when no tools added yet */}
               {!hasToolNodes && (
-                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                  <div className="text-center mt-32">
+                <div data-testid="builder-canvas-hint" className="absolute inset-x-0 top-6 flex justify-center px-4 pointer-events-none">
+                  <div className="text-center">
                     <div className="flex items-center justify-center gap-3 mb-2">
-                      <GripVertical className="w-4 h-4 text-slate-600" />
-                      <MousePointerClick className="w-4 h-4 text-slate-600" />
+                      <GripVertical className="w-4 h-4 text-slate-500" />
+                      <MousePointerClick className="w-4 h-4 text-slate-500" />
                     </div>
-                    <p className="text-sm text-slate-600">
+                    <p className="text-sm text-slate-400">
                       Drag tools from the palette or click to add them
                     </p>
-                    <p className="text-xs text-slate-700 mt-1">
+                    <p className="text-xs text-slate-500 mt-1">
                       Connect nodes by dragging between their handles
                     </p>
                   </div>
@@ -1387,6 +1398,10 @@ export default function BuilderPage() {
             onInputVariablesChange={(vars) => updateConfig({ input_variables: vars })}
             description={config.description || ''}
             onDescriptionChange={(v) => updateConfig({ description: v })}
+            riskTier={config.risk_tier}
+            onRiskTierChange={(risk_tier) => updateConfig({ risk_tier })}
+            outputSchema={config.output_schema}
+            onOutputSchemaChange={(output_schema) => updateConfig({ output_schema })}
           />
         )}
       </div>
@@ -1410,6 +1425,10 @@ function PipelineModeContent({
   onInputVariablesChange,
   description,
   onDescriptionChange,
+  riskTier,
+  onRiskTierChange,
+  outputSchema,
+  onOutputSchemaChange,
 }: {
   agentId: string | null;
   showExecutionViewer: boolean;
@@ -1418,6 +1437,10 @@ function PipelineModeContent({
   onInputVariablesChange: (vars: PipelineInputVariable[]) => void;
   description: string;
   onDescriptionChange: (v: string) => void;
+  riskTier?: string;
+  onRiskTierChange: (tier: 'low' | 'medium' | 'high' | 'critical') => void;
+  outputSchema?: string;
+  onOutputSchemaChange: (v: string) => void;
 }) {
   const pipelineStore = usePipelineStore();
   const reactFlowRef = useRef<ReactFlowInstance | null>(null);
@@ -1493,7 +1516,7 @@ function PipelineModeContent({
     setRfNodes(pipelineNodes);
     // Auto-fit view when nodes are loaded from config
     if (pipelineNodes.length > 0 && reactFlowRef.current) {
-      setTimeout(() => reactFlowRef.current?.fitView({ padding: 0.2 }), 100);
+      setTimeout(() => reactFlowRef.current?.fitView({ maxZoom: 1, padding: 0.2 }), 100);
     }
   }, [pipelineNodes, setRfNodes]);
 
@@ -1580,7 +1603,7 @@ function PipelineModeContent({
       const position = last ? { x: last.position.x + 280, y: last.position.y } : { x: 100, y: 100 };
       const id = pipelineStore.addStep(toolId, name, position);
       pipelineStore.setSelectedStep(id);
-      setTimeout(() => reactFlowRef.current?.fitView({ padding: 0.2, duration: 200 }), 50);
+      setTimeout(() => reactFlowRef.current?.fitView({ maxZoom: 1, padding: 0.2, duration: 200 }), 50);
     },
     [pipelineStore],
   );
@@ -1615,7 +1638,7 @@ B: {{${b}.response}}`);
       } else {
         return;
       }
-      setTimeout(() => reactFlowRef.current?.fitView({ padding: 0.2, duration: 200 }), 50);
+      setTimeout(() => reactFlowRef.current?.fitView({ maxZoom: 1, padding: 0.2, duration: 200 }), 50);
     },
     [],
   );
@@ -1647,7 +1670,7 @@ B: {{${b}.response}}`);
           onInit={(instance) => {
             reactFlowRef.current = instance;
             // Fit view after initialization with loaded nodes
-            setTimeout(() => instance.fitView({ padding: 0.2 }), 200);
+            setTimeout(() => instance.fitView({ maxZoom: 1, padding: 0.2 }), 200);
           }}
           isValidConnection={handleIsValidConnection}
         />
@@ -1680,6 +1703,10 @@ B: {{${b}.response}}`);
         onInputVariablesChange={onInputVariablesChange}
         description={description}
         onDescriptionChange={onDescriptionChange}
+        riskTier={riskTier}
+        onRiskTierChange={onRiskTierChange}
+        outputSchema={outputSchema}
+        onOutputSchemaChange={onOutputSchemaChange}
       />
     </>
   );

@@ -160,7 +160,7 @@ export default function DashboardPage() {
       label: 'Total Agents',
       href: '/agents?tab=all',
       value: stats?.total_agents ?? 0,
-      change: stats ? `${stats.active_executions} active now` : '',
+      change: stats ? `${stats.active_executions} running now` : '',
       changeColor: stats && stats.active_executions > 0 ? 'text-cyan-400' : 'text-slate-500',
       icon: Bot,
       iconBg: 'bg-cyan-500/10',

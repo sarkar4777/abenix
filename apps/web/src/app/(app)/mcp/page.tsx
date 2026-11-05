@@ -33,6 +33,7 @@ import ConfirmModal from '@/components/ui/ConfirmModal';
 import { toastSuccess, toastError } from '@/stores/toastStore';
 import { useIsMobile } from '@/hooks/useMediaQuery';
 import { useApi } from '@/hooks/useApi';
+import { apiFetch } from '@/lib/api-client';
 import { usePageTitle } from '@/hooks/usePageTitle';
 import { useEscapeToClose } from '@/hooks/useEscapeToClose';
 import PageHeader from '@/components/layout/PageHeader';
@@ -881,6 +882,8 @@ function MyServersTab({
             `${orphaned.length} attached tool${orphaned.length !== 1 ? 's are' : ' is'} no longer offered by this server`,
           );
         }
+      } else {
+        toastError('Could not discover tools', json.error?.message || 'The server did not answer.');
       }
     } catch {
       setConnections((prev) =>
@@ -911,6 +914,8 @@ function MyServersTab({
               : c,
           ),
         );
+      } else {
+        toastError('Could not check this server', json.error?.message || 'The server did not answer.');
       }
     } catch {
       setConnections((prev) =>
@@ -969,20 +974,17 @@ function MyServersTab({
 
   const startOAuth = async (connId: string) => {
     setOauthStarting(connId);
-    try {
-      const res = await fetch(`${API_URL}/api/mcp/oauth2/start`, {
-        method: 'POST',
-        headers: getAuthHeaders(),
-        body: JSON.stringify({ connection_id: connId }),
-      });
-      const json = await res.json();
-      if (json.data?.authorization_url) {
-        window.location.href = json.data.authorization_url;
-      }
-    } catch {
-      // silent
-    } finally {
-      setOauthStarting(null);
+    const res = await apiFetch<{ authorization_url?: string }>('/api/mcp/oauth2/start', {
+      method: 'POST',
+      body: JSON.stringify({ connection_id: connId }),
+      throwOnError: false,
+      silent: true,
+    });
+    setOauthStarting(null);
+    if (res.data?.authorization_url) {
+      window.location.href = res.data.authorization_url;
+    } else {
+      toastError('Could not start sign in', res.error || 'The server gave no sign in address.');
     }
   };
 
@@ -1213,23 +1215,21 @@ function RegistryTab({
   const [category, setCategory] = useState('all');
   const [installing, setInstalling] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
+  const [problem, setProblem] = useState('');
+  const [notice, setNotice] = useState('');
 
   const fetchRegistry = useCallback(async () => {
     setLoading(true);
-    try {
-      const params = new URLSearchParams();
-      if (search) params.set('search', search);
-      if (category !== 'all') params.set('category', category);
-      const res = await fetch(`${API_URL}/api/mcp/registry?${params.toString()}`, {
-        headers: getAuthHeaders(),
-      });
-      const json = await res.json();
-      if (json.data) setEntries(json.data);
-    } catch {
-      // silent
-    } finally {
-      setLoading(false);
-    }
+    const params = new URLSearchParams();
+    if (search) params.set('search', search);
+    if (category !== 'all') params.set('category', category);
+    const res = await apiFetch<RegistryEntry[]>(`/api/mcp/registry?${params.toString()}`, {
+      throwOnError: false,
+      silent: true,
+    });
+    if (res.data) setEntries(res.data);
+    else setProblem(`The registry could not be loaded. ${res.error || 'Try again.'}`);
+    setLoading(false);
   }, [search, category]);
 
   useEffect(() => {
@@ -1238,37 +1238,44 @@ function RegistryTab({
 
   const syncRegistry = async () => {
     setSyncing(true);
-    try {
-      await fetch(`${API_URL}/api/mcp/registry/sync`, {
-        method: 'POST',
-        headers: getAuthHeaders(),
-      });
+    setProblem('');
+    setNotice('');
+    const res = await apiFetch('/api/mcp/registry/sync', {
+      method: 'POST',
+      throwOnError: false,
+      silent: true,
+    });
+    if (res.error) setProblem(`Sync failed. ${res.error}`);
+    else {
+      setNotice('Registry synced.');
       await fetchRegistry();
-    } catch {
-      // silent
-    } finally {
-      setSyncing(false);
     }
+    setSyncing(false);
   };
 
   const installEntry = async (entry: RegistryEntry) => {
     setInstalling(entry.id);
-    try {
-      const res = await fetch(`${API_URL}/api/mcp/registry/install`, {
-        method: 'POST',
-        headers: getAuthHeaders(),
-        body: JSON.stringify({ registry_entry_id: entry.id }),
-      });
-      const json = await res.json();
-      if (json.data) {
-        onInstalled(json.data);
-      }
-    } catch {
-      // silent
-    } finally {
-      setInstalling(null);
+    setProblem('');
+    setNotice('');
+    const res = await apiFetch<MCPConnection>('/api/mcp/registry/install', {
+      method: 'POST',
+      body: JSON.stringify({ registry_id: entry.registry_id, server_name: entry.name }),
+      throwOnError: false,
+      silent: true,
+    });
+    setInstalling(null);
+    if (res.data) {
+      toastSuccess(
+        `${entry.name} is installed`,
+        entry.auth_type === 'none' ? 'It is now under My Servers.' : 'It is under My Servers and needs sign in details before its tools load.',
+      );
+      onInstalled(res.data);
+    } else {
+      setProblem(`${entry.name} could not be installed. ${res.error || 'Try again.'}`);
     }
   };
+
+  const filtering = !!search || category !== 'all';
 
   return (
     <div className="space-y-4">
@@ -1297,6 +1304,17 @@ function RegistryTab({
         </button>
       </div>
 
+      {problem && (
+        <p role="alert" data-testid="mcp-registry-error" className="flex items-start gap-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /> {problem}
+        </p>
+      )}
+      {notice && (
+        <p role="status" data-testid="mcp-registry-notice" className="flex items-start gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-300">
+          <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" /> {notice}
+        </p>
+      )}
+
       {/* Category pills */}
       <div className="flex items-center gap-2 overflow-x-auto pb-1">
         {REGISTRY_CATEGORIES.map((cat) => (
@@ -1323,10 +1341,27 @@ function RegistryTab({
           <div className="w-14 h-14 rounded-xl bg-slate-800/50 border border-slate-700/50 flex items-center justify-center mx-auto mb-4">
             <Globe className="w-7 h-7 text-slate-600" />
           </div>
-          <p className="text-sm text-slate-400 mb-1">No registry entries found</p>
-          <p className="text-xs text-slate-600">
-            Try a different search or sync the registry
-          </p>
+          {filtering ? (
+            <>
+              <p className="text-sm text-slate-400 mb-1">No servers match this search</p>
+              <p className="text-xs text-slate-500">Try a different word or category.</p>
+            </>
+          ) : (
+            <>
+              <p className="text-sm text-slate-300 mb-1">The registry has not been synced yet</p>
+              <p className="text-xs text-slate-500 mb-4">Sync it to load the list of servers you can install.</p>
+              <button
+                type="button"
+                onClick={syncRegistry}
+                disabled={syncing}
+                data-testid="mcp-registry-sync-empty"
+                className="inline-flex items-center gap-2 px-4 py-2 bg-cyan-500 text-white text-sm font-medium rounded-lg hover:bg-cyan-400 disabled:opacity-50"
+              >
+                {syncing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                Sync the registry now
+              </button>
+            </>
+          )}
         </div>
       ) : (
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -1417,21 +1452,19 @@ function ResourcesTab({ connections }: { connections: MCPConnection[] }) {
   const [resourceContent, setResourceContent] = useState('');
   const [contentLoading, setContentLoading] = useState(false);
   const [contentModalOpen, setContentModalOpen] = useState(false);
+  const [problem, setProblem] = useState('');
 
   const fetchResources = useCallback(async (connId: string) => {
     setLoading(true);
     setResources([]);
-    try {
-      const res = await fetch(`${API_URL}/api/mcp/connections/${connId}/resources`, {
-        headers: getAuthHeaders(),
-      });
-      const json = await res.json();
-      if (json.data) setResources(json.data);
-    } catch {
-      // silent
-    } finally {
-      setLoading(false);
-    }
+    setProblem('');
+    const res = await apiFetch<MCPResource[]>(`/api/mcp/connections/${connId}/resources`, {
+      throwOnError: false,
+      silent: true,
+    });
+    if (res.data) setResources(res.data);
+    else setProblem(res.error || 'This server did not answer.');
+    setLoading(false);
   }, []);
 
   useEffect(() => {
@@ -1458,13 +1491,15 @@ function ResourcesTab({ connections }: { connections: MCPConnection[] }) {
         },
       );
       const json = await res.json();
-      if (json.data?.content) {
+      if (!json.data) {
+        setResourceContent(json.error?.message || 'Failed to read resource');
+      } else if (json.data.content) {
         setResourceContent(
           typeof json.data.content === 'string'
             ? json.data.content
             : JSON.stringify(json.data.content, null, 2),
         );
-      } else if (json.data?.text) {
+      } else if (json.data.text) {
         setResourceContent(json.data.text);
       } else {
         setResourceContent(JSON.stringify(json.data, null, 2));
@@ -1500,7 +1535,13 @@ function ResourcesTab({ connections }: { connections: MCPConnection[] }) {
         </div>
       )}
 
-      {selectedId && !loading && resources.length === 0 && (
+      {selectedId && !loading && problem && (
+        <p role="alert" data-testid="mcp-resources-error" className="flex items-start gap-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /> Resources could not be loaded. {problem}
+        </p>
+      )}
+
+      {selectedId && !loading && !problem && resources.length === 0 && (
         <div className="text-center py-16">
           <div className="w-14 h-14 rounded-xl bg-slate-800/50 border border-slate-700/50 flex items-center justify-center mx-auto mb-4">
             <FileText className="w-7 h-7 text-slate-600" />
@@ -1569,21 +1610,19 @@ function PromptsTab({ connections }: { connections: MCPConnection[] }) {
   const [prompts, setPrompts] = useState<MCPPrompt[]>([]);
   const [loading, setLoading] = useState(false);
   const [tryPrompt, setTryPrompt] = useState<MCPPrompt | null>(null);
+  const [problem, setProblem] = useState('');
 
   const fetchPrompts = useCallback(async (connId: string) => {
     setLoading(true);
     setPrompts([]);
-    try {
-      const res = await fetch(`${API_URL}/api/mcp/connections/${connId}/prompts`, {
-        headers: getAuthHeaders(),
-      });
-      const json = await res.json();
-      if (json.data) setPrompts(json.data);
-    } catch {
-      // silent
-    } finally {
-      setLoading(false);
-    }
+    setProblem('');
+    const res = await apiFetch<MCPPrompt[]>(`/api/mcp/connections/${connId}/prompts`, {
+      throwOnError: false,
+      silent: true,
+    });
+    if (res.data) setPrompts(res.data);
+    else setProblem(res.error || 'This server did not answer.');
+    setLoading(false);
   }, []);
 
   useEffect(() => {
@@ -1618,7 +1657,13 @@ function PromptsTab({ connections }: { connections: MCPConnection[] }) {
         </div>
       )}
 
-      {selectedId && !loading && prompts.length === 0 && (
+      {selectedId && !loading && problem && (
+        <p role="alert" data-testid="mcp-prompts-error" className="flex items-start gap-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /> Prompts could not be loaded. {problem}
+        </p>
+      )}
+
+      {selectedId && !loading && !problem && prompts.length === 0 && (
         <div className="text-center py-16">
           <div className="w-14 h-14 rounded-xl bg-slate-800/50 border border-slate-700/50 flex items-center justify-center mx-auto mb-4">
             <BookOpen className="w-7 h-7 text-slate-600" />

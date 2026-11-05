@@ -35,9 +35,9 @@ export function adminConfigHref(config?: ToolConfigInfo | null): string {
 }
 
 const STYLE: Record<Exclude<ToolCredentialStatus, 'none'>, { cls: string; text: string }> = {
-  missing: { cls: 'bg-rose-500/10 text-rose-300 border-rose-500/30', text: 'Needs a key' },
-  optional: { cls: 'bg-amber-500/10 text-amber-300 border-amber-500/30', text: 'Key optional' },
-  configured: { cls: 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30', text: 'Settings ready' },
+  missing: { cls: 'bg-rose-500/10 text-rose-300 border-rose-500/30', text: 'Needs setup' },
+  optional: { cls: 'bg-amber-500/10 text-amber-300 border-amber-500/30', text: 'Setup optional' },
+  configured: { cls: 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30', text: 'Ready' },
 };
 
 export function CredentialBadge({

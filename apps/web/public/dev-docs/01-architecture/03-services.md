@@ -246,11 +246,11 @@ For gateways and plant floors where a round trip to the cloud is too slow. Each 
 
 | Edge runtime | Language | Use case |
 |---|---|---|
-| `edge-runtime` | Python | Default. Runs signed `.agent` bundles locally |
-| `edge-runtime-rust` | Rust | Same wire contract, smaller and faster |
-| `edge-runtime-c` | C | Ultra-constrained gateways that cannot take Python or Rust |
+| `edge-runtime` | Python | Default. Signed `.agent` bundles, or Abenix Edge with collectors and store and forward |
+| `edge-runtime-rust` | Rust | Bundles only, same wire contract, smaller |
+| `edge-runtime-c` | C | Bundles only, for small gateways |
 
-All three register with the platform every 60 s, take bundle deploys on MQTT topic `edge.<gateway_id>.deploy`, verify the RSA signature, and serve `/agents/<slug>/execute` on 8080. See [06-deployment/05-edge-runtime](../06-deployment/05-edge-runtime.md).
+All three register with the platform every 60 s, take bundle deploys on MQTT topic `edge/<gateway_id>/deploy/<slug>`, verify the RSA signature, and serve `/agents/<slug>/execute` on 8080. See [06-deployment/05-edge-runtime](../06-deployment/05-edge-runtime.md).
 
 ---
 

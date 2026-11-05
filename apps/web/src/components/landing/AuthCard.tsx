@@ -33,6 +33,11 @@ interface FormData {
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
+export const demoLoginVisible = (
+  nodeEnv = process.env.NODE_ENV,
+  flag = process.env.NEXT_PUBLIC_SHOW_DEMO_LOGIN,
+) => nodeEnv !== 'production' || flag === 'true';
+
 function useTypingAnimation(text: string, speed = 80) {
   const [displayed, setDisplayed] = useState('');
   const [done, setDone] = useState(false);
@@ -84,6 +89,11 @@ export default function AuthCard() {
     if (q.get('reset') === 'done') setNotice('Your password was changed. Sign in with the new one.');
     const prefill = q.get('email');
     if (prefill) setForm((f) => ({ ...f, email: prefill }));
+    // text typed before hydration lives only in the DOM, the next render would wipe it
+    const typed = (id: string) => (document.getElementById(id) as HTMLInputElement | null)?.value || '';
+    const email = typed('auth-email');
+    const password = typed('auth-password');
+    if (email || password) setForm((f) => ({ ...f, email: email || f.email, password: password || f.password }));
   }, []);
 
   function finishSignIn(data: { access_token?: string; refresh_token?: string }) {
@@ -614,8 +624,9 @@ export default function AuthCard() {
           </>
         )}
 
-        <div className="mt-4 text-center">
-          <p className="text-slate-500 text-xs mb-2">Quick Access:</p>
+        {demoLoginVisible() && (
+        <div className="mt-4 text-center" data-testid="auth-demo-login">
+          <p className="text-slate-500 text-xs mb-2">Quick Access</p>
           <div className="flex items-center justify-center gap-2">
             <button
               type="button"
@@ -637,6 +648,7 @@ export default function AuthCard() {
             </button>
           </div>
         </div>
+        )}
 
         <div className="flex items-center justify-center gap-4 mt-6 pt-4 border-t border-slate-800/50">
           <span className="flex items-center gap-1 text-slate-600 text-xs">

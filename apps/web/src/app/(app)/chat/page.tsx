@@ -28,6 +28,7 @@ import { connectToAgentStream, deniedReason, errorRepeatsReply, withToolStatus, 
 import type { HoldView } from '@/components/moderation/HeldNotice';
 import { autonomyMetaOf } from '@/lib/autonomy';
 import { fetchAllAgents, sortForPicker } from '@/lib/fetch-all-agents';
+import { pluralShown } from '@/lib/plural';
 import { usePageTitle } from '@/hooks/usePageTitle';
 import { CostValue } from '@/components/shared/CostValue';
 import PageHeader from '@/components/layout/PageHeader';
@@ -779,7 +780,7 @@ export default function ChatPage() {
                 <div className="flex items-center gap-1.5 mt-0.5">
                   <span className="text-[10px] text-slate-500">{timeLabel(conv.updated_at)}</span>
                   {conv.message_count > 0 && (
-                    <span className="text-[10px] text-slate-500">{conv.message_count} messages</span>
+                    <span className="text-[10px] text-slate-500">{pluralShown(conv.message_count, conv.message_count, 'message')}</span>
                   )}
                 </div>
               </div>
@@ -878,7 +879,7 @@ export default function ChatPage() {
                           type="text"
                           value={agentQuery}
                           onChange={(e) => setAgentQuery(e.target.value)}
-                          placeholder={`Search ${agents.length} agents by name or topic`}
+                          placeholder="Search agents by name or topic"
                           aria-label="Search agents"
                           data-testid="chat-agent-search"
                           className="w-full pl-9 pr-3 py-2 bg-slate-900/50 border border-slate-700/40 rounded-lg text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500/50"
@@ -1005,7 +1006,7 @@ export default function ChatPage() {
                 <li className="flex gap-2.5">
                   <Bot className="w-4 h-4 text-cyan-400 shrink-0" />
                   <span>
-                    The agent named at the top answers. Click its name to search all {agents.length || 'your'} agents and switch.
+                    The agent named at the top answers. Click its name to search your agents and switch.
                   </span>
                 </li>
                 <li className="flex gap-2.5">

@@ -22,6 +22,8 @@ import {
 import { useApi } from '@/hooks/useApi';
 import { apiFetch } from '@/lib/api-client';
 import MarketplaceOffNotice from '@/components/marketplace/MarketplaceOffNotice';
+import OperatorOnlyNote from '@/components/shared/OperatorOnlyNote';
+import { usePlatformOperator } from '@/hooks/usePlatformFeatures';
 import { SkeletonAgentCard } from '@/components/ui/Skeleton';
 import EmptyState from '@/components/ui/EmptyState';
 
@@ -70,6 +72,7 @@ export default function MarketplaceSubmissions({ onCount }: { onCount?: (n: numb
   const [rejectingId, setRejectingId] = useState<string | null>(null);
   const [rejectReason, setRejectReason] = useState('');
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const { readOnly, rule } = usePlatformOperator();
 
   const pendingAgents = (allAgents ?? []).filter(
     (a) => a.status === 'pending_review',
@@ -122,6 +125,7 @@ export default function MarketplaceSubmissions({ onCount }: { onCount?: (n: numb
       </p>
 
       <MarketplaceOffNotice what="Nothing new arrives in this queue while it is off." />
+      {readOnly && <OperatorOnlyNote what="The marketplace review" rule={rule} />}
 
       {(loadError || actionError) && (
         <div role="alert" data-testid="review-error" className="px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/30 text-red-300 text-sm">
@@ -208,6 +212,7 @@ export default function MarketplaceSubmissions({ onCount }: { onCount?: (n: numb
                       >
                         <Eye className="w-4 h-4" />
                       </button>
+                      {!readOnly && (<>
                       <button
                         onClick={() => handleApprove(agent.id)}
                         disabled={actionLoading === agent.id}
@@ -230,6 +235,7 @@ export default function MarketplaceSubmissions({ onCount }: { onCount?: (n: numb
                         <X className="w-3.5 h-3.5" />
                         Reject
                       </button>
+                      </>)}
                     </div>
                   </div>
 

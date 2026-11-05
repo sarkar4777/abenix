@@ -21,6 +21,8 @@ import { TOOL_DOCS, type ToolParam } from '@/lib/tool-docs';
 import ModelPicker from '@/components/ModelPicker';
 import InputVariablesEditor, { type InputVariable } from '@/components/builder/InputVariablesEditor';
 import { ModelStatusBanner } from '@/components/ModelStatusBanner';
+import RiskTierPicker from '@/components/governance/RiskTierPicker';
+import type { Tier } from '@/components/governance/TierPolicies';
 
 // Props
 
@@ -33,6 +35,10 @@ interface StepConfigPanelProps {
   onInputVariablesChange?: (vars: InputVariable[]) => void;
   description?: string;
   onDescriptionChange?: (v: string) => void;
+  riskTier?: string;
+  onRiskTierChange?: (tier: Tier) => void;
+  outputSchema?: string;
+  onOutputSchemaChange?: (v: string) => void;
 }
 
 // Constants
@@ -199,6 +205,10 @@ function PipelineOverview({
   onInputVariablesChange,
   description,
   onDescriptionChange,
+  riskTier,
+  onRiskTierChange,
+  outputSchema,
+  onOutputSchemaChange,
 }: {
   allSteps: PipelineStep[];
   onClose: () => void;
@@ -206,6 +216,10 @@ function PipelineOverview({
   onInputVariablesChange?: (vars: InputVariable[]) => void;
   description?: string;
   onDescriptionChange?: (v: string) => void;
+  riskTier?: string;
+  onRiskTierChange?: (tier: Tier) => void;
+  outputSchema?: string;
+  onOutputSchemaChange?: (v: string) => void;
 }) {
   const validation = validatePipeline(allSteps);
 
@@ -238,6 +252,32 @@ function PipelineOverview({
               maxLength={500}
               placeholder="What this pipeline does and who it is for. Shown on its chat page and in the agent list."
               className="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white resize-y focus:border-cyan-500 focus:outline-none"
+            />
+          </div>
+        )}
+
+        {onRiskTierChange && (
+          <RiskTierPicker
+            value={riskTier}
+            onChange={onRiskTierChange}
+            selectedTools={Array.from(new Set(allSteps.map((s) => s.toolName)))}
+            hasOutputSchema={!!(outputSchema || '').trim()}
+            isPipeline
+          />
+        )}
+
+        {onOutputSchemaChange && (
+          <div>
+            <label htmlFor="pipeline-output-schema" className="block text-xs text-slate-400 mb-1.5">Output schema, optional</label>
+            <textarea
+              id="pipeline-output-schema"
+              data-testid="pipeline-output-schema"
+              value={outputSchema || ''}
+              onChange={(e) => onOutputSchemaChange(e.target.value)}
+              rows={3}
+              spellCheck={false}
+              placeholder="JSON Schema for the final output. Higher risk tiers can require one."
+              className="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-2 text-xs font-mono text-white resize-y focus:border-cyan-500 focus:outline-none"
             />
           </div>
         )}
@@ -2168,6 +2208,10 @@ export default function StepConfigPanel({
   onInputVariablesChange,
   description,
   onDescriptionChange,
+  riskTier,
+  onRiskTierChange,
+  outputSchema,
+  onOutputSchemaChange,
 }: StepConfigPanelProps) {
   const [tab, setTab] = useState<Tab>('general');
 
@@ -2185,7 +2229,7 @@ export default function StepConfigPanel({
 
   // Show pipeline overview when no step is selected
   if (!step) {
-    return <PipelineOverview allSteps={allSteps} onClose={onClose} inputVariables={inputVariables} onInputVariablesChange={onInputVariablesChange} description={description} onDescriptionChange={onDescriptionChange} />;
+    return <PipelineOverview allSteps={allSteps} onClose={onClose} inputVariables={inputVariables} onInputVariablesChange={onInputVariablesChange} description={description} onDescriptionChange={onDescriptionChange} riskTier={riskTier} onRiskTierChange={onRiskTierChange} outputSchema={outputSchema} onOutputSchemaChange={onOutputSchemaChange} />;
   }
 
   const stepIcon = getStepIcon(step.toolName);

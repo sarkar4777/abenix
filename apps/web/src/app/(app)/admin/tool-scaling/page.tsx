@@ -7,6 +7,8 @@ import {
 import { formatCount, formatMs as fmtMs } from '@/lib/format-stats';
 import PageHeader from '@/components/layout/PageHeader';
 import { AccessGate } from '@/components/layout/NoAccess';
+import OperatorOnlyNote from '@/components/shared/OperatorOnlyNote';
+import { usePlatformOperator } from '@/hooks/usePlatformFeatures';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 function getToken() {
@@ -43,6 +45,7 @@ function ToolScalingPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const { readOnly, rule } = usePlatformOperator();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -117,6 +120,8 @@ function ToolScalingPage() {
         ]}
       />
 
+      {readOnly && <OperatorOnlyNote what="Tool runtime scaling" rule={rule} />}
+
       {error && (
         <div className="mb-4 p-3 rounded-md bg-red-900/30 border border-red-700/50 text-red-200 text-sm flex items-center gap-2">
           <AlertTriangle className="w-4 h-4" /> {error}
@@ -174,11 +179,11 @@ function ToolScalingPage() {
                       }`} title={r.breaker_state || 'closed'} />
                     </td>
                     <td className="px-3 py-2 text-right">
-                      <button
+                      {!readOnly && <button
                         onClick={() => setEditing({ ...r })}
                         aria-label={`Edit ${r.slug}`}
                         className="px-2 py-1 text-xs rounded bg-slate-700 hover:bg-slate-600"
-                      >Edit</button>
+                      >Edit</button>}
                     </td>
                   </tr>
                 );
@@ -241,11 +246,11 @@ function ToolScalingPage() {
                     <td className={`px-3 py-2 text-right tabular-nums ${calls === 0 ? 'text-slate-500' : ''}`}>{formatCount(calls)}</td>
                     <td className={`px-3 py-2 text-right tabular-nums ${avgMs === 0 ? 'text-slate-500' : ''}`}>{fmtMs(avgMs)}</td>
                     <td className="px-3 py-2 text-right">
-                      <button
+                      {!readOnly && <button
                         onClick={() => setEditing({ ...r })}
                         aria-label={`Edit ${r.slug}`}
                         className="px-2 py-1 text-xs rounded bg-slate-700 hover:bg-slate-600"
-                      >Edit</button>
+                      >Edit</button>}
                     </td>
                   </tr>
                 );

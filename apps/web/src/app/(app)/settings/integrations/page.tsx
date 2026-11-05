@@ -292,8 +292,8 @@ const STATUS_COLOR: Record<IntegrationStatus, string> = {
 };
 
 const STATUS_LABEL: Record<IntegrationStatus, string> = {
-  configured: 'Configured',
-  missing: 'Not configured',
+  configured: 'Ready',
+  missing: 'Needs setup',
   error: 'Error',
   unknown: 'Status unknown',
 };

@@ -1163,10 +1163,10 @@ bash scripts/deploy-azure.sh all       # AKS + ACR + helm`}</pre>
             <p><strong className="text-white">What changes when you flip.</strong></p>
             <ul className="list-disc pl-6 space-y-1">
               <li><code>agents.dedicated_mode</code> goes <code>false → true</code>, through <code>POST /api/admin/scaling/agents/{'{'}id{'}'}/dedicated-mode</code>.</li>
-              <li>The admin API reports <code>effective_pool</code> as <code>dedicated-&lt;agent-id&gt;</code>.</li>
+              <li>The admin API reports <code>effective_pool</code> as <code>dedicated-&lt;agent-id&gt;</code>, and runs are published to that queue.</li>
               <li>The <code>runtime_pool</code> field is left as it was, so you can flip back without losing the pool.</li>
             </ul>
-            <Callout tone="warn">Today the flag is only recorded. Runs still go to the agent&apos;s <code>runtime_pool</code>, and the chart does not create per-agent Deployments. For real isolation, add a pool for the agent in the helm values and move it there with Edit scaling.</Callout>
+            <Callout tone="info">The API creates a Deployment and a KEDA ScaledObject for the agent, cloned from the chart&apos;s default pool, sized by the agent&apos;s replica fields up to <code>scaling.dedicated.maxReplicas</code>. Runs go to its own NATS subject. Flip it back and new runs return to the shared pool, and the workers are removed once nothing is queued on them.</Callout>
             <p><strong className="text-white">See the cost first.</strong> <code>GET /api/admin/scaling/agents/{'{'}id{'}'}/cost-projection</code> returns three scenarios, <em>shared</em>, <em>dedicated</em> and <em>peak</em> (at <code>max_replicas</code>), from the trailing-24h run rate and average cost per run plus a <code>$0.012/h</code> per-pod baseline. Tune the baseline in <code>app/routers/admin_scaling.py</code> if your cluster billing differs. The Scaling page does not show it yet.</p>
             <p><strong className="text-white">When a pool of its own helps:</strong></p>
             <ul className="list-disc pl-6 space-y-1">
@@ -1537,15 +1537,15 @@ if (result.isPaused()) {
             ]} />
             <p><strong className="text-white">How interactions work.</strong></p>
             <ul className="list-disc pl-5 space-y-1 text-[13px]">
-              <li><strong>Bundle delivery (default):</strong> MQTT topic <code>edge.{`{gateway_id}`}.deploy</code> at QoS 0. The runtime verifies the RSA-PSS signature, refuses tampered bundles, extracts to <code>/var/edge/agents/{`{slug}`}/</code>.</li>
-              <li><strong>Bundle delivery (fallback):</strong> if MQTT publish fails, the platform <code>POST</code>s the tar bytes to <code>{`{endpoint_url}`}/agents/{`{slug}`}/bundle</code> on the gateway.</li>
-              <li><strong>Sync execution:</strong> <code>POST {`{endpoint_url}`}/agents/{`{slug}`}/execute</code> with a JSON body — runtime returns <code>{`{slug, duration_ms, result}`}</code>.</li>
-              <li><strong>Tool budget:</strong> only <code>mqtt_publish, mqtt_subscribe, current_time, windowed_state, connector_call, code_executor</code> are allowed on edge. Bundle compiler refuses anything else. Runtime re-checks on load.</li>
+              <li><strong>Bundle delivery (default):</strong> MQTT topic <code>edge/{`{gateway_id}`}/deploy/{`{slug}`}</code> at QoS 1 and retained, so a gateway that is off picks it up when it connects. The runtime verifies the RSA-PSS signature, refuses tampered bundles, swaps it into <code>/var/edge/agents/{`{slug}`}/</code> and answers on <code>edge/{`{gateway_id}`}/ack/{`{slug}`}</code>.</li>
+              <li><strong>Bundle delivery (fallback):</strong> when the gateway does not confirm over MQTT, the platform <code>POST</code>s the tar bytes to <code>{`{endpoint_url}`}/agents/{`{slug}`}/bundle</code> with the gateway&apos;s push token. A deploy counts as deployed only when the gateway confirmed it.</li>
+              <li><strong>Sync execution:</strong> <code>POST {`{endpoint_url}`}/agents/{`{slug}`}/execute</code> with a JSON body and <code>Authorization: Bearer</code> the gateway&apos;s token. The runtime makes one model call and returns <code>{`{slug, duration_ms, result}`}</code>. There is no tool loop on the device, so answering offline needs an Anthropic compatible server on the site network.</li>
+              <li><strong>Tool list:</strong> only <code>mqtt_publish, mqtt_subscribe, current_time, windowed_state, connector_call, code_executor</code> may be listed. The bundle compiler refuses anything else and the runtime checks again on load. The model is not given these tools. <code>code_executor</code> only opens <code>params.code</code>, which stays off until the gateway sets <code>EDGE_ENABLE_CODE_EXECUTOR=true</code>.</li>
             </ul>
             <p><strong className="text-white">When to use.</strong> Latency-sensitive sites (sub-100 ms), intermittent connectivity, data-residency regulations. <strong className="text-white">When NOT to use.</strong> Anything that needs platform-only tools (<code>knowledge_search</code>, <code>atlas_*</code>, MCP) or a &gt;2 GB model.</p>
-            <Callout tone="info">Bundle format, signing math, manifest schema, and failure modes are documented in <code>infra/edge-runtime/AGENT_BUNDLE_FORMAT.md</code>. End-to-end smoke: <code>scripts/edge-smoke.sh</code>. Pick the variant that matches plant hardware — they all interop with the same bundle.</Callout>
+            <Callout tone="info">Bundle format, signing math, manifest schema, and failure modes are documented in <code>infra/edge-runtime/AGENT_BUNDLE_FORMAT.md</code>. End to end test: <code>bash scripts/deploy.sh edge-e2e</code>. Pick the variant that matches plant hardware — they all interop with the same bundle.</Callout>
 
-            <h4 className="text-white font-semibold pt-3">Three secrets every gateway needs</h4>
+            <h4 className="text-white font-semibold pt-3">The secrets every gateway needs</h4>
             <div className="overflow-x-auto">
               <table className="w-full text-[12px] border border-slate-700/40 rounded-md overflow-hidden">
                 <thead className="bg-slate-800/60 text-slate-400 text-[10.5px] uppercase">
@@ -1562,13 +1562,19 @@ if (result.isPaused()) {
                     <td className="px-2 py-1.5 font-mono text-cyan-300">SIGNING_PUBKEY_PEM</td>
                     <td className="px-2 py-1.5">RSA-PSS-2048 pub key to verify bundles</td>
                     <td className="px-2 py-1.5">Same mint dialog returns it</td>
-                    <td className="px-2 py-1.5 text-rose-300">Rust and C accept unverified bundles. Python refuses unless <code>EDGE_ALLOW_UNSIGNED=true</code>. Always set it.</td>
+                    <td className="px-2 py-1.5 text-rose-300">The gateway refuses to start, unless <code>EDGE_ALLOW_UNSIGNED</code> is the literal <code>true</code>, which is for local development.</td>
                   </tr>
                   <tr className="border-t border-slate-800/40">
                     <td className="px-2 py-1.5 font-mono text-cyan-300">ANTHROPIC_API_KEY</td>
                     <td className="px-2 py-1.5">Cloud LLM.</td>
                     <td className="px-2 py-1.5">helm <code>--set anthropic_api_key=$KEY</code></td>
-                    <td className="px-2 py-1.5 text-slate-400">Execute returns <code>stub: true</code>. Tool-only agents still work.</td>
+                    <td className="px-2 py-1.5 text-slate-400">Execute returns <code>stub: true</code>. <code>ANTHROPIC_AUTH_TOKEN</code> takes a subscription token instead.</td>
+                  </tr>
+                  <tr className="border-t border-slate-800/40">
+                    <td className="px-2 py-1.5 font-mono text-cyan-300">EDGE_AUTH_TOKEN</td>
+                    <td className="px-2 py-1.5">Bearer token for bundle install and execute</td>
+                    <td className="px-2 py-1.5">The helm chart makes one, or <code>--set auth_token=$TOKEN</code></td>
+                    <td className="px-2 py-1.5 text-rose-300">The gateway refuses to start, unless <code>EDGE_ALLOW_NO_AUTH</code> is the literal <code>true</code>, which is for local development.</td>
                   </tr>
                 </tbody>
               </table>
@@ -2209,7 +2215,7 @@ spec:
               <div className="rounded-lg border border-violet-700/40 bg-violet-900/15 p-3">
                 <div className="text-violet-300 font-semibold mb-1">Layer 1 — Agents + pods</div>
                 <div className="text-slate-400 mb-2"><a href="/admin/scaling" className="text-violet-300 underline">/admin/scaling</a></div>
-                <p className="text-slate-300 mb-2">Per-agent <code>runtime_pool</code>, <code>min_replicas</code>, <code>max_replicas</code>, <code>concurrency_per_replica</code>, <code>rate_limit_qps</code>, <code>daily_budget_usd</code>. Once a tenant has spent <code>daily_budget_usd</code> on the agent in a UTC day, or the agent has spent its <code>daily_cost_limit</code> across everyone, new runs are refused with <code>BUDGET_EXCEEDED</code> until midnight UTC. 0 means no cap. Over <code>rate_limit_qps</code> runs per second a call is turned away with <code>RATE_LIMITED</code> and a retry time. The replica and concurrency fields are a sizing note only, the pool&apos;s Helm settings decide those.</p>
+                <p className="text-slate-300 mb-2">Per-agent <code>runtime_pool</code>, <code>min_replicas</code>, <code>max_replicas</code>, <code>concurrency_per_replica</code>, <code>rate_limit_qps</code>, <code>daily_budget_usd</code>. Once a tenant has spent <code>daily_budget_usd</code> on the agent in a UTC day, or the agent has spent its <code>daily_cost_limit</code> across everyone, new runs are refused with <code>BUDGET_EXCEEDED</code> until midnight UTC. 0 means no cap. Over <code>rate_limit_qps</code> runs per second a call is turned away with <code>RATE_LIMITED</code> and a retry time. The replica and concurrency fields apply only to an agent in dedicated mode. On a shared pool they are a sizing note and the pool&apos;s Helm settings decide.</p>
                 <p className="text-slate-300 mb-2">The daily caps are checked before any run starts on every path: the agent page, the API, triggers, pipelines and pipeline steps, meetings, OracleNet, governance replays, a2a and batch. A refusal is 429 <code>BUDGET_EXCEEDED</code> with today&apos;s spend (UTC) and who can raise the cap. A saved agent run as a pipeline step counts toward its own caps once the pipeline finishes, without counting twice in the organization totals.</p>
                 <p className="text-slate-300 mb-2"><code>per_execution_cost_limit</code> caps one run. After each model call the run checks its spend, and once the limit is reached and the agent wants another step it stops with <code>BUDGET_EXCEEDED</code>. The answer so far and every step stay in the Flight Recorder, ending with a <code>budget_stop</code> step. A final answer that crosses the limit is kept. Pipelines apply the same limit across steps, and an API caller can only tighten it with <code>cost_limit</code>. A pipeline run&apos;s cost includes what failed and retried steps spent.</p>
                 <p className="text-slate-400 text-[11.5px]">Stops the api pod from doing agent work itself. KEDA scales the pool deployments on NATS JetStream consumer lag.</p>
@@ -2693,7 +2699,7 @@ spec:
               'Where offered, <strong>Test</strong> sends one request to the provider with the value and reports the answer.',
               '<strong>Clear tenant value</strong> or <strong>Clear platform value</strong> removes what was saved so the next source applies again.',
             ]} />
-            <p>Secrets are masked after saving and encrypted with the cluster key when one is set. The page header says which. A tool missing a required key tells the agent, in one sentence, which key to ask an admin for. The Tools Catalogue and the builder palette show a badge per tool: Needs a key, Key optional or Settings ready.</p>
+            <p>Secrets are masked after saving and encrypted with the cluster key when one is set. The page header says which. A tool missing a required key tells the agent, in one sentence, which key to ask an admin for. The Tools Catalogue and the builder palette show a badge per tool. It reads Needs setup, Setup optional or Ready.</p>
             <Callout tone="info">Not here: MCP tools keep credentials on their connection under MCP Servers, and code assets keep their own secrets in Code Runner. Source Watch sign-in credentials are set here, under Source Watch.</Callout>
           </div>
         ),

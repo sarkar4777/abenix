@@ -16,6 +16,11 @@ vi.mock('@/lib/capabilities', async (orig) => ({
   useMyPermissions: () => ({ perms: { role: 'admin', is_admin: true, features: {}, capabilities: ['*'] }, loading: false }),
 }));
 
+vi.mock('@/hooks/usePlatformFeatures', async (orig) => ({
+  ...(await orig<typeof import('@/hooks/usePlatformFeatures')>()),
+  usePlatformOperator: () => ({ settled: true, readOnly: false, rule: undefined }),
+}));
+
 import ClusterPage from '@/app/(app)/admin/cluster/page';
 import PodDrawer from '@/components/cluster/PodDrawer';
 

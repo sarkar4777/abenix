@@ -62,7 +62,7 @@ export const AgentNode = memo(function AgentNode({ data, selected }: NodeProps<A
         </div>
       </div>
       {/* Summary badges */}
-      {((data.toolCount && data.toolCount > 0) || (data.inputParamCount && data.inputParamCount > 0)) && (
+      {((data.toolCount ?? 0) > 0 || (data.inputParamCount ?? 0) > 0) && (
         <div className="flex items-center gap-2 mt-2.5 pt-2 border-t border-slate-700/50">
           {data.toolCount !== undefined && data.toolCount > 0 && (
             <span className="text-[9px] text-slate-400 bg-slate-700/50 px-1.5 py-0.5 rounded-full">

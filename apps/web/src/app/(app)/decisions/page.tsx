@@ -164,6 +164,15 @@ export default function DecisionsPage() {
           ? { label: 'New decision', onClick: () => setCreating('blank'), icon: Plus, testId: 'decision-new' }
           : { label: 'Reference sets', href: '/decisions/reference-sets', icon: Layers }}
         secondaryAction={canAuthor ? { label: 'Import a decision file', onClick: () => setImportOpen(true), icon: FileJson, testId: 'decision-import' } : undefined}
+        extraActions={canAuthor ? (
+          <Link
+            href="/decisions/reference-sets"
+            data-testid="decision-reference-sets"
+            className="inline-flex min-h-[40px] w-full items-center justify-center gap-1.5 rounded-lg border border-slate-700 px-4 py-2 text-sm font-medium text-slate-200 transition-colors hover:bg-slate-800 sm:w-auto"
+          >
+            <Layers className="h-4 w-4 shrink-0" /> Reference sets
+          </Link>
+        ) : undefined}
         steps={[
           'Write rules in plain terms: the facts that come in and the outcome that goes out. Or paste them from Excel.',
           'Test them against golden cases until every answer is right.',

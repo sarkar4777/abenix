@@ -10,6 +10,7 @@ import {
   Share2, FlaskConical, RotateCcw, BarChart3,
 } from 'lucide-react';
 import { useApi } from '@/hooks/useApi';
+import { holds, useMyPermissions } from '@/lib/capabilities';
 import { apiFetch, ApiError } from '@/lib/api-client';
 import { toastSuccess, toastError } from '@/stores/toastStore';
 import ResourceShareDialog from '@/components/share/ResourceShareDialog';
@@ -24,6 +25,7 @@ import ExplainBars, { type Explanation } from '@/components/ml/ExplainBars';
 import {
   type MLModel, RUNNABLE_EXTENSIONS, UNRUNNABLE_HINTS, FRAMEWORK_LABELS, INPUT_SCHEMA_TEMPLATE,
   fileExt, nextVersion, featureNames, featureCount, defaultInputFor, fmtBytes,
+  deploymentReason, isPickleExtension, PICKLE_NEEDS_PERMISSION,
 } from './helpers';
 
 const LIST_KEY = '/api/ml-models';
@@ -80,7 +82,7 @@ export default function MLModelsPage() {
   const [predInput, setPredInput] = useState('');
   const [predOutcome, setPredOutcome] = useState<PredOutcome | null>(null);
   const [explaining, setExplaining] = useState(false);
-  const [explainOutcome, setExplainOutcome] = useState<{ ok: true; data: Explanation } | { ok: false; message: string } | null>(null);
+  const [explainOutcome, setExplainOutcome] = useState<{ ok: true; data: Explanation } | { ok: false; needsOnnx?: boolean; message: string } | null>(null);
   const [invocationsKey, setInvocationsKey] = useState(0);
 
   const [editing, setEditing] = useState(false);
@@ -127,12 +129,15 @@ export default function MLModelsPage() {
     scrollToDeepLinkRow(m.id, (el) => scrollInMain(el, 'center'));
   }, (m, w) => matchModel(m, w, models || []));
 
+  const { perms } = useMyPermissions();
   const versionsFor = (name: string) => (models || []).filter(m => m.name === name.trim()).map(m => m.version);
   const versionPlaceholder = uploadName.trim() ? nextVersion(versionsFor(uploadName)) : '1.0.0';
   const pickedExt = uploadFile ? fileExt(uploadFile.name) : '';
   const fileHint = pickedExt && !RUNNABLE_EXTENSIONS.includes(pickedExt)
     ? (UNRUNNABLE_HINTS[pickedExt] || `Abenix cannot run ${pickedExt} files. Upload .joblib or .pkl (scikit-learn, XGBoost), .onnx, or .pt/.pth (PyTorch).`)
-    : '';
+    : perms && isPickleExtension(pickedExt) && !holds(perms.capabilities, 'ml_models.upload_pickle')
+      ? PICKLE_NEEDS_PERMISSION
+      : '';
 
   const onPickFile = (f: File | null) => {
     setUploadFile(f);
@@ -347,7 +352,8 @@ export default function MLModelsPage() {
       });
       setExplainOutcome({ ok: true, data: res.data });
     } catch (e: any) {
-      setExplainOutcome({ ok: false, message: e?.message || 'Could not explain this prediction' });
+      const needsOnnx = e instanceof ApiError && e.errorCode === 'EXPLAIN_NEEDS_ONNX';
+      setExplainOutcome({ ok: false, needsOnnx, message: e?.message || 'Could not explain this prediction' });
     }
     setExplaining(false);
     setInvocationsKey(k => k + 1);
@@ -773,7 +779,10 @@ export default function MLModelsPage() {
                     {explainOutcome?.ok === false && (
                       <div role="alert" className="mt-3 rounded-lg bg-amber-500/10 border border-amber-500/30 p-3 text-xs text-amber-200 flex items-start gap-2" data-testid="ml-explain-error">
                         <AlertCircle className="w-4 h-4 mt-0.5 shrink-0 text-amber-300" />
-                        <span className="min-w-0 break-words">{explainOutcome.message}</span>
+                        <span className="min-w-0 break-words">
+                          {explainOutcome.needsOnnx && <strong className="block" data-testid="ml-explain-needs-onnx">Explain needs an ONNX model</strong>}
+                          {explainOutcome.message}
+                        </span>
                       </div>
                     )}
                     {explainOutcome?.ok && <ExplainBars explanation={explainOutcome.data} />}
@@ -855,12 +864,19 @@ export default function MLModelsPage() {
                     {activeDeps.map(d => {
                       const ds = STATUS_STYLES[d.status] || STATUS_STYLES.stopped;
                       return (
-                        <div key={d.id} className="mt-2 rounded-lg bg-slate-900/50 p-2 flex items-center gap-2 text-[11px] min-w-0" data-testid="ml-deployment-row">
+                        <div key={d.id} className="mt-2 rounded-lg bg-slate-900/50 p-2 text-[11px] min-w-0" data-testid="ml-deployment-row">
+                        <div className="flex items-center gap-2 min-w-0">
                           {d.deployment_type === 'k8s' ? <Cloud className="w-3 h-3 text-blue-400 shrink-0" /> : <Monitor className="w-3 h-3 text-emerald-400 shrink-0" />}
                           <span className="text-slate-300">{d.deployment_type === 'k8s' ? 'Kubernetes' : 'Local'}</span>
                           <span className={`px-1 py-0.5 rounded ${ds.text} ${ds.bg}`}>{ds.label}</span>
                           {d.status === 'deploying' && <Loader2 className="w-3 h-3 animate-spin text-cyan-300" />}
                           {d.endpoint_url && <span className="text-slate-500 font-mono truncate">{d.endpoint_url}</span>}
+                        </div>
+                        {d.status === 'failed' && (
+                          <p role="alert" data-testid="ml-deployment-error" className="mt-1.5 break-words text-red-300">
+                            {deploymentReason(d) || 'This deployment did not start, and the server gave no reason.'}
+                          </p>
+                        )}
                         </div>
                       );
                     })}

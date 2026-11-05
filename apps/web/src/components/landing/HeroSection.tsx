@@ -28,10 +28,11 @@ const features = [
   },
 ];
 
-const stats: Array<{ value: number; prefix?: string; suffix: string; label: string }> = [
-  { value: 140, suffix: '', label: 'Pre-Built Agents' },
-  { value: 132, suffix: '', label: 'Built-in Tools' },
-  { value: 45, suffix: '', label: 'Test Suites' },
+// floors rather than exact counts, heroStats.test.ts fails if the repo falls below them
+export const HERO_STATS: Array<{ value: number; prefix?: string; suffix: string; label: string }> = [
+  { value: 170, suffix: '+', label: 'Pre-Built Agents' },
+  { value: 150, suffix: '+', label: 'Built-in Tools' },
+  { value: 100, suffix: '+', label: 'Test Suites' },
 ];
 
 function CountUp({
@@ -158,7 +159,7 @@ export default function HeroSection() {
               variants={item}
               className="flex items-center gap-8 mt-8"
             >
-              {stats.map((s, i) => (
+              {HERO_STATS.map((s, i) => (
                 <div key={s.label} className="flex items-center gap-8">
                   {i > 0 && (
                     <div className="w-px h-10 bg-slate-700/50" />

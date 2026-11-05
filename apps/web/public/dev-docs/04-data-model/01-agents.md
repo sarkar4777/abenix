@@ -116,9 +116,9 @@ them on every run and a join would be on the hot path.
 |---|---|
 | `per_execution_cost_limit` / `daily_cost_limit` / `daily_budget_usd` | numeric(10,4) / numeric(10,2) / numeric(10,2), all nullable. Spend caps, NULL or 0 or less means none. `daily_cost_limit` caps the agent's spend across all callers per UTC day, `daily_budget_usd` caps one tenant's spend on it per UTC day. A run over either is refused with 429 `BUDGET_EXCEEDED`. `per_execution_cost_limit` caps one run. An agent stops with `BUDGET_EXCEEDED` when it wants another step after reaching it, a pipeline fails its next node. The builder and `/admin/scaling` both edit `daily_budget_usd`. See [Spend caps](../02-runtime/00-agent-execution.md#spend-caps). Pausing an agent from `/admin/scaling` sets `status = archived`. |
 | `runtime_pool` | varchar(40), default `default`. Which agent-runtime pool executes it. `inline` keeps the run on the API pod. |
-| `min_replicas` / `max_replicas` / `concurrency_per_replica` | Defaults 1, 10 and 3. Stored as a sizing note and not applied: pools are shared, so the chart's `scaling.pools` sets their bounds and concurrency. The admin and builder screens say so. |
+| `min_replicas` / `max_replicas` / `concurrency_per_replica` | Defaults 1, 10 and 3. Applied only in dedicated mode. On a shared pool they are a sizing note and the chart's `scaling.pools` decides. |
 | `rate_limit_qps` | Per-agent throttle, applied on `POST /api/agents/{id}/execute` as a Redis token bucket with a one-second burst. Over it the call gets 429 `RATE_LIMITED` and a `Retry-After` header. NULL means unlimited. |
-| `dedicated_mode` | bool, default false. Gives the agent its own pod instead of sharing a pool. Added by `w3x4y5z6a7b8`. |
+| `dedicated_mode` | bool, default false. Gives the agent a Deployment, ScaledObject and queue of its own, created by the API, instead of sharing a pool. Added by `w3x4y5z6a7b8`. |
 
 `runtime_pool`, the replica and concurrency columns, `rate_limit_qps` and
 `daily_budget_usd` are also added by idempotent `ALTER TABLE` statements in the

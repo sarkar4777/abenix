@@ -125,6 +125,8 @@ Each collection has a `vector_backend`. New collections default to `pgvector` an
 
 Embeddings come from Azure OpenAI when its key and endpoint are set, then OpenAI. With neither, or with `ABENIX_LOCAL_EMBEDDINGS=1`, both ingest and query use the local hashing embedder in [`packages/db/local_embeddings.py`](../../packages/db/local_embeddings.py). It is lexical, not semantic, and produces 1536 dimensions to fit the same column.
 
+When a configured provider refuses an ingest (a dead key or no credits), an empty collection moves to the local embedder and records `local-hashing-v1` as its `embedding_model`. A collection that already holds provider vectors stores nothing for that document, because the two schemes cannot be compared. Either way the document is `DEGRADED` with the reason in `error_message`, and search responses carry the reason in `degraded`. Re-embed the collection once the key works.
+
 ---
 
 ## Redis

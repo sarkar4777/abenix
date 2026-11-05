@@ -84,7 +84,7 @@ export default function RiskTierPicker({
           {needsSchema && (
             <li className="flex gap-1.5 text-amber-300" data-testid="risk-tier-needs-schema">
               <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-px" />
-              This tier needs an output schema before the {what} can go live. Add one under Advanced.
+              This tier needs an output schema before the {what} can go live. Add one {isPipeline ? 'below' : 'under Advanced'}.
             </li>
           )}
           {modelBlocked && (

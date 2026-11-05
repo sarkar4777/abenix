@@ -236,8 +236,8 @@ function useMiniStats() {
     today_failed: number;
   }>('/api/analytics/live-stats');
   return [
-    { label: 'Total Agents', value: String(stats?.total_agents ?? 0), color: 'text-cyan-400', bg: 'bg-cyan-500/10', href: '/agents?tab=all' },
-    { label: 'Active', value: String(stats?.active_executions ?? 0), color: 'text-emerald-400', bg: 'bg-emerald-500/10', href: '/executions?status=running' },
+    { label: 'Agents', value: String(stats?.total_agents ?? 0), color: 'text-cyan-400', bg: 'bg-cyan-500/10', href: '/agents?tab=all' },
+    { label: 'Running now', value: String(stats?.active_executions ?? 0), color: 'text-emerald-400', bg: 'bg-emerald-500/10', href: '/executions?status=running' },
     { label: 'Runs today', value: String(stats?.today_executions ?? 0), color: 'text-amber-400', bg: 'bg-amber-500/10', href: '/executions?since=today' },
     { label: 'Failed today', value: String(stats?.today_failed ?? 0), color: 'text-red-400', bg: 'bg-red-500/10', href: '/executions?since=today&status=failed' },
   ];

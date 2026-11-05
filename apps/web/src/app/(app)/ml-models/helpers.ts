@@ -4,7 +4,17 @@ export interface MLDeployment {
   status: string;
   endpoint_url: string | null;
   replicas?: number;
+  error?: string | null;
+  config?: { error?: string | null } | null;
 }
+
+export function deploymentReason(d: Pick<MLDeployment, 'error' | 'config'>): string | null {
+  return d.error || d.config?.error || null;
+}
+
+const PICKLE_EXTENSIONS = ['.joblib', '.pkl', '.pt', '.pth'];
+export const isPickleExtension = (ext: string) => PICKLE_EXTENSIONS.includes(ext);
+export const PICKLE_NEEDS_PERMISSION = 'Uploading this file type needs the Upload pickle models permission, because loading it can run code. An admin can grant it under Admin, Permissions. Or export the model to ONNX and upload the .onnx file, which anyone can do.';
 
 export interface MLModel {
   id: string;

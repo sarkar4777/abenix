@@ -26,6 +26,8 @@ interface MLModel {
     deployment_type: string;
     status: string;
     endpoint_url: string | null;
+    error?: string | null;
+    config?: { error?: string | null } | null;
   }[];
   created_at: string;
   updated_at?: string | null;
@@ -283,6 +285,11 @@ function AdminModelsPage() {
                       <span className={`inline-flex items-center text-[10px] px-2 py-0.5 rounded border ${tone} uppercase tracking-wider`}>
                         {m.status}
                       </span>
+                      {m.deployments?.filter((d) => d.status === 'failed').map((d) => (
+                        <p key={d.id} role="alert" data-testid="admin-ml-deployment-error" className="mt-1 max-w-xs break-words text-[10px] text-red-300">
+                          {d.error || d.config?.error || 'This deployment did not start, and the server gave no reason.'}
+                        </p>
+                      ))}
                       {deployed && (
                         <div className="mt-1">
                           <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded border border-blue-500/40 bg-blue-500/10 text-blue-300">

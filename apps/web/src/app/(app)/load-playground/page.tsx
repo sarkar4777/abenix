@@ -8,6 +8,8 @@ import {
 import { apiFetch } from '@/lib/api-client';
 import { fetchAllAgents } from '@/lib/fetch-all-agents';
 import PageHeader from '@/components/layout/PageHeader';
+import { holds, useMyPermissions } from '@/lib/capabilities';
+import { PLAYGROUND_NEEDS_PERMISSION, PLAYGROUND_REFUSED } from '@/lib/playground';
 
 interface Agent {
   id: string;
@@ -31,6 +33,8 @@ const SCENARIOS: Scenario[] = [
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 export default function LoadPlaygroundPage() {
+  const { perms } = useMyPermissions();
+  const canRun = !perms || holds(perms.capabilities, 'playground.execute');
   const [agents, setAgents] = useState<Agent[]>([]);
   const [agentsState, setAgentsState] = useState<'loading' | 'ready' | 'error'>('loading');
 
@@ -111,7 +115,7 @@ export default function LoadPlaygroundPage() {
         body: JSON.stringify({ code }),
       });
       if (!resp.ok || !resp.body) {
-        let msg = resp.status === 403 ? 'Only admins can run load tests.' : `The run could not start (HTTP ${resp.status}).`;
+        let msg = resp.status === 403 ? PLAYGROUND_REFUSED : `The run could not start (HTTP ${resp.status}).`;
         try {
           const j = await resp.json();
           const m = j?.error?.message || j?.error || j?.detail;
@@ -179,7 +183,7 @@ export default function LoadPlaygroundPage() {
         steps={[
           'Pick an agent and a load shape, like a steady stream or everything at once.',
           'Set how many requests and how many at a time, then generate the script.',
-          'Run it here. Only admins can run load tests.',
+          'Run it here if you have the Run playground code permission, or copy it to your own machine.',
           'Read the report: typical and slowest response times, requests per second and what failed.',
         ]}
       />
@@ -291,6 +295,12 @@ export default function LoadPlaygroundPage() {
         </div>
       </div>
 
+      {code && !canRun && (
+        <p role="note" data-testid="load-run-permission" className="rounded-lg border border-slate-700/60 bg-slate-800/40 px-3 py-2 text-xs text-slate-300">
+          {PLAYGROUND_NEEDS_PERMISSION}
+        </p>
+      )}
+
       {error && (
         <div className="rounded-lg bg-red-500/10 border border-red-500/30 text-red-300 text-sm px-4 py-2.5 flex items-center gap-2">
           <AlertCircle className="w-4 h-4" /> {error}
@@ -316,14 +326,14 @@ export default function LoadPlaygroundPage() {
                 {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
                 {copied ? 'Copied' : 'Copy'}
               </button>
-              <button
+              {canRun && <button
                 onClick={execute}
                 disabled={executing}
                 className="text-xs px-3 py-1 rounded bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/20 inline-flex items-center gap-1 disabled:opacity-50"
               >
                 {executing ? <Loader2 className="w-3 h-3 animate-spin" /> : <Play className="w-3 h-3" />}
                 {executing ? 'Running…' : 'Run'}
-              </button>
+              </button>}
             </div>
           </div>
           <pre className="bg-slate-950/70 text-slate-200 text-[11.5px] font-mono px-5 py-4 overflow-x-auto max-h-[520px]">

@@ -19,6 +19,18 @@ export function plainError(message: string | null | undefined, code?: string, fa
   return message || fallback;
 }
 
+// can_change is the API's is_platform_operator answer, and a failed read leaves the server to refuse
+export function usePlatformOperator() {
+  const { data, isLoading } = useApi<{ can_change?: boolean; operator_rule?: string }>('/api/admin/platform-features', {
+    dedupingInterval: 15_000,
+  });
+  return {
+    settled: !isLoading,
+    readOnly: !!data && data.can_change !== true,
+    rule: data?.operator_rule,
+  };
+}
+
 // Read at runtime so an admin change applies without a rebuild. Both read as off until loaded.
 export function usePlatformFeatures() {
   const { data, error, isLoading, mutate } = useApi<PlatformFeatures>(PLATFORM_FEATURES_PATH, {

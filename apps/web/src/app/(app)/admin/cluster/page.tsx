@@ -14,7 +14,8 @@ import PodDrawer from '@/components/cluster/PodDrawer';
 import WarningsTimeline from '@/components/cluster/WarningsTimeline';
 import AccessPanel from '@/components/cluster/AccessPanel';
 import PageHeader from '@/components/layout/PageHeader';
-import { AccessGate } from '@/components/layout/NoAccess';
+import NoAccess, { AccessGate } from '@/components/layout/NoAccess';
+import { usePlatformOperator } from '@/hooks/usePlatformFeatures';
 import {
   GROUPS, VERDICT_STYLE, agoText, filterWorkloads, fmtBytes, fmtCores, groupSummary, groupWorkloads, isProblem,
   type Group, type Overview, type Reason, type StatusFilter,
@@ -527,16 +528,28 @@ function ClusterPage() {
   );
 }
 
+const CLUSTER_PURPOSE = 'Check whether the cluster running the platform is healthy, with its nodes, services and warnings read live from Kubernetes. For admins.';
+const CLUSTER_ONWARD = { text: 'You can follow your own runs and how long they take on Executions.', href: '/executions', label: 'Open Executions' };
+
+function ClusterForOperators() {
+  const { settled, readOnly, rule } = usePlatformOperator();
+  if (!settled) return <div className="mx-auto max-w-3xl h-24 animate-pulse rounded-xl bg-slate-800/40" aria-busy="true" />;
+  if (readOnly) {
+    return <NoAccess title="Cluster Health" purpose={CLUSTER_PURPOSE} icon={Server} need={{ operator: true, rule }} instead={CLUSTER_ONWARD} testId="cluster-operator-only" />;
+  }
+  return <ClusterPage />;
+}
+
 export default function ClusterPageGated() {
   return (
     <AccessGate
       title="Cluster Health"
-      purpose="Check whether the cluster running the platform is healthy, with its nodes, services and warnings read live from Kubernetes. For admins."
+      purpose={CLUSTER_PURPOSE}
       icon={Server}
       need={{ admin: true }}
-      instead={{ text: 'You can follow your own runs and how long they take on Executions.', href: '/executions', label: 'Open Executions' }}
+      instead={CLUSTER_ONWARD}
     >
-      <ClusterPage />
+      <ClusterForOperators />
     </AccessGate>
   );
 }

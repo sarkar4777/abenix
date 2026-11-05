@@ -96,10 +96,11 @@ const item = {
 };
 
 export default function AgentsPage() {
-  usePageTitle('My Agents');
+  usePageTitle('Agents');
   const { marketplace: marketplaceOn } = usePlatformFeatures();
   const [search, setSearch] = useState('');
-  const [tab, setTab] = useState<Tab>('my');
+  // a new user owns nothing yet, so open on everything they can use
+  const [tab, setTab] = useState<Tab>('all');
   // ?tab=all from the dashboard card opens the matching list
   useEffect(() => {
     const t = new URLSearchParams(window.location.search).get('tab') as Tab | null;

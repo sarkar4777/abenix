@@ -26,7 +26,7 @@ An attached MCP tool sits in the same `ToolRegistry` as built-in tools, has the 
 2. **Discover its tools.** `POST /api/mcp/connections/{id}/discover` lists what the server offers.
 3. **Attach tools to an agent.** `POST /api/mcp/agents/{agent_id}/tools` with `mcp_connection_id`, `tool_name`, and optional `tool_config`, `approval_required` and `max_calls_per_execution`. Only attached tools reach the agent. Every other tool the server offers stays hidden.
 
-`GET /api/mcp/registry` lists known servers to start from, `POST /api/mcp/registry/install` adds one as a connection, and `POST /api/mcp/registry/sync` seeds the curated list.
+`GET /api/mcp/registry` lists known servers to start from, `POST /api/mcp/registry/install` adds one as a connection, and `POST /api/mcp/registry/sync` refreshes the curated list. The first browse of an empty registry seeds it, so a new install needs no sync.
 
 `model_config.mcp_extensions` is a builder setting (`allow_user_mcp`, `max_mcp_servers`, `suggested_mcp_servers`, `allowed_tool_annotations`). The runtime does not read it.
 

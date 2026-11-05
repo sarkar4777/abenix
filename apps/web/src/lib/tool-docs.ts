@@ -270,7 +270,7 @@ export const TOOL_DOCS: Record<string, ToolDoc> = {
   code_executor: {
     category: "Core",
     name: "Code Executor",
-    description: "Execute Python code safely in a sandboxed environment. Supports complex data transformations, statistical computations, file generation (Excel, PDF, charts, PowerPoint), image processing, and algorithmic operations. Core libraries always available: pandas, numpy, openpyxl, json, csv, re, math, datetime, collections, itertools, statistics, uuid, io, base64. Extended libraries available: scipy, matplotlib, seaborn, reportlab, fpdf, Pillow (PIL), beautifulsoup4 (bs4), python-pptx (pptx), scikit-learn (sklearn), plotly, tabulate, xlsxwriter, lxml, zipfile, gzip. Can save files to the export directory using open('file.ext', 'wb') or save_export('file.ext', bytes_data). Pipeline data available via context['node_id']. Does NOT support network calls, system commands, or arbitrary file system access. Additional modules can be requested via extra_modules \u2014 they are LLM-validated for safety.",
+    description: "Execute Python code in a separate process with no secrets, resource limits and no network. Supports complex data transformations, statistical computations, file generation (Excel, PDF, charts, PowerPoint), image processing, and algorithmic operations. Core libraries always available: pandas, numpy, openpyxl, json, csv, re, math, datetime, collections, itertools, statistics, uuid, io, base64. Extended libraries available: scipy, matplotlib, seaborn, reportlab, fpdf, Pillow (PIL), beautifulsoup4 (bs4), python-pptx (pptx), scikit-learn (sklearn), plotly, tabulate, xlsxwriter, lxml, zipfile, gzip. Can save files to the export directory using open('file.ext', 'wb') or save_export('file.ext', bytes_data). Pipeline data available via context['node_id']. Does NOT support network calls, system commands, or arbitrary file system access. Additional modules can be requested via extra_modules \u2014 they are LLM-validated for safety.",
     parameters: [
       { name: "code", type: "string", required: true, description: "Python code to execute. Use print() for output. A last expression, or a variable named result, is captured as the result." },
       { name: "variables", type: "object", required: false, description: "Pre-defined variables available in the execution context as globals" },
@@ -394,7 +394,7 @@ export const TOOL_DOCS: Record<string, ToolDoc> = {
     description: "Execute read-only SQL queries against PostgreSQL databases. Read-only (SELECT only), parameterized, 30s timeout. Returns up to 10,000 rows.",
     parameters: [
       { name: "query", type: "string", required: true, description: "SQL query to execute (SELECT only)" },
-      { name: "connection_string", type: "string", required: false, description: "Database connection string (e.g., postgresql://user:pass@host:5432/db). If omitted, uses the platform database." },
+      { name: "connection_string", type: "string", required: false, description: "Database connection string (e.g., postgresql://user:pass@host:5432/db). Refused unless the tool configuration allows it. If omitted, uses the database configured for this tenant." },
       { name: "max_rows", type: "integer", required: false, description: "Maximum rows to return (default: 1000, max: 10000)", default: 1000 },
       { name: "params", type: "object", required: false, description: "Query parameters for parameterized queries", default: {} },
     ],
@@ -409,7 +409,7 @@ export const TOOL_DOCS: Record<string, ToolDoc> = {
       { name: "rows", type: "array", required: false, description: "Array of row objects to insert (for insert/upsert)", items: { type: "object" } },
       { name: "columns", type: "object", required: false, description: "Column definitions for create_table: {name: type}" },
       { name: "conflict_column", type: "string", required: false, description: "Column for ON CONFLICT (upsert only)" },
-      { name: "connection_string", type: "string", required: false, description: "PostgreSQL connection string (optional, uses platform DB if omitted)" },
+      { name: "connection_string", type: "string", required: false, description: "PostgreSQL connection string. Refused unless the tool configuration allows it. If omitted, uses the database configured for this tenant." },
     ],
   },
   date_calculator: {

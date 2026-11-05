@@ -25,8 +25,8 @@ Running it again is safe. Passwords are made once and kept in the `testbed-crede
 | `deploy.sh testbed` | Install or update the testbed, then add the connections |
 | `deploy.sh testbed-connect` | Add or refresh only the connections |
 | `deploy.sh testbed-forwards` | Testbed ports on localhost: 19092 Kafka, 5672 AMQP, 4222 NATS, 50000 OPC UA, 5020 Modbus, 8765 WebSocket |
-| `deploy.sh testbed-chaos <svc>` | Kill one broker or simulator pod and time its return. `<svc>` is `redpanda`, `rabbitmq`, `nats`, `opc-plc`, `meter`, `prices`, or a simulator such as `payments` |
-| `deploy.sh testbed-poison <sim>` | Make a simulator send one malformed message, for the dead-letter ring |
+| `deploy.sh testbed-chaos <svc>` | Kill one broker or simulator pod, time its return and check data resumes on its connection, exits nonzero if it does not. `<svc>` is `redpanda`, `rabbitmq`, `nats`, `opc-plc`, `meter`, `prices`, or a simulator such as `payments` |
+| `deploy.sh testbed-poison <sim>` | Make a simulator send one malformed message and check it reaches the dead letters of its connection, exits nonzero if it does not |
 | `deploy.sh testbed-load <n> <rate>` | A one-off Kafka burst to `load.events` for throughput runs |
 | `deploy.sh testbed-down` | Remove the namespace, its data and its passwords |
 
@@ -59,7 +59,7 @@ To see one chart, open
 bash scripts/deploy.sh edge-demo-cut 120
 ```
 
-It cuts the gateway's link to Abenix for 120 seconds, or the number you give. Every 10 seconds it prints the buffer depth and the age of the oldest reading. When the link returns it waits for the buffer to drain, then prints a proof. The proof reads the gateway's `Edge/Seq` history over the cut and reports gaps, repeats and whether the readings arrived in order. A clean run shows `gap_count` 0 and `in_order` true. How the buffer works is in [18-connect-your-organisation](18-connect-your-organisation.md#store-and-forward).
+It exits nonzero on any loss, gap or an undrained buffer. It cuts the gateway's link to Abenix for 120 seconds, or the number you give. Every 10 seconds it prints the buffer depth and the age of the oldest reading. When the link returns it waits for the buffer to drain, then prints a proof. The proof reads the gateway's `Edge/Seq` history over the cut and reports gaps, repeats and whether the readings arrived in order. A clean run shows `gap_count` 0 and `in_order` true. How the buffer works is in [18-connect-your-organisation](18-connect-your-organisation.md#store-and-forward).
 
 ### Remove it
 

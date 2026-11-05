@@ -8,6 +8,8 @@ import {
   ShieldAlert, ChevronDown, KeyRound,
 } from 'lucide-react';
 import PageHeader from '@/components/layout/PageHeader';
+import { holds, useMyPermissions } from '@/lib/capabilities';
+import { PLAYGROUND_NEEDS_PERMISSION, playgroundRefusal } from '@/lib/playground';
 import { apiFetch } from '@/lib/api-client';
 import { CostValue } from '@/components/shared/CostValue';
 import { fetchAllAgents } from '@/lib/fetch-all-agents';
@@ -213,6 +215,9 @@ export default function SDKPlaygroundPage() {
   const [genError, setGenError] = useState<string | null>(null);
   const [copyFailed, setCopyFailed] = useState(false);
 
+  const { perms } = useMyPermissions();
+  const canRunCode = !perms || holds(perms.capabilities, 'playground.execute');
+
   const runCode = async () => {
     if (!code) return;
     setRunning(true);
@@ -230,6 +235,12 @@ export default function SDKPlaygroundPage() {
         },
         body: JSON.stringify({ code, language: sdk }),
       });
+      const refusal = await playgroundRefusal(res);
+      if (refusal) {
+        setStderr(refusal);
+        setRunning(false);
+        return;
+      }
       if (!res.body) {
         setStderr('No response body');
         setRunning(false);
@@ -566,16 +577,19 @@ export default function SDKPlaygroundPage() {
                   >
                     {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />} {copied ? 'Copied' : 'Copy'}
                   </button>
-                  <button
+                  {canRunCode && <button
                     onClick={runCode}
                     disabled={!code || running || sdk !== 'python'}
                     title={sdk !== 'python' ? 'In-browser execution is Python-only. Copy the snippet and run it locally with Node + @abenix/sdk.' : 'Run code in sandbox'}
                     className="px-3 py-1.5 text-[10px] rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20 disabled:opacity-30 transition-colors flex items-center gap-1"
                   >
                     {running ? <Loader2 className="w-3 h-3 animate-spin" /> : <Play className="w-3 h-3" />} Run
-                  </button>
+                  </button>}
                 </div>
               </div>
+              {!canRunCode && (
+                <p role="note" data-testid="sdk-run-permission" className="px-4 pt-3 text-[11px] text-slate-300">{PLAYGROUND_NEEDS_PERMISSION}</p>
+              )}
               {copyFailed && (
                 <p role="alert" className="px-4 pt-3 text-[11px] text-amber-300">The browser blocked the clipboard. The code is selected, press Ctrl+C to copy it.</p>
               )}

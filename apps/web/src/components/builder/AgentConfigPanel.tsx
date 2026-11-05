@@ -640,18 +640,16 @@ export default function AgentConfigPanel({
 
   return (
     <div className="w-[320px] border-l border-slate-800 bg-[#0F172A] flex flex-col shrink-0 overflow-hidden">
-      <div className="flex items-stretch border-b border-slate-800/60 bg-slate-900/40">
-        {tabs.map((t, i) => (
+      <div className="grid grid-cols-3 gap-px border-b border-slate-800/60 bg-slate-800/60">
+        {tabs.map((t) => (
           <button
             key={t.key}
             onClick={() => setTab(t.key)}
             data-testid={`config-tab-${t.label.toLowerCase()}`}
-            className={`relative flex-1 px-1 py-3 text-[10px] uppercase tracking-wider font-semibold transition-colors flex items-center justify-center gap-1 ${
-              i > 0 ? 'border-l border-slate-800/60' : ''
-            } ${
+            className={`relative px-1 py-2.5 text-[10px] uppercase tracking-wider font-semibold transition-colors flex items-center justify-center gap-1 bg-[#0F172A] ${
               tab === t.key
-                ? 'text-cyan-300 bg-cyan-500/5'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/30'
+                ? 'text-cyan-300'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
             }`}
           >
             {t.icon && <t.icon className="w-3 h-3" />}
@@ -947,7 +945,7 @@ export default function AgentConfigPanel({
                 </div>
               </div>
               <p className="text-[10px] text-amber-300/90 mt-1" data-testid="builder-replicas-not-enforced">
-                Replicas and concurrency are a sizing note only, the worker pool&apos;s own Helm settings decide them.
+                Replicas and concurrency apply only in dedicated mode, otherwise the worker pool&apos;s own Helm settings decide them.
                 The rate limit and daily budget below are enforced on every run.
               </p>
 

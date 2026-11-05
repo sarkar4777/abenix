@@ -22,7 +22,7 @@ The page has a "How this works" panel, an empty state, and stacks to one column 
 | `sklearn` | `.joblib`, `.pkl` | `joblib.load` | Must have `predict()`. `predict_proba()` and `classes_` are used when present |
 | `xgboost` | `.xgb` or `framework: xgboost` | `joblib.load` | The scikit-learn wrapper, saved with joblib |
 | `onnx` | `.onnx` | `onnxruntime.InferenceSession` | First input gets the rows as float32 |
-| `pytorch` | `.pt`, `.pth` | `torch.load` | A whole model saved with `torch.save(model)`. A bare state dict is refused. Needs torch on the API image |
+| `pytorch` | `.pt`, `.pth` | `torch.jit.load` | A TorchScript model saved with `torch.jit.save`. A whole model pickled with `torch.save(model)` and a bare state dict are refused. Needs torch on the API image |
 
 TensorFlow (`.h5`, `.keras`) and unknown `.bin` files are refused at upload with a hint to convert to ONNX. Nothing in the platform can run them.
 

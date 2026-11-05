@@ -5,6 +5,8 @@ import { DollarSign, Loader2, Plus, RefreshCw, Save, Trash2 } from 'lucide-react
 import { apiFetch, API_URL } from '@/lib/api-client';
 import PageHeader from '@/components/layout/PageHeader';
 import { AccessGate } from '@/components/layout/NoAccess';
+import OperatorOnlyNote from '@/components/shared/OperatorOnlyNote';
+import { usePlatformOperator } from '@/hooks/usePlatformFeatures';
 
 type PricingRow = {
   id: string;
@@ -31,6 +33,7 @@ const PROVIDER_COLOR: Record<string, string> = {
 };
 
 function LlmPricingPage() {
+  const { readOnly, rule } = usePlatformOperator();
   const [data, setData] = useState<ApiResp | null>(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
@@ -153,9 +156,9 @@ function LlmPricingPage() {
         iconClassName="text-emerald-400"
         storageKey="admin-llm-pricing"
         docSlug="09-reference/04-platform-settings"
-        primaryAction={{ label: 'Add model pricing', icon: Plus, onClick: focusAddRow }}
-        secondaryAction={{ label: 'Re-seed baseline', icon: RefreshCw, onClick: reseed }}
-        extraActions={
+        primaryAction={readOnly ? { label: 'Refresh', icon: RefreshCw, onClick: load } : { label: 'Add model pricing', icon: Plus, onClick: focusAddRow }}
+        secondaryAction={readOnly ? undefined : { label: 'Re-seed baseline', icon: RefreshCw, onClick: reseed }}
+        extraActions={readOnly ? undefined :
           <button onClick={load} className="inline-flex min-h-[40px] items-center justify-center gap-2 rounded-lg border border-slate-700/60 bg-slate-800/30 px-3 py-2 text-sm text-slate-300 hover:bg-slate-800/60">
             <RefreshCw className="w-4 h-4" /> Refresh
           </button>
@@ -167,6 +170,8 @@ function LlmPricingPage() {
           'Models with no row here fall back to the built in default prices.',
         ]}
       />
+
+      {readOnly && <OperatorOnlyNote what="Model pricing" rule={rule} />}
 
       {msg && <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3 text-sm text-emerald-200">{msg}</div>}
       {err && <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-sm text-rose-200">{err}</div>}
@@ -184,7 +189,7 @@ function LlmPricingPage() {
               Seed the platform defaults to make per-model rates editable here.
             </p>
           </div>
-          <button
+          {!readOnly && <button
             onClick={seedDefaults}
             disabled={seeding}
             data-testid="seed-defaults-btn"
@@ -192,12 +197,12 @@ function LlmPricingPage() {
           >
             {seeding ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
             Seed defaults
-          </button>
+          </button>}
         </div>
       )}
 
       {/* New row */}
-      <div className="rounded-xl border border-slate-700/60 bg-[#0B0F19] p-4" data-testid="add-pricing-row">
+      {!readOnly && <div className="rounded-xl border border-slate-700/60 bg-[#0B0F19] p-4" data-testid="add-pricing-row">
         <h2 className="text-sm font-semibold text-white mb-3 flex items-center gap-2">
           <Plus className="w-4 h-4 text-emerald-400" /> Add model pricing
         </h2>
@@ -218,7 +223,7 @@ function LlmPricingPage() {
             {adding ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
           </button>
         </div>
-      </div>
+      </div>}
 
       {/* Per-provider tables */}
       {(['anthropic', 'openai', 'google', 'other'] as const).map((prov) => {
@@ -252,15 +257,15 @@ function LlmPricingPage() {
                     <tr key={r.id} className="border-b border-slate-800/60 hover:bg-slate-800/30" data-testid={`row-${r.model}`}>
                       <td className="py-2 px-3 font-mono text-white text-xs">{r.model}</td>
                       <td className="py-2 px-3 text-right">
-                        <input type="number" step="0.0001" aria-label={`Input price for ${r.model}`} className="w-24 text-right bg-slate-900/50 border border-slate-700/40 rounded px-2 py-1 text-xs text-white font-mono"
+                        <input type="number" step="0.0001" disabled={readOnly} aria-label={`Input price for ${r.model}`} className="w-24 text-right bg-slate-900/50 border border-slate-700/40 rounded px-2 py-1 text-xs text-white font-mono"
                           value={show('input_per_m')} onChange={(e) => markEdit(r.id, { input_per_m: Number(e.target.value) })} />
                       </td>
                       <td className="py-2 px-3 text-right">
-                        <input type="number" step="0.0001" aria-label={`Output price for ${r.model}`} className="w-24 text-right bg-slate-900/50 border border-slate-700/40 rounded px-2 py-1 text-xs text-white font-mono"
+                        <input type="number" step="0.0001" disabled={readOnly} aria-label={`Output price for ${r.model}`} className="w-24 text-right bg-slate-900/50 border border-slate-700/40 rounded px-2 py-1 text-xs text-white font-mono"
                           value={show('output_per_m')} onChange={(e) => markEdit(r.id, { output_per_m: Number(e.target.value) })} />
                       </td>
                       <td className="py-2 px-3 text-right">
-                        <input type="number" step="0.0001" placeholder="—" aria-label={`Cached input price for ${r.model}`} className="w-24 text-right bg-slate-900/50 border border-slate-700/40 rounded px-2 py-1 text-xs text-white font-mono placeholder-slate-600"
+                        <input type="number" step="0.0001" placeholder="—" disabled={readOnly} aria-label={`Cached input price for ${r.model}`} className="w-24 text-right bg-slate-900/50 border border-slate-700/40 rounded px-2 py-1 text-xs text-white font-mono placeholder-slate-600"
                           value={show('cached_input_per_m', '') ?? ''} onChange={(e) => markEdit(r.id, { cached_input_per_m: e.target.value === '' ? null : Number(e.target.value) })} />
                       </td>
                       <td className="py-2 px-3 text-right text-slate-400 font-mono text-xs">{r.batch_input_per_m ?? '—'}</td>
@@ -274,9 +279,9 @@ function LlmPricingPage() {
                             {saving === r.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
                           </button>
                         )}
-                        <button onClick={() => deleteRow(r.id, r.model)} aria-label={`Delete pricing for ${r.model}`} className="p-1.5 rounded text-slate-500 hover:text-rose-400 hover:bg-rose-500/10">
+                        {!readOnly && <button onClick={() => deleteRow(r.id, r.model)} aria-label={`Delete pricing for ${r.model}`} className="p-1.5 rounded text-slate-500 hover:text-rose-400 hover:bg-rose-500/10">
                           <Trash2 className="w-3.5 h-3.5" />
-                        </button>
+                        </button>}
                       </td>
                     </tr>
                   );

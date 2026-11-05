@@ -131,6 +131,36 @@ Messages published to a connection while its replica was down are lost at QoS 0,
 | `code_runner_bench.py` | Cold, warm, scale-from-zero, new-version and concurrent latency of one code asset through the real `code_asset` tool | Inside an agent-runtime pod, see its docstring |
 | `middleware_bench.py` | The API middleware stack in process, `--requests` and `--concurrency` | Anywhere with the API dependencies installed |
 
+## Pass and fail thresholds
+
+Every load tool prints one line per threshold, `PASS name measured=X limit=Y` or `FAIL name measured=X limit=Y`. It exits 1 if any failed and 2 if it could not run or got no samples. The defaults suit one shared minikube node and sit far below the numbers on this page, so a pass only means nothing is badly wrong. Tighten them to compare against a recorded number.
+
+| Tool | Flag or env var | Default | Off |
+|---|---|---|---|
+| `telemetry-loadtest.sh` | `--min-rate` or `LOADTEST_MIN_RATE` | a quarter of the offered rate | `0` |
+| | `--min-held-ratio` or `LOADTEST_MIN_HELD_RATIO` | `0.5` | `0` |
+| | `--max-lost` or `LOADTEST_MAX_LOST` | `0` | below `0` |
+| | `--max-errors` or `LOADTEST_MAX_ERRORS` | `0` | below `0` |
+| `decision_load.py` | `--min-rps` | `100` | `0` |
+| | `--max-error-rate` | `0.05` | below `0` |
+| | `--max-p95-ms` | `5000` | `0` |
+| `code_runner_bench.py` | `--max-p50-ms`, `--max-p99-ms` for the warm scenario | `500`, `5000` | `0` |
+| | `--min-calls-per-s` for the concurrency scenario | `10` | `0` |
+| | `--max-failed` per scenario | `0` | below `0` |
+| | `--max-wake-seconds` for cold and zero | `180` | `0` |
+| `middleware_bench.py` | `--max-new-ms` | `5` | `0` |
+| | `--max-overhead-ms` | `2` | `0` |
+| | `--min-speedup` | `1.5` | `0` |
+| `tests/load/locustfile.py` | `LOCUST_MAX_FAIL_RATIO` | `0.05` | set `1` |
+| | `LOCUST_MAX_P95_MS` | `3000` | `0` |
+| | `LOCUST_MIN_RPS` | `0.2` | `0` |
+| `testbed-load` chart values | `load.minRate` | a quarter of `load.rate` | `0` |
+| | `load.maxFailed` | `0` | below `0` |
+
+Lost telemetry messages are the change in dropped and throttled counts over the run, plus seq gaps on the load nodes for t2. t7 leaves seq gaps out because the planned kill causes them.
+
+`bash scripts/deploy.sh testbed-load` still exits 0 when the burst fails. It warns once its wait times out, and the job log holds the lines.
+
 ## Reference: extending the test
 
 If you add a new high-traffic endpoint, append a scenario in `scripts/load/baseline.js`. Keep total k6 runtime under 5 minutes so the test stays cheap to run.

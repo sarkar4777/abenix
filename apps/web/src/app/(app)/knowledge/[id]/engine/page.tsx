@@ -144,6 +144,14 @@ export default function KnowledgeEnginePage() {
 
   useEffect(() => { loadData(); }, [loadData]);
 
+  // the header badge links to one job, and the list only exists after the fetch
+  const jobCount = jobs.length;
+  useEffect(() => {
+    if (jobCount > 0 && window.location.hash.startsWith('#cognify-job-')) {
+      document.getElementById(window.location.hash.slice(1))?.scrollIntoView({ block: 'center' });
+    }
+  }, [jobCount]);
+
   // Keep polling while a cognify job is running so the banner updates.
   useEffect(() => {
     if (!runningJob) return;
@@ -538,7 +546,7 @@ export default function KnowledgeEnginePage() {
           </h3>
           <div className="space-y-2">
             {jobs.map((job) => (
-              <div key={job.id} data-testid="cognify-job" data-status={job.status} className="bg-slate-900/30 rounded-lg px-3 py-2 text-xs">
+              <div key={job.id} id={`cognify-job-${job.id}`} data-testid="cognify-job" data-status={job.status} className="bg-slate-900/30 rounded-lg px-3 py-2 text-xs">
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                 {job.status === 'complete' ? (
                   <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />

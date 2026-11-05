@@ -12,7 +12,8 @@ import { roleLabel } from '@/lib/monitor-format';
 export type AccessNeed =
   | { admin: true }
   | { feature: string }
-  | { capability: string; label: string };
+  | { capability: string; label: string }
+  | { operator: true; rule?: string };
 
 export interface Onward {
   text: ReactNode;
@@ -33,12 +34,16 @@ export interface NoAccessProps {
 export function canAccess(perms: MyPermissions | null | undefined, need: AccessNeed): boolean {
   if (!perms) return false;
   const admin = !!perms.is_admin || perms.role === 'admin';
+  if ('operator' in need) return false;
   if ('admin' in need) return admin;
   if ('feature' in need) return admin || !!perms.features?.[need.feature];
   return holds(perms.capabilities, need.capability);
 }
 
 export function whoCanUse(title: string, need: AccessNeed): ReactNode {
+  if ('operator' in need) {
+    return <>{title} covers every workspace on this deployment, so only a platform operator can use it. {need.rule}</>;
+  }
   if ('capability' in need) {
     return (
       <>
@@ -79,7 +84,9 @@ export default function NoAccess({ title, purpose, icon, need, role, instead = D
               {role ? <> You are signed in as a {roleLabel(role)}.</> : null}
             </p>
             <p>
-              Ask an admin if you need it. The Team page lists who the admins are.
+              {'operator' in need
+                ? 'Ask the person who runs this deployment if you need it.'
+                : 'Ask an admin if you need it. The Team page lists who the admins are.'}
             </p>
             <p className="text-slate-400">{instead.text}</p>
             <Link

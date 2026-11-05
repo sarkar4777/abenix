@@ -13,7 +13,6 @@ import ChatMessage from '@/components/chat/ChatMessage';
 import ChatInput from '@/components/chat/ChatInput';
 import ResponsiveModal from '@/components/ui/ResponsiveModal';
 import { useChatStore } from '@/stores/chatStore';
-import { toastWarning } from '@/stores/toastStore';
 import { usePageTitle } from '@/hooks/usePageTitle';
 import { useApi } from '@/hooks/useApi';
 import { useIsMobile } from '@/hooks/useMediaQuery';
@@ -103,6 +102,11 @@ export default function AgentChatPage() {
   const replyStatus = useChatStore((st) => st.replyStatus);
   const [paramValues, setParamValues] = useState<Record<string, string>>({});
   const [showParams, setShowParams] = useState(true);
+  const [missingParams, setMissingParams] = useState<string[]>([]);
+  const setParam = (name: string, value: string) => {
+    setParamValues((prev) => ({ ...prev, [name]: value }));
+    setMissingParams((prev) => prev.filter((m) => m !== name));
+  };
 
   // defaults are real values, not placeholders, so a required variable with a default passes the check
   useEffect(() => {
@@ -148,11 +152,11 @@ export default function AgentChatPage() {
           (v) => v.required && (!paramValues[v.name] || paramValues[v.name].trim() === '')
         );
         if (missing.length > 0) {
-          toastWarning(
-            'Missing required parameters',
-            missing.map((m) => m.name).join(', '),
-          );
+          setMissingParams(missing.map((m) => m.name));
           setShowParams(true);
+          requestAnimationFrame(() => {
+            (document.querySelector(`[data-testid="chat-param-${CSS.escape(missing[0].name)}"]`) as HTMLElement | null)?.focus();
+          });
           return false;
         }
       }
@@ -320,6 +324,12 @@ export default function AgentChatPage() {
               <h4 className="text-xs font-semibold text-cyan-400">Input Parameters</h4>
               <button onClick={() => setShowParams(false)} className="text-[10px] text-slate-500 hover:text-slate-300">&times; Hide</button>
             </div>
+            {missingParams.length > 0 && (
+              <p role="alert" data-testid="chat-params-missing" className="mb-2 rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1.5 text-xs text-amber-200">
+                <strong>Missing required parameters</strong>
+                {` Fill in ${missingParams.join(', ')} below and press Send again. Your message is still in the box.`}
+              </p>
+            )}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
               {inputVars.map((v) => (
                 <div key={v.name}>
@@ -332,8 +342,9 @@ export default function AgentChatPage() {
                       aria-label={v.name}
                       data-testid={`chat-param-${v.name}`}
                       value={paramValues[v.name] || (v.default as string) || ''}
-                      onChange={(e) => setParamValues((prev) => ({ ...prev, [v.name]: e.target.value }))}
-                      className="w-full px-2 py-1.5 text-xs bg-slate-800/50 border border-slate-700 rounded text-white focus:border-cyan-500 focus:outline-none"
+                      onChange={(e) => setParam(v.name, e.target.value)}
+                      className={`w-full px-2 py-1.5 text-xs bg-slate-800/50 border rounded text-white focus:border-cyan-500 focus:outline-none ${missingParams.includes(v.name) ? 'border-amber-400' : 'border-slate-700'}`}
+                      aria-invalid={missingParams.includes(v.name)}
                     >
                       <option value="">Select...</option>
                       {v.options.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
@@ -344,7 +355,7 @@ export default function AgentChatPage() {
                         type="checkbox"
                         data-testid={`chat-param-${v.name}`}
                         checked={paramValues[v.name] === 'true'}
-                        onChange={(e) => setParamValues((prev) => ({ ...prev, [v.name]: e.target.checked ? 'true' : 'false' }))}
+                        onChange={(e) => setParam(v.name, e.target.checked ? 'true' : 'false')}
                         className="rounded border-slate-600"
                       />
                       {v.name}
@@ -357,8 +368,9 @@ export default function AgentChatPage() {
                       rows={2}
                       value={paramValues[v.name] || (v.default as string) || ''}
                       placeholder={`Enter ${v.name}`}
-                      onChange={(e) => setParamValues((prev) => ({ ...prev, [v.name]: e.target.value }))}
-                      className="w-full px-2 py-1.5 text-xs bg-slate-800/50 border border-slate-700 rounded text-white focus:border-cyan-500 focus:outline-none resize-y"
+                      onChange={(e) => setParam(v.name, e.target.value)}
+                      className={`w-full px-2 py-1.5 text-xs bg-slate-800/50 border rounded text-white focus:border-cyan-500 focus:outline-none resize-y ${missingParams.includes(v.name) ? 'border-amber-400' : 'border-slate-700'}`}
+                      aria-invalid={missingParams.includes(v.name)}
                     />
                   ) : (
                     <input
@@ -367,8 +379,9 @@ export default function AgentChatPage() {
                       type={v.type === 'number' ? 'number' : 'text'}
                       value={paramValues[v.name] || (v.default as string) || ''}
                       placeholder={v.type === 'connection_string' ? 'postgresql://user:pass@host:5432/db' : v.type === 'url' ? 'https://...' : `Enter ${v.name}`}
-                      onChange={(e) => setParamValues((prev) => ({ ...prev, [v.name]: e.target.value }))}
-                      className="w-full px-2 py-1.5 text-xs bg-slate-800/50 border border-slate-700 rounded text-white focus:border-cyan-500 focus:outline-none"
+                      onChange={(e) => setParam(v.name, e.target.value)}
+                      className={`w-full px-2 py-1.5 text-xs bg-slate-800/50 border rounded text-white focus:border-cyan-500 focus:outline-none ${missingParams.includes(v.name) ? 'border-amber-400' : 'border-slate-700'}`}
+                      aria-invalid={missingParams.includes(v.name)}
                     />
                   )}
                 </div>

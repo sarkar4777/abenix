@@ -26,8 +26,10 @@ ENV NEXT_TELEMETRY_DISABLED=1
 # be available here. deploy-azure.sh passes these as --build-args.
 ARG NEXT_PUBLIC_GRAFANA_URL=""
 ARG NEXT_PUBLIC_TEMPO_URL=""
+ARG NEXT_PUBLIC_SHOW_DEMO_LOGIN=""
 ENV NEXT_PUBLIC_GRAFANA_URL=${NEXT_PUBLIC_GRAFANA_URL}
 ENV NEXT_PUBLIC_TEMPO_URL=${NEXT_PUBLIC_TEMPO_URL}
+ENV NEXT_PUBLIC_SHOW_DEMO_LOGIN=${NEXT_PUBLIC_SHOW_DEMO_LOGIN}
 # Patch Next.js's lockfile-checker to no-op. The original throws
 # `Cannot read properties of undefined (reading 'os')` on alpine
 # because some optional-deps entries are missing platform-specific

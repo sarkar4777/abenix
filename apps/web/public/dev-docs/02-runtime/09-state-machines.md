@@ -33,7 +33,7 @@ A run never goes back to `running`. Replays create a new row with `parent_execut
 1. **The runtime finishes.** The queue consumer, or the API on the inline path, writes the terminal status, output, tokens, cost, `risk_tier`, `risk_reasons`, `failure_code`, `tool_calls`, `node_results` and `execution_trace` in one update. See [00-agent-execution](00-agent-execution.md).
 2. **The runtime raises.** The row is failed with `classify_exception(e)` as the code, and a `dead_letter_executions` row is written for replay.
 3. **The client goes away.** A streaming run on the inline path whose client disconnects is failed with `CLIENT_DISCONNECTED`, if it is still `running`.
-4. **The stale sweep.** Every minute the API scheduler job `sweep_stale_executions`, on one replica at a time through an advisory lock, finds `running` rows older than `STALE_EXECUTION_MAX_MINUTES` (default 10) by `created_at` whose runtime lease has lapsed or was never set. Rows whose execution has a `hitl:waiting:<id>` key in Redis are skipped, because they are waiting on an approval gate. The rest are failed with `STALE_SWEEP` and the owners are notified. A run a runtime pod held whose lease lapsed more than `WORKER_GONE_SECONDS` (default 300) ago, with no pod taking it over, is failed sooner with `WORKER_STOPPED`. If the Redis lookup fails, the sweep skips that tick.
+4. **The stale sweep.** Every minute the API scheduler job `sweep_stale_executions`, on one replica at a time through an advisory lock, finds `running` rows older than `STALE_EXECUTION_MAX_MINUTES` (default 10) by `created_at` whose runtime lease has lapsed or was never set. Rows whose execution has a `hitl:waiting:<id>` key in Redis are skipped, because they are waiting on an approval gate. A queued run no worker ever claimed is failed with `QUEUE_NOT_PICKED_UP`. The rest are failed with `STALE_SWEEP`. The owners are notified. A run a runtime pod held whose lease lapsed more than `WORKER_GONE_SECONDS` (default 300) ago, with no pod taking it over, is failed sooner with `WORKER_STOPPED`. If the Redis lookup fails, the sweep skips that tick.
 
 So the longest a dead run shows as `running` is about the max age plus the 5 minute interval, unless it was waiting on a gate. A run whose pod is alive and renewing its lease is never swept, however old it is.
 
@@ -57,6 +57,8 @@ Set directly by the code:
 | `CLIENT_DISCONNECTED` | API | The streaming client left before the run finished |
 | `STALE_SWEEP` | API scheduler | Stuck in `running` past the max age |
 | `WORKER_STOPPED` | API scheduler | The runtime pod running it stopped and no pod took it over |
+| `QUEUE_NOT_PICKED_UP` | API scheduler | It was queued for a pool and no worker claimed it within `STALE_EXECUTION_MAX_MINUTES` |
+| `POOL_NOT_DEPLOYED` | API, execute and triggers | Its pool has no Deployment on the cluster, or no replicas and nothing to wake it |
 | `UNKNOWN_ERROR` | consumer | Nothing else matched |
 
 Derived from an error message by `classify_exception` in [`apps/api/app/core/failure_codes.py`](../../apps/api/app/core/failure_codes.py), first match wins:
@@ -64,6 +66,8 @@ Derived from an error message by `classify_exception` in [`apps/api/app/core/fai
 | failure_code | Matches |
 |---|---|
 | `WORKER_STOPPED` | "worker running this stopped before it finished" |
+| `POOL_NOT_DEPLOYED` | "is not deployed on this cluster" |
+| `QUEUE_NOT_PICKED_UP` | "no worker picked this run up" |
 | `STALE_SWEEP` | "stuck in running", "sweep … backfill", "owning process likely crashed" |
 | `CONFIG_UNKNOWN_MODEL` | "unknown model", "unrecognised model", "unrecognized model" |
 | `RATE_LIMITED` | Our own limits: `RATE_LIMITED`, "by its rate limit" (per-agent `rate_limit_qps`), "rate limit (per-…" (tool gate), "rate limit … user", "too many requests from", "over its limits". Checked before the provider rule, whose bare "rate limit" would match these too |

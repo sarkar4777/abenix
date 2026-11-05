@@ -30,6 +30,9 @@ type Pool = {
   node_affinity: string | null;
   agent_count: number;
   executions_24h: number;
+  deployed?: boolean | null;
+  replicas?: number | null;
+  autoscaled?: boolean | null;
 };
 
 type AgentScale = {
@@ -101,6 +104,8 @@ function AdminScalingPage() {
   const [fleet, setFleet] = useState<{ total: number; with_rate_limit: number; with_budget: number } | null>(null);
   const [listTotal, setListTotal] = useState<number | null>(null);
   const [listLoading, setListLoading] = useState(false);
+  const [dedicatedAvailable, setDedicatedAvailable] = useState(true);
+  const [modeError, setModeError] = useState<string | null>(null);
   const firstQuery = useRef(true);
 
   const load = useCallback(async () => {
@@ -120,6 +125,7 @@ function AdminScalingPage() {
       const pj = await pr.json();
       const aj = await ar.json();
       setPools(pj.data?.pools || []);
+      setDedicatedAvailable(pj.data?.dedicated_available !== false);
       setAgents(aj.data?.agents || []);
       if (typeof aj.data?.total === 'number') {
         setFleet({ total: aj.data.total, with_rate_limit: aj.data.with_rate_limit ?? 0, with_budget: aj.data.with_budget ?? 0 });
@@ -206,9 +212,14 @@ function AdminScalingPage() {
       body: JSON.stringify({ enabled }),
     });
     const j = await r.json();
-    if (!j.error) {
-      setAgents(prev => prev.map(x => x.id === a.id ? { ...x, ...(j.data || {}) } : x));
+    if (j.error) {
+      setModeError(typeof j.error === 'string' ? j.error : j.error?.message || 'The mode could not be changed.');
+      return;
     }
+    setModeError(j.data?.dedicated_state === 'draining'
+      ? `${a.name} is back on its shared pool. Its own workers stay until the runs queued on them finish.`
+      : null);
+    setAgents(prev => prev.map(x => x.id === a.id ? { ...x, ...(j.data || {}) } : x));
   };
 
   if (loading) {
@@ -309,8 +320,12 @@ function AdminScalingPage() {
                       <p className={`text-lg font-semibold ${p.agent_count === 0 ? 'text-slate-500' : colors.text}`}>{formatCount(p.agent_count)}</p>
                     </div>
                     <div>
-                      <p className="text-[9px] uppercase text-slate-500">Min–Max</p>
-                      <p className={`text-lg font-semibold ${colors.text}`}>{p.default_min_replicas}–{p.default_max_replicas}</p>
+                      <p className="text-[9px] uppercase text-slate-500">Workers</p>
+                      {p.deployed === false ? (
+                        <p className="text-[11px] font-semibold text-amber-300 leading-7" data-testid={`pool-undeployed-${p.key}`}>Not deployed</p>
+                      ) : (
+                        <p className={`text-lg font-semibold ${colors.text}`}>{p.replicas ?? '–'}</p>
+                      )}
                     </div>
                     <div>
                       <p className="text-[9px] uppercase text-slate-500">24 h execs</p>
@@ -387,14 +402,17 @@ function AdminScalingPage() {
                       <td className="py-2">
                         <button
                           onClick={() => toggleDedicated(a)}
+                          disabled={!dedicatedAvailable && !a.dedicated_mode}
                           className={`text-[10px] px-2 py-0.5 rounded border transition ${
                             a.dedicated_mode
                               ? 'border-cyan-500/40 bg-cyan-500/10 text-cyan-300 hover:bg-cyan-500/20'
                               : 'border-slate-600/40 bg-slate-700/20 text-slate-300 hover:bg-slate-700/40'
                           }`}
                           title={a.dedicated_mode
-                            ? 'Dedicated: this agent has its own pod / NATS subject. Click to fall back to the shared pool.'
-                            : 'Shared: this agent runs on its pool. Click to opt-in to dedicated per-agent pod scaling.'}
+                            ? 'Dedicated: this agent has its own workers and queue, sized by its replica settings. Click to go back to the shared pool.'
+                            : dedicatedAvailable
+                              ? 'Shared: this agent runs on its pool. Click to create a Deployment and autoscaler for this agent alone.'
+                              : 'Shared: this cluster cannot create dedicated pools. It needs the API in Kubernetes and scaling.dedicated.enabled.'}
                           data-testid={`mode-${a.slug}`}
                         >
                           {a.dedicated_mode ? 'Dedicated' : 'Shared'}
@@ -603,7 +621,9 @@ function EditScaleModal({
                   data-testid="edit-pool"
                 >
                   {pools.filter(p => p.key !== 'inline').map(p => (
-                    <option key={p.key} value={p.key}>{p.label}</option>
+                    <option key={p.key} value={p.key} disabled={p.deployed === false}>
+                      {p.label}{p.deployed === false ? ' (not deployed)' : ''}
+                    </option>
                   ))}
                 </select>
                 <p className="text-[10px] text-slate-500 mt-1">
@@ -620,8 +640,8 @@ function EditScaleModal({
                   onChange={v => setForm({ ...form, concurrency_per_replica: v })} data-testid="edit-conc" />
               </div>
               <p className="text-[11px] text-amber-300/90" data-testid="replicas-not-enforced">
-                Min and max replicas and concurrency are saved as a sizing note only. They are not enforced
-                per agent. The worker pool scales between the bounds set for the whole pool in the Helm chart.
+                Min and max replicas and concurrency apply only when this agent is in dedicated mode, capped by
+                the chart. On a shared pool they are a sizing note and the pool&apos;s bounds in the Helm chart decide.
               </p>
             </>
           )}
@@ -643,7 +663,7 @@ function EditScaleModal({
             <p className="font-semibold text-cyan-300 mb-1">What will happen</p>
             <p>
               The pool, rate limit and daily budget apply to the next run. A run over the rate limit is
-              turned away with a &ldquo;try again&rdquo; message. Replica counts come from the pool, not this agent.
+              turned away with a &ldquo;try again&rdquo; message. Replica counts come from the pool unless the agent is dedicated.
             </p>
           </div>
         </div>

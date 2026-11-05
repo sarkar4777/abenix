@@ -2,6 +2,7 @@
 
 import { useAuth } from '@/contexts/AuthContext';
 import { useApi } from '@/hooks/useApi';
+import { pluralShown } from '@/lib/plural';
 
 interface LiveStats {
   active_executions: number;
@@ -28,7 +29,7 @@ export default function StatusBar() {
           <>
             <span data-testid="status-running">{stats.active_executions} running</span>
             <span className="text-slate-600">|</span>
-            <span data-testid="status-today">{stats.today_executions} runs today</span>
+            <span data-testid="status-today">{pluralShown(stats.today_executions, stats.today_executions, 'run')} today</span>
             {stats.today_failed > 0 && (
               <>
                 <span className="text-slate-600">|</span>

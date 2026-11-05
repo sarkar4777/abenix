@@ -7,6 +7,16 @@ import { CheckCircle2, Loader2, Network, XCircle } from 'lucide-react';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 const POLL_MS = 4000;
+const DISMISSED_KEY = 'cognify.dismissed';
+
+function readDismissed(): string[] {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(DISMISSED_KEY) || '[]');
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
 
 type Job = {
   id: string;
@@ -46,8 +56,21 @@ export default function CognifyIndicator() {
   const router = useRouter();
   const [state, setState] = useState<State>({ running: [], recent: [] });
   const [open, setOpen] = useState(false);
+  const [dismissed, setDismissed] = useState<string[]>([]);
   const popRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => { setDismissed(readDismissed()); }, []);
+
+  const dismiss = (id: string) => {
+    const next = [...dismissed, id].slice(-50);
+    setDismissed(next);
+    try {
+      localStorage.setItem(DISMISSED_KEY, JSON.stringify(next));
+    } catch {
+      // storage blocked, it comes back on the next visit
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -98,8 +121,9 @@ export default function CognifyIndicator() {
   }, [open]);
 
   const running = state.running.length;
-  const failedRecently = state.recent.filter(j => j.status === 'failed').length;
-  const completedRecently = state.recent.filter(j => j.status === 'complete').length;
+  const recent = state.recent.filter(j => !dismissed.includes(j.id));
+  const failedRecently = recent.filter(j => j.status === 'failed').length;
+  const completedRecently = recent.filter(j => j.status === 'complete').length;
 
   if (running === 0 && failedRecently === 0 && completedRecently === 0) return null;
 
@@ -154,7 +178,7 @@ export default function CognifyIndicator() {
               <h3 className="text-sm font-semibold text-white">Knowledge graph indexing</h3>
             </div>
             <div className="max-h-[320px] overflow-y-auto">
-              {state.running.length === 0 && state.recent.length === 0 ? (
+              {state.running.length === 0 && recent.length === 0 ? (
                 <p className="px-4 py-6 text-xs text-slate-500 text-center">No activity right now.</p>
               ) : (
                 <>
@@ -179,13 +203,14 @@ export default function CognifyIndicator() {
                       ))}
                     </div>
                   )}
-                  {state.recent.length > 0 && (
+                  {recent.length > 0 && (
                     <div className="px-2 py-2 border-t border-slate-700/30">
                       <p className="px-2 text-[10px] uppercase tracking-wider text-slate-500 mb-1">Recent</p>
-                      {state.recent.map(j => (
+                      {recent.map(j => (
+                        <div key={j.id}>
                         <button
-                          key={j.id}
-                          onClick={() => { setOpen(false); router.push(`/knowledge/${j.kb_id}/engine`); }}
+                          onClick={() => { setOpen(false); router.push(`/knowledge/${j.kb_id}/engine#cognify-job-${j.id}`); }}
+                          data-testid={`cognify-job-${j.status}`}
                           className="w-full text-left px-2 py-2 rounded-lg hover:bg-slate-700/40 transition-colors"
                         >
                           <div className="flex items-center gap-2">
@@ -208,7 +233,19 @@ export default function CognifyIndicator() {
                               {j.entities_extracted} entities · {j.relationships_extracted} rels
                             </p>
                           )}
+                          {j.status === 'failed' && <p className="text-[10px] text-cyan-300 mt-0.5 ml-5">See the failed job</p>}
                         </button>
+                        {j.status === 'failed' && (
+                          <button
+                            type="button"
+                            onClick={() => dismiss(j.id)}
+                            data-testid="cognify-dismiss"
+                            className="ml-7 mb-1 text-[10px] text-slate-400 hover:text-white underline"
+                          >
+                            Dismiss
+                          </button>
+                        )}
+                        </div>
                       ))}
                     </div>
                   )}
