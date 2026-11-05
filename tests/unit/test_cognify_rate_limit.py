@@ -122,3 +122,24 @@ def test_a_failed_model_call_is_reported_not_taken_for_an_empty_chunk(monkeypatc
     monkeypatch.setattr(lr, "LLMRouter", _Router)
     out = asyncio.run(ex.extract_from_chunk("text", 3, "doc"))
     assert out.error and "rejected" in out.error and out.entities == []
+
+
+def test_a_cut_off_reply_keeps_every_whole_item():
+    from engine.knowledge.entity_extractor import parse_extraction
+
+    text = (
+        '{"entities": [{"name": "A", "type": "org"}, {"name": "B", "type": "org"},'
+        ' {"name": "C", "ty'
+    )
+    data, cut_off = parse_extraction(text)
+    assert cut_off
+    assert [e["name"] for e in data["entities"]] == ["A", "B"]
+    assert data["relationships"] == []
+
+
+def test_a_finished_reply_is_not_marked_cut_off():
+    from engine.knowledge.entity_extractor import parse_extraction
+
+    data, cut_off = parse_extraction('x {"entities": [], "relationships": []} y')
+    assert not cut_off
+    assert data == {"entities": [], "relationships": []}

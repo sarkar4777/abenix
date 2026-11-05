@@ -17,6 +17,10 @@ from engine.knowledge.rate_limit import CallLimiter, with_backoff
 
 logger = logging.getLogger(__name__)
 
+EXTRACTION_MAX_TOKENS = 8192
+MAX_SPLIT_DEPTH = 2
+MIN_SPLIT_CHARS = 200
+
 DEFAULT_COGNIFY_MODEL = os.environ.get(
     "COGNIFY_DEFAULT_MODEL", "claude-haiku-4-5-20251001"
 )
@@ -125,6 +129,39 @@ def _ontology_typing_prior(ontology: dict | BoundOntology | None) -> str:
     return "\n".join(lines)
 
 
+def _complete_items(text: str, key: str) -> list[dict]:
+    """Whole objects from a JSON array that may have been cut off."""
+    at = text.find(f'"{key}"')
+    at = text.find("[", at) if at >= 0 else -1
+    if at < 0:
+        return []
+    decoder = json.JSONDecoder()
+    items: list[dict] = []
+    i = at + 1
+    while True:
+        while i < len(text) and text[i] in " \t\r\n,":
+            i += 1
+        if i >= len(text) or text[i] != "{":
+            return items
+        try:
+            item, i = decoder.raw_decode(text, i)
+        except ValueError:
+            return items
+        items.append(item)
+
+
+def parse_extraction(text: str) -> tuple[dict, bool]:
+    """The parsed reply, and whether the model ran out of room before finishing it."""
+    start = text.index("{")
+    try:
+        return json.loads(text[start : text.rindex("}") + 1]), False
+    except ValueError:
+        return {
+            "entities": _complete_items(text, "entities"),
+            "relationships": _complete_items(text, "relationships"),
+        }, True
+
+
 async def extract_from_chunk(
     chunk_text: str,
     chunk_index: int,
@@ -134,6 +171,7 @@ async def extract_from_chunk(
     ontology: dict | BoundOntology | None = None,
     limiter: CallLimiter | None = None,
     retries: int = 5,
+    split_depth: int = 0,
 ) -> ChunkExtractionResult:
     """Extract entities and relationships from a single text chunk.
 
@@ -170,6 +208,7 @@ async def extract_from_chunk(
             system=system_prompt,
             model=model,
             temperature=0.1,  # Low temperature for consistent extraction
+            max_tokens=EXTRACTION_MAX_TOKENS,
         )
 
     response = None
@@ -193,8 +232,7 @@ async def extract_from_chunk(
                 cost=response.cost,
                 error="the model returned no JSON",
             )
-        json_str = text[text.index("{") : text.rindex("}") + 1]
-        data = json.loads(json_str)
+        data, cut_off = parse_extraction(text)
 
         entities = []
         for e in data.get("entities", []):
@@ -234,7 +272,7 @@ async def extract_from_chunk(
                     )
                 )
 
-        return ChunkExtractionResult(
+        result = ChunkExtractionResult(
             entities=entities,
             relationships=relationships,
             chunk_index=chunk_index,
@@ -242,6 +280,41 @@ async def extract_from_chunk(
             tokens_used=response.input_tokens + response.output_tokens,
             cost=response.cost,
         )
+        if (
+            cut_off
+            and split_depth < MAX_SPLIT_DEPTH
+            and len(chunk_text) >= MIN_SPLIT_CHARS
+        ):
+            middle = len(chunk_text) // 2
+            parts = await asyncio.gather(
+                *(
+                    extract_from_chunk(
+                        part,
+                        chunk_index,
+                        doc_id,
+                        existing_entities,
+                        model,
+                        ontology,
+                        limiter,
+                        retries,
+                        split_depth + 1,
+                    )
+                    for part in (chunk_text[:middle], chunk_text[middle:])
+                )
+            )
+            for part in parts:
+                result.entities.extend(part.entities)
+                result.relationships.extend(part.relationships)
+                result.tokens_used += part.tokens_used
+                result.cost += part.cost
+            result.error = next((p.error for p in parts if p.error), None)
+        elif cut_off:
+            logger.warning(
+                "Kept what fit from a cut off reply for chunk %d of doc %s",
+                chunk_index,
+                doc_id,
+            )
+        return result
 
     except Exception as e:
         logger.error(
