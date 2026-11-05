@@ -1,3 +1,4 @@
+import json
 import logging
 from pathlib import Path as _Path
 from typing import Any
@@ -51,6 +52,7 @@ from app.routers import (
     agent_sharing,
     agents,
     analytics,
+    admin_api_key_report,
     api_keys,
     atlas,
     auth,
@@ -84,9 +86,17 @@ from app.core.sentry import setup_sentry
 
 setup_sentry()
 
+
+def _product_version() -> str:
+    try:
+        return (_Path(__file__).resolve().parents[3] / "VERSION").read_text().strip()
+    except OSError:
+        return "unknown"
+
+
 app = FastAPI(
     title="Abenix API",
-    version="0.1.0",
+    version=_product_version(),
     docs_url="/docs",
     redoc_url="/redoc",
     description=(
@@ -302,6 +312,12 @@ async def _unhandled_exception_handler(
     )
 
 
+def _validation_errors(exc: RequestValidationError) -> list[dict[str, Any]]:
+    # pydantic keeps the raised exception in ctx, and input can hold anything
+    text_form = json.dumps(exc.errors(), default=str, skipkeys=True, ensure_ascii=False)
+    return json.loads(text_form.encode("utf-8", "replace"))
+
+
 @app.exception_handler(RequestValidationError)
 async def _validation_exception_handler(
     request: Request, exc: RequestValidationError
@@ -314,7 +330,7 @@ async def _validation_exception_handler(
                 "message": "Request validation failed",
                 "code": 422,
                 "error_code": "VALIDATION_ERROR",
-                "details": {"errors": exc.errors()},
+                "details": {"errors": _validation_errors(exc)},
             },
         },
         headers=_cors_headers_for(request),
@@ -388,6 +404,7 @@ app.include_router(billing.router)
 app.include_router(analytics.router)
 app.include_router(settings_router.router)
 app.include_router(api_keys.router)
+app.include_router(admin_api_key_report.router)
 app.include_router(team.router)
 app.include_router(creator.router)
 app.include_router(notifications.router)
@@ -810,6 +827,27 @@ async def health_check() -> dict[str, str]:
     return {"status": "ok"}
 
 
+async def _any_llm_provider() -> bool:
+    if any(
+        [
+            app_settings.anthropic_api_key,
+            app_settings.openai_api_key,
+            app_settings.google_api_key,
+        ]
+    ):
+        return True
+    # a subscription or a key saved in the admin screens lives in the database
+    from app.core.deps import priority_session
+    from app.routers.llm_models import _probe_providers
+
+    try:
+        async with priority_session() as db:
+            providers = await _probe_providers(db)
+    except Exception:
+        return False
+    return any((p or {}).get("configured") for p in providers.values())
+
+
 @app.get("/api/health/ready")
 async def readiness_check() -> dict[str, Any]:
     from app.core.deps import priority_engine as db_engine
@@ -856,15 +894,7 @@ async def readiness_check() -> dict[str, Any]:
     except Exception:
         checks["neo4j"] = "unavailable"
 
-    # LLM provider (at least one key configured)
-    llm_ok = any(
-        [
-            app_settings.anthropic_api_key,
-            app_settings.openai_api_key,
-            app_settings.google_api_key,
-        ]
-    )
-    checks["llm_provider"] = "ok" if llm_ok else "no_key_configured"
+    checks["llm_provider"] = "ok" if await _any_llm_provider() else "no_key_configured"
 
     from app.core import dependency_health
 
@@ -897,4 +927,4 @@ async def metrics() -> PlainTextResponse:
 
 @app.get("/")
 async def root() -> dict[str, Any]:
-    return {"data": "Abenix API v0.1.0", "error": None, "meta": {}}
+    return {"data": f"Abenix API v{app.version}", "error": None, "meta": {}}

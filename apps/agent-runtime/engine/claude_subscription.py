@@ -254,6 +254,47 @@ def build_sync_client(api_key: str | None = None):
     return anthropic.Anthropic(), False
 
 
+async def vision_text(
+    image_b64: str, prompt: str, model: str, api_key: str = "", timeout: float = 60.0
+) -> str:
+    """Read one PNG with Claude, a key first and then the plan, empty on any failure."""
+    if not get_config().usable and not api_key:
+        return ""
+    try:
+        if api_key:
+            import anthropic
+
+            client = anthropic.AsyncAnthropic(api_key=api_key)
+        else:
+            client, _ = build_async_client()
+            model = effective_model(model)
+        resp = await client.messages.create(
+            model=model,
+            max_tokens=4096,
+            timeout=timeout,
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": "image/png",
+                                "data": image_b64,
+                            },
+                        },
+                        {"type": "text", "text": prompt},
+                    ],
+                }
+            ],
+        )
+    except Exception as exc:
+        logger.warning("vision call failed %s", exc)
+        return ""
+    return "".join(b.text for b in resp.content if getattr(b, "type", "") == "text")
+
+
 def effective_model(model: str) -> str:
     """Model a call should actually use, accounting for exclusive remapping."""
     cfg = get_config()

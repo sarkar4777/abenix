@@ -379,7 +379,11 @@ async def release_denial(db: AsyncSession, user: Any, approval: Any) -> str | No
     agent = await get_agent(
         db, approval.tenant_id, (payload.get("agent") or {}).get("id")
     )
-    creator = payload.get("agent_creator_id") or _s(getattr(agent, "creator_id", None))
+    creator = (
+        _s(getattr(agent, "creator_id", None))
+        if agent is not None
+        else payload.get("agent_creator_id")
+    )
     if creator and str(creator) == str(user.id):
         if await self_approval_reason(db, user, agent) is None:
             return AUTHOR_REFUSED

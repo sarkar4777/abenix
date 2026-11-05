@@ -40,8 +40,15 @@ OPERATOR_ONLY = (
     "platform operator can change them."
 )
 
+PLATFORM_ONLY = (
+    "This applies to every tenant on this deployment, so only a platform "
+    "operator can change it."
+)
+
 MARKETPLACE_OFF = "The marketplace is turned off on this deployment."
 MONETIZATION_OFF = "Monetization is turned off on this deployment."
+
+DEV_ENVIRONMENTS = {"local", "dev", "development", "ci", "test"}
 
 _TRUE = {"1", "true", "yes", "on"}
 _FALSE = {"0", "false", "no", "off"}
@@ -56,6 +63,12 @@ def parse_bool(value: Any) -> bool | None:
     if v in _FALSE:
         return False
     return None
+
+
+def is_dev_environment() -> bool:
+    if parse_bool(os.environ.get("IS_LOCAL_DEV")):
+        return True
+    return os.environ.get("ENVIRONMENT", "").strip().lower() in DEV_ENVIRONMENTS
 
 
 def env_default(key: str) -> bool:
@@ -97,6 +110,17 @@ async def is_platform_operator(db: AsyncSession, user: Any) -> bool:
         return str(getattr(user, "email", "") or "").lower() in listed
     tid = await _platform_tenant_id(db)
     return tid is not None and str(tid) == str(getattr(user, "tenant_id", ""))
+
+
+async def ensure_platform_operator(db: AsyncSession, user: Any) -> None:
+    if not await is_platform_operator(db, user):
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "message": PLATFORM_ONLY,
+                "error_code": "PLATFORM_OPERATOR_REQUIRED",
+            },
+        )
 
 
 def operator_rule() -> str:

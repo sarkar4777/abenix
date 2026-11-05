@@ -239,6 +239,7 @@ def test_purges_ask_for_confirmation():
         "lesson_retention",
         "prune_events",
         "nightly_archive",
+        "tenant_retention",
         "reset_monthly_quotas",
     ):
         assert job_runs.CATALOGUE[jid].destructive
@@ -373,3 +374,9 @@ def test_escalation_minutes_validation():
             {"publish_approvals": {"escalate_after_minutes": bad}}
         )
         assert any("escalate_after_minutes" in p for p in problems), bad
+
+
+def test_archive_with_no_rows_reads_as_idle():
+    assert job_runs.summarize("nightly_archive", {"rows": 0}) == (
+        "No table had rows past its retention."
+    )

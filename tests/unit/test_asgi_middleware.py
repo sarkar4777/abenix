@@ -136,10 +136,12 @@ async def test_ip_whitelist_blocks_and_exempts_health(monkeypatch):
         blocked = await c.get("/tenant", headers={"x-forwarded-for": "8.8.8.8"})
         assert blocked.status_code == 403
         assert blocked.json()["error"]["code"] == 403
-        allowed = await c.get(
+        allowed = await c.get("/tenant", headers={"x-forwarded-for": "10.1.2.3"})
+        assert allowed.status_code == 200
+        spoofed = await c.get(
             "/tenant", headers={"x-forwarded-for": "10.1.2.3, 8.8.8.8"}
         )
-        assert allowed.status_code == 200
+        assert spoofed.status_code == 403
         health = await c.get("/api/health", headers={"x-forwarded-for": "8.8.8.8"})
         assert health.status_code == 200
 

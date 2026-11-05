@@ -30,6 +30,7 @@ RUN apt-get update && apt-get upgrade -y && rm -rf /var/lib/apt/lists/*
 RUN rm -rf /usr/local/lib/python3.12/site-packages
 COPY --from=deps /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
 COPY --from=deps /usr/local/bin /usr/local/bin
+COPY VERSION ./VERSION
 COPY packages/db/ ./packages/db/
 COPY infra/use_cases_catalog.json ./infra/use_cases_catalog.json
 COPY packages/sdk/python/ ./packages/sdk/python/

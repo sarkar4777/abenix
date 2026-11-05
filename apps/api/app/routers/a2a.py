@@ -68,7 +68,11 @@ async def get_agent_card(
 ) -> Any:
     """Public endpoint: return A2A agent card with capabilities and input schema."""
     result = await db.execute(
-        select(Agent).where(Agent.id == agent_id, Agent.status == AgentStatus.ACTIVE)
+        select(Agent).where(
+            Agent.id == agent_id,
+            Agent.status == AgentStatus.ACTIVE,
+            Agent.is_published.is_(True),
+        )
     )
     agent = result.scalar_one_or_none()
     if not agent:

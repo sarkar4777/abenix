@@ -65,10 +65,14 @@ def _canonical_args_hash(arguments: dict[str, Any]) -> str:
     return hashlib.sha256(blob).hexdigest()[:24]
 
 
+# market and web data that reads the same for everyone, the only answers shared across tenants
+PUBLIC_DATA_TOOLS = frozenset({"yahoo_finance", "tavily_search"})
+
+
 def _cache_key(slug: str, tenant_id: str, args_hash: str, scope: str) -> str:
-    if scope == "per_tenant":
-        return f"toolcache:{slug}:{tenant_id}:{args_hash}"
-    return f"toolcache:{slug}:_:{args_hash}"
+    if scope == "global" and slug in PUBLIC_DATA_TOOLS:
+        return f"toolcache:{slug}:_:{args_hash}"
+    return f"toolcache:{slug}:{tenant_id}:{args_hash}"
 
 
 # leases, one member per call with its own expiry, so a call that never releases frees itself

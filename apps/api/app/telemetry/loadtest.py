@@ -5,7 +5,8 @@
                                         and a replica killed half way through by the calling script
 
 Publishes real Sparkplug B through the in-cluster broker, reads back through the
-public API as a person would, and prints one JSON report on the last line.
+public API as a person would, prints one JSON report, then one line per threshold.
+Exits 0 when every threshold holds, 1 when one fails, 2 when it could not run or got no samples.
 """
 
 from __future__ import annotations
@@ -38,6 +39,63 @@ def pct(values: list[float], p: float) -> float | None:
         return None
     v = sorted(values)
     return round(v[min(len(v) - 1, int(round(p / 100 * (len(v) - 1))))], 2)
+
+
+def check(name: str, measured: float, limit: float, ceiling: bool = True) -> bool:
+    ok = measured <= limit if ceiling else measured >= limit
+    print(
+        f"{'PASS' if ok else 'FAIL'} {name} measured={measured} limit={limit}",
+        flush=True,
+    )
+    return ok
+
+
+def default_min_rate(scenario: str, rate: float) -> float:
+    nodes, per_node = (4, 400) if scenario == "t2" else (50, rate)
+    return nodes * per_node * 0.25
+
+
+def evaluate(
+    report: dict[str, Any],
+    min_rate: float,
+    min_held_ratio: float,
+    max_lost: int,
+    max_errors: int,
+) -> int:
+    published = report.get("published_per_second") or 0
+    held = report.get("ingested_per_second") or 0
+    if not report.get("published_total") or not published or not held:
+        log("no samples, nothing was published or nothing was stored")
+        return 2
+    results = []
+    if min_rate > 0:
+        results.append(check("held_rate", held, min_rate, ceiling=False))
+    if min_held_ratio > 0:
+        ratio = round(held / published, 3)
+        results.append(check("held_ratio", ratio, min_held_ratio, ceiling=False))
+    if max_lost >= 0:
+        results.append(check("lost_messages", report["lost_messages"], max_lost))
+    if max_errors >= 0:
+        errors = report["read_errors"] + report.get("viewer_errors_total", 0)
+        results.append(check("errors", errors, max_errors))
+    return 0 if all(results) else 1
+
+
+def loss_counters(stats: dict[str, Any], health: dict[str, Any]) -> dict[str, int]:
+    return {
+        "dropped": int(health.get("dropped") or 0),
+        "throttled": int(stats.get("throttled") or 0),
+    }
+
+
+def loss_since(before: dict[str, int], after: dict[str, int]) -> dict[str, int]:
+    return {k: max(0, after[k] - before[k]) for k in before}
+
+
+async def node_seq_gaps(r: Any, tenant: str, nodes: list[tuple[str, str]]) -> int:
+    fields = [K.index_field(g, n, "") for g, n in nodes]
+    docs = await r.hmget(K.index(tenant), fields)
+    return sum(int(json.loads(d).get("seq_gaps") or 0) for d in docs if d)
 
 
 # publishers, one process per slice of nodes
@@ -439,6 +497,10 @@ async def t2(seconds: int, keep: bool) -> dict[str, Any]:
     group = "loadtest"
     nodes = [(group, f"lt-{i}") for i in range(4)]
     await cleanup(r, tenant, {group})
+    # these counters live as long as the tenant or the replica, so only the change counts
+    loss0 = loss_counters(
+        await r.hgetall(K.stats(tenant)), await api.get("/api/telemetry/health")
+    )
     ps, q, start_at = run_publishers(nodes, 400, seconds + 5, procs=4)
     await asyncio.sleep(max(0, start_at - time.time()) + 5)
     log("warm, measuring")
@@ -478,6 +540,9 @@ async def t2(seconds: int, keep: bool) -> dict[str, Any]:
     ingested = sum(tally.total(tenant, f"{g}/{n}") for g, n in nodes)
     stats = await r.hgetall(K.stats(tenant))
     health = await api.get("/api/telemetry/health")
+    lost = loss_since(loss0, loss_counters(stats, health))
+    # cleanup cleared these nodes, so this is this run alone
+    lost["seq_gaps"] = await node_seq_gaps(r, tenant, nodes)
     report = {
         "scenario": "T2: 4 nodes x 400 msg/s, one tenant, one connection",
         "measured_seconds": round(m1 - m0, 1),
@@ -497,6 +562,9 @@ async def t2(seconds: int, keep: bool) -> dict[str, Any]:
         "read_node_redis_p99_ms": pct(redis_reads, 99),
         "reads": len(api_reads),
         "read_errors": len(errors),
+        "read_error_samples": errors[:3],
+        "lost_messages": sum(lost.values()),
+        "lost_breakdown": lost,
         "seq_gaps": int(stats.get("seq_gaps") or 0),
         "throttled": int(stats.get("throttled") or 0),
         "dropped": health.get("dropped"),
@@ -681,6 +749,13 @@ async def t7(
         for cid in conn_ids[key]:
             raw = await r.hgetall(K.conn_status(cid))
             placement[cid] = sorted(raw)
+    loss0 = {
+        key: loss_counters(
+            await r.hgetall(K.stats(tenants[key])),
+            await api.get("/api/telemetry/health"),
+        )
+        for key, api in apis.items()
+    }
     ps, q, start_at = run_publishers(
         all_nodes, rate, seconds + 5, procs=min(10, len(all_nodes))
     )
@@ -766,6 +841,15 @@ async def t7(
             "throttled": int(st.get("throttled") or 0),
         }
     published = sum(s["sent"] for s in sent)
+    # seq gaps stay out, the planned kill makes them expected here
+    lost = {"dropped": 0, "throttled": 0}
+    for key, api in apis.items():
+        after = loss_counters(
+            await r.hgetall(K.stats(tenants[key])),
+            await api.get("/api/telemetry/health"),
+        )
+        for k, v in loss_since(loss0[key], after).items():
+            lost[k] += v
     report = {
         "scenario": f"T7: 50 nodes x {rate} msg/s, 3 workspaces, 5 connections (one shared), 2 replicas",
         "measured_seconds": round(m1 - m0, 1),
@@ -785,6 +869,10 @@ async def t7(
         "read_node_api_p99_ms_before_kill": pct(pre_reads, 99),
         "read_node_api_p99_ms_whole_run": pct(api_reads, 99),
         "read_errors": len(errors),
+        "read_error_samples": errors[:3],
+        "viewer_errors_total": len(vstats["errors"]),
+        "lost_messages": sum(lost.values()),
+        "lost_breakdown": lost,
         "failover": {
             "killed": fo.get("killed"),
             "seconds_to_detect": (
@@ -832,13 +920,43 @@ def main() -> None:
     ap.add_argument(
         "--rate", type=int, default=200, help="t7 messages a second per node"
     )
+    ap.add_argument(
+        "--min-rate",
+        type=float,
+        default=None,
+        help="stored msg/s floor, default a quarter of the offered rate, 0 means not checked",
+    )
+    ap.add_argument(
+        "--min-held-ratio",
+        type=float,
+        default=0.5,
+        help="stored over published floor, 0 means not checked",
+    )
+    ap.add_argument(
+        "--max-lost",
+        type=int,
+        default=0,
+        help="dropped, throttled and for t2 seq gaps, below 0 means not checked",
+    )
+    ap.add_argument(
+        "--max-errors",
+        type=int,
+        default=0,
+        help="read and viewer errors, below 0 means not checked",
+    )
     a = ap.parse_args()
-    if a.scenario == "t2":
-        report = asyncio.run(t2(a.seconds, a.keep))
-    else:
-        report = asyncio.run(t7(a.seconds, a.keep, a.viewers, a.kill_after, a.rate))
+    if a.min_rate is None:
+        a.min_rate = default_min_rate(a.scenario, a.rate)
+    try:
+        if a.scenario == "t2":
+            report = asyncio.run(t2(a.seconds, a.keep))
+        else:
+            report = asyncio.run(t7(a.seconds, a.keep, a.viewers, a.kill_after, a.rate))
+    except Exception as exc:  # noqa: BLE001
+        log(f"could not run, {exc!r}")
+        sys.exit(2)
     print("REPORT " + json.dumps(report), flush=True)
-    sys.exit(0)
+    sys.exit(evaluate(report, a.min_rate, a.min_held_ratio, a.max_lost, a.max_errors))
 
 
 if __name__ == "__main__":

@@ -7,12 +7,13 @@ import time
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, get_db
+from app.core.platform_features import ensure_platform_operator
 from app.core.responses import success
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "packages" / "db"))
@@ -207,6 +208,32 @@ def _provider_from_model(model: str, declared: str | None) -> str:
     return "other"
 
 
+def _subscription_target(
+    model: str,
+    declared: str | None,
+    sub: dict[str, Any],
+    providers: dict[str, dict[str, Any]],
+) -> str | None:
+    """The Claude model the subscription runs this request on, matching the router chain."""
+    if not sub.get("active"):
+        return None
+    from engine.claude_subscription import SubscriptionConfig, map_model
+
+    if not sub.get("exclusive") and not model.lower().startswith("claude"):
+        native = providers.get(_provider_from_model(model, declared)) or {}
+        if native.get("configured", True):
+            return None
+    return map_model(
+        model,
+        SubscriptionConfig(
+            enabled=True,
+            token="",
+            default_model=str(sub.get("default_model") or ""),
+            exclusive=bool(sub.get("exclusive")),
+        ),
+    )
+
+
 def _display(
     row: LLMModelPricing,
     avail: ModelAvailability | None,
@@ -240,11 +267,11 @@ def _display(
     served_by_subscription = False
     remapped_to: str | None = None
     if sub.get("active"):
-        if row.model.lower().startswith("claude"):
+        target = _subscription_target(row.model, row.provider, sub, providers or {})
+        if target is not None:
             served_by_subscription = True
-        elif sub.get("exclusive"):
-            served_by_subscription = True
-            remapped_to = sub.get("default_model")
+            if not row.model.lower().startswith("claude"):
+                remapped_to = target
     if served_by_subscription:
         provider_available = True
 
@@ -397,6 +424,13 @@ async def resolve_model(
                 select(ModelAvailability).where(ModelAvailability.model == model)
             )
         ).scalar_one_or_none()
+        effective, chain, reason = decision.effective, decision.chain, decision.reason
+        target = _subscription_target(
+            model, None, await _subscription_state(db), await _probe_providers(db)
+        )
+        if target is not None:
+            effective, reason = target, "claude_subscription"
+            chain = [model] if target == model else [model, target]
         pricing = (
             await db.execute(
                 select(LLMModelPricing)
@@ -410,10 +444,11 @@ async def resolve_model(
         return success(
             {
                 "requested": decision.requested,
-                "effective": decision.effective,
-                "chain": decision.chain,
-                "reason": decision.reason,
-                "swap": decision.effective != decision.requested,
+                "effective": effective,
+                "chain": chain,
+                "reason": reason,
+                "swap": effective != decision.requested,
+                "served_by": "claude_subscription" if target is not None else None,
                 "requested_status": (avail.status if avail else "available"),
                 "requested_is_deprecated": (
                     bool(pricing.is_deprecated) if pricing else False
@@ -442,9 +477,9 @@ async def resolve_model(
 @router.post("/ping-now")
 async def ping_now(
     user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
-    if str(getattr(user.role, "value", user.role) or "").lower() != "admin":
-        raise HTTPException(status_code=403, detail="Admin only")
+    await ensure_platform_operator(db, user)
     from app.services.model_availability import run_pings
 
     res = await run_pings()
@@ -463,8 +498,7 @@ async def clear_stale(
       - models: list[str]  — only clear these (default: all unavailable rows)
       - reping: bool       — also run an immediate prober pass after clearing
     """
-    if str(getattr(user.role, "value", user.role) or "").lower() != "admin":
-        raise HTTPException(status_code=403, detail="Admin only")
+    await ensure_platform_operator(db, user)
     body = body or {}
     models = [str(m).strip() for m in (body.get("models") or []) if str(m).strip()]
     reping = bool(body.get("reping", False))

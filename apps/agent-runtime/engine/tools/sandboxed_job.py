@@ -473,7 +473,7 @@ async def _run_docker_inner(
             "backend": "docker",
             "image": image,
             "exit_code": rc,
-            "stdout": out[:4000],
+            "stdout": out[:262144],
             "stderr": err[:2000],
         },
     )

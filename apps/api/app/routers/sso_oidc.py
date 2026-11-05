@@ -34,6 +34,7 @@ from sqlalchemy.orm.attributes import flag_modified
 
 from app.core import crypto, sessions
 from app.core.audit import log_action
+from app.core.config import settings
 from app.core.deps import get_current_user, get_db
 from app.core.responses import error, success
 
@@ -365,9 +366,7 @@ async def discover_for_email(
 
 
 def _state_secret() -> str:
-    return os.environ.get("JWT_SECRET_KEY") or os.environ.get(
-        "SECRET_KEY", "dev-secret-do-not-use-in-prod"
-    )
+    return os.environ.get("JWT_SECRET_KEY") or settings.secret_key
 
 
 def _sign_state(slug: str, return_to: str, nonce: str) -> str:

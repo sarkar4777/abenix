@@ -3,15 +3,22 @@
 from __future__ import annotations
 
 import ast
-import io
+import asyncio
+import base64
 import json
 import logging
 import os
+import re
 import tempfile
-import traceback
 from typing import Any
 
-from engine.tools.base import READ_ONLY, BaseTool, ToolResult
+from engine.process_sandbox import SandboxError, code_request, run_code
+from engine.tenant_access import (
+    current_tenant,
+    export_dir_for,
+    tenant_file_roots,
+)
+from engine.tools.base import READ_ONLY, BaseTool, ConfigField, ToolResult
 
 logger = logging.getLogger(__name__)
 
@@ -179,10 +186,55 @@ FORBIDDEN_NAMES = frozenset(
         "httpx",
     }
 )
-# Note: "open" is not forbidden — a sandboxed _safe_open is provided
-# that only allows writes to EXPORT_DIR.
-# Note: "getattr" allowed for pandas/numpy attribute access.
-# Note: "__import__" allowed via safe wrapper that checks ALLOWED_MODULES.
+# allowed modules re-export these, so zipfile.os or random._os reach them without an import
+FORBIDDEN_ATTRIBUTES = frozenset(
+    {
+        "os",
+        "sys",
+        "subprocess",
+        "shutil",
+        "pathlib",
+        "importlib",
+        "ctypes",
+        "socket",
+        "urllib",
+        "requests",
+        "httpx",
+        "aiohttp",
+        "builtins",
+        "pickle",
+        "marshal",
+        "threading",
+        "multiprocessing",
+        "signal",
+        "read_pickle",
+        "gi_frame",
+        "gi_code",
+        "f_globals",
+        "f_locals",
+        "f_builtins",
+        "f_back",
+        "tb_frame",
+        "cr_frame",
+        "ag_frame",
+    }
+)
+_ALLOWED_PRIVATE_ATTRIBUTES = frozenset({"_asdict", "_replace", "_fields", "_make"})
+_FORMAT_METHODS = frozenset({"format", "format_map", "vformat", "get_field"})
+_SAFE_GETATTR_NAMES = _ALLOWED_PRIVATE_ATTRIBUTES | {"__name__", "__doc__"}
+_FORMAT_WALK = re.compile(r"\{[^{}:!]*[.\[]")
+
+
+def _attribute_problem(name: str) -> str | None:
+    if name in FORBIDDEN_ATTRIBUTES:
+        return f"Access to attribute '{name}' is not allowed"
+    if (
+        name.startswith("_")
+        and not (name.startswith("__") and name.endswith("__"))
+        and name not in _ALLOWED_PRIVATE_ATTRIBUTES
+    ):
+        return f"Access to private attribute '{name}' is not allowed"
+    return None
 
 
 class _CodeValidator(ast.NodeVisitor):
@@ -205,6 +257,26 @@ class _CodeValidator(ast.NodeVisitor):
             self.imports.append(mod)
             if mod not in self._allowed:
                 self.errors.append(f"Import not allowed: {node.module}")
+        for alias in node.names:
+            problem = _attribute_problem(alias.name)
+            if problem:
+                self.errors.append(problem)
+        self.generic_visit(node)
+
+    def visit_Call(self, node: ast.Call) -> None:
+        func = node.func
+        if isinstance(func, ast.Attribute) and func.attr in _FORMAT_METHODS:
+            literal = isinstance(func.value, ast.Constant) and isinstance(
+                func.value.value, str
+            )
+            if func.attr != "format" or not literal:
+                self.errors.append(
+                    "str.format is only allowed on a literal string, use an f-string"
+                )
+            elif _FORMAT_WALK.search(func.value.value):
+                self.errors.append(
+                    "str.format fields cannot use dots or indexes, use an f-string"
+                )
         self.generic_visit(node)
 
     def visit_Name(self, node: ast.Name) -> None:
@@ -213,6 +285,10 @@ class _CodeValidator(ast.NodeVisitor):
         self.generic_visit(node)
 
     def visit_Attribute(self, node: ast.Attribute) -> None:
+        owner = node.value.id if isinstance(node.value, ast.Name) else ""
+        problem = None if owner in ("self", "cls") else _attribute_problem(node.attr)
+        if problem:
+            self.errors.append(problem)
         if node.attr.startswith("__") and node.attr.endswith("__"):
             safe_dunders = (
                 "__init__",
@@ -237,7 +313,6 @@ class _CodeValidator(ast.NodeVisitor):
                 "__call__",
                 "__name__",
                 "__class__",
-                "__dict__",
                 "__doc__",
                 "__module__",
                 "__add__",
@@ -267,11 +342,28 @@ def _validate_code(
 
 
 class CodeExecutorTool(BaseTool):
+    config_fields = (
+        ConfigField(
+            "CODE_EXECUTOR_SANDBOX_IMAGE",
+            label="Container image for code runs",
+            kind="string",
+            group="Code execution",
+            description="Runs code_executor in a sandboxed job when the sandbox is on and this image is allowed. It needs Python and the data libraries. Empty means a local process.",
+        ),
+        ConfigField(
+            "SANDBOX_MEMORY_MB",
+            label="Memory limit in MB",
+            kind="int",
+            group="Code execution",
+            description="Limit for a code run or a model load. A process honours it where the operating system allows.",
+            default="2048",
+        ),
+    )
     name = "code_executor"
     risk_tier = "medium"
     effect = READ_ONLY
     description = (
-        "Execute Python code safely in a sandboxed environment. Supports complex data "
+        "Execute Python code in a separate process with no secrets, resource limits and no network. Supports complex data "
         "transformations, statistical computations, file generation (Excel, PDF, charts, "
         "PowerPoint), image processing, and algorithmic operations. "
         "Core libraries always available: pandas, numpy, openpyxl, json, csv, re, math, "
@@ -354,189 +446,37 @@ class CodeExecutorTool(BaseTool):
                 is_error=True,
             )
 
-        stdout_capture = io.StringIO()
-        result_value = None
-
-        safe_globals: dict[str, Any] = {"__builtins__": {}}
-        for mod_name in session_allowed:
-            try:
-                safe_globals[mod_name] = __import__(mod_name)
-            except ImportError:
-                pass
-
-        def _safe_import(name: str, *args: Any, **kwargs: Any) -> Any:
-            top = name.split(".")[0]
-            if top not in session_allowed:
-                raise ImportError(
-                    f"Import not allowed: {name}. Use extra_modules to request it."
-                )
-            return __import__(name, *args, **kwargs)
-
-        # Sandboxed file I/O — only allows writing inside EXPORT_DIR
-        os.makedirs(EXPORT_DIR, exist_ok=True)
-        _export_dir_resolved = os.path.realpath(EXPORT_DIR)
-
-        def _safe_open(filepath: str, mode: str = "r", **kwargs: Any) -> Any:
-            resolved = os.path.realpath(
-                os.path.join(_export_dir_resolved, os.path.basename(filepath))
-            )
-            if not resolved.startswith(_export_dir_resolved):
-                raise PermissionError(
-                    "File access restricted to export directory. Use just a filename, e.g. open('output.xlsx', 'wb')"
-                )
-            return (
-                __builtins__["open"](resolved, mode, **kwargs)
-                if isinstance(__builtins__, dict)
-                else open(resolved, mode, **kwargs)
-            )
-
-        def _save_export(filename: str, data: bytes | str) -> str:
-            """Convenience: save binary or text data to the export directory. Returns the full path."""
-            resolved = os.path.join(_export_dir_resolved, os.path.basename(filename))
-            mode = "wb" if isinstance(data, (bytes, bytearray)) else "w"
-            with open(resolved, mode) as f:
-                f.write(data)
-            return resolved
-
-        safe_builtins = {
-            "__import__": _safe_import,
-            "print": lambda *args, **kwargs: print(
-                *args, file=stdout_capture, **kwargs
-            ),
-            "open": _safe_open,
-            "save_export": _save_export,
-            "len": len,
-            "range": range,
-            "enumerate": enumerate,
-            "zip": zip,
-            "map": map,
-            "filter": filter,
-            "sorted": sorted,
-            "reversed": reversed,
-            "list": list,
-            "dict": dict,
-            "set": set,
-            "tuple": tuple,
-            "int": int,
-            "float": float,
-            "str": str,
-            "bool": bool,
-            "abs": abs,
-            "min": min,
-            "max": max,
-            "sum": sum,
-            "round": round,
-            "any": any,
-            "all": all,
-            "isinstance": isinstance,
-            "type": type,
-            "hasattr": hasattr,
-            "repr": repr,
-            "format": format,
-            "chr": chr,
-            "ord": ord,
-            "hex": hex,
-            "bin": bin,
-            "oct": oct,
-            "pow": pow,
-            "divmod": divmod,
-            "complex": complex,
-            "bytes": bytes,
-            "bytearray": bytearray,
-            "memoryview": memoryview,
-            "frozenset": frozenset,
-            "slice": slice,
-            "iter": iter,
-            "next": next,
-            "id": id,
-            "hash": hash,
-            "callable": callable,
-            "property": property,
-            "staticmethod": staticmethod,
-            "classmethod": classmethod,
-            "super": super,
-            "object": object,
-            "ValueError": ValueError,
-            "TypeError": TypeError,
-            "KeyError": KeyError,
-            "IndexError": IndexError,
-            "RuntimeError": RuntimeError,
-            "StopIteration": StopIteration,
-            "Exception": Exception,
-            "getattr": getattr,
-            "True": True,
-            "False": False,
-            "None": None,
-            "NotImplementedError": NotImplementedError,
-            "AttributeError": AttributeError,
-            "ImportError": ImportError,
-            "FileNotFoundError": FileNotFoundError,
-            "PermissionError": PermissionError,
-            "OSError": OSError,
-            "IOError": IOError,
-            "ZeroDivisionError": ZeroDivisionError,
-            "OverflowError": OverflowError,
-            "ArithmeticError": ArithmeticError,
-        }
-        safe_globals["__builtins__"] = safe_builtins
-        safe_globals.update(variables)
-
-        import threading
-
-        exec_exception: list[Exception] = []
-
-        def _run_code() -> None:
-            nonlocal result_value
-            try:
-                tree = ast.parse(code)
-                last_expr = None
-                if tree.body and isinstance(tree.body[-1], ast.Expr):
-                    last_expr = tree.body.pop()
-                    exec(
-                        compile(
-                            ast.Module(body=tree.body, type_ignores=[]),
-                            "<sandbox>",
-                            "exec",
-                        ),
-                        safe_globals,
-                    )
-                    result_value = eval(
-                        compile(
-                            ast.Expression(body=last_expr.value), "<sandbox>", "eval"
-                        ),
-                        safe_globals,
-                    )
-                else:
-                    exec(compile(tree, "<sandbox>", "exec"), safe_globals)
-                    # code that ends with result = {...} instead of printing it
-                    if "result" in safe_globals and "result" not in variables:
-                        result_value = safe_globals["result"]
-            except Exception as e:
-                exec_exception.append(e)
-
-        thread = threading.Thread(target=_run_code, daemon=True)
-        thread.start()
-        thread.join(timeout=MAX_EXECUTION_TIME)
-
-        if thread.is_alive():
+        tenant = current_tenant(self)
+        export_dir = export_dir_for(tenant)
+        os.makedirs(export_dir, exist_ok=True)
+        request = code_request(
+            code,
+            variables,
+            sorted(session_allowed),
+            export_dir,
+            tenant_file_roots(tenant),
+            MAX_EXECUTION_TIME,
+        )
+        isolation = "process"
+        try:
+            reply = await self._run_in_job(request, tenant, export_dir)
+            if reply is not None:
+                isolation = "job"
+            else:
+                reply = await asyncio.to_thread(run_code, request)
+        except ImportError as e:
             return ToolResult(
-                content=f"Execution timed out after {MAX_EXECUTION_TIME} seconds",
-                is_error=True,
+                content=f"Execution error: ImportError: {e}", is_error=True
             )
+        except SandboxError as e:
+            if str(e).startswith("Stopped after"):
+                return ToolResult(
+                    content=f"Execution timed out after {MAX_EXECUTION_TIME} seconds",
+                    is_error=True,
+                )
+            return ToolResult(content=f"Execution error: {e}", is_error=True)
 
-        if exec_exception:
-            e = exec_exception[0]
-            tb = traceback.format_exception(type(e), e, e.__traceback__)
-            lines = "".join(tb).split("\n")
-            relevant = [
-                ln for ln in lines if not ln.startswith("  File") or "<sandbox>" in ln
-            ]
-            return ToolResult(
-                content=f"Execution error: {type(e).__name__}: {e}\n\n{''.join(relevant[-5:])}",
-                is_error=True,
-            )
-
-        output = stdout_capture.getvalue()
+        output = reply.get("stdout") or ""
         if len(output) > MAX_OUTPUT_SIZE:
             output = (
                 output[:MAX_OUTPUT_SIZE]
@@ -546,11 +486,8 @@ class CodeExecutorTool(BaseTool):
         parts = []
         if output:
             parts.append(output.rstrip())
-        if result_value is not None:
-            try:
-                val_str = json.dumps(result_value, indent=2, default=str)
-            except (TypeError, ValueError):
-                val_str = repr(result_value)
+        val_str = reply.get("result")
+        if val_str is not None:
             # alone it is the step's output, so the next step can read it as JSON
             parts.append(f"\nResult: {val_str}" if output else val_str)
 
@@ -560,9 +497,56 @@ class CodeExecutorTool(BaseTool):
             content=content,
             metadata={
                 "has_output": bool(output),
-                "has_result": result_value is not None,
+                "has_result": val_str is not None,
+                "isolation": isolation,
+                "network_namespace": bool(reply.get("network_namespace")),
             },
         )
+
+    async def _run_in_job(
+        self, request: dict[str, Any], tenant: str, export_dir: str
+    ) -> dict[str, Any] | None:
+        image = str(self.cfg("CODE_EXECUTOR_SANDBOX_IMAGE") or "").strip()
+        if not image:
+            return None
+        from engine import process_sandbox
+        from engine.tools.sandboxed_job import MAX_FILES_BYTES, SandboxedJobTool
+
+        job = SandboxedJobTool(tenant_id=tenant)
+        settings = await job._resolve_settings()
+        if not settings["enabled"] or image not in settings["allowed_images"]:
+            return None
+        in_container = {**request, "export_dir": "/tmp/exports", "read_roots": []}
+        with open(process_sandbox.__file__, "rb") as f:
+            source = f.read()
+        body = json.dumps(in_container, default=str).encode()
+        if len(source) + len(body) > MAX_FILES_BYTES:
+            return None
+        result = await job.execute(
+            {
+                "image": image,
+                "command": "python -I /in/sandbox.py /in/request.json",
+                "timeout_seconds": MAX_EXECUTION_TIME + 30,
+                "memory_mb": int(self.cfg("SANDBOX_MEMORY_MB") or 2048),
+                "network": False,
+                "files_b64": {
+                    "sandbox.py": base64.b64encode(source).decode(),
+                    "request.json": base64.b64encode(body).decode(),
+                },
+            }
+        )
+        meta = result.metadata or {}
+        raw = meta.get("logs") or meta.get("stdout") or ""
+        if not raw.strip():
+            logger.warning("code_executor job gave no output, running as a process")
+            return None
+        reply = process_sandbox.parse_reply(raw)
+        for item in reply.pop("exports", []):
+            with open(
+                os.path.join(export_dir, os.path.basename(item["name"])), "wb"
+            ) as f:
+                f.write(base64.b64decode(item["b64"]))
+        return reply
 
     async def _validate_extra_modules(
         self, modules: list[str], code: str

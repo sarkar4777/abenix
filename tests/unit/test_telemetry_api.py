@@ -823,13 +823,16 @@ def test_subjects_are_taken_at_the_top_or_inside_config(fake, monkeypatch, shape
     assert pipeline.connection_row(c)["config"]["subjects"] == ["kept"]
 
 
-def test_rules_mode_is_a_choice_setting():
+def test_rules_mode_is_a_choice_setting(monkeypatch):
+    monkeypatch.setenv("ABENIX_PLATFORM_OPERATORS", "ops@example.com")
     from app.core.platform_settings import DEFAULTS
     from app.routers import admin_settings as A
 
     meta = DEFAULTS["telemetry.rules_mode"]
     assert meta["kind"] == "choice" and meta["value"] in meta["choices"]
-    user = SimpleNamespace(role="admin", is_superuser=True, id=uuid.uuid4())
+    user = SimpleNamespace(
+        role="admin", is_superuser=True, id=uuid.uuid4(), email="ops@example.com"
+    )
 
     async def go():
         res = await A.update_setting(

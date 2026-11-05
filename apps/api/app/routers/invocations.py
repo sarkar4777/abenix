@@ -16,6 +16,7 @@ from app.core.responses import error, success
 from models.code_asset_invocation import CodeAssetInvocation
 from models.ml_model_invocation import MLModelInvocation
 from models.kb_query_invocation import KBQueryInvocation
+from models.knowledge_base import KnowledgeBase
 from models.code_asset import CodeAsset
 from models.ml_model import MLModel
 from models.user import User
@@ -480,6 +481,16 @@ async def stream_kb_query_invocations(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> StreamingResponse:
+    collection_tenant = (
+        await db.execute(
+            select(KnowledgeBase.tenant_id).where(KnowledgeBase.id == collection_id)
+        )
+    ).scalar_one_or_none()
+    if collection_tenant != user.tenant_id:
+        return StreamingResponse(
+            iter([b'event: error\ndata: {"reason":"not_found"}\n\n']),
+            media_type="text/event-stream",
+        )
     # same session the auth lookup used, release it before streaming
     await db.close()
     return StreamingResponse(

@@ -147,6 +147,8 @@ spec:
             - {name: LOAD_RATE, value: {{ .Values.load.rate | quote }}}
             - {name: LOAD_PARTITIONS, value: {{ .Values.load.partitions | quote }}}
             - {name: LOAD_DEVICES, value: {{ .Values.load.devices | quote }}}
+            - {name: LOAD_MIN_RATE, value: {{ .Values.load.minRate | quote }}}
+            - {name: LOAD_MAX_FAILED, value: {{ .Values.load.maxFailed | quote }}}
           resources:
             requests: {cpu: 100m, memory: 64Mi}
             limits: {cpu: "1", memory: 256Mi}

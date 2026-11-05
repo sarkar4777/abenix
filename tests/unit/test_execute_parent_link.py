@@ -17,6 +17,7 @@ import app.services.agent_share  # noqa: E402,F401
 import engine.queue_backend  # noqa: E402,F401
 from app.schemas.agents import ExecuteRequest
 from models.agent import AgentStatus
+from models.execution import ExecutionStatus
 from models.user import UserRole
 
 pytestmark = pytest.mark.asyncio
@@ -185,3 +186,30 @@ async def test_top_level_run_has_no_parent():
     payload = backend.submit.call_args.args[1]
     assert payload["delegation_depth"] == 0
     assert payload["parent_execution_id"] is None
+
+
+async def test_run_to_a_pool_that_is_not_deployed_fails_at_once_and_is_never_queued():
+    user, agent = _user(), _agent()
+    agent.runtime_pool = "gpu"
+    db = FakeSession(agent)
+    with patch(
+        "app.core.runtime_pools.pool_problem",
+        AsyncMock(return_value="Runtime pool 'gpu' is not deployed on this cluster"),
+    ):
+        resp, backend = await _execute(user, agent, db, _raw())
+    assert resp.status_code == 503
+    assert b"POOL_NOT_DEPLOYED" in resp.body
+    backend.submit.assert_not_called()
+    execution = db.added[0]
+    assert execution.status == ExecutionStatus.FAILED
+    assert execution.failure_code == "POOL_NOT_DEPLOYED"
+
+
+async def test_a_dedicated_agent_is_queued_on_its_own_pool():
+    user, agent = _user(), _agent()
+    agent.dedicated_mode = True
+    db = FakeSession(agent)
+    with patch("app.core.runtime_pools.pool_problem", AsyncMock(return_value=None)):
+        resp, backend = await _execute(user, agent, db, _raw())
+    assert resp.status_code == 200, resp.body
+    assert backend.submit.call_args.args[0] == f"dedicated-{agent.id}"

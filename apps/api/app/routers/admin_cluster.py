@@ -6,13 +6,14 @@ import os
 import time
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import cluster_view as cv
 from app.core.audit import log_action
 from app.core.deps import get_current_user, get_db
+from app.core.platform_features import ensure_platform_operator
 from app.core.responses import error, success
 from models.user import User
 
@@ -22,13 +23,6 @@ router = APIRouter(prefix="/api/admin/cluster", tags=["admin-cluster"])
 
 _NAMESPACE = os.environ.get("KUBERNETES_NAMESPACE", "abenix")
 _GRAFANA_URL_ENV = os.environ.get("GRAFANA_URL", "")
-
-
-def _ensure_admin(user: User) -> None:
-    role = getattr(user, "role", None)
-    r = role.value if hasattr(role, "value") else str(role or "")
-    if not (getattr(user, "is_admin", False) or r.lower() == "admin"):
-        raise HTTPException(status_code=403, detail="admin-only")
 
 
 def _parse_quantity(q: str | None) -> float:
@@ -83,7 +77,7 @@ async def cluster_summary(
     Queries the Kubernetes API directly (works the same on minikube and AKS
     without requiring kube-state-metrics + node-exporter).
     """
-    _ensure_admin(user)
+    await ensure_platform_operator(db, user)
 
     nodes: list[dict[str, Any]] = []
     pods: dict[str, int] = {}
@@ -182,9 +176,12 @@ async def cluster_summary(
 
 
 @router.get("/overview")
-async def cluster_overview(user: User = Depends(get_current_user)):
+async def cluster_overview(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     """Nodes, services, scaling, warnings and a health verdict, cached briefly."""
-    _ensure_admin(user)
+    await ensure_platform_operator(db, user)
     data, stamp = await cv.CACHE.get("overview", cv.OVERVIEW_TTL, cv.build_overview)
     out = dict(data)
     out["grafana_url"] = _GRAFANA_URL_ENV or out.pop("grafana_hint", "")
@@ -198,7 +195,7 @@ async def cluster_database(
     db: AsyncSession = Depends(get_db),
 ):
     """Database size and the largest tables, cached for a minute."""
-    _ensure_admin(user)
+    await ensure_platform_operator(db, user)
 
     async def produce() -> dict[str, Any]:
         info: dict[str, Any] = {}
@@ -286,9 +283,13 @@ def _outside():
 
 
 @router.get("/pods/{name}")
-async def pod_detail(name: str, user: User = Depends(get_current_user)):
+async def pod_detail(
+    name: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     """One pod: containers, conditions, last termination and its events."""
-    _ensure_admin(user)
+    await ensure_platform_operator(db, user)
     if not cv.valid_pod_name(name):
         return error("That is not a valid pod name.", 400, "BAD_POD_NAME")
     if not await asyncio.to_thread(cv.K8S.load):
@@ -316,7 +317,7 @@ async def pod_logs(
     db: AsyncSession = Depends(get_db),
 ):
     """Last N log lines of a pod container. Admin only, audited."""
-    _ensure_admin(user)
+    await ensure_platform_operator(db, user)
     if not cv.valid_pod_name(name) or (container and not cv.valid_pod_name(container)):
         return error("That is not a valid pod or container name.", 400, "BAD_POD_NAME")
     if not await asyncio.to_thread(cv.K8S.load):

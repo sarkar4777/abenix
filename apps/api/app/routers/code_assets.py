@@ -281,8 +281,15 @@ async def _clone_git(url: str, ref: str | None) -> Path:
         # Zip the cloned tree
         zip_path = _store_dir() / f"{asset_id}.zip"
         with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+            repo_root = (tmp / "repo").resolve()
             for p in (tmp / "repo").rglob("*"):
-                if p.is_file() and ".git" not in p.parts:
+                # a repo can hold a symlink to any file on this server
+                if (
+                    p.is_file()
+                    and not p.is_symlink()
+                    and ".git" not in p.parts
+                    and p.resolve().is_relative_to(repo_root)
+                ):
                     zf.write(p, arcname=str(p.relative_to(tmp / "repo")))
         return zip_path
     finally:

@@ -12,6 +12,7 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, get_db
+from app.core.platform_features import ensure_platform_operator
 from app.core.responses import error, success
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "packages" / "db"))
@@ -73,7 +74,7 @@ async def force_status(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
-    _ensure_admin(user)
+    await ensure_platform_operator(db, user)
     model = (body.get("model") or "").strip()
     status = (body.get("status") or "").strip().lower()
     if not model or status not in {"available", "unavailable", "degraded"}:
@@ -136,7 +137,7 @@ async def ping_one_now(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
-    _ensure_admin(user)
+    await ensure_platform_operator(db, user)
     provider = (
         await db.execute(
             text(

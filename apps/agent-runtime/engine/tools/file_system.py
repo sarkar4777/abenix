@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from engine.tenant_access import path_refusal
 from engine.tools.base import READ_ONLY, BaseTool, ToolResult
 
 
@@ -58,6 +59,9 @@ class FileSystemTool(BaseTool):
             return ToolResult(content="Error: path is required", is_error=True)
 
         path = Path(path_str)
+        refused = await path_refusal(path)
+        if refused:
+            return ToolResult(content=refused, is_error=True)
 
         if operation == "list_recursive":
             return await self._list_recursive(path, max_files)

@@ -200,6 +200,24 @@ CATALOG: tuple[Capability, ...] = (
         "Telemetry",
         "Send a command to a machine, such as a safety hold or a new task. Every command is logged.",
     ),
+    Capability(
+        "tools.execute",
+        "Run tools directly",
+        "Tools",
+        "Call a tool or a tool preset through the API, outside any agent.",
+    ),
+    Capability(
+        "playground.execute",
+        "Run playground code",
+        "Tools",
+        "Run code from the SDK and load playgrounds. It runs inside the API process.",
+    ),
+    Capability(
+        "ml_models.upload_pickle",
+        "Upload pickle format models",
+        "Tools",
+        "Upload joblib, pickle and PyTorch model files. ONNX files need no permission.",
+    ),
 )
 KEYS = frozenset(c.key for c in CATALOG)
 
@@ -235,6 +253,9 @@ ROLE_DEFAULTS: dict[str, frozenset[str]] = {
             "improvements.propose",
             "feedback.give",
             "telemetry.view",
+            "tools.execute",
+            "playground.execute",
+            "ml_models.upload_pickle",
         }
     ),
     "admin": frozenset({"*"}),

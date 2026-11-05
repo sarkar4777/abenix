@@ -435,6 +435,7 @@ async def search_knowledge(
                     for r in response.results
                 ],
                 "mode_used": response.mode_used,
+                "degraded": response.degraded or None,
                 "vector_count": response.vector_results_count,
                 "graph_count": response.graph_results_count,
                 "entities_found": response.entities_found,

@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import hashlib
 import logging
-import os
 import re
 import time
 from dataclasses import dataclass, field
 from typing import Any
 
 import httpx
+
+from engine import credentials
 
 logger = logging.getLogger(__name__)
 
@@ -79,7 +80,8 @@ def _pick_action(
 async def _call_openai(
     content: str | list[str], model: str, timeout_s: float = 10.0
 ) -> dict[str, Any]:
-    api_key = os.environ.get("OPENAI_API_KEY", "").strip()
+    await credentials.ensure_fresh()
+    api_key = (credentials.get("OPENAI_API_KEY") or "").strip()
     if not api_key:
         raise RuntimeError("OPENAI_API_KEY not configured")
     clipped: Any

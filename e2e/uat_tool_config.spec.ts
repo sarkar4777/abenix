@@ -77,8 +77,10 @@ test.describe.serial('tool configuration', () => {
       for (const t of k.tools) expect(slugs.has(t), `${k.key} names ${t}`).toBeTruthy();
     }
     // pick an optional secret that is currently unset, so saving it changes the tool's badge
-    const candidate = d.groups.flatMap((g: any) => g.keys.map((k: any) => ({ ...k, group: g.group })))
-      .find((k: any) => k.kind === 'secret' && !k.is_set && k.tools.length === 1 && !k.required);
+    const allKeys = d.groups.flatMap((g: any) => g.keys.map((k: any) => ({ ...k, group: g.group })));
+    // one optional key set is enough for "configured", so the tool must have none set yet
+    const candidate = allKeys.find((k: any) => k.kind === 'secret' && !k.is_set && k.tools.length === 1 && !k.required
+      && !allKeys.some((o: any) => o.is_set && o.tools.includes(k.tools[0])));
     expect(candidate, 'an unset optional secret to exercise').toBeTruthy();
     key = candidate.key; tool = candidate.tools[0]; group = candidate.group;
     // /api/tools carries the same declaration per tool

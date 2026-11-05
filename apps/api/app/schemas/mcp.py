@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class ConnectMCPRequest(BaseModel):
@@ -58,5 +58,17 @@ class GetPromptRequest(BaseModel):
 
 
 class RegistryInstallRequest(BaseModel):
-    registry_id: str
-    server_name: str = Field(min_length=1, max_length=255)
+    registry_id: str | None = None
+    registry_entry_id: str | None = None
+    id: str | None = None
+    server_name: str | None = Field(default=None, min_length=1, max_length=255)
+
+    @model_validator(mode="after")
+    def _names_an_entry(self) -> "RegistryInstallRequest":
+        if not self.entry_ref:
+            raise ValueError("registry_id or registry_entry_id is required")
+        return self
+
+    @property
+    def entry_ref(self) -> str:
+        return (self.registry_id or self.registry_entry_id or self.id or "").strip()

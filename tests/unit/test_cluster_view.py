@@ -515,13 +515,22 @@ def test_pod_name_validation():
 # ---- routes ----
 
 
+@pytest.fixture(autouse=True)
+def _platform_operator(monkeypatch):
+    monkeypatch.setenv("ABENIX_PLATFORM_OPERATORS", "ops@example.com")
+
+
 def _client(role=UserRole.ADMIN):
     from app.routers import admin_cluster
 
     app = FastAPI()
     app.include_router(admin_cluster.router)
     user = SimpleNamespace(
-        id=uuid.uuid4(), tenant_id=uuid.uuid4(), role=role, is_admin=False
+        id=uuid.uuid4(),
+        tenant_id=uuid.uuid4(),
+        role=role,
+        is_admin=False,
+        email="ops@example.com",
     )
 
     async def _user():

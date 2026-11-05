@@ -25,7 +25,9 @@ TRIGGER_CLAIM_BATCH = 100
 # pg advisory lock keys (int4, ASCII sentinels) for the singleton jobs.
 QUOTA_LOCK_KEY = 0x51554F54  # "QUOT"
 ARCHIVE_LOCK_KEY = 0x41524348  # "ARCH"
+RETENTION_LOCK_KEY = 0x52455454  # "RETT"
 SWEEP_LOCK_KEY = 0x5354414C  # "STAL"
+POOLS_LOCK_KEY = 0x504F4F4C  # "POOL"
 DRIFT_LOCK_KEY = 0x44524654  # "DRFT"
 ESCALATE_LOCK_KEY = 0x45534341  # "ESCA"
 ACTION_LOCK_KEY = 0x4143544E  # "ACTN"
@@ -274,6 +276,16 @@ def worker_stopped(row: Any, gone_before: datetime) -> bool:
     return bool(runner) and lease is not None and lease < gone_before
 
 
+def queued_pool(row: Any, remote: bool) -> str | None:
+    """The pool a run was sent to when no worker ever claimed it, None for any other run."""
+    runner, attempts, pool, dedicated = row[5], row[7], row[8], row[9]
+    if not remote or runner or attempts or (pool == "inline" and not dedicated):
+        return None
+    if dedicated:
+        return f"dedicated-{row[3]}"
+    return pool or "default"
+
+
 async def sweep_stale_executions() -> dict[str, int] | None:
     """Mark executions still in RUNNING past the max allowed window as FAILED."""
     import os
@@ -283,8 +295,11 @@ async def sweep_stale_executions() -> dict[str, int] | None:
     sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "packages" / "db"))
 
     from sqlalchemy import and_, func, or_, select, update
+    from app.core.config import settings
     from app.core.deps import async_session
+    from app.core.runtime_pools import QUEUE_NOT_PICKED_UP, not_picked_up_message
 
+    from models.agent import Agent
     from models.execution import Execution, ExecutionStatus
 
     max_minutes = int(os.environ.get("STALE_EXECUTION_MAX_MINUTES", "10"))
@@ -312,7 +327,12 @@ async def sweep_stale_executions() -> dict[str, int] | None:
                         Execution.created_at,
                         Execution.runner_id,
                         Execution.lease_expires_at,
-                    ).where(
+                        Execution.delivery_attempts,
+                        Agent.runtime_pool,
+                        Agent.dedicated_mode,
+                    )
+                    .outerjoin(Agent, Agent.id == Execution.agent_id)
+                    .where(
                         Execution.status == ExecutionStatus.RUNNING,
                         or_(
                             and_(
@@ -352,6 +372,12 @@ async def sweep_stale_executions() -> dict[str, int] | None:
                     for row in found
                     if str(row[0]) not in waiting and worker_stopped(row, gone_before)
                 }
+                remote = bool(settings.scaling_exec_remote)
+                unclaimed = {
+                    row[0]: queued_pool(row, remote)
+                    for row in found
+                    if str(row[0]) not in waiting and queued_pool(row, remote)
+                }
                 ids = [row[0] for row in stale]
                 logger.info(
                     "Sweeping %d stale executions (older than %d min)",
@@ -363,7 +389,10 @@ async def sweep_stale_executions() -> dict[str, int] | None:
                     from app.core.telemetry import stale_sweeps_total
 
                     stale_sweeps_total.labels(reason="owning_pod_crashed").inc(
-                        len(ids) - len(stopped)
+                        len(ids) - len(stopped) - len(unclaimed)
+                    )
+                    stale_sweeps_total.labels(reason="not_picked_up").inc(
+                        len(unclaimed)
                     )
                     stale_sweeps_total.labels(reason="worker_stopped").inc(len(stopped))
                 except Exception:
@@ -384,10 +413,27 @@ async def sweep_stale_executions() -> dict[str, int] | None:
                             completed_at=datetime.now(timezone.utc),
                         )
                     )
+                for ex_id, pool in unclaimed.items():
+                    await db.execute(
+                        update(Execution)
+                        .where(
+                            Execution.id == ex_id,
+                            Execution.status == ExecutionStatus.RUNNING,
+                            Execution.delivery_attempts == 0,
+                        )
+                        .values(
+                            status=ExecutionStatus.FAILED,
+                            failure_code=QUEUE_NOT_PICKED_UP,
+                            error_message=not_picked_up_message(pool, max_minutes),
+                            completed_at=datetime.now(timezone.utc),
+                        )
+                    )
                 await db.execute(
                     update(Execution)
                     .where(
-                        Execution.id.in_([i for i in ids if i not in stopped]),
+                        Execution.id.in_(
+                            [i for i in ids if i not in stopped and i not in unclaimed]
+                        ),
                         Execution.status == ExecutionStatus.RUNNING,
                         or_(
                             Execution.lease_expires_at.is_(None),
@@ -407,6 +453,19 @@ async def sweep_stale_executions() -> dict[str, int] | None:
                 )
                 await db.commit()
 
+        # a client waiting on the stream or on wait=true would otherwise never hear
+        if unclaimed:
+            from app.core.execution_bus import publish_event
+
+            for ex_id, pool in unclaimed.items():
+                await publish_event(
+                    str(ex_id),
+                    {
+                        "event": "error",
+                        "error": not_picked_up_message(pool, max_minutes),
+                    },
+                )
+
         # Notifications run after the lock and the sweep transaction so a
         # notification glitch cannot roll back the sweep.
         try:
@@ -420,6 +479,18 @@ async def sweep_stale_executions() -> dict[str, int] | None:
                     if not uid:
                         continue
                     gone = ex_id in stopped
+                    queued = ex_id in unclaimed
+                    title = "Agent run abandoned"
+                    text = (
+                        "An agent run was still marked RUNNING after "
+                        f"{max_minutes} minutes and has been marked FAILED. "
+                        "The underlying process likely crashed."
+                    )
+                    if gone:
+                        title, text = "Agent run stopped", WORKER_STOPPED_MESSAGE
+                    elif queued:
+                        title = "Agent run never started"
+                        text = not_picked_up_message(unclaimed[ex_id], max_minutes)
                     if not await user_wants_notification(
                         db, uid, NotificationType.EXECUTION_FAILED
                     ):
@@ -429,19 +500,17 @@ async def sweep_stale_executions() -> dict[str, int] | None:
                         tenant_id=tid,
                         user_id=uid,
                         type=NotificationType.EXECUTION_FAILED,
-                        title="Agent run stopped" if gone else "Agent run abandoned",
-                        message=(
-                            WORKER_STOPPED_MESSAGE
-                            if gone
-                            else "An agent run was still marked RUNNING after "
-                            f"{max_minutes} minutes and has been marked FAILED. "
-                            "The underlying process likely crashed."
-                        ),
+                        title=title,
+                        message=text,
                         link=f"/executions/{ex_id}",
                         metadata_={
                             "execution_id": str(ex_id),
                             "agent_id": str(agent_id) if agent_id else None,
-                            "reason": "worker_stopped" if gone else "stale_sweep",
+                            "reason": (
+                                "worker_stopped"
+                                if gone
+                                else "not_picked_up" if queued else "stale_sweep"
+                            ),
                             "age_minutes": max_minutes,
                         },
                     )
@@ -475,6 +544,20 @@ async def sweep_stale_executions() -> dict[str, int] | None:
         logger.error("sweep_stale_executions failed: %s", e, exc_info=True)
         return None
     return {"swept": len(stale)}
+
+
+async def reconcile_runtime_pools() -> dict[str, int] | None:
+    """Durables for deployed pools, and each dedicated agent's Deployment and ScaledObject."""
+    try:
+        async with advisory_lock(POOLS_LOCK_KEY) as held:
+            if not held:
+                return None
+            from app.core.runtime_pools import reconcile
+
+            return await reconcile()
+    except Exception as e:
+        logger.warning("reconcile_runtime_pools failed: %s", e)
+        return None
 
 
 async def reconcile_active_executions_gauge() -> dict[str, int] | None:
@@ -669,6 +752,16 @@ def start_scheduler() -> None:
     )
 
     scheduler.add_job(
+        _tracked("reconcile_runtime_pools", reconcile_runtime_pools),
+        trigger="interval",
+        seconds=30,
+        id="reconcile_runtime_pools",
+        name="Keep pool durables and dedicated agent pools in step",
+        replace_existing=True,
+        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=10),
+    )
+
+    scheduler.add_job(
         _tracked("eval_schedules", _run_eval_schedules),
         trigger="interval",
         seconds=60,
@@ -799,6 +892,16 @@ def start_scheduler() -> None:
         minute=0,
         id="nightly_archive",
         name="Nightly archive of recording tables",
+        replace_existing=True,
+    )
+
+    scheduler.add_job(
+        _tracked("tenant_retention", _tenant_retention),
+        trigger="cron",
+        hour=3,
+        minute=0,
+        id="tenant_retention",
+        name="Delete data past each tenant's retention settings",
         replace_existing=True,
     )
 
@@ -1006,9 +1109,23 @@ async def _nightly_archive() -> dict[str, int] | None:
                 return None
             runs = await run_all_archives(async_session)
         rows = sum(int(getattr(r, "rows_archived", 0) or 0) for r in runs or [])
-        return {"rows": rows, "runs": len(runs or [])}
+        return {"rows": rows, "runs": len(runs or [])} if rows else {"rows": 0}
     except Exception as e:
         logger.exception("nightly archive failed: %s", e)
+        return None
+
+
+async def _tenant_retention() -> dict[str, int] | None:
+    try:
+        from app.core.deps import async_session
+        from app.core.retention import enforce_all_tenants
+
+        async with advisory_lock(RETENTION_LOCK_KEY) as held:
+            if not held:
+                return None
+            return await enforce_all_tenants(async_session)
+    except Exception as e:
+        logger.exception("tenant retention failed: %s", e)
         return None
 
 

@@ -11,12 +11,13 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Body, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, get_db
+from app.core.platform_features import ensure_platform_operator
 from app.core.platform_settings import (
     DEFAULTS,
     get_int_setting,
@@ -60,8 +61,7 @@ async def set_builder_model(
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
     """Admin-only writer that mirrors PATCH /api/admin/settings/{key}."""
-    if not _is_admin(user):
-        raise HTTPException(status_code=403, detail="Admin role required")
+    await ensure_platform_operator(db, user)
 
     # Avoid an import cycle: pull AVAILABLE_MODELS at call time.
     from app.routers.admin_settings import AVAILABLE_MODELS  # type: ignore

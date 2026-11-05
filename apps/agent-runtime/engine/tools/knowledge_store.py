@@ -113,12 +113,19 @@ class KnowledgeStoreTool(BaseTool):
             chunks = self._chunk_text(content)
             results["chunks"] = len(chunks)
 
-            embeddings = await self._embed_chunks(chunks)
+            embeddings, note, backend = await self._embed_for_collection(kb_id, chunks)
+            if note:
+                results["warnings"] = [note]
             if embeddings:
-                stored = await self._store_vectors(
-                    kb_id, doc_id, title, chunks, embeddings, metadata
-                )
-                results["vector_indexed"] = True
+                if backend == "pgvector":
+                    stored = await self._store_vectors_pgvector(
+                        kb_id, doc_id, title, chunks, embeddings, metadata
+                    )
+                else:
+                    stored = await self._store_vectors(
+                        kb_id, doc_id, title, chunks, embeddings, metadata
+                    )
+                results["vector_indexed"] = stored > 0
                 results["vectors_stored"] = stored
                 logger.info(
                     "knowledge_store: indexed %d vectors for doc %s in kb %s",
@@ -127,9 +134,7 @@ class KnowledgeStoreTool(BaseTool):
                     kb_id,
                 )
             else:
-                results["vector_error"] = (
-                    "No embeddings generated (check OPENAI_API_KEY)"
-                )
+                results["vector_error"] = note
 
         except Exception as e:
             logger.warning("knowledge_store vector indexing failed: %s", e)
@@ -180,7 +185,7 @@ class KnowledgeStoreTool(BaseTool):
                 results["cognify_error"] = str(e)
 
         # Format output
-        status = "stored" if results["vector_indexed"] else "partial"
+        status = "stored" if results["vector_indexed"] else "not indexed"
         summary_parts = [f"Content '{title}' {status} in knowledge base {kb_id}."]
         summary_parts.append(f"Document ID: {doc_id}")
         summary_parts.append(
@@ -203,8 +208,12 @@ class KnowledgeStoreTool(BaseTool):
             else:
                 summary_parts.append(f"Knowledge graph: {results['cognify_status']}")
 
+        if results.get("warnings"):
+            summary_parts.extend(results["warnings"])
+
         return ToolResult(
             content="\n".join(summary_parts),
+            is_error=not results["vector_indexed"],
             metadata=results,
         )
 
@@ -223,30 +232,130 @@ class KnowledgeStoreTool(BaseTool):
             start += chunk_size - chunk_overlap
         return chunks or [text]
 
+    async def _embed_for_collection(
+        self, kb_id: str, chunks: list[str]
+    ) -> tuple[list[list[float]] | None, str | None, str]:
+        """(vectors, message for the caller, vector backend) under the worker's failure rule."""
+        from engine.knowledge import hybrid_search as hs
+
+        settings = await hs._kb_index_settings([kb_id])
+        backend, model = settings.get(kb_id, ("pinecone", None))
+        try:
+            vectors = await hs.embed_for_collection(chunks, model)
+        except Exception as exc:
+            logger.warning("knowledge_store embedding failed for %s: %s", kb_id, exc)
+            vectors, note = await self._after_provider_failure(kb_id, chunks, exc)
+            return vectors, note, backend
+        if not vectors:
+            return (
+                None,
+                "No embedding provider is configured, so nothing was indexed. Set "
+                "OPENAI_API_KEY, or ABENIX_LOCAL_EMBEDDINGS=1 for the local embedder.",
+                backend,
+            )
+        return vectors, None, backend
+
+    async def _after_provider_failure(
+        self, kb_id: str, chunks: list[str], exc: Exception
+    ) -> tuple[list[list[float]] | None, str]:
+        from local_embeddings import MODEL_ID, embed_many, is_forced_off
+
+        reason = str(exc)[:300]
+        if is_forced_off() or not await self._move_empty_to_local(kb_id, MODEL_ID):
+            return None, (
+                "The embedding provider failed and no vectors were stored, so this "
+                f"content cannot be searched. Provider said {reason}"
+            )
+        return embed_many(chunks), (
+            "The embedding provider failed, so this content was indexed with the "
+            "local hashing embedder, which matches words and not meaning. Fix the "
+            f"provider and re-embed the collection. Provider said {reason}"
+        )
+
     @staticmethod
-    async def _embed_chunks(chunks: list[str]) -> list[list[float]]:
-        """Embed chunks using OpenAI API."""
-        api_key = credentials.get("OPENAI_API_KEY")
-        if not api_key:
-            return []
+    async def _move_empty_to_local(kb_id: str, model: str) -> bool:
+        """True when the collection held no vectors and now records the local embedder."""
+        from sqlalchemy import text
+        from sqlalchemy.ext.asyncio import AsyncSession
+
+        from engine.db_pool import shared_engine
+        from engine.knowledge.hybrid_search import _async_db_url
 
         try:
-            from openai import OpenAI
-
-            client = OpenAI(api_key=api_key)
-            embeddings = []
-            batch_size = 100
-            for i in range(0, len(chunks), batch_size):
-                batch = chunks[i : i + batch_size]
-                response = client.embeddings.create(
-                    model="text-embedding-3-small",
-                    input=batch,
+            async with AsyncSession(shared_engine(_async_db_url())) as session:
+                moved = await session.execute(
+                    text(
+                        "UPDATE knowledge_collections "
+                        "SET embedding_model = :m, status = 'DEGRADED' "
+                        "WHERE id = CAST(:id AS uuid) AND NOT EXISTS ("
+                        "SELECT 1 FROM documents d WHERE d.kb_id = knowledge_collections.id "
+                        "AND d.status IN ('READY', 'DEGRADED') AND d.chunk_count > 0) "
+                        "AND NOT EXISTS (SELECT 1 FROM chunks c "
+                        "WHERE c.collection_id = knowledge_collections.id)"
+                    ),
+                    {"m": model, "id": kb_id},
                 )
-                embeddings.extend([d.embedding for d in response.data])
-            return embeddings
-        except Exception as e:
-            logger.warning("Embedding failed: %s", e)
-            return []
+                await session.commit()
+                return moved.rowcount > 0
+        except Exception as exc:
+            logger.warning("knowledge_store could not record the embedder %s", exc)
+            return False
+
+    @staticmethod
+    async def _store_vectors_pgvector(
+        kb_id: str,
+        doc_id: str,
+        title: str,
+        chunks: list[str],
+        embeddings: list[list[float]],
+        metadata: dict[str, Any] | None = None,
+    ) -> int:
+        import json
+
+        from sqlalchemy import text
+        from engine.db_pool import shared_engine
+
+        async with shared_engine(os.environ.get("DATABASE_URL", "")).begin() as conn:
+            await conn.execute(
+                text(
+                    "INSERT INTO documents (id, kb_id, filename, file_type, "
+                    "file_size, chunk_count, status, storage_url) VALUES "
+                    "(:id, :kb, :name, 'text', :size, :count, 'READY', :url)"
+                ),
+                {
+                    "id": doc_id,
+                    "kb": kb_id,
+                    "name": title[:500],
+                    "size": sum(len(c) for c in chunks),
+                    "count": len(chunks),
+                    "url": f"agent://knowledge_store/{doc_id}",
+                },
+            )
+            for i, (chunk, emb) in enumerate(zip(chunks, embeddings)):
+                await conn.execute(
+                    text(
+                        "INSERT INTO chunks (id, collection_id, document_id, "
+                        "chunk_index, content, metadata, embedding) VALUES (:id, "
+                        ":kb, :doc, :i, :content, CAST(:meta AS jsonb), "
+                        "CAST(:emb AS vector))"
+                    ),
+                    {
+                        "id": str(uuid.uuid4()),
+                        "kb": kb_id,
+                        "doc": doc_id,
+                        "i": i,
+                        "content": chunk,
+                        "meta": json.dumps(
+                            {
+                                "filename": title,
+                                "chunk_index": i,
+                                **(metadata or {}),
+                            }
+                        ),
+                        "emb": "[" + ",".join(f"{x:.7f}" for x in emb) + "]",
+                    },
+                )
+        return len(chunks)
 
     @staticmethod
     async def _store_vectors(
@@ -257,40 +366,36 @@ class KnowledgeStoreTool(BaseTool):
         embeddings: list[list[float]],
         metadata: dict[str, Any] | None = None,
     ) -> int:
-        """Store vectors in Pinecone."""
-        try:
-            from pinecone import Pinecone
+        """Store vectors in Pinecone, a failure reaches the caller."""
+        from pinecone import Pinecone
 
-            pc = Pinecone(api_key=credentials.get("PINECONE_API_KEY"))
-            index_name = credentials.get(
-                "PINECONE_INDEX_NAME", default="agentforge-knowledge"
-            )
-            index = pc.Index(index_name)
+        pc = Pinecone(api_key=credentials.get("PINECONE_API_KEY"))
+        index_name = credentials.get(
+            "PINECONE_INDEX_NAME", default="agentforge-knowledge"
+        )
+        index = pc.Index(index_name)
 
-            vectors = []
-            for i, (chunk, emb) in enumerate(zip(chunks, embeddings)):
-                vec_meta = {
-                    "kb_id": kb_id,
-                    "doc_id": doc_id,
-                    "filename": title,
-                    "chunk_index": i,
-                    "text": chunk[:1000],  # Pinecone metadata limit
+        vectors = []
+        for i, (chunk, emb) in enumerate(zip(chunks, embeddings)):
+            vec_meta = {
+                "kb_id": kb_id,
+                "doc_id": doc_id,
+                "filename": title,
+                "chunk_index": i,
+                "text": chunk[:1000],  # Pinecone metadata limit
+            }
+            if metadata:
+                vec_meta.update({k: str(v)[:200] for k, v in metadata.items()})
+            vectors.append(
+                {
+                    "id": f"{doc_id}_{i}",
+                    "values": emb,
+                    "metadata": vec_meta,
                 }
-                if metadata:
-                    vec_meta.update({k: str(v)[:200] for k, v in metadata.items()})
-                vectors.append(
-                    {
-                        "id": f"{doc_id}_{i}",
-                        "values": emb,
-                        "metadata": vec_meta,
-                    }
-                )
+            )
 
-            # Upsert in batches of 100
-            for i in range(0, len(vectors), 100):
-                index.upsert(vectors=vectors[i : i + 100], namespace=kb_id)
+        # Upsert in batches of 100
+        for i in range(0, len(vectors), 100):
+            index.upsert(vectors=vectors[i : i + 100], namespace=kb_id)
 
-            return len(vectors)
-        except Exception as e:
-            logger.warning("Pinecone storage failed: %s", e)
-            return 0
+        return len(vectors)

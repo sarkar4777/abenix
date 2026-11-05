@@ -54,22 +54,27 @@ def _model_names(model: str | None) -> tuple[str, str, dict]:
 
 
 async def _embed_query(query: str, model: str | None = None) -> list[float] | None:
-    """Embed a search query with the model the collection was indexed with.
+    """Embed a search query with the model the collection was indexed with."""
+    vectors = await embed_for_collection([query], model)
+    return vectors[0] if vectors else None
 
-    Azure OpenAI if configured, else direct OpenAI. Returns None when no
-    provider is configured so callers can fall back to other backends instead
-    of treating it as a hard error."""
+
+async def embed_for_collection(
+    texts: list[str], model: str | None = None
+) -> list[list[float]] | None:
+    """Embed with the collection's model, Azure OpenAI then OpenAI. None when no provider is configured."""
+    import asyncio
     import os
 
     # Same fallback the ingest path uses, and it has to be the same one:
     # vectors from two schemes share a space and nothing else.
     try:
         from local_embeddings import MODEL_ID as _LOCAL_ID
-        from local_embeddings import embed as _local_embed
+        from local_embeddings import embed_many as _local_embed_many
         from local_embeddings import is_enabled as _local_enabled
 
         if model == _LOCAL_ID or _local_enabled():
-            return _local_embed(query)
+            return await asyncio.to_thread(_local_embed_many, texts)
     except ImportError:
         pass
 
@@ -89,6 +94,15 @@ async def _embed_query(query: str, model: str | None = None) -> list[float] | No
     openai_key = os.environ.get("OPENAI_API_KEY", "")
     openai_model, deployment, extra = _model_names(model)
 
+    async def batched(client: Any, name: str) -> list[list[float]]:
+        out: list[list[float]] = []
+        for i in range(0, len(texts), 100):
+            resp = await client.embeddings.create(
+                input=texts[i : i + 100], model=name, **extra
+            )
+            out.extend(d.embedding for d in resp.data)
+        return out
+
     if azure_key and azure_endpoint:
         try:
             from openai import AsyncAzureOpenAI
@@ -100,10 +114,7 @@ async def _embed_query(query: str, model: str | None = None) -> list[float] | No
                     "AZURE_OPENAI_API_VERSION", "2024-10-01-preview"
                 ),
             )
-            resp = await client.embeddings.create(
-                input=query, model=deployment, **extra
-            )
-            return resp.data[0].embedding
+            return await batched(client, deployment)
         except Exception:
             # Azure failed live — fall through to OpenAI if a direct key is
             # available. Only return None if both providers are unreachable.
@@ -114,9 +125,7 @@ async def _embed_query(query: str, model: str | None = None) -> list[float] | No
         return None
     from openai import AsyncOpenAI
 
-    client = AsyncOpenAI(api_key=openai_key)
-    resp = await client.embeddings.create(model=openai_model, input=query, **extra)
-    return resp.data[0].embedding
+    return await batched(AsyncOpenAI(api_key=openai_key), openai_model)
 
 
 class SearchMode(str, Enum):
@@ -248,6 +257,7 @@ async def hybrid_search(
                     graph_hops=cached.get("graph_hops", 0),
                     latency_ms=int((time.monotonic() - start) * 1000),
                     hidden_documents=len(restricted),
+                    degraded=cached.get("degraded", ""),
                 )
                 return resp
             except Exception:
@@ -264,7 +274,9 @@ async def hybrid_search(
     if reranker.provider() != "none":
         fetch = max(fetch, RERANK_CANDIDATES)
     vector_results: list[SearchResult] = []
+    outage = False
     if mode in (SearchMode.VECTOR, SearchMode.HYBRID):
+        response.degraded = await _lexical_index_note(kb_ids)
         try:
             vector_results = await _vector_search(
                 query, kb_ids, top_k=fetch, hidden=hidden
@@ -274,6 +286,7 @@ async def hybrid_search(
             vector_results = await _keyword_search_pg(query, kb_ids, fetch, hidden)
             if not vector_results:
                 raise
+            outage = True
             response.degraded = (
                 "Matched by keywords because the embedding provider is unavailable: "
                 f"{str(e)[:200]}"
@@ -311,7 +324,7 @@ async def hybrid_search(
 
     # Stash in cache (best-effort). Only cache hits with results to
     # avoid burning Redis on empty-corpus misses.
-    if cache_k and response.results and not response.degraded:
+    if cache_k and response.results and not outage:
         try:
             await search_cache.set(
                 cache_k,
@@ -331,6 +344,7 @@ async def hybrid_search(
                     "graph_results_count": response.graph_results_count,
                     "entities_found": response.entities_found,
                     "graph_hops": response.graph_hops,
+                    "degraded": response.degraded,
                 },
             )
         except Exception:
@@ -393,6 +407,21 @@ async def _kb_index_settings(kb_ids: list[str]) -> dict[str, tuple[str, str | No
         return result
     except Exception:
         return fallback
+
+
+async def _lexical_index_note(kb_ids: list[str]) -> str:
+    try:
+        from local_embeddings import MODEL_ID, is_enabled
+    except ImportError:
+        return ""
+    settings = await _kb_index_settings(kb_ids)
+    if is_enabled() or any(s[1] == MODEL_ID for s in settings.values()):
+        return (
+            "Matched by word overlap because this collection uses the local hashing "
+            "embedder. Results are not semantic. Add an embedding provider key and "
+            "re-embed the collection for semantic search."
+        )
+    return ""
 
 
 async def _classify_kb_backends(kb_ids: list[str]) -> dict[str, str]:

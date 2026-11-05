@@ -233,7 +233,7 @@ async def execute_pipeline(
         serialize_pipeline_result,
     )
 
-    tool_registry = build_tool_registry(tool_names)
+    tool_registry = build_tool_registry(tool_names, tenant_id=str(user.tenant_id))
     executor = PipelineExecutor(
         tool_registry=tool_registry,
         timeout_seconds=await _timeout_for(body.timeout_seconds),
@@ -432,7 +432,9 @@ async def execute_saved_pipeline(
         serialize_pipeline_result,
     )
 
-    tool_registry = build_tool_registry(tool_names)
+    tool_registry = build_tool_registry(
+        tool_names, tenant_id=str(user.tenant_id), agent_id=str(agent.id)
+    )
     executor = PipelineExecutor(
         tool_registry=tool_registry,
         timeout_seconds=await _timeout_for(body.timeout_seconds),
@@ -581,7 +583,7 @@ async def execute_pipeline_stream(
         serialize_pipeline_result,
     )
 
-    tool_registry = build_tool_registry(tool_names)
+    tool_registry = build_tool_registry(tool_names, tenant_id=str(user.tenant_id))
 
     event_queue: asyncio.Queue[str | None] = asyncio.Queue()
 
@@ -831,7 +833,9 @@ async def replay_pipeline(
         return error("Agent has no pipeline config", 400)
 
     tool_names = model_config.get("tools", [])
-    tool_registry = build_tool_registry(tool_names)
+    tool_registry = build_tool_registry(
+        tool_names, tenant_id=str(user.tenant_id), agent_id=str(agent.id)
+    )
 
     raw_nodes = pipeline_config["nodes"]
     pipeline_nodes = parse_pipeline_nodes(raw_nodes)

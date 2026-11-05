@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, get_db
 from app.core.responses import error, success
+from app.core.tool_access import caller_config, tool_denial
 
 from models.tool_preset import ToolPreset
 from models.user import User
@@ -172,11 +173,18 @@ async def run_preset(
     if not preset.enabled:
         return error(f"preset disabled: {preset_slug}", 400)
 
+    denied = await tool_denial(db, user, preset.tool_slug)
+    if denied is not None:
+        return denied
+
     from app.core import tool_gate
 
     overrides = (body or {}).get("arguments") or {}
     merged_args = {**(preset.default_args or {}), **overrides}
-    config = {**(preset.config or {}), **((body or {}).get("config") or {})}
+    config = caller_config(
+        {**(preset.config or {}), **((body or {}).get("config") or {})},
+        preset.tool_slug,
+    )
 
     started = time.time()
     tenant_id = str(user.tenant_id)

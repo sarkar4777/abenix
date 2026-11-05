@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from engine.tenant_access import path_refusal
 from engine.tools.base import BaseTool, ConfigField, ToolResult
 
 
@@ -68,6 +69,9 @@ class SpeechToTextTool(BaseTool):
                     audio_data = resp.content
                     filename = audio_url.split("/")[-1].split("?")[0] or "audio.mp3"
             else:
+                refused = await path_refusal(audio_url)
+                if refused:
+                    return ToolResult(content=refused, is_error=True)
                 path = Path(audio_url)
                 if not path.exists():
                     return ToolResult(

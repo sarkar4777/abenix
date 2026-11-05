@@ -397,6 +397,12 @@ def _tools_as_text(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return out
 
 
+def _turn_separator(sent_tail: str, token: str) -> str:
+    if not sent_tail or not token or sent_tail.isspace() or token[0].isspace():
+        return ""
+    return "\n\n"
+
+
 class AgentExecutor:
     def __init__(
         self,
@@ -542,6 +548,26 @@ class AgentExecutor:
             logger.warning("final answer after step limit failed: %s", e)
             return None
         return resp if isinstance(resp, LLMResponse) and resp.content else None
+
+    async def _check_final_answer(self, content: str) -> str:
+        if self.moderation_gate is None:
+            return content
+        try:
+            checked, decision = await moderation_check(
+                content,
+                source="post_llm",
+                config=self.moderation_gate,
+                execution_id=self.execution_id,
+            )
+        except ModerationBlocked:
+            moderation_decisions_total.labels(
+                source="post_llm", outcome="blocked"
+            ).inc()
+            raise
+        moderation_decisions_total.labels(
+            source="post_llm", outcome=decision.outcome
+        ).inc()
+        return checked
 
     def _begin_governed_run(self) -> tuple[Any, Any, Any]:
         parent = governance.current()
@@ -832,6 +858,7 @@ class AgentExecutor:
                     elif ev.event == "done":
                         done_meta = ev.data
                 resp = LLMResponse(
+                    content=full_text,
                     # The router reports which model actually served the
                     # call, which can differ from the agent's configured one
                     # (subscription mode pins to the plan's model, and the
@@ -964,6 +991,7 @@ class AgentExecutor:
                         response=response_data,
                         agent_id=self.agent_id,
                         tenant_id=self.tenant_id,
+                        system=self.system_prompt or None,
                     )
 
                 grounding_violation = self._grounding_violated(all_tool_calls)
@@ -1146,10 +1174,25 @@ class AgentExecutor:
             # out of steps: answer from what was gathered rather than return nothing usable
             final = await self._final_answer(messages, tools)
             if final is not None:
-                final_text = final.content or ""
                 total_input += final.input_tokens
                 total_output += final.output_tokens
                 total_cost += final.cost
+                try:
+                    final_text = await self._check_final_answer(final.content)
+                except ModerationBlocked as mb:
+                    return ExecutionResult(
+                        output=_moderation_block_text(mb, "Response"),
+                        input_tokens=total_input,
+                        output_tokens=total_output,
+                        cost=total_cost,
+                        duration_ms=int((time.monotonic() - start) * 1000),
+                        tool_calls=all_tool_calls,
+                        model=effective_model or self.model,
+                        node_traces=node_traces,
+                        moderation_blocked=True,
+                        moderation_block_source="post_llm",
+                        **_held(mb),
+                    )
         duration = int((time.monotonic() - start) * 1000)
         agent_execution_duration_seconds.observe(duration / 1000)
         return ExecutionResult(
@@ -1365,6 +1408,7 @@ class AgentExecutor:
         # the reply waits for the post-LLM check when the policy could stop it
         guarded = guards_output(self.moderation_gate)
         withheld = ""
+        sent_tail = ""
         checking_sent = False
 
         # replies that depend on earlier turns stay out of the shared cache
@@ -1435,11 +1479,16 @@ class AgentExecutor:
 
             async for event in stream_resp:  # type: ignore[union-attr]
                 if event.event == "token":
+                    # clients join the tokens of every turn into one reply
+                    token = event.data
+                    if not full_text:
+                        token = _turn_separator(sent_tail, token) + token
                     full_text += event.data
+                    sent_tail = (sent_tail + token)[-1:]
                     if not guarded:
-                        yield ExecutionEvent(event="token", data=event.data)
+                        yield ExecutionEvent(event="token", data=token)
                         continue
-                    withheld += event.data
+                    withheld += token
                     if not checking_sent:
                         checking_sent = True
                         yield ExecutionEvent(
@@ -1584,6 +1633,7 @@ class AgentExecutor:
                         response=response_data,
                         agent_id=self.agent_id,
                         tenant_id=self.tenant_id,
+                        system=self.system_prompt or None,
                     )
 
                 _grounding_failed = self._grounding_violated(all_tool_calls)
@@ -1809,7 +1859,49 @@ class AgentExecutor:
                     total_input += final.input_tokens
                     total_output += final.output_tokens
                     total_cost += final.cost
-                    yield ExecutionEvent(event="token", data=final.content)
+                    try:
+                        final_text = await self._check_final_answer(final.content)
+                    except ModerationBlocked as mb:
+                        agent_active_streams.dec()
+                        yield ExecutionEvent(
+                            event="moderation",
+                            data=(
+                                _held_event(mb)
+                                if isinstance(mb, ModerationHeld)
+                                else {
+                                    "source": "post_llm",
+                                    "outcome": "blocked",
+                                    "content": _moderation_block_text(mb, "Response"),
+                                    "message": (
+                                        mb.message
+                                        if isinstance(mb, DLPBlocked)
+                                        else "The answer was blocked by the moderation policy."
+                                    ),
+                                }
+                            ),
+                        )
+                        yield ExecutionEvent(
+                            event="done",
+                            data={
+                                "total_tokens": total_input + total_output,
+                                "input_tokens": total_input,
+                                "output_tokens": total_output,
+                                "cost": round(total_cost, 6),
+                                "provider_costs": dict(stream_provider_costs),
+                                "duration_ms": int((time.monotonic() - start) * 1000),
+                                "model": self.model,
+                                "effective_model": effective_model or self.model,
+                                "error": "moderation_blocked",
+                                "moderation_blocked": True,
+                                "moderation_block_source": "post_llm",
+                                **_held(mb),
+                            },
+                        )
+                        return
+                    yield ExecutionEvent(
+                        event="token",
+                        data=_turn_separator(sent_tail, final_text) + final_text,
+                    )
 
         duration = int((time.monotonic() - start) * 1000)
         agent_execution_duration_seconds.observe(duration / 1000)
@@ -2500,12 +2592,20 @@ def build_tool_registry(
             user_role=user_role,
         )
 
+    context_tools["database_query"] = lambda: _TOOL_CLASSES["database_query"](
+        tenant_id=str(tenant_id or ""), agent_id=str(agent_id or "")
+    )
+    context_tools["database_writer"] = lambda: _TOOL_CLASSES["database_writer"](
+        tenant_id=str(tenant_id or ""), agent_id=str(agent_id or "")
+    )
+
     from engine.tools.agent_step import AgentStepTool as _AgentStep
 
     context_tools["agent_step"] = lambda: _AgentStep(
         user_id=str(user_id or ""),
         user_role=user_role,
         delegation_depth=delegation_depth,
+        tenant_id=str(tenant_id or ""),
     )
 
     NarrateCls = _CONTEXT_TOOL_FACTORIES.get("narrate")

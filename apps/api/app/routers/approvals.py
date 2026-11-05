@@ -668,12 +668,30 @@ async def _expire_stale(db: AsyncSession, tenant_id: uuid.UUID) -> None:
                 await _autonomy_resolved(db, row, None)
 
 
+def _reserved_gate_kind(kind: str | None) -> bool:
+    if not kind:
+        return False
+    return (
+        kind in DECISION_KINDS
+        or kind in COMMAND_KINDS
+        or kind in ("autonomy.promote", "improvement.release")
+        or kind.startswith("action:")
+    )
+
+
 @router.post("")
 async def create_approval(
     body: ApprovalCreate,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
+    if _reserved_gate_kind(body.gate_kind):
+        return error(
+            f"{body.gate_kind} approvals are raised by the platform itself and cannot "
+            "be created here. Pick another kind.",
+            422,
+            "RESERVED_GATE_KIND",
+        )
     if body.client_token:
         existing = await db.execute(
             select(Approval).where(

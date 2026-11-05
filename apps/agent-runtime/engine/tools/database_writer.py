@@ -3,12 +3,32 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
+from engine.tenant_access import resolve_connection
 from engine.tools.base import BaseTool, Effect, ToolResult
+from engine.tools.database_query import TENANT_DB_FIELDS
+
+_IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,62}$")
+_COLUMN_TYPE = re.compile(
+    r"^(TEXT|VARCHAR(\(\d+\))?|CHAR(\(\d+\))?|INT|INTEGER|BIGINT|SMALLINT|SERIAL|BIGSERIAL"
+    r"|BOOL|BOOLEAN|REAL|FLOAT|DOUBLE PRECISION|NUMERIC(\(\d+(,\s*\d+)?\))?"
+    r"|DECIMAL(\(\d+(,\s*\d+)?\))?|DATE|TIME|TIMESTAMP|TIMESTAMPTZ|UUID|JSON|JSONB|BYTEA)"
+    r"(\s+NOT NULL)?(\s+UNIQUE)?(\s+PRIMARY KEY)?$",
+    re.IGNORECASE,
+)
+
+
+def _bad_identifier(*names: Any) -> str | None:
+    for name in names:
+        if not isinstance(name, str) or not _IDENT.match(name):
+            return f"{name!r} is not a valid table or column name. Use letters, digits and underscores."
+    return None
 
 
 class DatabaseWriterTool(BaseTool):
+    config_fields = TENANT_DB_FIELDS
     name = "database_writer"
     risk_tier = "high"
     effect = Effect(
@@ -46,25 +66,31 @@ class DatabaseWriterTool(BaseTool):
             },
             "connection_string": {
                 "type": "string",
-                "description": "PostgreSQL connection string (optional, uses platform DB if omitted)",
+                "description": "PostgreSQL connection string. Refused unless the tool configuration allows it. If omitted, uses the database configured for this tenant.",
             },
         },
         "required": ["operation", "table"],
     }
 
-    def __init__(self, default_connection: str = ""):
+    def __init__(
+        self, default_connection: str = "", tenant_id: str = "", agent_id: str = ""
+    ):
         self._default_conn = default_connection
+        self.tenant_id = tenant_id
+        self.agent_id = agent_id
 
     async def execute(self, arguments: dict[str, Any]) -> ToolResult:
         operation = arguments.get("operation", "")
         table = arguments.get("table", "")
-        conn_str = arguments.get("connection_string", "") or self._default_conn
 
         if not table.startswith("af_"):
             return ToolResult(
                 content="Error: Table name must start with 'af_' for safety. Example: af_repo_analyses",
                 is_error=True,
             )
+        bad = _bad_identifier(table)
+        if bad:
+            return ToolResult(content=bad, is_error=True)
 
         # Build a connection string asyncpg can actually consume:
         # asyncpg.connect() does NOT accept the SQLAlchemy `+asyncpg`
@@ -75,7 +101,12 @@ class DatabaseWriterTool(BaseTool):
         # dev-local.sh (same URL shape via .env).
         from engine.tools._db_url import resolve_async_db_url
 
-        canonical = resolve_async_db_url(conn_str or "")
+        conn_str, refused = await resolve_connection(
+            self, arguments.get("connection_string", "")
+        )
+        if refused:
+            return ToolResult(content=refused, is_error=True)
+        canonical = resolve_async_db_url(conn_str)
         if not canonical:
             return ToolResult(
                 content=(
@@ -99,8 +130,17 @@ class DatabaseWriterTool(BaseTool):
                             content="Error: columns required for create_table",
                             is_error=True,
                         )
+                    bad = _bad_identifier(*columns.keys())
+                    if not bad:
+                        for dtype in columns.values():
+                            if not _COLUMN_TYPE.match(str(dtype).strip()):
+                                bad = f"{dtype!r} is not an allowed column type."
+                                break
+                    if bad:
+                        return ToolResult(content=bad, is_error=True)
                     col_defs = ", ".join(
-                        f"{name} {dtype}" for name, dtype in columns.items()
+                        f"{name} {str(dtype).strip()}"
+                        for name, dtype in columns.items()
                     )
                     await conn.execute(
                         f"CREATE TABLE IF NOT EXISTS {table} (id SERIAL PRIMARY KEY, {col_defs}, created_at TIMESTAMPTZ DEFAULT now())"
@@ -124,6 +164,11 @@ class DatabaseWriterTool(BaseTool):
 
                     # Auto-create table if it doesn't exist
                     cols = list(rows[0].keys())
+                    bad = _bad_identifier(*cols)
+                    if not bad and arguments.get("conflict_column"):
+                        bad = _bad_identifier(arguments["conflict_column"])
+                    if bad:
+                        return ToolResult(content=bad, is_error=True)
                     col_types = []
                     for k, v in rows[0].items():
                         if isinstance(v, int):

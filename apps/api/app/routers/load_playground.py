@@ -13,6 +13,7 @@ import tempfile
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -21,6 +22,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import async_session, get_current_user, get_db
+from app.core.playground_access import (
+    playground_denial,
+    run_in_sandbox,
+    sandbox_image,
+)
+from app.core.responses import error
 
 
 def _anthropic_client(api_key: str | None = None, sync: bool = False):
@@ -306,9 +313,12 @@ async def execute_load_script(
     body: ExecuteLoadRequest,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-) -> StreamingResponse:
+) -> Any:
     """Run a generated Python load-test script with an ephemeral 1-hour API key.
     Streams stdout line-by-line over SSE so the user sees live progress."""
+    denied = await playground_denial(db, user)
+    if denied:
+        return error(denied, 403, "PLAYGROUND_EXECUTE_DENIED")
     tenant_id = user.tenant_id
     user_id = user.id
     await db.close()
@@ -357,6 +367,19 @@ async def execute_load_script(
         )
 
         yield f"event: status\ndata: {json.dumps({'message': f'Executing {script_path.name}'})}\n\n"
+
+        image = await sandbox_image(tenant_id)
+        if image:
+            try:
+                job_env = {k: v for k, v in env.items() if k.startswith("ABENIX_")}
+                ran = await run_in_sandbox(image, tenant_id, body.code, job_env, 600)
+                for text in (ran["message"] or ran["stdout"]).splitlines():
+                    yield f"event: line\ndata: {json.dumps({'text': text})}\n\n"
+                yield f"event: done\ndata: {json.dumps({'status': 'completed', 'exit_code': ran['exit_code']})}\n\n"
+            finally:
+                await revoke_playground_key(key_id)
+                shutil.rmtree(home_dir, ignore_errors=True)
+            return
 
         proc = await asyncio.create_subprocess_exec(
             sys.executable,

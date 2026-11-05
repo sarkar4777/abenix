@@ -146,6 +146,26 @@ async def embed_texts(
     raise PersonaIndexError("embedding failed, " + "; ".join(errors))
 
 
+async def embed_with_fallback(
+    texts: list[str], model: str, *, openai_key: str | None = None
+) -> tuple[list[list[float]], str, str | None]:
+    """(vectors, model used, note) falling back to the local embedder when the provider fails."""
+    try:
+        return await embed_texts(texts, model, openai_key=openai_key), model, None
+    except PersonaIndexError as e:
+        from local_embeddings import is_forced_off
+
+        if model == local_model_id() or is_forced_off():
+            raise
+        local = local_model_id()
+        vectors = await embed_texts(texts, local, openai_key=openai_key)
+        note = (
+            "Indexed with the local hashing embedder, which matches words and not "
+            f"meaning, because {e}. Fix the provider and index this item again."
+        )
+        return vectors, local, note
+
+
 async def _batched(
     client: Any, texts: list[str], model: str, extra: dict
 ) -> list[list[float]]:

@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import ipaddress
+import logging
 import time
 
 import redis.asyncio as aioredis
@@ -8,6 +11,8 @@ from fastapi import Request
 from starlette.responses import JSONResponse
 
 from app.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 _REDIS_POOL: dict[str, aioredis.Redis] = {}
 _REDIS_LOCK = asyncio.Lock()
@@ -46,49 +51,130 @@ async def sliding_window_check(
 
     Returns (allowed, remaining, retry_after_seconds).
     """
-    r = await _get_redis()
-    now = time.time()
-    window_start = now - window_seconds
-    pipe_key = f"abenix:ratelimit:{key}"
+    try:
+        r = await _get_redis()
+        now = time.time()
+        window_start = now - window_seconds
+        pipe_key = f"abenix:ratelimit:{key}"
 
-    pipe = r.pipeline()
-    pipe.zremrangebyscore(pipe_key, 0, window_start)
-    pipe.zcard(pipe_key)
-    pipe.zadd(pipe_key, {str(now): now})
-    pipe.expire(pipe_key, window_seconds + 1)
-    results = await pipe.execute()
+        pipe = r.pipeline()
+        pipe.zremrangebyscore(pipe_key, 0, window_start)
+        pipe.zcard(pipe_key)
+        pipe.zadd(pipe_key, {str(now): now})
+        pipe.expire(pipe_key, window_seconds + 1)
+        results = await pipe.execute()
 
-    current_count = results[1]
-    if current_count >= limit:
-        oldest = await r.zrange(pipe_key, 0, 0, withscores=True)
-        if oldest:
-            retry_after = int(oldest[0][1] + window_seconds - now) + 1
-        else:
-            retry_after = window_seconds
-        await r.zrem(pipe_key, str(now))
-        return False, 0, max(retry_after, 1)
+        current_count = results[1]
+        if current_count >= limit:
+            oldest = await r.zrange(pipe_key, 0, 0, withscores=True)
+            if oldest:
+                retry_after = int(oldest[0][1] + window_seconds - now) + 1
+            else:
+                retry_after = window_seconds
+            await r.zrem(pipe_key, str(now))
+            return False, 0, max(retry_after, 1)
+    except (aioredis.RedisError, OSError) as e:
+        # a limiter outage must not become an API outage
+        logger.warning("rate limit skipped, Redis is unavailable (%s)", e)
+        return True, limit, 0
 
     remaining = limit - current_count - 1
     return True, remaining, 0
 
 
+def client_ip_from(peer: str | None, forwarded: str | None) -> str:
+    """The first public address from the right, a caller controls only the left of the list."""
+    if not forwarded or not _peer_is_proxy(peer):
+        return peer or "unknown"
+    hops = [h.strip() for h in forwarded.split(",") if h.strip()]
+    for hop in reversed(hops):
+        if not _is_internal(hop):
+            return hop
+    return hops[0] if hops else (peer or "unknown")
+
+
+def _peer_is_proxy(peer: str | None) -> bool:
+    if not peer:
+        return True
+    try:
+        ipaddress.ip_address(peer.strip())
+    except ValueError:
+        return True
+    return _is_internal(peer)
+
+
+def _is_internal(address: str | None) -> bool:
+    try:
+        ip = ipaddress.ip_address((address or "").strip())
+    except ValueError:
+        return False
+    return ip.is_private or ip.is_loopback or ip.is_link_local
+
+
 def _get_client_ip(request: Request) -> str:
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    if request.client:
-        return request.client.host
-    return "unknown"
+    peer = request.client.host if request.client else None
+    return client_ip_from(peer, request.headers.get("x-forwarded-for"))
 
 
 def _get_user_id(request: Request) -> str | None:
     auth = request.headers.get("authorization", "")
-    if not auth.startswith("Bearer "):
+    if not auth.startswith("Bearer ") or auth.startswith("Bearer af_"):
         return None
     from app.core.security import verify_token
 
     payload = verify_token(auth.removeprefix("Bearer "))
     return payload.get("sub")
+
+
+_API_KEY_IDS: dict[str, tuple[float, str]] = {}
+_API_KEY_ID_TTL = 60.0
+
+
+def _raw_api_key(request: Request) -> str:
+    raw = request.headers.get("x-api-key", "")
+    if raw.startswith("af_"):
+        return raw
+    auth = request.headers.get("authorization", "")
+    return auth.removeprefix("Bearer ") if auth.startswith("Bearer af_") else ""
+
+
+async def _lookup_api_key_id(key_hash: str) -> str | None:
+    from sqlalchemy import select
+
+    from app.core.deps import async_session
+    from models.api_key import ApiKey
+
+    try:
+        async with async_session() as db:
+            row = (
+                await db.execute(
+                    select(ApiKey.id).where(
+                        ApiKey.key_hash == key_hash, ApiKey.is_active.is_(True)
+                    )
+                )
+            ).first()
+    except Exception as e:  # noqa: BLE001
+        logger.warning("api key lookup for the rate limit failed (%s)", e)
+        return None
+    return str(row[0]) if row else None
+
+
+async def _api_key_id(request: Request) -> str | None:
+    """The id of a real key. Made up keys get no bucket of their own, they stay on the IP limit."""
+    raw = _raw_api_key(request)
+    if not raw:
+        return None
+    key_hash = hashlib.sha256(raw.encode()).hexdigest()
+    now = time.monotonic()
+    hit = _API_KEY_IDS.get(key_hash)
+    if hit and hit[0] > now:
+        return hit[1]
+    key_id = await _lookup_api_key_id(key_hash)
+    if key_id:
+        if len(_API_KEY_IDS) > 4096:
+            _API_KEY_IDS.clear()
+        _API_KEY_IDS[key_hash] = (now + _API_KEY_ID_TTL, key_id)
+    return key_id
 
 
 def _rate_limit_response(retry_after: int) -> JSONResponse:
@@ -185,7 +271,11 @@ async def rate_limit_user(
     if _is_dev_bypass(request):
         return None
     user_id = _get_user_id(request)
-    if user_id:
+    api_key_id = None if user_id else await _api_key_id(request)
+    if api_key_id:
+        key = f"apikey:{api_key_id}"
+        lim = limit if limit is not None else _DEFAULT_USER_LIMIT
+    elif user_id:
         key = f"user:{user_id}"
         lim = limit if limit is not None else _DEFAULT_USER_LIMIT
     else:

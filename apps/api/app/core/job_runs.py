@@ -115,6 +115,18 @@ CATALOGUE: dict[str, JobInfo] = {
             confirm="Runs stuck in running past the time limit are marked failed and their owners are told. Runs a live worker still holds are left alone.",
         ),
         JobInfo(
+            "reconcile_runtime_pools",
+            "Runtime pool upkeep",
+            "Creates the queue consumer of every deployed pool, and the workers of every agent in dedicated mode, and removes those no agent wants.",
+            "A pool at zero only wakes if its queue consumer already exists, and a dedicated agent's workers must follow the chart.",
+            "Runs and schedules",
+            {
+                "created": "dedicated pool created|dedicated pools created",
+                "removed": "dedicated pool removed|dedicated pools removed",
+            },
+            "Every pool was already in step.",
+        ),
+        JobInfo(
             "reconcile_active_executions_gauge",
             "Running count correction",
             "Sets the running-now metric back to the true count from the database.",
@@ -291,6 +303,19 @@ CATALOGUE: dict[str, JobInfo] = {
             },
             "No table had rows past its retention.",
             confirm="Rows older than each tenant's retention policy are written to archive files and removed from the live tables. They can be restored from Admin, Archives.",
+        ),
+        JobInfo(
+            "tenant_retention",
+            "Data retention",
+            "Deletes runs, conversations and audit logs past the days a workspace saved under Settings, Data and DLP.",
+            "A workspace's retention settings only mean something if they are enforced.",
+            "Retention and clean-up",
+            {
+                "tenants": "workspace checked|workspaces checked",
+                "rows": "row deleted|rows deleted",
+            },
+            "No workspace has saved retention settings.",
+            confirm="Data older than each workspace's saved retention is permanently deleted.",
         ),
         JobInfo(
             "pinecone_vacuum",

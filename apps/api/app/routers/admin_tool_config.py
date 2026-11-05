@@ -24,6 +24,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_db, require_role
+from app.core.platform_features import ensure_platform_operator
 from app.core.platform_settings import invalidate
 from app.core.responses import error, success
 from app.core.tool_secrets import TENANT_TABLE, encode_for_storage
@@ -143,6 +144,8 @@ async def set_value(
     s = _scope(body.scope, scope)
     if s is None:
         return error("scope must be tenant or platform", 400)
+    if s == "platform":
+        await ensure_platform_operator(db, user)
     problem = _validate(decl, body.value)
     if problem:
         return error(problem, 400)
@@ -203,6 +206,8 @@ async def clear_value(
     s = _scope(body.scope if body else None, scope)
     if s is None:
         return error("scope must be tenant or platform", 400)
+    if s == "platform":
+        await ensure_platform_operator(db, user)
     if s == "tenant":
         await db.execute(
             text(

@@ -253,9 +253,14 @@ def tool_status(slug: str, tenant_id: Any = None) -> str:
     tid = _tid(tenant_id)
     required_missing = False
     optional_missing = False
+    # a declared default is not a choice the admin made, so it does not configure anything
+    optional_chosen = False
     for k, required in keys.items():
         d = decls[k]
         if credentials.get(k, default=d.default, tenant_id=tid):
+            optional_chosen = optional_chosen or (
+                not required and bool(credentials.get(k, default="", tenant_id=tid))
+            )
             continue
         if required:
             required_missing = True
@@ -263,7 +268,7 @@ def tool_status(slug: str, tenant_id: Any = None) -> str:
             optional_missing = True
     if required_missing:
         return "missing"
-    if optional_missing:
+    if optional_missing and not optional_chosen:
         return "optional"
     return "configured"
 

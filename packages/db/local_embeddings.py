@@ -74,6 +74,11 @@ def is_enabled() -> bool:
     return not (azure or os.environ.get("OPENAI_API_KEY", ""))
 
 
+def is_forced_off() -> bool:
+    forced = os.environ.get("ABENIX_LOCAL_EMBEDDINGS", "").strip().lower()
+    return forced in {"0", "false", "no"}
+
+
 def embedder_id() -> str:
     return MODEL_ID
 

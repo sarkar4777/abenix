@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.capabilities import has_capability, need_words
 from app.core.deps import get_current_user, get_db
 from app.core.responses import error, success
 from app.schemas.settings import CreateApiKeyRequest
@@ -48,6 +49,51 @@ def _serialize(k: ApiKey) -> dict:
             else None
         ),
     }
+
+
+def _granted_actions(scopes: dict | list | None) -> set[str]:
+    if isinstance(scopes, list):
+        return {str(s) for s in scopes}
+    if not isinstance(scopes, dict):
+        return set()
+    actions = scopes.get("allowed_actions")
+    granted = {str(a) for a in actions} if isinstance(actions, list) else set()
+    if scopes.get("can_delegate"):
+        granted.add("can_delegate")
+    return granted
+
+
+def _sensitive(actions: set[str]) -> set[str]:
+    return {a for a in actions if a == "can_delegate" or a.startswith("telemetry.")}
+
+
+async def _scope_refusal(
+    db: AsyncSession, user: User, wanted: dict | list | None, current: set[str]
+) -> str | None:
+    added = _sensitive(_granted_actions(wanted)) - _sensitive(current)
+    if not added:
+        return None
+    # a request signed by a key may not hand any key more than that key already holds
+    if getattr(user, "_api_key_id", None) is not None:
+        own = _granted_actions(getattr(user, "_api_key_scopes", None))
+        beyond = sorted(added - own)
+        if beyond:
+            return (
+                f"An API key cannot grant {', '.join(beyond)} beyond what it holds. "
+                "Sign in and change the key there."
+            )
+    if "can_delegate" in added and not _is_admin(user):
+        return "Only an admin can give a key can_delegate, it can act as any subject."
+    for action in sorted(added - {"can_delegate"}):
+        caps = (
+            ("telemetry.view", "telemetry.manage", "telemetry.command")
+            if action == "telemetry.*"
+            else (action,)
+        )
+        for cap in caps:
+            if not await has_capability(db, user, cap):
+                return f"You cannot give a key {action}. {need_words(cap)}"
+    return None
 
 
 def _is_admin(user: User) -> bool:
@@ -101,6 +147,10 @@ async def create_api_key(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
+    refused = await _scope_refusal(db, user, body.scopes, set())
+    if refused:
+        return error(refused, 403, "SCOPE_NOT_GRANTABLE")
+
     raw_key = f"af_{secrets.token_urlsafe(32)}"
     prefix = raw_key[:7] + "****" + raw_key[-4:]
 
@@ -169,6 +219,19 @@ async def update_api_key(
     key = result.scalar_one_or_none()
     if not key:
         return error("API key not found", 404)
+
+    if "scopes" in body:
+        refused = await _scope_refusal(
+            db, user, body["scopes"], _granted_actions(key.scopes)
+        )
+        if refused:
+            return error(refused, 403, "SCOPE_NOT_GRANTABLE")
+    if "expires_at" in body and getattr(user, "_api_key_id", None) is not None:
+        return error(
+            "An API key cannot change an expiry date. Sign in and change it there.",
+            403,
+            "SCOPE_NOT_GRANTABLE",
+        )
 
     if "name" in body:
         key.name = body["name"]

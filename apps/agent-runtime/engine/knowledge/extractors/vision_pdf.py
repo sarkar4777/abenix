@@ -12,15 +12,26 @@ import base64
 import logging
 import os
 
+from engine import claude_subscription, gemini_vision
+
 from .base import ExtractedBlock
 
 logger = logging.getLogger(__name__)
 
 
+def _google_key() -> str:
+    return (
+        os.environ.get("GOOGLE_API_KEY", "").strip()
+        or os.environ.get("GEMINI_API_KEY", "").strip()
+    )
+
+
 def _provider() -> str:
     if os.environ.get("ANTHROPIC_API_KEY", "").strip():
         return "anthropic"
-    if os.environ.get("GOOGLE_API_KEY", "").strip():
+    if claude_subscription.get_config().usable:
+        return "claude_subscription"
+    if _google_key():
         return "gemini"
     return "none"
 
@@ -42,52 +53,29 @@ async def _render_pages_to_png(blob_path: str) -> list[bytes]:
     return pngs
 
 
-async def _claude_vision(image_b64: str, page_no: int) -> str:
-    try:
-        import httpx
-    except ImportError:
-        return ""
-    api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
-    if not api_key:
-        return ""
-    prompt = (
+def _prompt(page_no: int) -> str:
+    return (
         f"Extract every word of text from page {page_no} of this scanned document. "
         "Preserve table structure as Markdown tables. Render figure captions as "
         "italics. Return ONLY the extracted Markdown, no commentary."
     )
-    async with httpx.AsyncClient(timeout=60) as client:
-        r = await client.post(
-            "https://api.anthropic.com/v1/messages",
-            headers={
-                "x-api-key": api_key,
-                "anthropic-version": "2023-06-01",
-                "content-type": "application/json",
-            },
-            json={
-                "model": "claude-haiku-4-5-20251001",
-                "max_tokens": 4096,
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "image",
-                                "source": {
-                                    "type": "base64",
-                                    "media_type": "image/png",
-                                    "data": image_b64,
-                                },
-                            },
-                            {"type": "text", "text": prompt},
-                        ],
-                    }
-                ],
-            },
+
+
+async def _read_page(image_b64: str, page_no: int) -> str:
+    if _provider() == "gemini":
+        return await gemini_vision.vision_text(
+            image_b64, _prompt(page_no), _google_key()
         )
-        if r.status_code != 200:
-            return ""
-        data = r.json()
-        return "".join(b.get("text", "") for b in data.get("content", []))
+    return await _claude_vision(image_b64, page_no)
+
+
+async def _claude_vision(image_b64: str, page_no: int) -> str:
+    return await claude_subscription.vision_text(
+        image_b64,
+        _prompt(page_no),
+        "claude-haiku-4-5-20251001",
+        api_key=os.environ.get("ANTHROPIC_API_KEY", "").strip(),
+    )
 
 
 class VisionPdfExtractor:
@@ -105,7 +93,7 @@ class VisionPdfExtractor:
         offset = 0
         for page_no, png in enumerate(pngs, start=1):
             b64 = base64.b64encode(png).decode("ascii")
-            text = await _claude_vision(b64, page_no)
+            text = await _read_page(b64, page_no)
             if not text.strip():
                 continue
             blocks.append(

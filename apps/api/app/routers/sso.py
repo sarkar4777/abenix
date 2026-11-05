@@ -31,6 +31,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import log_action
+from app.core.config import settings
 from app.core.deps import get_db
 from app.core.responses import error, success
 from app.core.security import verify_token
@@ -64,7 +65,7 @@ def _web_base() -> str:
 
 def _state_secret() -> str:
     # Reuse JWT_SECRET_KEY so we don't need a separate rotation surface.
-    return os.environ.get("JWT_SECRET_KEY", "dev-secret-do-not-use-in-prod")
+    return os.environ.get("JWT_SECRET_KEY") or settings.secret_key
 
 
 def _redirect_uri(provider: str) -> str:

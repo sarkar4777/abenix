@@ -5,6 +5,7 @@ import io
 from pathlib import Path
 from typing import Any
 
+from engine.tenant_access import path_refusal
 from engine.tools.base import BaseTool, ToolResult
 
 ALLOWED_EXTENSIONS = {".pdf", ".docx", ".txt", ".csv", ".md", ".json"}
@@ -48,6 +49,10 @@ class FileReaderTool(BaseTool):
         from engine.tools._inline_file import materialise_path
 
         file_path = arguments.get("file_path") or arguments.get("path")
+        if file_path:
+            refused = await path_refusal(file_path)
+            if refused:
+                return ToolResult(content=refused, is_error=True)
         # materialise_path handles BOTH inline `text` and on-disk paths.
         # Pass the existing arg dict but with a unified `path` key.
         norm_args = dict(arguments)

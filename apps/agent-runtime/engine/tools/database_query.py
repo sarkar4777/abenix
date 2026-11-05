@@ -5,7 +5,12 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from engine.tools.base import BaseTool, ToolResult
+from engine.tenant_access import (
+    ALLOW_CONNECTION_ARG_KEY,
+    TENANT_DB_KEY,
+    resolve_connection,
+)
+from engine.tools.base import BaseTool, ConfigField, ToolResult
 
 # Only allow read-only SQL
 ALLOWED_PREFIXES = ("select", "with", "explain", "show", "describe")
@@ -22,7 +27,29 @@ FORBIDDEN_KEYWORDS = (
 )
 
 
+TENANT_DB_FIELDS = (
+    ConfigField(
+        TENANT_DB_KEY,
+        label="Tenant database address",
+        kind="secret",
+        group="Database tools",
+        description="The Postgres database database_query and database_writer use for this tenant. Save it with the scope on This tenant. Tenant agents have no other database.",
+        dynamic=True,
+    ),
+    ConfigField(
+        ALLOW_CONNECTION_ARG_KEY,
+        label="Allow connection strings in tool calls",
+        kind="bool",
+        group="Database tools",
+        description="Lets an agent pass connection_string in a call. The host still has to pass the private address check.",
+        default="false",
+        dynamic=True,
+    ),
+)
+
+
 class DatabaseQueryTool(BaseTool):
+    config_fields = TENANT_DB_FIELDS
     name = "database_query"
     risk_tier = "low"
     description = (
@@ -38,7 +65,7 @@ class DatabaseQueryTool(BaseTool):
             },
             "connection_string": {
                 "type": "string",
-                "description": "Database connection string (e.g., postgresql://user:pass@host:5432/db). If omitted, uses the platform database.",
+                "description": "Database connection string (e.g., postgresql://user:pass@host:5432/db). Refused unless the tool configuration allows it. If omitted, uses the database configured for this tenant.",
             },
             "max_rows": {
                 "type": "integer",
@@ -54,21 +81,15 @@ class DatabaseQueryTool(BaseTool):
         "required": ["query"],
     }
 
-    def __init__(self, default_connection: str = ""):
-        import os
-
-        # Fallback: if no default provided, use the platform's own database
-        # (with asyncpg -> psycopg2 conversion for sync drivers used by SQL tools)
-        env_url = os.environ.get("DATABASE_URL", "")
-        # Convert async driver URLs to sync for psycopg2-based tools
-        env_url = env_url.replace("+asyncpg", "").replace(
-            "postgresql+asyncpg", "postgresql"
-        )
-        self._default_conn = default_connection or env_url
+    def __init__(
+        self, default_connection: str = "", tenant_id: str = "", agent_id: str = ""
+    ):
+        self._default_conn = default_connection
+        self.tenant_id = tenant_id
+        self.agent_id = agent_id
 
     async def execute(self, arguments: dict[str, Any]) -> ToolResult:
         query = arguments.get("query", "").strip()
-        conn_str = arguments.get("connection_string", "") or self._default_conn
         max_rows = min(arguments.get("max_rows", 1000), 10_000)
         arguments.get("params", {})
 
@@ -92,12 +113,11 @@ class DatabaseQueryTool(BaseTool):
                     is_error=True,
                 )
 
-        if not conn_str:
-            return ToolResult(
-                content="Error: No connection_string provided and no default configured. "
-                "Set a connection string in the agent's tool configuration or pass it as a parameter.",
-                is_error=True,
-            )
+        conn_str, refused = await resolve_connection(
+            self, arguments.get("connection_string", "")
+        )
+        if refused:
+            return ToolResult(content=refused, is_error=True)
 
         try:
             import asyncpg

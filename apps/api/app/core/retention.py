@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import delete, select, and_
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
@@ -37,6 +37,26 @@ def parse_retention_settings(settings: dict[str, Any] | None) -> RetentionPolicy
     )
 
 
+async def _detach_execution_references(db: AsyncSession, expired: Any) -> None:
+    # Foreign keys with no ondelete rule would otherwise block the delete
+    from models.base import Base
+
+    for table in Base.metadata.sorted_tables:
+        for fk in table.foreign_keys:
+            if fk.target_fullname != "executions.id" or fk.ondelete:
+                continue
+            column = fk.parent
+            if column.nullable:
+                stmt = (
+                    table.update()
+                    .where(column.in_(expired))
+                    .values({column.name: None})
+                )
+            else:
+                stmt = table.delete().where(column.in_(expired))
+            await db.execute(stmt)
+
+
 async def enforce_retention(
     db: AsyncSession, tenant_id: Any, policy: RetentionPolicy
 ) -> dict[str, int]:
@@ -56,6 +76,10 @@ async def enforce_retention(
 
     # Delete old executions
     cutoff = now - timedelta(days=policy.execution_retention_days)
+    expired = select(Execution.id).where(
+        Execution.tenant_id == tid, Execution.created_at < cutoff
+    )
+    await _detach_execution_references(db, expired)
     result = await db.execute(
         delete(Execution).where(
             Execution.tenant_id == tid,
@@ -85,43 +109,22 @@ async def enforce_retention(
     return counts
 
 
-async def apply_retention(
-    db: AsyncSession, tenant_id: str, policy: RetentionPolicy
-) -> dict[str, int]:
-    """Apply retention policy — delete records older than configured periods.
+async def enforce_all_tenants(session_factory: Any) -> dict[str, int]:
+    """Runs only for tenants that saved a policy, so nothing is deleted by default."""
+    from models.tenant import Tenant
 
-    Returns counts of deleted records per table.
-    """
-    import uuid
+    async with session_factory() as db:
+        rows = (await db.execute(select(Tenant.id, Tenant.settings))).all()
 
-    tid = uuid.UUID(tenant_id)
-    now = datetime.now(timezone.utc)
-    deleted = {}
-
-    try:
-        # Executions
-        from models.execution import Execution
-
-        cutoff = now - timedelta(days=policy.execution_retention_days)
-        result = await db.execute(
-            delete(Execution).where(
-                and_(Execution.tenant_id == tid, Execution.created_at < cutoff)
+    totals = {"tenants": 0, "rows": 0}
+    for tenant_id, settings in rows:
+        saved = (settings or {}).get("retention")
+        if not saved:
+            continue
+        async with session_factory() as db:
+            counts = await enforce_retention(
+                db, tenant_id, parse_retention_settings(saved)
             )
-        )
-        deleted["executions"] = result.rowcount
-
-        # Messages
-        from models.conversation import Message
-
-        cutoff = now - timedelta(days=policy.message_retention_days)
-        result = await db.execute(delete(Message).where(Message.created_at < cutoff))
-        deleted["messages"] = result.rowcount
-
-        await db.commit()
-        logger.info("Retention applied for tenant %s: %s", tenant_id, deleted)
-
-    except Exception as e:
-        logger.error("Retention cleanup failed for tenant %s: %s", tenant_id, e)
-        await db.rollback()
-
-    return deleted
+        totals["tenants"] += 1
+        totals["rows"] += sum(counts.values())
+    return totals

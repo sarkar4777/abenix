@@ -6,6 +6,7 @@ from typing import Any
 
 import httpx
 
+from engine.tools import _duckduckgo as duckduckgo
 from engine.tools.base import BaseTool, ConfigField, ToolResult
 
 # Provider configuration: name -> (env var for API key, base URL)
@@ -123,6 +124,7 @@ class TavilySearchTool(BaseTool):
         preferred = os.environ.get("SEARCH_PROVIDER", "tavily").lower()
         ordered = self._build_provider_order(preferred)
 
+        keyed_providers_failed = False
         for provider_name, env_key, url in ordered:
             api_key = credentials.get(env_key)
             if not api_key:
@@ -140,10 +142,11 @@ class TavilySearchTool(BaseTool):
                     include_answer=include_answer,
                 )
             except Exception:
+                keyed_providers_failed = True
                 continue
 
         # Final fallback: DuckDuckGo (no API key needed)
-        return await self._ddg_fallback(query, max_results)
+        return await self._ddg_fallback(query, max_results, keyed_providers_failed)
 
     @staticmethod
     def _build_provider_order(preferred: str) -> list[tuple[str, str, str]]:
@@ -326,48 +329,53 @@ class TavilySearchTool(BaseTool):
         )
 
     @staticmethod
-    async def _ddg_fallback(query: str, max_results: int) -> ToolResult:
+    async def _ddg_fallback(
+        query: str, max_results: int, keyed_providers_failed: bool = False
+    ) -> ToolResult:
+        reason = (
+            "The configured search providers failed"
+            if keyed_providers_failed
+            else "No search provider key is configured (TAVILY_API_KEY, "
+            "BRAVE_SEARCH_API_KEY, SERPAPI_API_KEY or SERPER_API_KEY)"
+        )
+        warnings = [
+            reason + ", so this used DuckDuckGo, which returns fewer and older results."
+        ]
         try:
-            from duckduckgo_search import DDGS
-
-            results = []
-            with DDGS() as ddgs:
-                for r in ddgs.text(query, max_results=max_results):
-                    results.append(
-                        {
-                            "title": r.get("title", ""),
-                            "url": r.get("href", ""),
-                            "snippet": r.get("body", ""),
-                        }
-                    )
-
-            if not results:
-                return ToolResult(content=f"No results found for: {query}")
-
-            lines = ["[Provider: DuckDuckGo (fallback)]", ""]
-            for i, r in enumerate(results, 1):
-                lines.append(f"{i}. {r['title']}")
-                lines.append(f"   URL: {r['url']}")
-                lines.append(f"   {r['snippet']}")
-                lines.append("")
-
-            return ToolResult(
-                content="\n".join(lines),
-                metadata={
-                    "provider": "duckduckgo",
-                    "result_count": len(results),
-                    "warnings": [
-                        "No search provider key is configured (TAVILY_API_KEY, "
-                        "BRAVE_SEARCH_API_KEY, SERPAPI_API_KEY or SERPER_API_KEY), "
-                        "so this used DuckDuckGo, which returns fewer and older results."
-                    ],
-                },
-            )
+            rows = await duckduckgo.search("text", query, max_results)
         except Exception as e:
             return ToolResult(
-                content=f"All search providers failed. DuckDuckGo error: {e}",
+                content=f"All search providers failed. DuckDuckGo error was {e}",
                 is_error=True,
+                metadata={"provider": "duckduckgo", "warnings": warnings},
             )
+
+        if not rows:
+            return ToolResult(
+                content=f"No results found for {query}. {duckduckgo.EMPTY_NOTE}",
+                metadata={
+                    "provider": "duckduckgo",
+                    "result_count": 0,
+                    "warnings": warnings,
+                },
+            )
+
+        lines = ["[Provider: DuckDuckGo (fallback)]", ""]
+        for i, r in enumerate(rows, 1):
+            lines.append(f"{i}. {r.get('title', '')}")
+            lines.append(f"   URL: {r.get('href', '')}")
+            lines.append(f"   {r.get('body', '')}")
+            lines.append("")
+
+        return ToolResult(
+            content="\n".join(lines),
+            metadata={
+                "provider": "duckduckgo",
+                "backend": rows[0].get("backend"),
+                "result_count": len(rows),
+                "warnings": warnings,
+            },
+        )
 
     @staticmethod
     def _format_results(

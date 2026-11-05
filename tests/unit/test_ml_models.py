@@ -105,6 +105,11 @@ def store(tmp_path, monkeypatch):
 
     monkeypatch.setattr(art, "mirror", mirror)
     monkeypatch.setattr(mm, "UPLOAD_DIR", tmp_path / "store")
+
+    async def _holds(_db, _user, _cap):
+        return True
+
+    monkeypatch.setattr(mm, "has_capability", _holds)
     return tmp_path
 
 

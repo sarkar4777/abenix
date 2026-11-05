@@ -73,7 +73,7 @@ pipeline_config:
           t1_usd:   250
           mgr_usd:  5000
         mode: "rescue"
-      required_if: "{{len(rescore_sla.breaching) > 0}}"
+      required_if: "{{rescore_sla.breaching}}"
 
     - id: approval_gate
       type: tool
@@ -82,7 +82,7 @@ pipeline_config:
         actions:       "{{plan_rescue.actions}}"
         minimum_tier:  "t1_lead"
         reason:        "SLA breach rescue plan"
-      required_if: "{{len(rescore_sla.breaching) > 0}}"
+      required_if: "{{rescore_sla.breaching}}"
 
     - id: slack_escalate
       type: tool
@@ -96,7 +96,7 @@ pipeline_config:
             approaching/over tier target. Approved rescue plans
             attached.
           attachments: "{{plan_rescue.actions}}"
-      required_if: "{{len(rescore_sla.breaching) > 0 and approval_gate.approved}}"
+      required_if: "{{approval_gate.approved}}"
 
     - id: final_report
       type: structured

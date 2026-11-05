@@ -33,6 +33,16 @@ class EmbeddingProviderError(Exception):
 _AZURE_STRIP_WARNED = False
 
 
+class EmbeddingProviderCallFailed(EmbeddingProviderError):
+    def __init__(self, message: str, cause: Exception) -> None:
+        super().__init__(message)
+        status = getattr(cause, "status_code", None)
+        # a 429 can be a passing rate limit, only insufficient_quota means no credits
+        self.refused = status in (401, 403) or (
+            status == 429 and "insufficient_quota" in message
+        )
+
+
 def _normalize_azure_endpoint(raw: str) -> str:
     """Strip the /openai/deployments path the SDK adds itself. Trailing slashes too."""
     if not raw:
@@ -186,30 +196,71 @@ def _chunk_blocks(
 EMBEDDING_DIM = 1536
 
 
-def _degraded_or_local(chunks: list[str]) -> tuple[list[list[float]], bool]:
-    """What to store when the configured provider failed.
+def _after_provider_failure(
+    kb_id: str, doc_id: str, chunks: list[str], exc: Exception
+) -> tuple[list[list[float]], bool, str | None, str]:
+    """(vectors, usable, collection model, message for the document) once the provider refused."""
+    from local_embeddings import embed_many, embedder_id, is_forced_off
 
-    Zero vectors match nothing, so a document stored that way is present in
-    the UI and invisible to search — the worst of both. If the local embedder
-    is available, use it: lexical retrieval beats no retrieval, and the loud
-    warning plus the recorded embedder id keep it honest.
-    """
+    reason = str(exc)[:300]
+    current = _kb_settings(kb_id)[1]
+    # one scheme per collection, hash vectors beside provider vectors match nothing
+    if current != embedder_id() and (
+        is_forced_off() or _collection_has_vectors(kb_id, doc_id)
+    ):
+        return (
+            [],
+            False,
+            current,
+            f"The embedding provider failed and no vectors were stored, so this "
+            f"document cannot be searched. Provider said {reason}",
+        )
+    if current != embedder_id():
+        _set_collection_model(kb_id, embedder_id())
+    logger.warning(
+        "embedding provider failed for collection %s, indexed with %s",
+        kb_id,
+        embedder_id(),
+    )
+    return (
+        embed_many(chunks),
+        True,
+        embedder_id(),
+        "The embedding provider failed, so this document was indexed with the local "
+        "hashing embedder, which matches words and not meaning. Fix the provider "
+        f"and re-embed the collection for semantic search. Provider said {reason}",
+    )
+
+
+def _collection_has_vectors(kb_id: str, doc_id: str) -> bool:
+    import psycopg2
+
+    conn = psycopg2.connect(_sync_db_url())
     try:
-        from local_embeddings import embed_many, embedder_id
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT 1 FROM documents WHERE kb_id = %s AND id <> %s "
+                "AND status IN ('READY', 'DEGRADED') AND chunk_count > 0 LIMIT 1",
+                (kb_id, doc_id),
+            )
+            return cur.fetchone() is not None
+    finally:
+        conn.close()
 
-        logger.warning(
-            "Embedding provider failed — falling back to %s (lexical, not "
-            "semantic). Fix the provider and re-ingest for semantic search; "
-            "vectors from the two schemes are not comparable.",
-            embedder_id(),
-        )
-        return embed_many(chunks), True
-    except Exception:  # noqa: BLE001
-        logger.error(
-            "Embedding provider failed and no local fallback is available — "
-            "storing zero vectors and marking the document DEGRADED."
-        )
-        return [[0.0] * EMBEDDING_DIM for _ in chunks], False
+
+def _set_collection_model(kb_id: str, model: str) -> None:
+    import psycopg2
+
+    conn = psycopg2.connect(_sync_db_url())
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE knowledge_collections SET embedding_model = %s WHERE id = %s",
+                (model, kb_id),
+            )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def _local_embeddings_enabled() -> bool:
@@ -251,14 +302,9 @@ def _embed_chunks(
       3. Otherwise raise EmbeddingProviderError so the caller flags failure
          loudly instead of silently storing zero vectors.
 
-    A live provider call that still errors (quota, transport) after both
-    providers were attempted returns the (zero-vectors, False) tuple. The
-    caller marks the document DEGRADED with the honest reason in
-    documents.error_message; the KB rollup goes DEGRADED so the UI never
-    paints a green checkmark over a doc that nothing can actually search.
+    A failing provider call raises EmbeddingProviderCallFailed, the caller picks what follows.
 
-    strict=True (re-embedding) raises instead of degrading or switching to
-    the local embedder, so a collection is never re-indexed half and half."""
+    strict=True (re-embedding) never switches to the local embedder."""
     import asyncio
 
     try:
@@ -321,15 +367,7 @@ def _embed_chunks(
                     exc,
                 )
             else:
-                if strict:
-                    raise EmbeddingProviderError(str(exc)) from exc
-                logger.warning(
-                    "Azure embedding call failed (%s) and no OPENAI_API_KEY "
-                    "fallback is configured; marking doc DEGRADED with the "
-                    "honest reason so search returns 503 instead of an empty 200",
-                    exc,
-                )
-                return _degraded_or_local(chunks)
+                raise EmbeddingProviderCallFailed(str(exc), exc) from exc
 
     if OPENAI_API_KEY:
         try:
@@ -347,14 +385,7 @@ def _embed_chunks(
                     embeddings.append(item.embedding)
             return embeddings, True
         except Exception as exc:
-            if strict:
-                raise EmbeddingProviderError(str(exc)) from exc
-            logger.warning(
-                "OpenAI embedding call failed (%s); both providers exhausted, "
-                "doc will be marked DEGRADED with the honest provider error",
-                exc,
-            )
-            return _degraded_or_local(chunks)
+            raise EmbeddingProviderCallFailed(str(exc), exc) from exc
 
     # Nothing paid is configured. Rather than leave every collection empty on
     # a fresh clone, fall back to the local hashing embedder. It is lexical
@@ -669,7 +700,16 @@ def process_document(
             state="PROCESSING",
             meta={"doc_id": doc_id, "step": "embedding", "chunks": len(chunks)},
         )
-        embeddings, real_vectors = _embed_chunks(chunks, model)
+        provider_note: str | None = None
+        try:
+            embeddings, real_vectors = _embed_chunks(chunks, model)
+        except EmbeddingProviderCallFailed as exc:
+            # an outage may pass, a refused key will not
+            if not exc.refused and self.request.retries < self.max_retries:
+                raise
+            embeddings, real_vectors, model, provider_note = _after_provider_failure(
+                kb_id, doc_id, chunks, exc
+            )
 
         self.update_state(
             state="PROCESSING", meta={"doc_id": doc_id, "step": "storing"}
@@ -686,8 +726,8 @@ def process_document(
                     stored = _store_vectors(
                         kb_id, doc_id, filename, chunks, embeddings, pages, backend
                     )
-                final_status = "ready"
-                error_message = None
+                final_status = "degraded" if provider_note else "ready"
+                error_message = provider_note
             except Exception as ve:
                 # Embeddings are real but the vector store rejected them.
                 # Document is NOT searchable; honest signal beats a green
@@ -710,7 +750,7 @@ def process_document(
             # can retry / re-embed later.
             stored = 0
             final_status = "degraded"
-            error_message = (
+            error_message = provider_note or (
                 "embedding provider unavailable; vectors not stored, "
                 "document not searchable"
             )
@@ -749,7 +789,9 @@ def process_document(
 
     except Exception as exc:
         logger.exception("Failed to process document %s", doc_id)
-        _update_document_status(doc_id, kb_id, "failed", 0)
+        _update_document_status(
+            doc_id, kb_id, "failed", 0, error_message=str(exc)[:500]
+        )
         raise self.retry(exc=exc)
     finally:
         if tmp_path:

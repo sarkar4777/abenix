@@ -9,6 +9,7 @@ import logging
 import os
 from typing import Any
 
+from engine.process_sandbox import PICKLE_FRAMEWORKS, run_isolated
 from engine.tools.base import BaseTool, ToolResult
 
 logger = logging.getLogger(__name__)
@@ -423,6 +424,22 @@ class MLModelTool(BaseTool):
         finally:
             await conn.close()
 
+    async def _pickle_runs_in_process(self) -> bool:
+        # any signup is an admin of its own tenant, so only the platform tenant's files are trusted here
+        try:
+            conn = await self._get_conn()
+            try:
+                platform = await conn.fetchval(
+                    "SELECT tenant_id FROM users WHERE lower(email) = $1",
+                    "system@abenix.dev",
+                )
+            finally:
+                await conn.close()
+        except Exception as e:  # noqa: BLE001
+            logger.debug("platform tenant lookup failed (%s)", e)
+            return False
+        return platform is not None and str(platform) == str(self.tenant_id)
+
     async def _local_predict(
         self, file_uri: str, framework: str, input_data: Any
     ) -> Any:
@@ -455,6 +472,12 @@ class MLModelTool(BaseTool):
                 else np.array(features)
             )
 
+        if framework in PICKLE_FRAMEWORKS and not await self._pickle_runs_in_process():
+            rows = X if isinstance(X, list) else X.tolist()
+            return await asyncio.to_thread(
+                run_isolated, "predict", file_uri, framework, rows
+            )
+
         # Load model (with simple cache)
         cache_key = f"{file_uri}:{framework}"
         if cache_key not in _MODEL_CACHE:
@@ -471,9 +494,9 @@ class MLModelTool(BaseTool):
 
                 _MODEL_CACHE[cache_key] = ort.InferenceSession(file_uri)
             elif framework == "pytorch":
-                import torch
+                from engine.process_sandbox import load_torch
 
-                model = torch.load(file_uri, map_location="cpu", weights_only=False)
+                model = load_torch(file_uri)
                 model.eval()
                 _MODEL_CACHE[cache_key] = model
             else:
@@ -584,6 +607,14 @@ class MLModelTool(BaseTool):
             if framework not in ("sklearn", "xgboost"):
                 return ToolResult(
                     content=f"explain only supports sklearn/xgboost; '{model_name}' is {framework}.",
+                    is_error=True,
+                )
+            if not await self._pickle_runs_in_process():
+                return ToolResult(
+                    content=(
+                        f"explain cannot load '{model_name}' on this tenant, because it "
+                        "would run a pickle file inside this process. Export it to ONNX."
+                    ),
                     is_error=True,
                 )
             import joblib

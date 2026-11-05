@@ -10,6 +10,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
+from engine.tenant_access import path_refusal
 from engine.tools.base import BaseTool, ToolResult
 
 ALLOWED_EXTENSIONS = {".xlsx", ".xls", ".csv", ".tsv"}
@@ -90,6 +91,10 @@ class SpreadsheetAnalyzerTool(BaseTool):
         norm = dict(arguments)
         if arguments.get("file_path") and not norm.get("path"):
             norm["path"] = arguments["file_path"]
+        if norm.get("path"):
+            refused = await path_refusal(norm["path"])
+            if refused:
+                return ToolResult(content=refused, is_error=True)
         resolved, err = materialise_path(norm, default_ext="csv")
         if err:
             return ToolResult(content=err, is_error=True)

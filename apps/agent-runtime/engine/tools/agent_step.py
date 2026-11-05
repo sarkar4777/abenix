@@ -135,8 +135,13 @@ class AgentStepTool(BaseTool):
     )
 
     def __init__(
-        self, user_id: str = "", user_role: str = "", delegation_depth: int = 0
+        self,
+        user_id: str = "",
+        user_role: str = "",
+        delegation_depth: int = 0,
+        tenant_id: str = "",
     ) -> None:
+        self._tenant_id = tenant_id
         # the caller of the pipeline, so tools inside the step act as them
         self._user_id = user_id
         self._user_role = user_role
@@ -183,6 +188,8 @@ class AgentStepTool(BaseTool):
     }
 
     async def execute(self, arguments: dict[str, Any]) -> ToolResult:
+        # the registry knows the real tenant, a model written argument must not override it
+        tenant_id = self._tenant_id or str(arguments.get("__tenant_id__") or "")
         input_message = arguments.get("input_message", "")
         system_prompt = arguments.get("system_prompt", "")
         raw_tools = arguments.get("tools", [])
@@ -216,7 +223,7 @@ class AgentStepTool(BaseTool):
 
         breach = await _budget_breach(
             str(arguments.get("__agent_id__") or ""),
-            str(arguments.get("__tenant_id__") or ""),
+            tenant_id,
             _os.environ.get("DATABASE_URL", ""),
         )
         if breach is not None:
@@ -276,7 +283,7 @@ class AgentStepTool(BaseTool):
 
                 system_prompt = build_tool_config_prompt(system_prompt, tool_cfg)
                 asset_schemas = await resolve_asset_schemas(
-                    tool_cfg, tenant_id=str(arguments.get("__tenant_id__") or "")
+                    tool_cfg, tenant_id=tenant_id
                 )
             else:
                 asset_schemas = {}
@@ -285,7 +292,7 @@ class AgentStepTool(BaseTool):
                 tool_names or [],
                 kb_ids=arguments.get("__kb_ids__") or [],
                 agent_id=str(arguments.get("__agent_id__") or ""),
-                tenant_id=str(arguments.get("__tenant_id__") or ""),
+                tenant_id=tenant_id,
                 db_url=_os.environ.get("DATABASE_URL", ""),
                 user_id=getattr(self, "_user_id", ""),
                 user_role=getattr(self, "_user_role", ""),
@@ -305,6 +312,8 @@ class AgentStepTool(BaseTool):
                 tool_config=tool_cfg or None,
                 asset_schemas=asset_schemas or None,
                 cost_limit=cost_cap,
+                agent_id=child_agent_id,
+                tenant_id=tenant_id,
             )
 
             result = await executor.invoke(input_message)

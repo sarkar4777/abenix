@@ -19,7 +19,8 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from engine import credentials
+from engine import claude_subscription, credentials, gemini_vision
+from engine.tenant_access import path_refusal
 from engine.tools.base import BaseTool, ConfigField, ToolResult
 
 logger = logging.getLogger(__name__)
@@ -32,6 +33,8 @@ _RENDER_DPI = 150
 def _provider() -> str:
     if credentials.get("ANTHROPIC_API_KEY").strip():
         return "anthropic"
+    if claude_subscription.get_config().usable:
+        return "claude_subscription"
     if credentials.get("GOOGLE_API_KEY").strip():
         return "gemini"
     return "none"
@@ -55,54 +58,27 @@ async def _render_pages(pdf_path: str) -> list[bytes]:
 
 
 async def _vision_extract(image_b64: str, page_no: int) -> str:
-    """Send a single page image to Claude vision, return Markdown text."""
-    try:
-        import httpx
-    except ImportError:
-        return ""
-    api_key = credentials.get("ANTHROPIC_API_KEY").strip()
-    if not api_key:
-        return ""
+    """Send a single page image to the vision provider, return Markdown text."""
     prompt = (
         f"This is page {page_no} of a MET-template KYC Standard Check report. "
         "Transcribe every visible cell, label, and value. Preserve table "
         "structure as Markdown tables. Reproduce dates, scores, names, and "
         "tick-marks faithfully. Return ONLY the extracted Markdown, no commentary."
     )
-    async with httpx.AsyncClient(timeout=_VISION_TIMEOUT) as client:
-        r = await client.post(
-            "https://api.anthropic.com/v1/messages",
-            headers={
-                "x-api-key": api_key,
-                "anthropic-version": "2023-06-01",
-                "content-type": "application/json",
-            },
-            json={
-                "model": _VISION_MODEL,
-                "max_tokens": 4096,
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "image",
-                                "source": {
-                                    "type": "base64",
-                                    "media_type": "image/png",
-                                    "data": image_b64,
-                                },
-                            },
-                            {"type": "text", "text": prompt},
-                        ],
-                    }
-                ],
-            },
+    if _provider() == "gemini":
+        return await gemini_vision.vision_text(
+            image_b64,
+            prompt,
+            credentials.get("GOOGLE_API_KEY").strip(),
+            timeout=_VISION_TIMEOUT,
         )
-        if r.status_code != 200:
-            logger.warning("vision call returned %s: %s", r.status_code, r.text[:200])
-            return ""
-        data = r.json()
-        return "".join(b.get("text", "") for b in data.get("content", []))
+    return await claude_subscription.vision_text(
+        image_b64,
+        prompt,
+        _VISION_MODEL,
+        api_key=credentials.get("ANTHROPIC_API_KEY").strip(),
+        timeout=_VISION_TIMEOUT,
+    )
 
 
 def _unknown(snippet: str = "") -> dict[str, Any]:
@@ -693,6 +669,10 @@ class KycMetPdfExtractorTool(BaseTool):
 
     async def execute(self, arguments: dict[str, Any]) -> ToolResult:
         pdf_path = (arguments.get("pdf_path") or "").strip()
+        if pdf_path:
+            refused = await path_refusal(pdf_path)
+            if refused:
+                return ToolResult(content=refused, is_error=True)
         pdf_b64 = (arguments.get("pdf_base64") or "").strip()
 
         tmp_to_clean: str | None = None

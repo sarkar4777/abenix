@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from engine.tenant_access import path_refusal
 from engine.tools.base import BaseTool, ToolResult
 
 
@@ -49,6 +50,10 @@ class PresentationAnalyzerTool(BaseTool):
         norm = dict(arguments)
         if arguments.get("file_path") and not norm.get("path"):
             norm["path"] = arguments["file_path"]
+        if norm.get("path"):
+            refused = await path_refusal(norm["path"])
+            if refused:
+                return ToolResult(content=refused, is_error=True)
         resolved, err = materialise_path(norm, default_ext="pptx")
         if err:
             return ToolResult(content=err, is_error=True)

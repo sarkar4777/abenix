@@ -121,6 +121,16 @@ def _normalise_dsl_node(n: dict[str, Any]) -> dict[str, Any]:
     return normalised
 
 
+def _has_unresolvable_template(value: Any) -> bool:
+    if isinstance(value, str):
+        return "{{" in _TEMPLATE_PATTERN.sub("", value)
+    if isinstance(value, dict):
+        return any(_has_unresolvable_template(v) for v in value.values())
+    if isinstance(value, list):
+        return any(_has_unresolvable_template(v) for v in value)
+    return False
+
+
 def _extract_template_refs(value: Any) -> list[str]:
     """Extract all {{node.field}} references from a value (recursive)."""
     refs: list[str] = []
@@ -296,6 +306,26 @@ def validate_pipeline(
     ctx_keys = _AUTO_INJECTED_CONTEXT_KEYS | (available_context_keys or set())
     for n in nodes:
         nid = n.get("id", "")
+        guard = n.get("required_if", (n.get("arguments") or {}).get("__required_if__"))
+        if _has_unresolvable_template(guard):
+            errors.append(
+                ValidationError(
+                    node_id=nid,
+                    field="required_if",
+                    message=f"required_if {guard!r} is not a plain {{{{step.field}}}} template, so it can never resolve and the step would never run",
+                    suggestion="Point required_if at one field. An empty list, false, 0 or a missing field skips the step.",
+                )
+            )
+        if _has_unresolvable_template(n.get("arguments", {})):
+            warnings.append(
+                ValidationError(
+                    node_id=nid,
+                    field="arguments",
+                    severity="warning",
+                    message="These arguments hold a {{...}} expression the engine cannot resolve, so the tool receives it as literal text",
+                    suggestion="Use plain {{step.field}} templates, and do any calculation in an earlier step.",
+                )
+            )
         refs = _extract_template_refs(n.get("arguments", {}))
         for ref in refs:
             parts = ref.split(".", 1)

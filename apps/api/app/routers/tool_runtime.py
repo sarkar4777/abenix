@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import tool_gate
 from app.core.deps import get_db, require_role
+from app.core.platform_features import ensure_platform_operator
 from app.core.responses import error, success
 
 from models.tool_invocation import ToolInvocation
@@ -144,6 +145,7 @@ async def upsert_config(
     user: User = Depends(_admin),
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
+    await ensure_platform_operator(db, user)
     slug = body.get("slug")
     if not slug:
         return error("slug is required", 400)

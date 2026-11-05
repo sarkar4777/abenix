@@ -19,6 +19,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import async_session, get_current_user, get_db
+from app.core.playground_access import (
+    playground_denial,
+    run_in_sandbox,
+    sandbox_image,
+)
 from app.core.responses import error, success
 
 
@@ -167,6 +172,10 @@ class ExecuteRequest(BaseModel):
     language: Literal["typescript", "python"]
     timeout_seconds: int = Field(30, ge=1, le=120)
     env_overrides: dict[str, str] = Field(default_factory=dict)
+
+
+def _sandbox_job_env(env: dict[str, str]) -> dict[str, str]:
+    return {k: v for k, v in env.items() if k.startswith("ABENIX_")}
 
 
 def _load_sdk_source(sdk: str) -> str:
@@ -993,6 +1002,19 @@ async def execute_code(
 
     JavaScript execution is not yet supported — copy the code and run it locally.
     """
+    denied = await playground_denial(db, user)
+    if denied:
+        # the page reads the body as a stream whatever the status, so the reason goes out as an event
+        return StreamingResponse(
+            iter(
+                [
+                    f"event: error\ndata: {json.dumps({'message': denied})}\n\n",
+                    f"event: done\ndata: {json.dumps({'status': 'forbidden'})}\n\n",
+                ]
+            ),
+            status_code=403,
+            media_type="text/event-stream",
+        )
     tenant_id = user.tenant_id
     user_id = user.id
     await db.close()
@@ -1065,6 +1087,25 @@ async def execute_code(
                 home=home_dir,
                 user_env=body.env_overrides,
             )
+
+            image = await sandbox_image(tenant_id)
+            if image:
+                ran = await run_in_sandbox(
+                    image,
+                    tenant_id,
+                    safe_code,
+                    _sandbox_job_env(env),
+                    body.timeout_seconds,
+                )
+                if ran["message"]:
+                    yield f"event: error\ndata: {json.dumps({'message': ran['message']})}\n\n"
+                if ran["stdout"]:
+                    yield f"event: stdout\ndata: {json.dumps({'text': ran['stdout'][:50000]})}\n\n"
+                if ran["stderr"]:
+                    yield f"event: stderr\ndata: {json.dumps({'text': ran['stderr'][:50000]})}\n\n"
+                status = "success" if ran["exit_code"] == 0 else "error"
+                yield f"event: done\ndata: {json.dumps({'status': status, 'exit_code': ran['exit_code']})}\n\n"
+                return
 
             proc = await asyncio.create_subprocess_exec(
                 sys.executable,

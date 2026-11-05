@@ -160,7 +160,33 @@ _PINGER = {
 }
 
 
+def _subscription_serves_keyless(provider: str) -> bool:
+    helper = _subscription_helper()
+    if helper is None or provider == "anthropic":
+        return False
+    try:
+        from engine import credentials
+        from engine.provider_credentials import PROVIDER_KEYS
+
+        if not helper.get_config().usable:
+            return False
+        keys = [k for k in PROVIDER_KEYS.get(provider, ()) if k.endswith("_KEY")]
+        return not any(credentials.get(k).strip() for k in keys)
+    except Exception as exc:
+        logger.debug("keyless subscription check skipped %s", exc)
+        return False
+
+
 async def ping_one(model: str, provider: str) -> dict[str, Any]:
+    # the Claude probes already measure the plan that serves this model
+    if _subscription_serves_keyless(provider):
+        return {
+            "model": model,
+            "ok": True,
+            "error": None,
+            "latency_ms": None,
+            "provider": provider,
+        }
     try:
         from engine import llm_stub
 

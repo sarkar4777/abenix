@@ -16,6 +16,7 @@ from models.user import UserRole
 
 ADMIN_ROUTER_MODULES = [
     "admin_alerts",
+    "admin_api_key_report",
     "admin_cluster",
     "admin_dlq",
     "admin_model_availability",

@@ -303,25 +303,29 @@ test.describe.serial('platform surfaces', () => {
     const deploy = await api(page, 'POST', `/api/edge/gateways/${gwPk}/deploy`, token, {
       agent_id: edgeAgent.id,
     });
-    const dep = deploy.json?.data ?? {};
-    console.log(`  deploy -> ${deploy.status}, transport ${dep.transport}, pushed ${dep.pushed}`);
-    expect(deploy.status, 'edge deploy failed').toBeLessThan(400);
-    expect(dep.deployed, 'deploy did not report success').toBe(true);
+    const dep = deploy.json?.data ?? deploy.json?.error?.details ?? {};
+    console.log(`  deploy -> ${deploy.status}, delivered via ${dep.delivered_via}, queued ${dep.queued}`);
     expect(dep.bundle_digest, 'deploy pushed no bundle digest').toBeTruthy();
     expect(dep.bundle_bytes, 'deploy pushed an empty bundle').toBeGreaterThan(512);
     // There is no gateway process listening at the registered endpoint, so the
     // push itself cannot land. What matters is that the API says so rather than
-    // claiming delivery, and that the assignment is still recorded.
-    expect(dep, 'deploy does not report whether the push landed')
-      .toHaveProperty('pushed');
+    // claiming delivery.
+    expect(dep.deployed, 'deploy claimed delivery to a gateway that does not exist').toBe(false);
+    expect(dep.delivered_via, 'deploy named a delivery route that did not happen').toBeNull();
+    expect(dep.gateway_reachable, 'deploy did not say the gateway is unreachable').toBe(false);
 
-    // The assignment has to stick, which is the whole point of deploying.
-    const after = await api(page, 'GET', `/api/edge/gateways/${gwPk}/agents`, token);
-    const assigned = after.json?.data?.agents ?? after.json?.data ?? [];
-    console.log(`  agents assigned to the gateway: ${assigned.length}`);
-    expect(assigned.length, 'the deploy did not assign the agent').toBeGreaterThan(0);
-    expect(JSON.stringify(assigned), 'the assigned agent is not the one deployed')
-      .toContain(edgeAgent.id);
+    // With a broker the bundle waits there and the assignment sticks. Without one the deploy is an error.
+    if (dep.queued) {
+      expect(deploy.status, 'a queued deploy should still answer 200').toBe(200);
+      const after = await api(page, 'GET', `/api/edge/gateways/${gwPk}/agents`, token);
+      const assigned = after.json?.data?.agents ?? after.json?.data ?? [];
+      console.log(`  agents assigned to the gateway: ${assigned.length}`);
+      expect(assigned.length, 'the deploy did not assign the agent').toBeGreaterThan(0);
+      expect(JSON.stringify(assigned), 'the assigned agent is not the one deployed')
+        .toContain(edgeAgent.id);
+    } else {
+      expect(deploy.status, 'an undelivered deploy should be an error').toBe(502);
+    }
 
     // Capture the page after the gateway exists, so the shot shows a populated
     // fleet rather than an empty table.

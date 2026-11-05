@@ -19,10 +19,12 @@ from app.core.audit import log_action
 from app.core.config import settings
 from app.core.permissions import sees_other_users_resources
 from app.core.deps import get_current_user, get_db
+from app.core.platform_features import is_platform_operator
 from app.core.notifications import create_notification
 from app.core.responses import error, success
 from app.core.sanitize import is_safe_url, sanitize_input
 from app.core.ws_manager import ws_manager
+from app.services.agent_config_warnings import config_warnings
 from app.schemas.agents import (
     CreateAgentRequest,
     ExecuteRequest,
@@ -1110,6 +1112,20 @@ async def self_check_agent(
     return success(_self_check_agent(agent))
 
 
+def _sync_run_fields(execution: Execution, event: dict[str, Any]) -> dict[str, Any]:
+    confidence = execution.confidence_score
+    return {
+        "model": event.get("model") or execution.model_used,
+        "input_tokens": int(event.get("input_tokens") or execution.input_tokens or 0),
+        "output_tokens": int(
+            event.get("output_tokens") or execution.output_tokens or 0
+        ),
+        "cost": float(event.get("cost") or execution.cost or 0.0),
+        "tool_calls": execution.tool_calls or [],
+        "confidence_score": float(confidence) if confidence is not None else None,
+    }
+
+
 def _final_text(output: Any) -> str:
     """The readable answer in a run output, unwrapping {"response": ...}."""
     if output is None:
@@ -1167,8 +1183,13 @@ async def create_agent(
         return error("Invalid icon URL", 400)
 
     requested_type = (body.agent_type or "custom").lower()
-    if requested_type == "oob" and user.role.value != "admin":
-        return error("Only admins can create OOB agents", 403)
+    if requested_type == "oob" and not await is_platform_operator(db, user):
+        return error(
+            "Shipped agents show up in every tenant, so only a platform operator "
+            "can create one.",
+            403,
+            "PLATFORM_OPERATOR_REQUIRED",
+        )
 
     # POST used to silently drop top-level `tools` / `model` — SDK
     # callers and the dev docs passed them flat and ended up with an
@@ -1244,6 +1265,9 @@ async def create_agent(
     out = _serialize_agent(agent)
     if refused:
         out["kb_grants_refused"] = refused
+    warnings = await config_warnings(nested_cfg_dump, user.tenant_id)
+    if warnings:
+        out["warnings"] = warnings
     return success(out, status_code=201)
 
 
@@ -1353,6 +1377,15 @@ async def update_agent(
         if wanted_type != agent.agent_type:
             if user.role.value != "admin":
                 return error("Only admins can change agent_type", 403)
+            if AgentType.OOB in (wanted_type, agent.agent_type) and (
+                not await is_platform_operator(db, user)
+            ):
+                return error(
+                    "Shipped agents show up in every tenant, so only a platform "
+                    "operator can change this.",
+                    403,
+                    "PLATFORM_OPERATOR_REQUIRED",
+                )
             agent.agent_type = wanted_type
 
     new_state = revs.agent_state(agent)
@@ -1410,6 +1443,10 @@ async def update_agent(
     out = _serialize_agent(agent)
     if refused:
         out["kb_grants_refused"] = refused
+    if body.agent_model_config is not None:
+        warnings = await config_warnings(agent.model_config_ or {}, agent.tenant_id)
+        if warnings:
+            out["warnings"] = warnings
     return success(out)
 
 
@@ -1834,8 +1871,13 @@ async def review_agent(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
-    if user.role.value not in ("admin",):
-        return error("Admin access required", 403)
+    if not await is_platform_operator(db, user):
+        return error(
+            "The marketplace is shared by every tenant, so only a platform operator "
+            "can review a listing.",
+            403,
+            "PLATFORM_OPERATOR_REQUIRED",
+        )
 
     result = await db.execute(select(Agent).where(Agent.id == agent_id))
     agent = result.scalar_one_or_none()
@@ -2127,10 +2169,22 @@ async def preview_validation(
 
     # Probe the provider key for the effective model so the UI can warn
     # when the deployment is misconfigured before the user clicks run.
-    from app.routers.llm_models import _probe_providers, _provider_from_model  # type: ignore
+    from app.routers.llm_models import (  # type: ignore
+        _probe_providers,
+        _provider_from_model,
+        _subscription_state,
+        _subscription_target,
+    )
 
     providers = await _probe_providers(db)
     prov_name = _provider_from_model(effective, None)
+    sub_target = _subscription_target(
+        requested, None, await _subscription_state(db), providers
+    )
+    if requested and sub_target:
+        effective, prov_name = sub_target, "claude_subscription"
+        fallback_reason = None if sub_target == requested else "claude_subscription"
+        chain = [requested] if sub_target == requested else [requested, sub_target]
     prov_info = providers.get(prov_name) or {"configured": True, "reason": None}
 
     # Also surface the most recent execution's actual_model/fallback_reason
@@ -2320,12 +2374,10 @@ async def execute_agent(
 
     if body.wait is None:
         is_api_key_caller = getattr(user, "_api_key_scopes", None) is not None
-        body.wait = bool(is_api_key_caller)
-        # Also flip stream off for API-key callers when we're defaulting
-        # to wait=True — streaming + wait are incompatible (stream short-
-        # circuits before the wait branch). Browser callers keep stream
-        # default (True) since they want SSE.
-        if is_api_key_caller and body.stream is True:
+        # stream defaults to true, so only a value the client sent means it wants SSE
+        wants_stream = "stream" in body.model_fields_set and body.stream
+        body.wait = bool(is_api_key_caller) and not wants_stream
+        if is_api_key_caller and not wants_stream:
             body.stream = False
 
     allowed, limit_msg = await check_limit(db, user.tenant_id, user.id)
@@ -2555,8 +2607,23 @@ async def execute_agent(
 
     user_context = body.context or {}
 
-    agent_pool = getattr(agent, "runtime_pool", None) or "default"
+    from app.core.runtime_pools import POOL_NOT_DEPLOYED, effective_pool, pool_problem
+
+    agent_pool = effective_pool(agent)
     if settings.scaling_exec_remote and agent_pool != "inline":
+        _no_pool = await pool_problem(agent_pool)
+        if _no_pool:
+            execution.status = ExecutionStatus.FAILED
+            execution.error_message = _no_pool
+            execution.failure_code = POOL_NOT_DEPLOYED
+            execution.completed_at = datetime.now(timezone.utc)
+            await db.commit()
+            return error(
+                _no_pool,
+                503,
+                error_code=POOL_NOT_DEPLOYED,
+                details={"execution_id": str(execution.id), "pool": agent_pool},
+            )
         try:
             import sys
             import os as _os
@@ -2652,18 +2719,21 @@ async def execute_agent(
 
                 output_text = ""
                 summary: dict[str, Any] = {}
+                final_event: dict[str, Any] = {}
                 errored: str | None = None
                 paused_at: dict | None = None
 
                 async def _collect():
-                    nonlocal output_text, summary, errored
+                    nonlocal output_text, summary, errored, final_event
                     async for evt in subscribe_events(str(execution.id)):
                         ev = evt.get("event")
                         if ev == "done":
+                            final_event = evt
                             output_text = str(evt.get("output") or "")
                             summary = evt.get("summary") or {}
                             return
                         if ev == "error":
+                            final_event = evt
                             errored = str(evt.get("error") or "execution failed")
                             # Failed pipelines still publish a summary alongside
                             # the error event — capture it so the response
@@ -2774,6 +2844,17 @@ async def execute_agent(
                         }
                     )
 
+                # the consumer wrote the row while this request waited
+                try:
+                    await db.refresh(execution)
+                except Exception as _refresh_err:
+                    logging.getLogger(__name__).warning(
+                        "could not reload execution %s after the wait, reason %s",
+                        execution.id,
+                        _refresh_err,
+                    )
+                _run_fields = _sync_run_fields(execution, final_event)
+
                 if errored:
                     # Return 200 with status=failed so callers can drill into
                     # the execution by id. The consumer has already persisted
@@ -2807,7 +2888,7 @@ async def execute_agent(
                             "error": errored,
                             "output": output_text,
                             "output_text": output_text,
-                            "cost": float(execution.cost or 0.0),
+                            **_run_fields,
                             "duration_ms": int(
                                 _fs.get("total_duration_ms")
                                 or execution.duration_ms
@@ -2837,7 +2918,7 @@ async def execute_agent(
                     "status": _qstatus or "completed",
                     "output": _final if _final is not None else output_text,
                     "output_text": output_text,
-                    "cost": float(execution.cost or 0.0),
+                    **_run_fields,
                     "duration_ms": int(
                         _summary.get("total_duration_ms") or execution.duration_ms or 0
                     ),
@@ -3891,6 +3972,7 @@ async def _stream_execution(
             max_tokens=max_tokens,
             cache=_get_cache_orchestrator() if cache_enabled else None,
             agent_id=str(agent_id),
+            tenant_id=str(tenant_id),
             execution_id=str(execution_id),
             moderation_gate=(_mod_ctx.gate if _mod_ctx else None),
             # Pass the agent's tool_config so the executor can strip
@@ -4278,6 +4360,7 @@ async def _stream_execution(
             execution.status = ExecutionStatus.FAILED
             execution.error_message = str(e)
             execution.tool_calls = all_tool_calls or None
+            execution.model_used = getattr(e, "llm_model", None) or execution.model_used
             _persisted = True
             # Classify + emit outcome so the dashboards see this terminal
             # path. Earlier this branch updated the DB row but never
@@ -4460,6 +4543,7 @@ async def _non_stream_execution(
         max_tokens=max_tokens,
         cache=_get_cache_orchestrator() if cache_enabled else None,
         agent_id=str(execution.agent_id),
+        tenant_id=str(tenant_id),
         execution_id=str(execution.id),
         moderation_gate=_mod_ctx2.gate,
         # Same tool-schema injection as the streaming path — strips
@@ -4725,6 +4809,7 @@ async def _non_stream_execution(
     except Exception as e:
         execution.status = ExecutionStatus.FAILED
         execution.error_message = str(e)[:2000]
+        execution.model_used = getattr(e, "llm_model", None) or execution.model_used
         # Classify exception → stable failure_code for dashboards/alerts.
         from app.core.failure_codes import classify_exception, emit_outcome_metric
 

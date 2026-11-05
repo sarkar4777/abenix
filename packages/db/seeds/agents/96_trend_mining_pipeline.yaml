@@ -61,7 +61,7 @@ pipeline_config:
               "source":         "trend_miner" }
             for c in mine_trends.clusters if c.anomaly_score >= 0.5
           ]}}
-      required_if: "{{len(mine_trends.clusters) > 0}}"
+      required_if: "{{mine_trends.clusters}}"
 
     - id: slack_alert
       type: tool
@@ -74,7 +74,7 @@ pipeline_config:
             ResolveAI Trend Miner: {{len(mine_trends.alerts)}}
             anomaly alert(s) in the last 72h.
           attachments: "{{mine_trends.alerts}}"
-      required_if: "{{len(mine_trends.alerts) > 0}}"
+      required_if: "{{mine_trends.alerts}}"
 
     - id: final_report
       type: structured

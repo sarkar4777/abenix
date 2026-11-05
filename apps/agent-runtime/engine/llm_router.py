@@ -700,6 +700,7 @@ class AnthropicProvider(LLMProvider):
                             yield StreamEvent(
                                 event="tool_call",
                                 data={
+                                    "id": current_tool.get("id", ""),
                                     "name": current_tool["name"],
                                     "arguments": args,
                                 },
@@ -1018,7 +1019,7 @@ class OpenAIProvider(LLMProvider):
             tool_calls.append(entry)
             yield StreamEvent(
                 event="tool_call",
-                data={"name": entry["name"], "arguments": args},
+                data={"id": entry["id"], "name": entry["name"], "arguments": args},
             )
 
         latency = int((time.monotonic() - start) * 1000)
@@ -1233,6 +1234,7 @@ class GoogleProvider(LLMProvider):
                             yield StreamEvent(
                                 event="tool_call",
                                 data={
+                                    "id": tc.get("id", ""),
                                     "name": tc["name"],
                                     "arguments": tc["arguments"],
                                 },
@@ -1407,6 +1409,52 @@ MODEL_TO_PROVIDER: dict[str, str] = {
 }
 
 
+def _is_rate_limited(exc: Exception) -> bool:
+    return getattr(exc, "status_code", None) == 429
+
+
+def _note_attempt(exc: Exception, provider: str, model: str) -> None:
+    # the run row reads these, the model the agent asked for may never have been called
+    try:
+        exc.llm_provider = provider  # type: ignore[attr-defined]
+        exc.llm_model = model  # type: ignore[attr-defined]
+    except AttributeError:
+        pass
+
+
+async def _open_stream(
+    stream: Any, provider: str, model: str, requested: str, reason: str | None
+) -> AsyncGenerator[StreamEvent, None]:
+    # Providers only fail once iterated, so pull the first event while the chain can still react.
+    events = stream.__aiter__()
+    try:
+        first: StreamEvent | None = await events.__anext__()
+    except StopAsyncIteration:
+        first = None
+
+    async def relay() -> AsyncGenerator[StreamEvent, None]:
+        def tagged(event: StreamEvent) -> StreamEvent:
+            if event.event == "done" and isinstance(event.data, dict):
+                event.data.setdefault("requested_model", requested)
+                event.data.setdefault("fallback_reason", reason)
+            return event
+
+        try:
+            if first is not None:
+                yield tagged(first)
+            async for event in events:
+                yield tagged(event)
+        except Exception as exc:
+            _note_attempt(exc, provider, model)
+            raise
+        finally:
+            close = getattr(events, "aclose", None)
+            if close is not None:
+                await close()
+
+    return relay()
+
+
 class LLMRouter:
     def __init__(self) -> None:
         self._providers: dict[str, LLMProvider] = {}
@@ -1491,15 +1539,16 @@ class LLMRouter:
         chain: list[tuple[str, str]] = []
         cfg = claude_subscription.get_config()
         native = self._native_provider_name(model)
+        native_ready = _provider_configured(native)
 
         if cfg.usable:
             is_claude = model.lower().startswith("claude")
-            if cfg.exclusive or is_claude:
+            if cfg.exclusive or is_claude or not native_ready:
                 chain.append(
                     ("claude_subscription", claude_subscription.map_model(model, cfg))
                 )
 
-        if _provider_configured(native):
+        if native_ready:
             chain.append((native, model))
 
         # Last resort: any other provider that has a credential.
@@ -1516,6 +1565,25 @@ class LLMRouter:
             # cause (missing key) instead of an empty-chain abstraction.
             chain.append((native, model))
         return chain
+
+    def _subscription_replaces(self, model: str) -> bool:
+        cfg = claude_subscription.get_config()
+        if not cfg.usable or model.lower().startswith("claude"):
+            return False
+        return cfg.exclusive or not _provider_configured(
+            self._native_provider_name(model)
+        )
+
+    @staticmethod
+    def _subscription_retry_model(
+        provider: str, model: str, exc: Exception, chain: list[tuple[str, str]]
+    ) -> str | None:
+        if provider != "claude_subscription" or not _is_rate_limited(exc):
+            return None
+        default = claude_subscription.get_config().default_model
+        if model == default or ("claude_subscription", default) in chain:
+            return None
+        return default
 
     def route(self, model: str) -> LLMProvider:
         provider_name, _ = self.candidate_chain(model)[0]
@@ -1540,24 +1608,26 @@ class LLMRouter:
             from engine.model_resolver import resolve as _resolve
 
             required = {"tools": True} if tools else {}
-            decision = _resolve(model, required_capabilities=required)
-            if decision.effective != model:
-                logger.warning(
-                    "model_resolver swap requested=%s effective=%s reason=%s chain=%s",
-                    decision.requested,
-                    decision.effective,
-                    decision.reason,
-                    decision.chain,
-                )
-                model = decision.effective
-                fallback_reason = decision.reason
+            # the prober marks a keyless model unavailable, its fallbacks would skip the plan
+            if not self._subscription_replaces(model):
+                decision = _resolve(model, required_capabilities=required)
+                if decision.effective != model:
+                    logger.warning(
+                        "model_resolver swap requested=%s effective=%s reason=%s chain=%s",
+                        decision.requested,
+                        decision.effective,
+                        decision.reason,
+                        decision.chain,
+                    )
+                    model = decision.effective
+                    fallback_reason = decision.reason
         except Exception as exc:
             logger.debug("model_resolver bypass: %s", exc)
         # Walk the credential chain: subscription first when it's configured,
         # then the model's own provider, then whatever else has a key. The
         # first candidate keeps the full retry budget; each degradation step
         # gets one shot so a dead primary doesn't multiply latency.
-        chain = self.candidate_chain(model)
+        chain = list(self.candidate_chain(model))
         last_error: Exception | None = None
         # the first provider that answered with an error holds the cause, later ones are fallback noise
         first_call_error: Exception | None = None
@@ -1595,6 +1665,14 @@ class LLMRouter:
                         stream=stream,
                         max_tokens=_cap_output_tokens(attempt_model, max_tokens),
                     )
+                    if stream and hasattr(result, "__aiter__"):
+                        return await _open_stream(
+                            result,
+                            provider_name,
+                            attempt_model,
+                            requested_model,
+                            step_reason,
+                        )
                     if not stream and isinstance(result, LLMResponse):
                         result.requested_model = requested_model
                         result.fallback_reason = step_reason
@@ -1650,6 +1728,7 @@ class LLMRouter:
                     last_error = e
                     if first_call_error is None:
                         first_call_error = e
+                    _note_attempt(e, provider_name, attempt_model)
                     llm_errors_total.labels(
                         model=attempt_model,
                         error_type=type(e).__name__,
@@ -1663,6 +1742,13 @@ class LLMRouter:
                         attempts,
                         e,
                     )
+                    # plan limits are per model, so waiting on this one gains nothing
+                    plan_model = self._subscription_retry_model(
+                        provider_name, attempt_model, e, chain
+                    )
+                    if plan_model is not None:
+                        chain.insert(idx + 1, ("claude_subscription", plan_model))
+                        break
                     if attempt < attempts - 1:
                         await asyncio.sleep(2**attempt)
 

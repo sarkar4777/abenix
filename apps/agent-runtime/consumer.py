@@ -1666,6 +1666,7 @@ async def _run_one(payload: dict) -> None:
             str(e)[:2000],
             trace_id=_tid_fail,
             tool_calls=_agg_tool_calls or None,
+            model_used=getattr(e, "llm_model", None),
             trigger_id=trigger_id,
         )
         # Classify + emit the runtime-side terminal outcome. Without this,

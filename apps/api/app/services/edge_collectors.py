@@ -975,7 +975,11 @@ def needs(collectors: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def install(
-    gateway_id: str, url: str, token: str, collectors: list[dict[str, Any]]
+    gateway_id: str,
+    url: str,
+    token: str,
+    collectors: list[dict[str, Any]],
+    agent_token: str | None = None,
 ) -> dict[str, Any]:
     img = image()
     n = needs(collectors)
@@ -989,6 +993,8 @@ def install(
         f"-e ABENIX_ENROLL_TOKEN={q(token)}",
         f"-v {q(name)}-data:/var/lib/abenix-edge",
     ]
+    if agent_token:
+        run.insert(5, f"-e EDGE_AUTH_TOKEN={q(agent_token)}")
     if n["host_network"]:
         run.append("--network host")
     run += [f"--device {q(d)}" for d in n["devices"]]
@@ -1005,6 +1011,7 @@ def install(
         "    environment:",
         f"      ABENIX_URL: {json.dumps(url)}",
         f"      ABENIX_ENROLL_TOKEN: {json.dumps(token)}",
+        *([f"      EDGE_AUTH_TOKEN: {json.dumps(agent_token)}"] if agent_token else []),
         "    volumes:",
         "      - edge-data:/var/lib/abenix-edge",
     ]
@@ -1041,6 +1048,9 @@ def install(
         if n["devices"]
         else "          securityContext: {runAsNonRoot: true, allowPrivilegeEscalation: false}\n"
     )
+    agent_secret = (
+        f"\n  EDGE_AUTH_TOKEN: {json.dumps(agent_token)}" if agent_token else ""
+    )
     k8s = (
         f"""apiVersion: v1
 kind: Namespace
@@ -1051,7 +1061,7 @@ kind: Secret
 metadata: {{name: {k8s_name}, namespace: abenix-edge}}
 stringData:
   ABENIX_URL: {json.dumps(url)}
-  ABENIX_ENROLL_TOKEN: {json.dumps(token)}
+  ABENIX_ENROLL_TOKEN: {json.dumps(token)}{agent_secret}
 ---
 apiVersion: apps/v1
 kind: StatefulSet
@@ -1084,10 +1094,11 @@ spec:
         docker_flags += " --network host"
     docker_flags += "".join(f" --device {d}" for d in n["devices"])
     docker_flags += "".join(f" -v {f}:{f}:ro" for f in n["folders"])
+    agent_env = f"\nEDGE_AUTH_TOKEN={agent_token}" if agent_token else ""
     systemd = f"""# Linux IPC or Raspberry Pi (amd64 or arm64) with Docker installed: curl -fsSL https://get.docker.com | sh
 sudo mkdir -p /etc/abenix-edge && sudo tee /etc/abenix-edge/env >/dev/null <<'EOF'
 ABENIX_URL={url}
-ABENIX_ENROLL_TOKEN={token}
+ABENIX_ENROLL_TOKEN={token}{agent_env}
 EOF
 sudo chmod 600 /etc/abenix-edge/env
 sudo tee /etc/systemd/system/abenix-edge.service >/dev/null <<'EOF'

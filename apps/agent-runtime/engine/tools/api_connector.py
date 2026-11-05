@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from engine import url_guard
 from engine.tools.base import READ_ONLY, BaseTool, ConfigField, Effect, ToolResult
 
 
@@ -137,6 +138,13 @@ class ApiConnectorTool(BaseTool):
         message = params.get("message", "")
         channel = params.get("channel", "#general")
         webhook = params.get("webhook_url", self.cfg("SLACK_WEBHOOK_URL"))
+        blocked = await url_guard.check(
+            webhook or "",
+            allow_private=url_guard.env_flag("CONNECTORS_ALLOW_PRIVATE_TARGETS"),
+            require_dns=False,
+        )
+        if webhook and blocked:
+            return {"error": f"This webhook was refused. {blocked}."}
 
         if not message:
             return {"error": "message is required"}

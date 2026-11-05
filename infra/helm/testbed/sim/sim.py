@@ -299,31 +299,69 @@ async def role_sensors() -> None:
         await asyncio.sleep(1.0 / max(rate, 0.1))
 
 
+def load_verdict(delivered: int, failed: int, seconds: float, min_rate: float, max_failed: int) -> int:
+    if delivered <= 0 or seconds <= 0:
+        print(f"no messages delivered, {failed} failed", flush=True)
+        return 2
+    checks = []
+    if min_rate > 0:
+        measured = round(delivered / seconds, 1)
+        ok = measured >= min_rate
+        print(f"{'PASS' if ok else 'FAIL'} delivered_rate measured={measured} limit={min_rate}", flush=True)
+        checks.append(ok)
+    if max_failed >= 0:
+        ok = failed <= max_failed
+        print(f"{'PASS' if ok else 'FAIL'} failed_messages measured={failed} limit={max_failed}", flush=True)
+        checks.append(ok)
+    return 0 if all(checks) else 1
+
+
 async def role_load() -> None:
-    """A one-off burst for throughput tests."""
+    """A one-off burst for throughput tests. Exits 1 on a missed threshold, 2 when it could not run."""
     from aiokafka import AIOKafkaProducer
 
     topic = env("TOPIC", "load.events")
     count, rate = int(env("LOAD_COUNT", "100000")), float(env("LOAD_RATE", "5000"))
     devices = int(env("LOAD_DEVICES", "50"))
-    await ensure_topics({topic: int(env("LOAD_PARTITIONS", "6"))})
-    p = AIOKafkaProducer(linger_ms=10, acks=1, max_batch_size=262144, **kafka_kwargs())
-    await p.start()
+    try:
+        min_rate = float(env("LOAD_MIN_RATE") or rate * 0.25)
+        max_failed = int(env("LOAD_MAX_FAILED") or 0)
+        p = AIOKafkaProducer(linger_ms=10, acks=1, max_batch_size=262144, **kafka_kwargs())
+        await ensure_topics({topic: int(env("LOAD_PARTITIONS", "6"))})
+        await p.start()
+    except Exception as exc:
+        log.error("load could not start, %s", exc)
+        raise SystemExit(2)
     start = time.time()
+    outcome = {"delivered": 0, "failed": 0}
+
+    def settled(fut: asyncio.Future) -> None:
+        outcome["failed" if fut.cancelled() or fut.exception() else "delivered"] += 1
+
     try:
         for i in range(count):
             body = {"seq": i, "sent_ms": now_ms(), "device": f"dev-{i % devices:03d}", "value": round(random.random() * 100, 3)}
-            await p.send(topic, json.dumps(body).encode(), key=body["device"].encode())
+            sent = await p.send(topic, json.dumps(body).encode(), key=body["device"].encode())
+            sent.add_done_callback(settled)
             ahead = (i + 1) / rate - (time.time() - start)
             if ahead > 0:
                 await asyncio.sleep(ahead)
             if i and i % 10000 == 0:
                 log.info("load: %d sent, %.0f/s", i, i / (time.time() - start))
         await p.flush()
+        # flush settles the futures, their callbacks run on the next turn
+        await asyncio.sleep(0.1)
+    except Exception as exc:
+        log.error("the load burst stopped, %s", exc)
+        raise SystemExit(2)
     finally:
         await p.stop()
     took = time.time() - start
-    log.info("load: done, %d messages in %.1fs, %.0f msgs/s to %s", count, took, count / took, topic)
+    code = load_verdict(outcome["delivered"], outcome["failed"], took, min_rate, max_failed)
+    # deploy.sh shows only the last log line, so this one stays last
+    log.info("load: done, %d messages in %.1fs, %.0f msgs/s to %s", outcome["delivered"], took, outcome["delivered"] / took, topic)
+    if code:
+        raise SystemExit(code)
 
 
 # RabbitMQ

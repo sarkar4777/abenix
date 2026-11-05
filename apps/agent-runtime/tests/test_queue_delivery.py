@@ -84,6 +84,9 @@ class _FakeJS:
     def __init__(self):
         self.published: list = []
 
+    async def consumer_info(self, stream, name):
+        return SimpleNamespace(num_pending=0, num_ack_pending=0)
+
     async def publish(self, subject, body):
         self.published.append((subject, json.loads(body)))
 
@@ -340,3 +343,130 @@ async def test_renew_reports_takeover_only_when_someone_else_owns_it():
     s = _Session([_Result(rowcount=0), _Result(scalar=consumer.RUNNER_ID)])
     with patch.object(consumer, "_get_session_factory", _factory(s)):
         assert await consumer._renew(str(uuid.uuid4())) is True
+
+
+class _DurableJS:
+    def __init__(self, existing=()):
+        self.existing = set(existing)
+        self.calls: list = []
+        self.configs: list = []
+
+    async def consumer_info(self, stream, name):
+        from nats.js.errors import NotFoundError
+
+        self.calls.append(("info", name))
+        if name not in self.existing:
+            raise NotFoundError()
+        return SimpleNamespace(num_pending=4, num_ack_pending=1)
+
+    async def add_consumer(self, stream, config=None):
+        self.calls.append(("add", config.durable_name))
+        self.configs.append(config)
+        self.existing.add(config.durable_name)
+
+    async def publish(self, subject, body):
+        self.calls.append(("publish", subject))
+
+    async def delete_consumer(self, stream, name):
+        from nats.js.errors import NotFoundError
+
+        self.calls.append(("delete", name))
+        if name not in self.existing:
+            raise NotFoundError()
+        self.existing.discard(name)
+
+    async def purge_stream(self, stream, subject=None):
+        self.calls.append(("purge", subject))
+
+
+def _backend(js):
+    b = qb.NATSBackend()
+    b._ensure = AsyncMock()
+    b._js = js
+    return b
+
+
+@pytest.mark.asyncio
+async def test_first_run_to_a_pool_at_zero_creates_the_durable_before_publishing():
+    js = _DurableJS()
+    await _backend(js).submit("long-running", {"execution_id": "e1"})
+    assert js.calls == [
+        ("info", "abenix-long-running-consumer"),
+        ("add", "abenix-long-running-consumer"),
+        ("publish", "agents.long-running"),
+    ]
+    config = js.configs[0]
+    assert config.filter_subject == "agents.long-running"
+    assert config.ack_wait == qb.ACK_WAIT_SECONDS
+
+
+@pytest.mark.asyncio
+async def test_an_existing_durable_is_left_alone_and_only_checked_once_a_minute():
+    js = _DurableJS(existing={"abenix-default-consumer"})
+    b = _backend(js)
+    await b.submit("default", {"execution_id": "e1"})
+    await b.submit("default", {"execution_id": "e2"})
+    assert [c[0] for c in js.calls] == ["info", "publish", "publish"]
+    assert not js.configs
+
+
+@pytest.mark.asyncio
+async def test_a_message_is_not_published_when_its_durable_cannot_be_made():
+    js = _DurableJS()
+    js.add_consumer = AsyncMock(side_effect=RuntimeError("nats refused"))
+    with pytest.raises(RuntimeError):
+        await _backend(js).submit("default", {"execution_id": "e1"})
+    assert not [c for c in js.calls if c[0] == "publish"]
+
+
+@pytest.mark.asyncio
+async def test_backlog_counts_queued_and_held_runs_and_none_without_a_durable():
+    js = _DurableJS(existing={"abenix-default-consumer"})
+    b = _backend(js)
+    assert await b.backlog("default") == 5
+    assert await b.backlog("gone") is None
+
+
+@pytest.mark.asyncio
+async def test_remove_queue_drops_the_durable_and_its_messages_and_forgets_it():
+    js = _DurableJS()
+    b = _backend(js)
+    await b.ensure_consumer("dedicated-1")
+    await b.remove_queue("dedicated-1")
+    assert ("delete", "abenix-dedicated-1-consumer") in js.calls
+    assert ("purge", "agents.dedicated-1") in js.calls
+    js.calls.clear()
+    await b.ensure_consumer("dedicated-1")
+    assert ("add", "abenix-dedicated-1-consumer") in js.calls
+
+
+@pytest.mark.asyncio
+async def test_a_lost_connection_does_not_spin_the_fetch_loop():
+    class _Lost:
+        fetches = 0
+
+        async def fetch(self, n, timeout=5):
+            _Lost.fetches += 1
+            if _Lost.fetches > 1:
+                raise asyncio.CancelledError
+            raise ConnectionError("nats gone")
+
+        async def unsubscribe(self):
+            pass
+
+    b = qb.NATSBackend()
+    b._ensure = AsyncMock()
+    b._js = SimpleNamespace(pull_subscribe=AsyncMock(return_value=_Lost()))
+    slept: list = []
+    real_sleep = asyncio.sleep
+
+    async def fake_sleep(s):
+        slept.append(s)
+        await real_sleep(0)
+
+    with patch.object(qb.asyncio, "sleep", fake_sleep), pytest.raises(
+        asyncio.CancelledError
+    ):
+        async for _ in b.stream("default"):
+            pass
+    assert slept == [1]

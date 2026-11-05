@@ -405,7 +405,8 @@ async def test_free_listing_goes_to_review_and_drops_an_old_price():
 
 
 @pytest.mark.asyncio
-async def test_approval_is_refused_while_the_marketplace_is_off():
+async def test_approval_is_refused_while_the_marketplace_is_off(monkeypatch):
+    monkeypatch.setenv("ABENIX_PLATFORM_OPERATORS", "someone@example.com")
     from app.routers import agents as agents_router
     from app.schemas.agents import ReviewAgentRequest
     from models.agent import AgentStatus

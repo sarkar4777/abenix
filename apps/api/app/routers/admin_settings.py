@@ -11,6 +11,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, get_db
+from app.core.platform_features import ensure_platform_operator
 from app.core.platform_settings import DEFAULTS, SECRET_KEYS, invalidate, mask
 from app.core.responses import error, success
 
@@ -263,7 +264,7 @@ async def update_setting(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
-    _ensure_admin(user)
+    await ensure_platform_operator(db, user)
     if key not in DEFAULTS:
         return error(f"Unknown setting '{key}'", 400)
     value = body.get("value")
@@ -397,7 +398,7 @@ async def verify_subscription(
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
     """Make one real, minimal call with the stored token to prove it works."""
-    _ensure_admin(user)
+    await ensure_platform_operator(db, user)
     token = await _subscription_token(db)
     if not token:
         return error("No subscription token configured", 400)
@@ -460,7 +461,7 @@ async def reset_settings(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
-    _ensure_admin(user)
+    await ensure_platform_operator(db, user)
     # only the keys this screen manages, credentials and feature switches live elsewhere
     await db.execute(
         text("DELETE FROM platform_settings WHERE key = ANY(:keys)"),

@@ -15,7 +15,11 @@ from types import SimpleNamespace
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
-for p in (ROOT / "apps" / "agent-runtime", ROOT / "apps" / "api", ROOT / "packages" / "db"):
+for p in (
+    ROOT / "apps" / "agent-runtime",
+    ROOT / "apps" / "api",
+    ROOT / "packages" / "db",
+):
     if str(p) not in sys.path:
         sys.path.insert(0, str(p))
 
@@ -43,7 +47,10 @@ class RecordingDB:
 
 def _admin(tenant_id: str):
     return SimpleNamespace(
-        id=uuid.uuid4(), tenant_id=uuid.UUID(tenant_id), role=UserRole.ADMIN, email="a@x.io"
+        id=uuid.uuid4(),
+        tenant_id=uuid.UUID(tenant_id),
+        role=UserRole.ADMIN,
+        email="a@x.io",
     )
 
 
@@ -53,6 +60,7 @@ def _body(resp) -> dict:
 
 @pytest.fixture(autouse=True)
 def _fresh(monkeypatch):
+    monkeypatch.setenv("ABENIX_PLATFORM_OPERATORS", "a@x.io")
     credentials.configure(loader=None, ttl=30)
     credentials._snapshot.clear()
     credentials._tenant_snapshot.clear()
@@ -120,7 +128,9 @@ async def test_catalogue_counts_missing_for_the_scope():
     assert required
     for k in required:
         credentials._tenant_snapshot[(T1, k)] = "set"
-    tenant_view = await tool_config.catalogue(include_values=False, force=False, tenant_id=T1)
+    tenant_view = await tool_config.catalogue(
+        include_values=False, force=False, tenant_id=T1
+    )
     platform_view = await tool_config.catalogue(
         include_values=False, force=False, tenant_id=T1, scope="platform"
     )
@@ -174,7 +184,11 @@ async def test_query_scope_is_honoured_and_bad_scope_is_rejected():
     )
     assert "platform_settings" in db.statements[0][0]
     bad = await router.set_value(
-        KEY, router.ValueBody(value="v", scope="galaxy"), scope=None, user=_admin(T1), db=db
+        KEY,
+        router.ValueBody(value="v", scope="galaxy"),
+        scope=None,
+        user=_admin(T1),
+        db=db,
     )
     assert bad.status_code == 400
     assert len(db.statements) == 1
@@ -220,7 +234,9 @@ async def test_list_returns_the_scope_it_was_asked_for():
     credentials._snapshot[KEY] = "sk-platform-0000"
     credentials._tenant_snapshot[(T1, KEY)] = "sk-tenant-1111"
     tenant = _body(await router.list_tool_config(scope=None, user=_admin(T1)))["data"]
-    platform = _body(await router.list_tool_config(scope="platform", user=_admin(T1)))["data"]
+    platform = _body(await router.list_tool_config(scope="platform", user=_admin(T1)))[
+        "data"
+    ]
     row_t = next(k for g in tenant["groups"] for k in g["keys"] if k["key"] == KEY)
     row_p = next(k for g in platform["groups"] for k in g["keys"] if k["key"] == KEY)
     assert tenant["scope"] == "tenant" and row_t["source"] == "tenant"

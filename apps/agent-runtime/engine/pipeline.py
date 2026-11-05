@@ -1215,7 +1215,8 @@ class PipelineExecutor:
                 "[]",
                 "[not available]",
             )
-            if is_false:
+            # a template that did not resolve says nothing, so the guarded step must not run
+            if is_false or "{{" in val or "[not available]" in val:
                 return NodeResult(
                     node_id=node.id,
                     status="skipped",
@@ -1313,9 +1314,9 @@ class PipelineExecutor:
             # these its knowledge_search and every db-backed tool go missing.
             # No db_url here — it carries a password and these arguments are
             # recorded on the node result. agent_step reads DATABASE_URL itself.
-            resolved_args.setdefault("__kb_ids__", agent_row.get("kb_ids") or [])
-            resolved_args.setdefault("__agent_id__", agent_row.get("agent_id") or "")
-            resolved_args.setdefault("__tenant_id__", self._tenant_id or "")
+            resolved_args["__kb_ids__"] = agent_row.get("kb_ids") or []
+            resolved_args["__agent_id__"] = agent_row.get("agent_id") or ""
+            resolved_args["__tenant_id__"] = self._tenant_id or ""
             if (
                 mcfg.get("max_iterations") is not None
                 and "max_iterations" not in resolved_args
@@ -1581,8 +1582,11 @@ class PipelineExecutor:
                 res = await session.execute(
                     _t(
                         "SELECT id, system_prompt, model_config, status::text FROM agents "
-                        "WHERE slug = :slug ORDER BY (status::text = 'archived') LIMIT 1"
-                    ).bindparams(slug=slug)
+                        "WHERE slug = :slug AND (upper(agent_type::text) = 'OOB' "
+                        "OR CAST(tenant_id AS text) = :tid) "
+                        "ORDER BY (lower(status::text) = 'archived'), "
+                        "(CAST(tenant_id AS text) = :tid) DESC LIMIT 1"
+                    ).bindparams(slug=slug, tid=str(self._tenant_id or ""))
                 )
                 row = res.first()
                 if row is None:

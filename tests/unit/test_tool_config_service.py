@@ -104,3 +104,36 @@ def test_tool_credentials_are_secret_in_the_generic_settings_paths():
     assert is_secret("llm.subscription.token")
     assert not is_secret("agent.max_iterations")
     assert mask("tool.credential.X", "abcdefgh1234") == "********1234"
+
+
+def test_one_alternative_provider_key_is_enough_for_configured():
+    keys = [k for k in tool_config.keys_for_tool("tavily_search")]
+    assert len(keys) >= 2
+    blank = {k: "" for k in keys}
+    with credentials.override(blank):
+        assert tool_config.tool_status("tavily_search") == "optional"
+    with credentials.override({**blank, keys[0]: "x"}):
+        assert tool_config.tool_status("tavily_search") == "configured"
+
+
+def test_a_declared_default_alone_does_not_read_as_configured(monkeypatch):
+    decls = tool_config.declarations()
+    slug, key = next(
+        (t, k)
+        for t in sorted(tool_config.declarations()["AZURE_OPENAI_API_VERSION"].tools)
+        for k in ["AZURE_OPENAI_API_VERSION"]
+    )
+    assert decls[key].default
+    with credentials.override({k: "" for k in tool_config.keys_for_tool(slug)}):
+        assert tool_config.tool_status(slug) in ("optional", "missing")
+
+
+def test_a_required_key_still_wins_over_an_optional_one():
+    slug = next(
+        t
+        for t in sorted(tool_config.declarations()["EIA_API_KEY"].tools)
+        if tool_config.required_for_tool(t).get("EIA_API_KEY")
+    )
+    keys = tool_config.keys_for_tool(slug)
+    with credentials.override({k: "" for k in keys}):
+        assert tool_config.tool_status(slug) == "missing"

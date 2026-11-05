@@ -61,6 +61,8 @@ def _saved(p: PersonaItem, reason: str | None) -> JSONResponse:
     data = _item_dict(p)
     if reason:
         data["warning"] = f"Saved but not searchable yet: {reason}"
+    elif p.last_error:
+        data["warning"] = p.last_error
     return success(data)
 
 
@@ -91,7 +93,9 @@ async def _index(db: AsyncSession, p: PersonaItem) -> str | None:
         key = await _openai_key(tenant_id)
         model = pv.default_model(key)
         try:
-            vectors = await pv.embed_texts(chunks, model, openai_key=key)
+            vectors, model, note = await pv.embed_with_fallback(
+                chunks, model, openai_key=key
+            )
             n = await pv.write_chunks(
                 db,
                 item_id=item_id,
@@ -104,7 +108,7 @@ async def _index(db: AsyncSession, p: PersonaItem) -> str | None:
             )
             p.chunk_count = n
             p.status = "indexed"
-            p.last_error = None
+            p.last_error = note
             p.embedding_model = model
             await db.commit()
             await db.refresh(p)

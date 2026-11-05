@@ -20,6 +20,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.capabilities import has_capability, need_words
 from app.core.deps import get_current_user, get_db
 from app.core.responses import error, success
 
@@ -83,8 +84,30 @@ def _deployment_dict(d: MLModelDeployment) -> dict:
         "pod_name": d.pod_name,
         "service_name": d.service_name,
         "k8s_namespace": d.k8s_namespace,
+        "error": (d.config or {}).get("error"),
         "created_at": d.created_at.isoformat() if d.created_at else None,
     }
+
+
+def _stuck_pod_reason(svc: str, namespace: str) -> str | None:
+    from kubernetes import client
+
+    pods = client.CoreV1Api().list_namespaced_pod(
+        namespace, label_selector=f"model-id={svc.removeprefix('ml-model-')}"
+    )
+    for pod in pods.items:
+        for cs in pod.status.container_statuses or []:
+            waiting = cs.state.waiting if cs.state else None
+            if waiting and waiting.reason in {
+                "ImagePullBackOff",
+                "ErrImagePull",
+                "ErrImageNeverPull",
+                "InvalidImageName",
+                "CrashLoopBackOff",
+                "CreateContainerConfigError",
+            }:
+                return f"Pod cannot start. {waiting.reason}. {waiting.message or ''}".strip()
+    return None
 
 
 def _status_message(m: MLModel) -> str | None:
@@ -150,24 +173,28 @@ def _detect_framework(filename: str, explicit: str | None = None) -> MLModelFram
     return ALLOWED_EXTENSIONS.get(ext, MLModelFramework.CUSTOM)
 
 
+def _is_pickle_format(framework: MLModelFramework) -> bool:
+    return framework in (
+        MLModelFramework.SKLEARN,
+        MLModelFramework.XGBOOST,
+        MLModelFramework.PYTORCH,
+    )
+
+
+async def _pickle_runs_in_process(db: AsyncSession, model: MLModel) -> bool:
+    # any signup is an admin of its own tenant, so only the platform tenant's files are trusted here
+    from app.core.platform_features import _platform_tenant_id
+
+    platform = await _platform_tenant_id(db)
+    return platform is not None and str(platform) == str(model.tenant_id)
+
+
 def _load_check(file_path: str, framework: MLModelFramework) -> dict:
     # raises with the loader's own words when the file is not a usable model
-    if framework in (MLModelFramework.SKLEARN, MLModelFramework.XGBOOST):
-        import joblib
+    if _is_pickle_format(framework):
+        from engine import process_sandbox as model_sandbox
 
-        model = joblib.load(file_path)
-        if not hasattr(model, "predict"):
-            raise ValueError(
-                f"the file holds a {type(model).__name__}, which has no predict() method"
-            )
-        info: dict = {"type": type(model).__name__}
-        if hasattr(model, "n_features_in_"):
-            info["n_features"] = int(model.n_features_in_)
-        if hasattr(model, "feature_names_in_"):
-            info["feature_names"] = [str(f) for f in model.feature_names_in_]
-        if hasattr(model, "classes_"):
-            info["classes"] = [str(c) for c in model.classes_]
-        return info
+        return model_sandbox.run_isolated("validate", file_path, framework.value)
     if framework == MLModelFramework.ONNX:
         import onnxruntime as ort
 
@@ -185,16 +212,6 @@ def _load_check(file_path: str, framework: MLModelFramework) -> dict:
         if isinstance(shape, list) and len(shape) == 2 and isinstance(shape[1], int):
             info["n_features"] = shape[1]
         return info
-    if framework == MLModelFramework.PYTORCH:
-        import torch
-
-        model = torch.load(file_path, map_location="cpu", weights_only=False)
-        if not callable(model):
-            raise ValueError(
-                "the file holds weights only (a state_dict). Save the whole model "
-                "with torch.save(model) or export it to ONNX"
-            )
-        return {"type": type(model).__name__}
     raise ValueError(UNRUNNABLE.get(framework, "unsupported framework"))
 
 
@@ -218,7 +235,7 @@ async def _validate_model(
         return None, (
             f"This file could not be loaded as a {label} model. "
             "Check it is the trained model saved with joblib.dump, pickle.dump, "
-            "torch.save or an ONNX exporter, not a renamed or corrupted file. "
+            "torch.jit.save or an ONNX exporter, not a renamed or corrupted file. "
             f"Technical detail: {detail}."
         )
 
@@ -574,6 +591,15 @@ async def upload_model(
     framework = _detect_framework(file.filename, meta.get("framework"))
     if framework in UNRUNNABLE:
         return error(UNRUNNABLE[framework], 422, error_code="UNSUPPORTED_FRAMEWORK")
+    if _is_pickle_format(framework) and not await has_capability(
+        db, user, "ml_models.upload_pickle"
+    ):
+        return error(
+            f"{need_words('ml_models.upload_pickle')} Or export the model to ONNX and "
+            "upload the .onnx file, which anyone can do.",
+            403,
+            "MISSING_PERMISSION",
+        )
     input_schema = meta.get("input_schema")
     output_schema = meta.get("output_schema")
     for label, schema in (
@@ -1003,12 +1029,14 @@ async def deploy_model(
             core_v1 = client.CoreV1Api()
 
             download_url = f"http://abenix-api.{namespace}.svc.cluster.local:8000/api/ml-models/{model.id}/download"
-            from app.core.security import create_access_token
+            from app.core.security import create_purpose_token
 
-            fetch_token = create_access_token(
-                user.id,
-                user.tenant_id,
-                user.role.value if hasattr(user.role, "value") else str(user.role),
+            # replicas restart long after a user token would expire
+            fetch_token = create_purpose_token(
+                model.id,
+                "model_fetch",
+                60 * 24 * 365,
+                tenant_id=str(user.tenant_id),
             )
 
             image_ref = os.environ.get(
@@ -1147,6 +1175,15 @@ async def deploy_model(
                                     bg_dep = await bg_db.get(MLModelDeployment, dep_id)
                                     if bg_dep is not None:
                                         bg_dep.status = DeploymentStatus.RUNNING
+                                        await bg_db.commit()
+                                return
+                            stuck = _stuck_pod_reason(svc, ns)
+                            if stuck:
+                                async with async_session() as bg_db:
+                                    bg_dep = await bg_db.get(MLModelDeployment, dep_id)
+                                    if bg_dep is not None:
+                                        bg_dep.status = DeploymentStatus.FAILED
+                                        bg_dep.config = {"error": stuck}
                                         await bg_db.commit()
                                 return
                         except Exception as _p:
@@ -1356,7 +1393,11 @@ async def predict(
     if output is None:
         try:
             output = await _local_predict(
-                model.file_uri, model.framework, input_data, _feature_names(model)
+                model.file_uri,
+                model.framework,
+                input_data,
+                _feature_names(model),
+                isolate=not await _pickle_runs_in_process(db, model),
             )
             source = "local"
         except PredictInputError as e:
@@ -1487,10 +1528,9 @@ def _predict_sync(
     if framework == MLModelFramework.PYTORCH:
         import torch
 
-        model = _cached(
-            file_uri,
-            lambda f: torch.load(f, map_location="cpu", weights_only=False),
-        )
+        from engine.process_sandbox import load_torch
+
+        model = _cached(file_uri, load_torch)
         model.eval()
         with torch.no_grad():
             try:
@@ -1507,14 +1547,35 @@ async def _local_predict(
     framework: MLModelFramework,
     input_data: Any,
     names: list[str] | None = None,
+    *,
+    isolate: bool = True,
 ) -> dict:
     """Load the model and run inference in a worker thread."""
     from app.core.artifact_store import ensure_local
 
     await ensure_local(Path(file_uri))
+    if isolate and _is_pickle_format(framework):
+        return await asyncio.to_thread(
+            _predict_isolated, file_uri, framework, input_data, names or []
+        )
     return await asyncio.to_thread(
         _predict_sync, file_uri, framework, input_data, names or []
     )
+
+
+def _predict_isolated(
+    file_uri: str, framework: MLModelFramework, input_data: Any, names: list[str]
+) -> dict:
+    from engine import process_sandbox as model_sandbox
+
+    X = _to_matrix(input_data, names)
+    rows = X if isinstance(X, list) else X.tolist()
+    try:
+        return model_sandbox.run_isolated(
+            "predict", file_uri, framework.value, rows, names=names
+        )
+    except model_sandbox.ModelInputError as e:
+        raise PredictInputError(str(e))
 
 
 def _explain_names(model: MLModel, input_data: Any) -> list[str]:
@@ -1557,12 +1618,9 @@ def _load_for_explain(file_uri: str, framework: MLModelFramework) -> Any:
 
         return _cached(file_uri, ort.InferenceSession)
     if framework == MLModelFramework.PYTORCH:
-        import torch
+        from engine.process_sandbox import load_torch
 
-        return _cached(
-            file_uri,
-            lambda f: torch.load(f, map_location="cpu", weights_only=False),
-        )
+        return _cached(file_uri, load_torch)
     raise ValueError(UNRUNNABLE.get(framework, f"Unsupported framework: {framework}"))
 
 
@@ -1772,6 +1830,16 @@ async def explain(
     input_data = body.get("input_data")
     if input_data is None or input_data == [] or input_data == {}:
         return _missing_input(model)
+    if _is_pickle_format(model.framework) and not await _pickle_runs_in_process(
+        db, model
+    ):
+        return error(
+            "Explain is only available for ONNX models on this tenant, because it "
+            "would have to load a pickle file inside the API. Export the model to "
+            "ONNX and upload the .onnx file.",
+            422,
+            error_code="EXPLAIN_NEEDS_ONNX",
+        )
     baseline = body.get("baseline")
     if baseline is not None and not isinstance(baseline, (dict, list)):
         return error(
@@ -1935,16 +2003,32 @@ async def fetch_model_for_runtime(
 @router.get("/{model_id}/download")
 async def download_model_file(
     model_id: uuid.UUID,
-    user: User = Depends(get_current_user),
+    request: Request,
     db: AsyncSession = Depends(get_db),
 ) -> Any:
-    """Download the model file — used by model-serving pods to fetch the model."""
+    """Download the model file. Model pods use a token limited to this model."""
     from fastapi.responses import FileResponse
+
+    from app.core.deps import get_current_user
+    from app.core.security import verify_token
+
+    authorization = request.headers.get("authorization")
+    claims = verify_token((authorization or "").removeprefix("Bearer ").strip())
+    if claims.get("type") == "model_fetch" and claims.get("sub") == str(model_id):
+        tenant_id = uuid.UUID(claims["tenant_id"])
+    else:
+        caller = await get_current_user(
+            authorization,
+            request.headers.get("x-api-key"),
+            request.headers.get("x-abenix-subject"),
+            db,
+        )
+        tenant_id = caller.tenant_id
 
     result = await db.execute(
         select(MLModel).where(
             MLModel.id == model_id,
-            MLModel.tenant_id == user.tenant_id,
+            MLModel.tenant_id == tenant_id,
         )
     )
     model = result.scalar_one_or_none()

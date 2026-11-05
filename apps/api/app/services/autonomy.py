@@ -1415,13 +1415,14 @@ def approval_json(a: Any) -> dict[str, Any]:
 async def promotion_denial(db: AsyncSession, user: Any, approval: Any) -> str | None:
     """Separation of duties for promotions: never the agent's author."""
     payload = approval.payload or {}
-    creator = payload.get("agent_creator_id")
-    if creator is None:
-        g = await get_grant(db, approval.tenant_id, payload.get("grant_id"))
-        agent = await get_agent(db, approval.tenant_id, g.agent_id) if g else None
-        creator = _s(getattr(agent, "creator_id", None))
+    g = await get_grant(db, approval.tenant_id, payload.get("grant_id"))
+    agent = await get_agent(db, approval.tenant_id, g.agent_id) if g else None
+    creator = (
+        _s(getattr(agent, "creator_id", None))
+        if agent is not None
+        else payload.get("agent_creator_id")
+    )
     if creator and str(creator) == str(user.id):
-        g = await get_grant(db, approval.tenant_id, payload.get("grant_id"))
         at = await db.get(ActionType, g.action_type_id) if g else None
         # rechecked at sign time, a teammate may have joined since
         if await self_approval_reason(db, user, at) is None:

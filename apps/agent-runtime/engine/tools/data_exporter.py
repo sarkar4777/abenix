@@ -8,6 +8,7 @@ import json
 import os
 from typing import Any
 
+from engine import credentials
 from engine.tools.base import BaseTool, ConfigField, Effect, ToolResult
 
 
@@ -507,8 +508,10 @@ class DataExporterTool(BaseTool):
             content_bytes = content_text.encode("utf-8")
 
         # Write to local export dir (for pipeline node access within same execution)
-        os.makedirs(EXPORT_DIR, exist_ok=True)
-        filepath = os.path.join(EXPORT_DIR, filename)
+        tenant = credentials.current_tenant()
+        export_dir = os.path.join(EXPORT_DIR, tenant) if tenant else EXPORT_DIR
+        os.makedirs(export_dir, exist_ok=True)
+        filepath = os.path.join(export_dir, filename)
         with open(filepath, "wb") as f:
             f.write(content_bytes)
 
@@ -530,7 +533,7 @@ class DataExporterTool(BaseTool):
                     "pdf": "application/pdf",
                 }.get(fmt, "application/octet-stream")
                 storage_uri = await storage.upload(
-                    tenant_id="exports",
+                    tenant_id=tenant or "exports",
                     path=f"exports/{filename}",
                     data=content_bytes,
                     content_type=content_type,

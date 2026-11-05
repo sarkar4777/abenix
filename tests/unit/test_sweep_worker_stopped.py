@@ -63,9 +63,23 @@ async def test_a_run_whose_worker_stopped_fails_with_a_plain_reason(monkeypatch)
             now - timedelta(minutes=12),
             "rt-1",
             now - timedelta(minutes=10),
+            1,
+            "default",
+            False,
         ),
         # never claimed by a pod, just old
-        (old, None, uuid.uuid4(), None, now - timedelta(minutes=30), None, None),
+        (
+            old,
+            None,
+            uuid.uuid4(),
+            None,
+            now - timedelta(minutes=30),
+            None,
+            None,
+            0,
+            "inline",
+            False,
+        ),
     ]
     db = _Db(rows)
 

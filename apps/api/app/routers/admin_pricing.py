@@ -20,6 +20,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, get_db
+from app.core.platform_features import ensure_platform_operator
 from app.core.responses import error, success
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "packages" / "db"))
@@ -106,7 +107,7 @@ async def create_pricing(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
-    _ensure_admin(user)
+    await ensure_platform_operator(db, user)
     model = (body.get("model") or "").strip()
     provider = (body.get("provider") or "").strip().lower()
     if not model or provider not in {"anthropic", "openai", "google", "azure", "other"}:
@@ -152,7 +153,7 @@ async def update_pricing(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
-    _ensure_admin(user)
+    await ensure_platform_operator(db, user)
     row = await db.get(LLMModelPricing, row_id)
     if row is None:
         return error("Pricing row not found", 404)
@@ -211,7 +212,7 @@ async def delete_pricing(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
-    _ensure_admin(user)
+    await ensure_platform_operator(db, user)
     row = await db.get(LLMModelPricing, row_id)
     if row is None:
         return error("Pricing row not found", 404)
@@ -231,7 +232,7 @@ async def seed_from_defaults(
 
     Inserts missing rows and backfills NULL capabilities/fallback_to/is_active
     on existing rows. Idempotent — safe to re-run after schema upgrades."""
-    _ensure_admin(user)
+    await ensure_platform_operator(db, user)
 
     # The baseline and the insert logic live in packages/db/pricing_baseline.py so
     # the deploy seed and this endpoint cannot drift apart.

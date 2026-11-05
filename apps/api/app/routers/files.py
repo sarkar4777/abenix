@@ -10,6 +10,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse, StreamingResponse, RedirectResponse
+from sqlalchemy.ext.asyncio import AsyncSession
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "apps" / "agent-runtime"))
 
@@ -32,11 +33,35 @@ ALLOWED_UPLOAD_TYPES = frozenset(
     }
 )
 
-from app.core.deps import get_current_user
+from app.core.deps import get_current_user, get_db
+from app.core.platform_features import _platform_tenant_id
 from app.core.responses import error, success
 from models.user import User
 
 router = APIRouter(prefix="/api/files", tags=["files"])
+
+
+def _tenant_owns_uri(uri: str, tenant_id: Any) -> bool:
+    from engine.storage import service as storage_service
+
+    tenant = str(tenant_id)
+    for scheme, bucket in (
+        ("s3://", storage_service.STORAGE_S3_BUCKET),
+        ("az://", storage_service.STORAGE_AZURE_CONTAINER),
+    ):
+        if uri.startswith(scheme):
+            parts = uri[len(scheme) :].split("/")
+            return (
+                len(parts) > 2
+                and parts[0] == bucket
+                and parts[1] == tenant
+                and ".." not in parts
+            )
+    path = uri[len("file://") :] if uri.startswith("file://") else uri
+    if "://" in path:
+        return False
+    jail = (Path(storage_service.STORAGE_LOCAL_DIR).resolve() / tenant).resolve()
+    return Path(path).resolve().is_relative_to(jail)
 
 
 @router.get("/download")
@@ -52,8 +77,8 @@ async def download_file(
     except ImportError:
         return error("Storage service not available", 500)
 
-    # Verify file exists
-    if not await storage.exists(uri):
+    # the same answer as a missing file, so this cannot probe what exists elsewhere
+    if not _tenant_owns_uri(uri, user.tenant_id) or not await storage.exists(uri):
         return error("File not found", 404)
 
     # For cloud backends, redirect to presigned URL
@@ -86,6 +111,7 @@ async def download_file(
 async def download_export(
     filename: str,
     user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ) -> Any:
     """Download an agent-generated export file by filename."""
     # Sanitize filename — prevent path traversal
@@ -100,27 +126,32 @@ async def download_export(
     except ImportError:
         storage = None
 
-    # Check storage backend
-    export_dir = os.environ.get("EXPORT_DIR", "/tmp/abenix_exports")
-
+    tenant = str(user.tenant_id)
     if storage and storage.backend != "local":
-        # Cloud: check in exports bucket
-        uri = f"s3://{os.environ.get('STORAGE_S3_BUCKET', 'abenix-exports')}/exports/{safe_name}"
+        from engine.storage import service as storage_service
+
+        scheme, bucket = (
+            ("s3", storage_service.STORAGE_S3_BUCKET)
+            if storage.backend == "s3"
+            else ("az", storage_service.STORAGE_AZURE_CONTAINER)
+        )
+        uri = f"{scheme}://{bucket}/{tenant}/exports/{safe_name}"
         if await storage.exists(uri):
             download_url = await storage.get_download_url(uri, expires=3600)
             return RedirectResponse(url=download_url, status_code=302)
         return error("Export file not found", 404)
 
-    # Local: serve from EXPORT_DIR
-    filepath = Path(export_dir) / safe_name
-    if not filepath.exists():
+    export_dir = Path(os.environ.get("EXPORT_DIR", "/tmp/abenix_exports")).resolve()
+    filepath = export_dir / tenant / safe_name
+    # files written before exports were per tenant have no owner, so only the platform tenant reads them
+    if not filepath.is_file():
+        platform = await _platform_tenant_id(db)
+        legacy = export_dir / safe_name
+        if platform is None or str(platform) != tenant or not legacy.is_file():
+            return error("Export file not found", 404)
+        filepath = legacy
+    if not filepath.resolve().is_relative_to(export_dir):
         return error("Export file not found", 404)
-
-    # Security: ensure the file is within EXPORT_DIR
-    try:
-        filepath.resolve().relative_to(Path(export_dir).resolve())
-    except ValueError:
-        return error("Access denied", 403)
 
     data = filepath.read_bytes()
     content_type = mimetypes.guess_type(safe_name)[0] or "application/octet-stream"

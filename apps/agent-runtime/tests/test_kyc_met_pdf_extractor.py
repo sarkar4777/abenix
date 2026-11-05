@@ -18,6 +18,16 @@ from engine.tools.kyc_met_pdf_extractor import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _open_file_jail(monkeypatch):
+    from engine import credentials, tenant_access
+
+    token = credentials.set_tenant("tests")
+    monkeypatch.setattr(tenant_access, "tenant_file_roots", lambda _t: ["/"])
+    yield
+    credentials.reset_tenant(token)
+
+
 def _make_pdf_with_text(text: str) -> str:
     """Create a tiny single-page PDF that PyPDF2 can read.
 

@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, get_db
 from app.core.responses import error, success
+from app.core.tool_access import caller_config, tool_denial
 
 from models.user import User
 
@@ -1141,9 +1142,13 @@ async def execute_tool(
 
     from app.core import tool_gate
 
+    denied = await tool_denial(db, user, tool_slug)
+    if denied is not None:
+        return denied
+
     started = time.time()
     arguments = (body or {}).get("arguments") or {}
-    config = (body or {}).get("config") or {}
+    config = caller_config((body or {}).get("config"), tool_slug)
     tenant_id = str(user.tenant_id)
 
     # Gate: cache lookup, semaphore, rate limit, circuit breaker
@@ -1280,7 +1285,6 @@ async def execute_tool(
     init_kwargs = {
         k: v for k, v in base_kwargs.items() if not accepted or k in accepted
     }
-    # Layer in caller-supplied config last so it can override.
     init_kwargs.update(
         {k: v for k, v in (config or {}).items() if not accepted or k in accepted}
     )

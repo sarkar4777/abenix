@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from engine.tenant_access import path_refusal
 from engine.tools.base import BaseTool, ConfigField, ToolResult
 
 
@@ -140,6 +141,8 @@ class ImageAnalyzerTool(BaseTool):
                     return base64.b64encode(resp.content).decode(), media_type
             else:
                 # Local file
+                if await path_refusal(url):
+                    return None
                 path = Path(url)
                 if not path.exists():
                     return None

@@ -62,6 +62,11 @@ def _no_shap(monkeypatch):
     monkeypatch.setitem(sys.modules, "shap", None)
     monkeypatch.setattr(mm, "_MODEL_CACHE", mm.OrderedDict())
 
+    async def _trusted(_db, _model):
+        return True
+
+    monkeypatch.setattr(mm, "_pickle_runs_in_process", _trusted)
+
 
 @pytest.fixture
 def local(monkeypatch):

@@ -11,6 +11,8 @@ logger = logging.getLogger(__name__)
 # exception's message + class name combined.
 _RULES: list[tuple[str, str]] = [
     (r"worker running this stopped before it finished", "WORKER_STOPPED"),
+    (r"is not deployed on this cluster", "POOL_NOT_DEPLOYED"),
+    (r"no worker picked this run up", "QUEUE_NOT_PICKED_UP"),
     # Stale-sweeper messages — match FIRST because the message shape
     # ("stuck in RUNNING for >N minutes") would otherwise hit the
     # timeout rule below.

@@ -17,6 +17,7 @@ from fastapi.responses import JSONResponse, Response
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.agent_lookup import find_agent_by_slug
 from app.core.deps import get_current_user, get_db
 from app.core.responses import error, success
 
@@ -633,9 +634,8 @@ def _plain_preview(text: str, limit: int = 200) -> str:
     return t[:limit]
 
 
-async def _get_agent(db: AsyncSession) -> Agent | None:
-    row = await db.execute(select(Agent).where(Agent.slug == AGENT_SLUG))
-    return row.scalar_one_or_none()
+async def _get_agent(db: AsyncSession, tenant_id: Any) -> Agent | None:
+    return await find_agent_by_slug(db, AGENT_SLUG, tenant_id)
 
 
 def _attachments_to_blocks(attachments: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -1329,7 +1329,7 @@ async def list_vision_models(
     vision_models = [
         m for m in AVAILABLE_MODELS if "vision" in (m.get("capabilities") or [])
     ]
-    agent = await _get_agent(db)
+    agent = await _get_agent(db, user.tenant_id)
     default = (agent.model_config_ if agent else {}).get(
         "model"
     ) or default_vision_model()
@@ -1484,7 +1484,7 @@ async def upload_pdf(
     if not attachments:
         return error("Nothing readable was found in this file", 422)
 
-    agent = await _get_agent(db)
+    agent = await _get_agent(db, user.tenant_id)
     if not agent:
         return error(f"Agent {AGENT_SLUG} not seeded — run alembic + seed_agents", 503)
 
@@ -1591,7 +1591,7 @@ async def chat_turn(
     if not content:
         return error("content is required", 400)
 
-    agent = await _get_agent(db)
+    agent = await _get_agent(db, user.tenant_id)
     if not agent:
         return error(f"Agent {AGENT_SLUG} not seeded", 503)
 
@@ -1734,7 +1734,7 @@ async def suggest_agents(
     if err is not None:
         return err
 
-    agent = await _get_agent(db)
+    agent = await _get_agent(db, user.tenant_id)
     if not agent:
         return error(f"Agent {AGENT_SLUG} not seeded", 503)
 
@@ -1925,7 +1925,7 @@ async def _synthesize_input(
     """One realistic test input for the agent, grounded in the uploaded artifact."""
     history = await _thread_messages(db, conv.id)
     attachments = _source_attachments(history)
-    bpm_agent = await _get_agent(db)
+    bpm_agent = await _get_agent(db, conv.tenant_id)
     model = (
         conv.model_used
         or ((bpm_agent.model_config_ or {}).get("model") if bpm_agent else None)

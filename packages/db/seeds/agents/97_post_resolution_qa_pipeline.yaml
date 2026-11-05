@@ -73,7 +73,7 @@ pipeline_config:
             approval_tier: "none"
             channel: "email"
             escalate_to: "manager_inbox"
-      required_if: "{{qa_review.predicted_csat < 3.5 or qa_review.proactive_outreach_recommended}}"
+      required_if: "{{qa_review.proactive_outreach_recommended}}"
 
     - id: execute_outreach
       type: agent
@@ -81,7 +81,7 @@ pipeline_config:
       input: >-
         case_id: {{input.case_id}}
         actions: {{outreach_plan.actions}}
-      required_if: "{{qa_review.predicted_csat < 3.5 or qa_review.proactive_outreach_recommended}}"
+      required_if: "{{qa_review.proactive_outreach_recommended}}"
 
     - id: final_report
       type: structured

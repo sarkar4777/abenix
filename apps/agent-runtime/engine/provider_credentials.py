@@ -36,7 +36,7 @@ PROVIDER_CONFIG_FIELDS: tuple[ConfigField, ...] = (
         label="API key",
         kind="secret",
         group="Google AI",
-        description="Gemini models in the agent picker and the Gemini document path.",
+        description="Gemini models in the agent picker and the Gemini document path. With no key they run on the Claude subscription when one is active.",
         signup_url="https://aistudio.google.com/app/apikey",
         dynamic=True,
     ),

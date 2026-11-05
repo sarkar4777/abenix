@@ -15,7 +15,8 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import log_action
@@ -1058,6 +1059,145 @@ async def detach_tool(
     )
 
 
+_CURATED_REGISTRY = [
+    {
+        "registry_id": "github-mcp",
+        "name": "GitHub",
+        "description": "Access GitHub repositories, issues, PRs, and actions",
+        "server_url": "https://api.githubcopilot.com/mcp",
+        "auth_type": "oauth2",
+        "categories": ["development", "version-control"],
+        "tools_count": 12,
+        "popularity_score": 95,
+        "verified": True,
+    },
+    {
+        "registry_id": "slack-mcp",
+        "name": "Slack",
+        "description": "Send messages, manage channels, and search Slack workspace",
+        "server_url": "https://mcp.slack.com/v1",
+        "auth_type": "oauth2",
+        "categories": ["communication", "productivity"],
+        "tools_count": 8,
+        "popularity_score": 90,
+        "verified": True,
+    },
+    {
+        "registry_id": "postgres-mcp",
+        "name": "PostgreSQL",
+        "description": "Query and manage PostgreSQL databases",
+        "server_url": "https://mcp.postgresql.org/v1",
+        "auth_type": "api_key",
+        "categories": ["database", "analytics"],
+        "tools_count": 6,
+        "popularity_score": 88,
+        "verified": True,
+    },
+    {
+        "registry_id": "stripe-mcp",
+        "name": "Stripe",
+        "description": "Manage payments, subscriptions, and financial data",
+        "server_url": "https://mcp.stripe.com/v1",
+        "auth_type": "api_key",
+        "categories": ["finance", "payments"],
+        "tools_count": 10,
+        "popularity_score": 85,
+        "verified": True,
+    },
+    {
+        "registry_id": "notion-mcp",
+        "name": "Notion",
+        "description": "Access and manage Notion pages, databases, and blocks",
+        "server_url": "https://mcp.notion.so/v1",
+        "auth_type": "oauth2",
+        "categories": ["productivity", "knowledge-management"],
+        "tools_count": 9,
+        "popularity_score": 82,
+        "verified": True,
+    },
+    {
+        "registry_id": "jira-mcp",
+        "name": "Jira",
+        "description": "Create and manage issues, sprints, and projects in Jira",
+        "server_url": "https://mcp.atlassian.com/jira/v1",
+        "auth_type": "oauth2",
+        "categories": ["project-management", "development"],
+        "tools_count": 7,
+        "popularity_score": 78,
+        "verified": True,
+    },
+    {
+        "registry_id": "google-drive-mcp",
+        "name": "Google Drive",
+        "description": "Access and manage Google Drive files and folders",
+        "server_url": "https://mcp.googleapis.com/drive/v1",
+        "auth_type": "oauth2",
+        "categories": ["storage", "productivity"],
+        "tools_count": 5,
+        "popularity_score": 75,
+        "verified": True,
+    },
+    {
+        "registry_id": "weather-mcp",
+        "name": "Weather",
+        "description": "Current weather, forecasts, and historical weather data",
+        "server_url": "https://mcp.weather.gov/v1",
+        "auth_type": "none",
+        "categories": ["data", "utilities"],
+        "tools_count": 4,
+        "popularity_score": 60,
+        "verified": False,
+    },
+]
+
+
+async def _sync_curated_registry(db: AsyncSession) -> int:
+    synced = 0
+    for entry in _CURATED_REGISTRY:
+        existing = await db.execute(
+            select(MCPRegistryCache).where(
+                MCPRegistryCache.registry_id == entry["registry_id"]
+            )
+        )
+        record = existing.scalar_one_or_none()
+        if record:
+            record.name = entry["name"]
+            record.description = entry["description"]
+            record.server_url = entry["server_url"]
+            record.auth_type = entry["auth_type"]
+            record.categories = entry["categories"]
+            record.tools_count = entry["tools_count"]
+            record.popularity_score = entry["popularity_score"]
+            record.verified = entry["verified"]
+        else:
+            record = MCPRegistryCache(
+                registry_id=entry["registry_id"],
+                name=entry["name"],
+                description=entry["description"],
+                server_url=entry["server_url"],
+                auth_type=entry["auth_type"],
+                categories=entry["categories"],
+                tools_count=entry["tools_count"],
+                popularity_score=entry["popularity_score"],
+                verified=entry["verified"],
+            )
+            db.add(record)
+        synced += 1
+
+    await db.commit()
+    return synced
+
+
+async def _seed_registry_when_empty(db: AsyncSession) -> None:
+    if (await db.execute(select(MCPRegistryCache.id).limit(1))).first() is not None:
+        return
+    try:
+        await _sync_curated_registry(db)
+    except IntegrityError:
+        # another request seeded it first
+        await db.rollback()
+
+
 @router.get("/registry")
 async def browse_registry(
     category: str | None = None,
@@ -1065,6 +1205,7 @@ async def browse_registry(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ) -> JSONResponse:
+    await _seed_registry_when_empty(db)
     query = select(MCPRegistryCache).order_by(MCPRegistryCache.popularity_score.desc())
 
     if search:
@@ -1104,9 +1245,13 @@ async def install_from_registry(
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
     """Install an MCP server from the registry as a user connection."""
-    result = await db.execute(
-        select(MCPRegistryCache).where(MCPRegistryCache.registry_id == body.registry_id)
-    )
+    await _seed_registry_when_empty(db)
+    matches = [MCPRegistryCache.registry_id == body.entry_ref]
+    try:
+        matches.append(MCPRegistryCache.id == uuid.UUID(body.entry_ref))
+    except ValueError:
+        pass
+    result = await db.execute(select(MCPRegistryCache).where(or_(*matches)).limit(1))
     entry = result.scalar_one_or_none()
     if not entry:
         return error("Registry entry not found", 404)
@@ -1114,7 +1259,7 @@ async def install_from_registry(
     conn = UserMCPConnection(
         tenant_id=user.tenant_id,
         user_id=user.id,
-        server_name=sanitize_input(body.server_name),
+        server_name=sanitize_input(body.server_name or entry.name),
         server_url=entry.server_url,
         transport_type="streamable_http",
         auth_type=entry.auth_type,
@@ -1130,7 +1275,7 @@ async def install_from_registry(
         user.id,
         "mcp.installed_from_registry",
         {
-            "registry_id": body.registry_id,
+            "registry_id": entry.registry_id,
             "server_url": entry.server_url,
         },
     )
@@ -1145,129 +1290,5 @@ async def sync_registry(
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
     """Seed/sync registry with curated MCP servers."""
-    curated = [
-        {
-            "registry_id": "github-mcp",
-            "name": "GitHub",
-            "description": "Access GitHub repositories, issues, PRs, and actions",
-            "server_url": "https://api.githubcopilot.com/mcp",
-            "auth_type": "oauth2",
-            "categories": ["development", "version-control"],
-            "tools_count": 12,
-            "popularity_score": 95,
-            "verified": True,
-        },
-        {
-            "registry_id": "slack-mcp",
-            "name": "Slack",
-            "description": "Send messages, manage channels, and search Slack workspace",
-            "server_url": "https://mcp.slack.com/v1",
-            "auth_type": "oauth2",
-            "categories": ["communication", "productivity"],
-            "tools_count": 8,
-            "popularity_score": 90,
-            "verified": True,
-        },
-        {
-            "registry_id": "postgres-mcp",
-            "name": "PostgreSQL",
-            "description": "Query and manage PostgreSQL databases",
-            "server_url": "https://mcp.postgresql.org/v1",
-            "auth_type": "api_key",
-            "categories": ["database", "analytics"],
-            "tools_count": 6,
-            "popularity_score": 88,
-            "verified": True,
-        },
-        {
-            "registry_id": "stripe-mcp",
-            "name": "Stripe",
-            "description": "Manage payments, subscriptions, and financial data",
-            "server_url": "https://mcp.stripe.com/v1",
-            "auth_type": "api_key",
-            "categories": ["finance", "payments"],
-            "tools_count": 10,
-            "popularity_score": 85,
-            "verified": True,
-        },
-        {
-            "registry_id": "notion-mcp",
-            "name": "Notion",
-            "description": "Access and manage Notion pages, databases, and blocks",
-            "server_url": "https://mcp.notion.so/v1",
-            "auth_type": "oauth2",
-            "categories": ["productivity", "knowledge-management"],
-            "tools_count": 9,
-            "popularity_score": 82,
-            "verified": True,
-        },
-        {
-            "registry_id": "jira-mcp",
-            "name": "Jira",
-            "description": "Create and manage issues, sprints, and projects in Jira",
-            "server_url": "https://mcp.atlassian.com/jira/v1",
-            "auth_type": "oauth2",
-            "categories": ["project-management", "development"],
-            "tools_count": 7,
-            "popularity_score": 78,
-            "verified": True,
-        },
-        {
-            "registry_id": "google-drive-mcp",
-            "name": "Google Drive",
-            "description": "Access and manage Google Drive files and folders",
-            "server_url": "https://mcp.googleapis.com/drive/v1",
-            "auth_type": "oauth2",
-            "categories": ["storage", "productivity"],
-            "tools_count": 5,
-            "popularity_score": 75,
-            "verified": True,
-        },
-        {
-            "registry_id": "weather-mcp",
-            "name": "Weather",
-            "description": "Current weather, forecasts, and historical weather data",
-            "server_url": "https://mcp.weather.gov/v1",
-            "auth_type": "none",
-            "categories": ["data", "utilities"],
-            "tools_count": 4,
-            "popularity_score": 60,
-            "verified": False,
-        },
-    ]
-
-    synced = 0
-    for entry in curated:
-        existing = await db.execute(
-            select(MCPRegistryCache).where(
-                MCPRegistryCache.registry_id == entry["registry_id"]
-            )
-        )
-        record = existing.scalar_one_or_none()
-        if record:
-            record.name = entry["name"]
-            record.description = entry["description"]
-            record.server_url = entry["server_url"]
-            record.auth_type = entry["auth_type"]
-            record.categories = entry["categories"]
-            record.tools_count = entry["tools_count"]
-            record.popularity_score = entry["popularity_score"]
-            record.verified = entry["verified"]
-        else:
-            record = MCPRegistryCache(
-                registry_id=entry["registry_id"],
-                name=entry["name"],
-                description=entry["description"],
-                server_url=entry["server_url"],
-                auth_type=entry["auth_type"],
-                categories=entry["categories"],
-                tools_count=entry["tools_count"],
-                popularity_score=entry["popularity_score"],
-                verified=entry["verified"],
-            )
-            db.add(record)
-        synced += 1
-
-    await db.commit()
-
-    return success({"synced": synced, "total_entries": len(curated)})
+    synced = await _sync_curated_registry(db)
+    return success({"synced": synced, "total_entries": len(_CURATED_REGISTRY)})

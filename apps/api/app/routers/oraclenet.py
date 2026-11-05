@@ -13,13 +13,13 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.agent_lookup import find_agent_by_slug
 from app.core.deps import async_session, get_current_user, get_db
 from app.core.responses import error, success
 from app.schemas.oraclenet import AnalyzeRequest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "packages" / "db"))
 
-from models.agent import Agent
 from models.execution import Execution
 from models.user import User
 
@@ -41,12 +41,9 @@ async def analyze_decision(
         return error(quota_error, 429)
 
     # Look up the OracleNet pipeline agent
-    result = await db.execute(
-        select(Agent).where(
-            Agent.slug == "oraclenet-pipeline", Agent.status == "active"
-        )
+    agent = await find_agent_by_slug(
+        db, "oraclenet-pipeline", user.tenant_id, active_only=True
     )
-    agent = result.scalar_one_or_none()
     if not agent:
         return error(
             "OracleNet pipeline agent not found. Run seed_agents.py first.", 404
@@ -138,14 +135,11 @@ async def list_sessions(
 ) -> JSONResponse:
     """List past OracleNet decision analyses."""
     # Find the OracleNet pipeline agent
-    result = await db.execute(
-        select(Agent.id).where(Agent.slug == "oraclenet-pipeline")
-    )
-    agent_row = result.first()
-    if not agent_row:
+    agent = await find_agent_by_slug(db, "oraclenet-pipeline", user.tenant_id)
+    if not agent:
         return success([])
 
-    agent_id = agent_row[0]
+    agent_id = agent.id
 
     result = await db.execute(
         select(Execution)

@@ -9,6 +9,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+from engine.tenant_access import path_refusal
 from engine.tools.base import BaseTool, ToolResult
 
 
@@ -59,6 +60,9 @@ class DocumentExtractorTool(BaseTool):
             )
 
         if file_path and not text:
+            refused = await path_refusal(file_path)
+            if refused:
+                return ToolResult(content=refused, is_error=True)
             text = self._read_file(file_path)
             if text.startswith("Error:"):
                 return ToolResult(content=text, is_error=True)

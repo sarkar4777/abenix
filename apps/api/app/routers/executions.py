@@ -15,7 +15,7 @@ from pydantic import BaseModel
 from sqlalchemy import select, desc, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.permissions import sees_other_users_resources
+from app.core.permissions import is_admin, sees_other_users_resources
 from app.core.deps import get_current_user, get_db
 from app.core.execution_state import (
     get_execution_tree,
@@ -549,7 +549,13 @@ async def get_execution(
 ) -> JSONResponse:
     """Get a historical execution record from the database."""
     result = await db.execute(
-        select(Execution, Agent.name, Agent.system_prompt, Agent.model_config_)
+        select(
+            Execution,
+            Agent.name,
+            Agent.system_prompt,
+            Agent.model_config_,
+            Agent.creator_id,
+        )
         .outerjoin(Agent, Execution.agent_id == Agent.id)
         .where(
             Execution.id == execution_id,
@@ -562,11 +568,12 @@ async def get_execution(
     execution = row[0]
     data = _serialize_execution(execution)
     data["agent_name"] = row[1]
-    data["system_prompt"] = row[2]
-    # Include tool_config if present for debugging
-    mc = row[3] or {}
-    if mc.get("tool_config"):
-        data["tool_config"] = mc["tool_config"]
+    # a run is visible to the whole tenant, the agent's prompt and settings are not
+    if is_admin(user) or row[4] == user.id:
+        data["system_prompt"] = row[2]
+        mc = row[3] or {}
+        if mc.get("tool_config"):
+            data["tool_config"] = mc["tool_config"]
     from app.routers.llm_models import _subscription_state
 
     data["flat_rate_billing"] = (await _subscription_state(db))["active"]

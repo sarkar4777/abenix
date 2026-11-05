@@ -62,7 +62,7 @@ class CacheOrchestrator:
     ) -> CacheResult:
         if self.exact:
             cached = await self.exact.get(
-                model, messages, tools, temperature, tenant_id
+                model, messages, tools, temperature, tenant_id, system, agent_id
             )
             if cached is not None:
                 _count(cache_hits, layer="exact", tenant_id=tenant_id)
@@ -101,6 +101,7 @@ class CacheOrchestrator:
         response: dict[str, Any],
         agent_id: str = "",
         tenant_id: str = "",
+        system: str | None = None,
     ) -> None:
         if _looks_like_error_fallback(response, had_tools=bool(tools)):
             logger.info("skipping cache store — response looks like an error fallback")
@@ -108,7 +109,14 @@ class CacheOrchestrator:
 
         if self.exact:
             await self.exact.set(
-                model, messages, tools, temperature, response, tenant_id
+                model,
+                messages,
+                tools,
+                temperature,
+                response,
+                tenant_id,
+                system,
+                agent_id,
             )
 
         if self.semantic and agent_id:

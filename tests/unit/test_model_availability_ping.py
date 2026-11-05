@@ -39,3 +39,30 @@ def test_api_key_probes_the_named_model(monkeypatch):
     ok, err, _ = asyncio.run(ma._ping_anthropic("claude-sonnet-4-5-20250929"))
     assert not ok and "429" in err
     assert sent == ["claude-sonnet-4-5-20250929"]
+
+
+def _plan_helper(usable: bool):
+    return SimpleNamespace(get_config=lambda: SimpleNamespace(usable=usable))
+
+
+def _clear_google_keys(monkeypatch):
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+
+
+def test_keyless_gemini_on_a_subscription_is_not_marked_down(monkeypatch):
+    _clear_google_keys(monkeypatch)
+    monkeypatch.setattr(ma, "_subscription_helper", lambda: _plan_helper(True))
+    out = asyncio.run(ma.ping_one("gemini-2.0-flash", "google"))
+    assert out["ok"] is True and out["error"] is None
+
+
+def test_keyless_gemini_without_a_subscription_still_fails_its_probe(monkeypatch):
+    _clear_google_keys(monkeypatch)
+    monkeypatch.setattr(ma, "_subscription_helper", lambda: _plan_helper(False))
+
+    async def down(model):
+        return False, "no key", None
+
+    monkeypatch.setitem(ma._PINGER, "google", down)
+    assert asyncio.run(ma.ping_one("gemini-2.0-flash", "google"))["ok"] is False

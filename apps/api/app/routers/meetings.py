@@ -17,6 +17,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy import delete, desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.agent_lookup import find_agent_by_slug
 from app.core.deps import get_current_user, get_db
 from app.core.responses import error, success
 
@@ -1201,15 +1202,7 @@ async def _meeting_agent(db: AsyncSession, m: Meeting) -> Any:
 
     agent = await db.get(Agent, m.agent_id) if m.agent_id else None
     if agent is None:
-        agent = (
-            (
-                await db.execute(
-                    select(Agent).where(Agent.slug == "meeting-representative")
-                )
-            )
-            .scalars()
-            .first()
-        )
+        agent = await find_agent_by_slug(db, "meeting-representative", m.tenant_id)
     return agent
 
 
@@ -1285,14 +1278,8 @@ async def _run_meeting_agent(
                     .first()
                 )
             if not agent:
-                agent = (
-                    (
-                        await db2.execute(
-                            _sel(Agent).where(Agent.slug == "meeting-representative")
-                        )
-                    )
-                    .scalars()
-                    .first()
+                agent = await find_agent_by_slug(
+                    db2, "meeting-representative", m.tenant_id
                 )
             if not agent:
                 await sessmod.append_decision(

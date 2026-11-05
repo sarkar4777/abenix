@@ -11,6 +11,7 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
 
+from engine.tenant_access import path_refusal
 from engine.tools.base import BaseTool, ToolResult
 
 
@@ -101,6 +102,9 @@ class CsvAnalyzerTool(BaseTool):
 
         try:
             if file_path:
+                refused = await path_refusal(file_path)
+                if refused:
+                    return ToolResult(content=refused, is_error=True)
                 path = Path(file_path)
                 if not path.exists():
                     return ToolResult(

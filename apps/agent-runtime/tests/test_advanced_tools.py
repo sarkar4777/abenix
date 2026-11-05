@@ -23,6 +23,17 @@ from engine.tools.data_exporter import DataExporterTool
 from engine.tools.spreadsheet_analyzer import SpreadsheetAnalyzerTool
 from engine.tools.api_connector import ApiConnectorTool
 
+
+@pytest.fixture(autouse=True)
+def _open_file_jail(monkeypatch):
+    from engine import credentials, tenant_access
+
+    token = credentials.set_tenant("tests")
+    monkeypatch.setattr(tenant_access, "tenant_file_roots", lambda _t: ["/"])
+    yield
+    credentials.reset_tenant(token)
+
+
 # ---------- DocumentExtractorTool ----------
 
 

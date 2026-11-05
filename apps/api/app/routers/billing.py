@@ -11,7 +11,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, get_db
-from app.core.platform_features import require_monetization
+from app.core.platform_features import (
+    is_dev_environment,
+    is_platform_operator,
+    require_monetization,
+)
 from app.core.responses import error, success
 from app.core.stripe import (
     PLANS,
@@ -69,6 +73,21 @@ async def create_checkout(
 ) -> JSONResponse:
     if body.plan not in PLANS:
         return error("Invalid plan", 400)
+
+    if str(getattr(user.role, "value", user.role)).lower() != "admin":
+        return error("Only a workspace admin can change the plan.", 403)
+    # mock mode hands out a paid plan for free, so it stays out of shared deployments
+    if (
+        is_mock_mode()
+        and not is_dev_environment()
+        and not await is_platform_operator(db, user)
+    ):
+        return error(
+            "Billing is not set up on this deployment. Ask an operator to configure "
+            "Stripe before changing plans.",
+            409,
+            "BILLING_NOT_CONFIGURED",
+        )
 
     PLANS[body.plan]
     if body.plan in ("free", "enterprise"):

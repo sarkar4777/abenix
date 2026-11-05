@@ -514,7 +514,9 @@ async def dispatch_execution(
 
     model_cfg = agent.model_config_ or {}
     is_pipeline = model_cfg.get("mode") == "pipeline"
-    pool = getattr(agent, "runtime_pool", None) or "default"
+    from app.core.runtime_pools import POOL_NOT_DEPLOYED, effective_pool, pool_problem
+
+    pool = effective_pool(agent)
 
     if execution is None:
         execution = Execution(
@@ -599,6 +601,27 @@ async def dispatch_execution(
         return execution, False
 
     if settings.scaling_exec_remote and pool != "inline":
+        no_pool = await pool_problem(pool)
+        if no_pool:
+            execution.status = ExecutionStatus.FAILED
+            execution.error_message = no_pool
+            execution.failure_code = POOL_NOT_DEPLOYED
+            execution.completed_at = datetime.now(timezone.utc)
+            await db.commit()
+            if trigger_id:
+                try:
+                    await _notify_trigger_failure(
+                        db,
+                        tenant_id=execution.tenant_id,
+                        user_id=user.id,
+                        trigger_id=trigger_id,
+                        execution_id=str(execution.id),
+                        error=no_pool,
+                    )
+                    await db.commit()
+                except Exception:
+                    pass
+            return execution, False
         try:
             runtime_path = Path(__file__).resolve().parents[3] / "agent-runtime"
             if str(runtime_path) not in sys.path and runtime_path.exists():
@@ -672,6 +695,13 @@ def _not_dispatched_error(execution: Any) -> Any:
             execution.error_message,
             409,
             error_code="DRAFT_NOT_RELEASED",
+            details={"execution_id": str(execution.id)},
+        )
+    if getattr(execution, "failure_code", None) == "POOL_NOT_DEPLOYED":
+        return error(
+            execution.error_message,
+            503,
+            error_code="POOL_NOT_DEPLOYED",
             details={"execution_id": str(execution.id)},
         )
     return error("Trigger execution could not be queued", 503)
@@ -914,6 +944,7 @@ async def _execute_triggered_agent(
             model=model_cfg.get("model", "claude-sonnet-4-5-20250929"),
             temperature=model_cfg.get("temperature", 0.3),
             agent_id=str(agent.id),
+            tenant_id=str(user.tenant_id),
             cost_limit=getattr(agent, "per_execution_cost_limit", None),
         )
 

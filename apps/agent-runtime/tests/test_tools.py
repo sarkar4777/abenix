@@ -12,6 +12,16 @@ from engine.tools.current_time import CurrentTimeTool
 from engine.tools.file_reader import FileReaderTool
 
 
+@pytest.fixture(autouse=True)
+def _open_file_jail(monkeypatch):
+    from engine import credentials, tenant_access
+
+    token = credentials.set_tenant("tests")
+    monkeypatch.setattr(tenant_access, "tenant_file_roots", lambda _t: ["/"])
+    yield
+    credentials.reset_tenant(token)
+
+
 class TestCalculatorTool:
     @pytest.fixture
     def calc(self):

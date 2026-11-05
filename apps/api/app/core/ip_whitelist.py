@@ -65,10 +65,9 @@ class IPWhitelistMiddleware:
 
     @staticmethod
     def _get_client_ip(scope: Scope) -> str | None:
-        forwarded = Headers(scope=scope).get("x-forwarded-for")
-        if forwarded:
-            return forwarded.split(",")[0].strip()
+        from app.core.rate_limit import client_ip_from
+
         client = scope.get("client")
-        if client:
-            return client[0]
-        return None
+        peer = client[0] if client else None
+        ip = client_ip_from(peer, Headers(scope=scope).get("x-forwarded-for"))
+        return None if ip == "unknown" else ip

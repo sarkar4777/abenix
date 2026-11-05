@@ -4,9 +4,34 @@ from __future__ import annotations
 
 import json
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
+from engine import url_guard
 from engine.tools.base import READ_ONLY, BaseTool, Effect, ToolResult
+
+MAX_REDIRECTS = 5
+REDIRECT_STATUSES = (301, 302, 303, 307, 308)
+SENSITIVE_HEADERS = {"authorization", "cookie", "x-api-key"}
+
+
+async def _blocked_reason(url: str) -> str | None:
+    # a host that does not resolve falls through to the plain DNS message below
+    return await url_guard.check(
+        url,
+        allow_private=url_guard.env_flag("CONNECTORS_ALLOW_PRIVATE_TARGETS"),
+        require_dns=False,
+    )
+
+
+def _blocked_result(url: str, reason: str) -> ToolResult:
+    return ToolResult(
+        content=(
+            f"This request was refused. {reason}. Internal addresses are off limits "
+            "unless CONNECTORS_ALLOW_PRIVATE_TARGETS is set on this server."
+        ),
+        is_error=True,
+        metadata={"url": url, "blocked": True},
+    )
 
 
 def plain_error(e: BaseException, host: str, timeout: float) -> str:
@@ -132,6 +157,10 @@ class HttpClientTool(BaseTool):
         if not parsed.hostname:
             return ToolResult(content="Error: invalid URL", is_error=True)
 
+        blocked = await _blocked_reason(url)
+        if blocked:
+            return _blocked_result(url, blocked)
+
         try:
             import aiohttp
 
@@ -153,18 +182,54 @@ class HttpClientTool(BaseTool):
                     kwargs["params"] = params
                 if body and method in ("POST", "PUT", "PATCH"):
                     kwargs["json"] = body
+                kwargs["allow_redirects"] = False
 
                 status = 0
                 resp_body: Any = None
                 resp_headers: dict[str, str] = {}
                 last_error = ""
 
-                for attempt in range(max_retries + 1):
+                hops = 0
+                attempt = -1
+                while attempt < max_retries:
+                    attempt += 1
                     try:
                         async with session.request(method, **kwargs) as resp:
                             status = resp.status
                             resp_headers = dict(resp.headers)
                             content_type = resp.content_type or ""
+
+                            location = resp.headers.get("Location")
+                            if status in REDIRECT_STATUSES and location:
+                                if hops >= MAX_REDIRECTS:
+                                    return ToolResult(
+                                        content=f"{parsed.hostname} redirected too many times.",
+                                        is_error=True,
+                                        metadata={"url": url, "unreachable": True},
+                                    )
+                                hops += 1
+                                attempt -= 1
+                                next_url = urljoin(kwargs["url"], location)
+                                blocked = await _blocked_reason(next_url)
+                                if blocked:
+                                    return _blocked_result(next_url, blocked)
+                                if (
+                                    urlparse(next_url)[:2]
+                                    != urlparse(kwargs["url"])[:2]
+                                ):
+                                    kwargs["headers"] = {
+                                        k: v
+                                        for k, v in kwargs["headers"].items()
+                                        if k.lower() not in SENSITIVE_HEADERS
+                                    }
+                                if status == 303 or (
+                                    status in (301, 302) and method == "POST"
+                                ):
+                                    method = "GET"
+                                    kwargs.pop("json", None)
+                                kwargs["url"] = next_url
+                                kwargs.pop("params", None)
+                                continue
 
                             if status in (429, 503) and attempt < max_retries:
                                 retry_after = int(
