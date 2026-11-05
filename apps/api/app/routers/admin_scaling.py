@@ -12,6 +12,7 @@ from sqlalchemy import func as sqlfunc, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_db
+from app.core.platform_features import is_platform_operator
 from app.core.responses import error, success
 from app.routers.auth import get_current_user
 from models.agent import Agent, AgentStatus
@@ -95,6 +96,12 @@ def _ensure_admin(user: User) -> None:
         raise HTTPException(status_code=403, detail="Admin role required")
 
 
+async def _agent_scope(db: AsyncSession, user: User) -> list[Any]:
+    if await is_platform_operator(db, user):
+        return []
+    return [Agent.tenant_id == user.tenant_id]
+
+
 def _serialize_agent_scale(a: Agent) -> dict[str, Any]:
     return {
         "id": str(a.id),
@@ -135,13 +142,13 @@ async def list_pools(
     usage so the UI can render a meaningful health card for each pool."""
     _ensure_admin(user)
 
-    # Count agents per pool (across all tenants) so admins see the whole fleet
+    scope = await _agent_scope(db, user)
     counts = {}
     for pool, n in (
         await db.execute(
-            select(Agent.runtime_pool, sqlfunc.count(Agent.id)).group_by(
-                Agent.runtime_pool
-            )
+            select(Agent.runtime_pool, sqlfunc.count(Agent.id))
+            .where(*scope)
+            .group_by(Agent.runtime_pool)
         )
     ).all():
         counts[pool or "default"] = n
@@ -154,7 +161,7 @@ async def list_pools(
             await db.execute(
                 select(Agent.runtime_pool, sqlfunc.count(Execution.id))
                 .join(Execution, Execution.agent_id == Agent.id)
-                .where(Execution.created_at >= since)
+                .where(Execution.created_at >= since, *scope)
                 .group_by(Agent.runtime_pool)
             )
         ).all()
@@ -164,16 +171,26 @@ async def list_pools(
         # Execution model column name may differ in older deploys; non-fatal
         exec_counts = {}
 
+    from app.core.runtime_pools import dedicated_refusal, inventory
+
+    known = await inventory()
     out = []
     for p in POOLS:
+        info = (known or {}).get(p["key"])
         out.append(
             {
                 **p,
                 "agent_count": counts.get(p["key"], 0),
                 "executions_24h": exec_counts.get(p["key"], 0),
+                # null when this process cannot read the cluster
+                "deployed": (
+                    None if known is None or p["key"] == "inline" else info is not None
+                ),
+                "replicas": info.replicas if info else None,
+                "autoscaled": info.has_scaler if info else None,
             }
         )
-    return success({"pools": out})
+    return success({"pools": out, "dedicated_available": dedicated_refusal() is None})
 
 
 def agent_scale_filters(pool: str = "", q: str = "") -> list[Any]:
@@ -198,7 +215,7 @@ async def list_agents_with_scale(
 ) -> JSONResponse:
     """List agents with their scaling knobs, with totals over every match, not just the page."""
     _ensure_admin(user)
-    where = agent_scale_filters(pool, q)
+    where = [*agent_scale_filters(pool, q), *await _agent_scope(db, user)]
     rows = (
         (
             await db.execute(
@@ -293,7 +310,9 @@ async def update_agent_scale(
     """Update scaling knobs on an agent."""
     _ensure_admin(user)
     a = (
-        await db.execute(select(Agent).where(Agent.id == agent_id))
+        await db.execute(
+            select(Agent).where(Agent.id == agent_id, *await _agent_scope(db, user))
+        )
     ).scalar_one_or_none()
     if not a:
         return error("Agent not found", 404)
@@ -301,6 +320,13 @@ async def update_agent_scale(
     updates, problem = scaling_updates(body)
     if problem:
         return error(problem, 400)
+
+    if updates.get("runtime_pool", "inline") != "inline":
+        from app.core.runtime_pools import pool_problem
+
+        no_pool = await pool_problem(updates["runtime_pool"])
+        if no_pool:
+            return error(no_pool, 400, error_code="POOL_NOT_DEPLOYED")
 
     if "status" in body:
         s = str(body["status"]).strip().lower()
@@ -343,7 +369,9 @@ async def pause_agent(
     executions (but the row stays for audit/unpause)."""
     _ensure_admin(user)
     a = (
-        await db.execute(select(Agent).where(Agent.id == agent_id))
+        await db.execute(
+            select(Agent).where(Agent.id == agent_id, *await _agent_scope(db, user))
+        )
     ).scalar_one_or_none()
     if not a:
         return error("Agent not found", 404)
@@ -364,7 +392,9 @@ async def resume_agent(
 ) -> JSONResponse:
     _ensure_admin(user)
     a = (
-        await db.execute(select(Agent).where(Agent.id == agent_id))
+        await db.execute(
+            select(Agent).where(Agent.id == agent_id, *await _agent_scope(db, user))
+        )
     ).scalar_one_or_none()
     if not a:
         return error("Agent not found", 404)
@@ -382,17 +412,47 @@ async def set_dedicated_mode(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
-    """Toggle per-agent dedicated pod scaling."""
+    """Give an agent its own Deployment and ScaledObject, or take them away."""
     _ensure_admin(user)
     a = (
-        await db.execute(select(Agent).where(Agent.id == agent_id))
+        await db.execute(
+            select(Agent).where(Agent.id == agent_id, *await _agent_scope(db, user))
+        )
     ).scalar_one_or_none()
     if not a:
         return error("Agent not found", 404)
     enabled = bool(body.get("enabled", False))
+    from app.core.config import settings
+    from app.core.runtime_pools import dedicated_refusal, provision, retire
+
+    state = "off"
+    if enabled:
+        refusal = dedicated_refusal()
+        if not refusal and not settings.scaling_exec_remote:
+            refusal = "Dedicated pools need scaling.execRemote, agents run inline here."
+        if refusal:
+            return error(refusal, 409, error_code="DEDICATED_UNAVAILABLE")
+        try:
+            state = await provision(a)
+        except Exception as e:
+            logger.warning("[admin.scaling] no dedicated pool for %s: %s", a.id, e)
+            return error(
+                f"The agent stays on its shared pool, its own pool could not be created: {getattr(e, 'reason', None) or e}"[
+                    :500
+                ],
+                502,
+                error_code="DEDICATED_FAILED",
+            )
     a.dedicated_mode = enabled
     await db.commit()
     await db.refresh(a)
+    if not enabled and not dedicated_refusal():
+        # runs now go to the shared pool, what is left finishes where it was queued
+        try:
+            state = await retire(a.id)
+        except Exception as e:
+            logger.warning("[admin.scaling] pool of %s stays for now: %s", a.id, e)
+            state = "draining"
     logger.info(
         "[admin.scaling] dedicated_mode=%s on agent %s (slug=%s) by %s",
         enabled,
@@ -400,7 +460,7 @@ async def set_dedicated_mode(
         a.slug,
         user.email,
     )
-    return success(_serialize_agent_scale(a))
+    return success({**_serialize_agent_scale(a), "dedicated_state": state})
 
 
 @router.get("/agents/{agent_id}/cost-projection")
@@ -412,7 +472,9 @@ async def cost_projection(
     """Project hourly + daily + monthly cost for this agent based on"""
     _ensure_admin(user)
     a = (
-        await db.execute(select(Agent).where(Agent.id == agent_id))
+        await db.execute(
+            select(Agent).where(Agent.id == agent_id, *await _agent_scope(db, user))
+        )
     ).scalar_one_or_none()
     if not a:
         return error("Agent not found", 404)
@@ -495,6 +557,10 @@ async def tenant_spend(
     """Per-tenant spend today + this month, vs. configured daily_budget_usd
     aggregated across all their agents. Drives the P4 budget alert."""
     _ensure_admin(user)
+    if str(tenant_id) != str(user.tenant_id) and not await is_platform_operator(
+        db, user
+    ):
+        raise HTTPException(status_code=403, detail="That is another tenant's spend")
 
     start_day = datetime.now(timezone.utc).replace(
         hour=0, minute=0, second=0, microsecond=0
@@ -603,7 +669,14 @@ async def list_pipelines(
 
     # All agents that have a pipeline definition (mode=pipeline OR model_config carries pipeline_config)
     rows = (
-        (await db.execute(select(Agent).where(Agent.status != AgentStatus.ARCHIVED)))
+        (
+            await db.execute(
+                select(Agent).where(
+                    Agent.status != AgentStatus.ARCHIVED,
+                    *await _agent_scope(db, user),
+                )
+            )
+        )
         .scalars()
         .all()
     )

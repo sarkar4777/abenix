@@ -62,8 +62,15 @@ spec:
     name: {{ .Release.Name }}-improvements-proof
   minReplicaCount: {{ default 0 $pool.minReplicas }}
   maxReplicaCount: {{ default 4 $pool.maxReplicas }}
-  pollingInterval: 15
-  cooldownPeriod: 300
+  pollingInterval: {{ default 15 $keda.pollingInterval }}
+  cooldownPeriod: {{ default 300 $keda.cooldownPeriod }}
+  {{- if $keda.scaleDownStabilizationSeconds }}
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleDown:
+          stabilizationWindowSeconds: {{ $keda.scaleDownStabilizationSeconds }}
+  {{- end }}
   triggers:
     - type: prometheus
       metadata:

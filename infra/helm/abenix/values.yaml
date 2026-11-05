@@ -434,6 +434,23 @@ scaling:
     enabled: false
     # pools scale down one pod at a time, this many seconds apart
     scaleDownPeriodSeconds: 300
+    pollingInterval: 15
+    cooldownPeriod: 300
+    # how long the load must stay low before the first pod goes
+    scaleDownStabilizationSeconds: 600
+    # p95 run time above this adds pods, used when prometheusUrl is set
+    p95ThresholdMs: "90000"
+  # extra env on every pool pod, dedicated ones included
+  poolEnv: {}
+  # POST /api/admin/scaling/agents/{id}/dedicated-mode gives one agent its own
+  # Deployment and ScaledObject, cloned from templatePool and created by the API.
+  dedicated:
+    enabled: true
+    templatePool: default
+    # replicas one dedicated pool may reach, whatever the agent asks for
+    maxReplicas: 5
+    # dedicated pools on the cluster, each one costs at least its min_replicas pods
+    maxPools: 20
   alerts:
     # PrometheusRule CRD is not present on a vanilla cluster.
     enabled: false

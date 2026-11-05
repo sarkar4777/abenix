@@ -150,8 +150,15 @@ spec:
     name: {{ $name }}
   minReplicaCount: {{ $auto.minReplicas | default 1 }}
   maxReplicaCount: {{ $auto.maxReplicas | default 4 }}
-  pollingInterval: 15
-  cooldownPeriod: 300
+  pollingInterval: {{ $auto.pollingInterval | default 15 }}
+  cooldownPeriod: {{ $auto.cooldownPeriod | default 300 }}
+  {{- if $auto.scaleDownStabilizationSeconds }}
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleDown:
+          stabilizationWindowSeconds: {{ $auto.scaleDownStabilizationSeconds }}
+  {{- end }}
   triggers:
     - type: metrics-api
       metadata:

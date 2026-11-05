@@ -9,6 +9,9 @@ the CODE_RUNNER_* settings and the service account are already present:
 
 Scenarios: cold (runner deleted), warm (sequential), zero (scaled to zero and
 back), version (new version uploaded under load), concurrency (N at once).
+
+Exits 0 when every threshold holds, 1 when one fails, 2 when it could not run or got no answers.
+This file stays self contained because it is copied into the pod on its own.
 """
 
 from __future__ import annotations
@@ -23,17 +26,42 @@ import urllib.request
 import uuid
 from collections import Counter
 from pathlib import Path
+from typing import Any
 
-_here = Path(__file__).resolve().parents
-for p in (
-    "/app/apps/agent-runtime",
-    str(_here[2] / "apps" / "agent-runtime") if len(_here) > 2 else "",
-):
-    if p and Path(p).is_dir() and p not in sys.path:
-        sys.path.insert(0, p)
+SCENARIOS = ["cold", "warm", "zero", "version", "concurrency"]
+PLAIN_NUMBERS = (
+    "scenario",
+    "calls",
+    "errors",
+    "p50_ms",
+    "p95_ms",
+    "p99_ms",
+    "overhead_p50_ms",
+    "overhead_p95_ms",
+    "calls_per_s",
+    "first_call_runner",
+    "first_call_ms",
+    "seconds_until_warm",
+    "seconds_until_warm_again",
+)
 
-from engine import code_runners as cr  # noqa: E402
-from engine.tools.code_asset import CodeAssetTool  # noqa: E402
+cr: Any = None
+CodeAssetTool: Any = None
+
+
+def load_engine() -> None:
+    global cr, CodeAssetTool
+    here = Path(__file__).resolve().parents
+    for p in (
+        "/app/apps/agent-runtime",
+        str(here[2] / "apps" / "agent-runtime") if len(here) > 2 else "",
+    ):
+        if p and Path(p).is_dir() and p not in sys.path:
+            sys.path.insert(0, p)
+    from engine import code_runners
+    from engine.tools.code_asset import CodeAssetTool as tool
+
+    cr, CodeAssetTool = code_runners, tool
 
 
 def pct(xs: list[float], q: float) -> float:
@@ -41,6 +69,59 @@ def pct(xs: list[float], q: float) -> float:
         return float("nan")
     xs = sorted(xs)
     return xs[min(len(xs) - 1, int(round(q / 100 * (len(xs) - 1))))]
+
+
+def check(name: str, measured: float, limit: float, ceiling: bool = True) -> bool:
+    ok = measured <= limit if ceiling else measured >= limit
+    print(
+        f"{'PASS' if ok else 'FAIL'} {name} measured={measured} limit={limit}",
+        flush=True,
+    )
+    return ok
+
+
+def print_measured(results: list[dict]) -> None:
+    for r in results:
+        if r:
+            pairs = (f"{k}={r[k]}" for k in PLAIN_NUMBERS if k in r)
+            print("MEASURED " + " ".join(pairs), flush=True)
+
+
+def evaluate(
+    results: list[dict],
+    max_p50_ms: float = 500,
+    max_p99_ms: float = 5000,
+    min_calls_per_s: float = 10,
+    max_failed: int = 0,
+    max_wake_seconds: float = 180,
+) -> int:
+    ran = [r for r in results if r]
+    empty = [r["scenario"] for r in ran if r["calls"] <= r["errors"]]
+    if not ran or empty:
+        print(f"no successful calls, scenarios {empty or 'none ran'}", flush=True)
+        return 2
+    checks = []
+    for r in ran:
+        name = r["scenario"]
+        if max_failed >= 0:
+            checks.append(check(f"{name}_failed_calls", r["errors"], max_failed))
+        if name == "warm" and max_p50_ms > 0:
+            checks.append(check("warm_p50_ms", r["p50_ms"], max_p50_ms))
+        if name == "warm" and max_p99_ms > 0:
+            checks.append(check("warm_p99_ms", r["p99_ms"], max_p99_ms))
+        if name == "concurrency" and min_calls_per_s > 0:
+            checks.append(
+                check(
+                    "concurrency_calls_per_s",
+                    r["calls_per_s"],
+                    min_calls_per_s,
+                    ceiling=False,
+                )
+            )
+        wake = r.get("seconds_until_warm", r.get("seconds_until_warm_again"))
+        if wake is not None and max_wake_seconds > 0:
+            checks.append(check(f"{name}_wake_seconds", wake, max_wake_seconds))
+    return 0 if all(checks) else 1
 
 
 def summary(name: str, rows: list[dict]) -> dict:
@@ -73,7 +154,8 @@ class Bench:
     async def load(self) -> None:
         assets = await cr._load_assets(self.db, [self.args.asset])
         if self.args.asset not in assets:
-            raise SystemExit(f"asset {self.args.asset} not found")
+            print(f"asset {self.args.asset} not found", file=sys.stderr, flush=True)
+            sys.exit(2)
         self.asset = assets[self.args.asset]
 
     def tool(self) -> CodeAssetTool:
@@ -127,6 +209,8 @@ class Bench:
         took, rows = await self.wait_warm(self.args.warm_limit)
         out = {
             "scenario": "cold",
+            "calls": len(rows) + 1,
+            "errors": sum(1 for r in [first, *rows] if not r["ok"]),
             "first_call_runner": first["runner"],
             "first_call_ms": round(first["ms"], 1),
             "first_call_reason": first["reason"],
@@ -159,6 +243,8 @@ class Bench:
         took, rows = await self.wait_warm(self.args.warm_limit)
         out = {
             "scenario": "zero",
+            "calls": len(rows) + 1,
+            "errors": sum(1 for r in [first, *rows] if not r["ok"]),
             "first_call_runner": first["runner"],
             "first_call_ms": round(first["ms"], 1),
             "seconds_until_warm_again": round(took, 1),
@@ -246,13 +332,13 @@ class Bench:
         wall = time.perf_counter() - t0
         out = summary("concurrency", list(rows))
         out["wall_s"] = round(wall, 2)
-        out["calls_per_s"] = round(len(rows) / wall, 1)
+        out["calls_per_s"] = round(sum(1 for r in rows if r["ok"]) / wall, 1)
         out["error_samples"] = [r["error"] for r in rows if not r["ok"]][:3]
         print(json.dumps(out))
         return out
 
 
-async def main() -> None:
+async def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--asset", required=True, help="code asset id")
     ap.add_argument("--nats", default="", help="NATS URL, defaults to NATS_URL")
@@ -274,24 +360,67 @@ async def main() -> None:
     ap.add_argument("--warm-limit", type=float, default=300)
     ap.add_argument("--version-load", type=int, default=20)
     ap.add_argument("--version-seconds", type=float, default=60)
+    ap.add_argument(
+        "--max-p50-ms", type=float, default=500, help="warm p50, 0 means not checked"
+    )
+    ap.add_argument(
+        "--max-p99-ms", type=float, default=5000, help="warm p99, 0 means not checked"
+    )
+    ap.add_argument(
+        "--min-calls-per-s",
+        type=float,
+        default=10,
+        help="concurrency scenario, 0 means not checked",
+    )
+    ap.add_argument(
+        "--max-failed",
+        type=int,
+        default=0,
+        help="failed calls per scenario, below 0 means not checked",
+    )
+    ap.add_argument(
+        "--max-wake-seconds",
+        type=float,
+        default=180,
+        help="cold and zero, seconds until warm, 0 means not checked",
+    )
     args = ap.parse_args()
-    if args.nats:
-        os.environ["NATS_URL"] = args.nats
-    os.environ.setdefault("CODE_RUNNER_MODE", "auto")
-    b = Bench(args)
-    await b.load()
-    order = ["cold", "warm", "zero", "version", "concurrency"]
     wanted = (
-        order
+        SCENARIOS
         if args.scenario == "all"
         else [s.strip() for s in args.scenario.split(",")]
     )
+    if set(wanted) - set(SCENARIOS):
+        ap.error(f"--scenario takes all or a comma list of {','.join(SCENARIOS)}")
+    if args.nats:
+        os.environ["NATS_URL"] = args.nats
+    os.environ.setdefault("CODE_RUNNER_MODE", "auto")
+    load_engine()
+    b = Bench(args)
+    await b.load()
     results = []
-    for name in order:
+    for name in SCENARIOS:
         if name in wanted:
             results.append(await getattr(b, name)())
     print("SUMMARY " + json.dumps(results))
+    print_measured(results)
+    return evaluate(
+        results,
+        args.max_p50_ms,
+        args.max_p99_ms,
+        args.min_calls_per_s,
+        args.max_failed,
+        args.max_wake_seconds,
+    )
+
+
+def cli() -> int:
+    try:
+        return asyncio.run(main())
+    except Exception as exc:  # noqa: BLE001
+        print(f"code runner bench could not run, {exc!r}", file=sys.stderr, flush=True)
+        return 2
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    sys.exit(cli())

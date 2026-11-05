@@ -1,6 +1,8 @@
 """In-process benchmark of the API middleware stack, old BaseHTTPMiddleware vs pure ASGI.
 
 Usage: python scripts/load/middleware_bench.py [--requests 5000] [--concurrency 200]
+
+Exits 0 when every threshold holds, 1 when one fails, 2 when it could not run.
 """
 
 from __future__ import annotations
@@ -17,44 +19,50 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-ROOT = Path(__file__).resolve().parents[2]
-for sub in ("apps/api", "packages/db"):
-    sys.path.insert(0, str(ROOT / sub))
-os.environ.setdefault("DEBUG", "true")
-os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://t:t@localhost/t")
-os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
-os.environ.setdefault("IP_WHITELIST", "0.0.0.0/0,::/0")
+# only as a script, an importing test keeps its own environment
+if __name__ == "__main__":
+    ROOT = Path(__file__).resolve().parents[2]
+    for sub in ("apps/api", "packages/db"):
+        sys.path.insert(0, str(ROOT / sub))
+    os.environ.setdefault("DEBUG", "true")
+    os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://t:t@localhost/t")
+    os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
+    os.environ.setdefault("IP_WHITELIST", "0.0.0.0/0,::/0")
 
-import httpx  # noqa: E402
-import structlog  # noqa: E402
-from fastapi import FastAPI, Request  # noqa: E402
-from starlette.middleware.base import (  # noqa: E402
-    BaseHTTPMiddleware,
-    RequestResponseEndpoint,
-)
-from starlette.responses import JSONResponse, Response  # noqa: E402
+try:
+    import httpx  # noqa: E402
+    import structlog  # noqa: E402
+    from fastapi import FastAPI, Request  # noqa: E402
+    from starlette.middleware.base import (  # noqa: E402
+        BaseHTTPMiddleware,
+        RequestResponseEndpoint,
+    )
+    from starlette.responses import JSONResponse, Response  # noqa: E402
 
-import app.core.rate_limit as rate_limit  # noqa: E402
-from app.core.ip_whitelist import IPWhitelistMiddleware  # noqa: E402
-from app.core.middleware import (  # noqa: E402
-    AUTH_PATHS,
-    MAX_REQUEST_BODY_BYTES,
-    MAX_UPLOAD_BODY_BYTES,
-    RATE_LIMIT_SKIP,
-    BodySizeLimitMiddleware,
-    RateLimitMiddleware,
-    SecurityHeadersMiddleware,
-    TenantMiddleware,
-)
-from app.core.observability_middleware import (  # noqa: E402
-    ObservabilityMiddleware,
-    _status_family,
-)
-from app.core.security import verify_token  # noqa: E402
-from app.core.telemetry import (  # noqa: E402
-    http_request_duration_seconds,
-    http_requests_total,
-)
+    import app.core.rate_limit as rate_limit  # noqa: E402
+    from app.core.ip_whitelist import IPWhitelistMiddleware  # noqa: E402
+    from app.core.middleware import (  # noqa: E402
+        AUTH_PATHS,
+        MAX_REQUEST_BODY_BYTES,
+        MAX_UPLOAD_BODY_BYTES,
+        RATE_LIMIT_SKIP,
+        BodySizeLimitMiddleware,
+        RateLimitMiddleware,
+        SecurityHeadersMiddleware,
+        TenantMiddleware,
+    )
+    from app.core.observability_middleware import (  # noqa: E402
+        ObservabilityMiddleware,
+        _status_family,
+    )
+    from app.core.security import verify_token  # noqa: E402
+    from app.core.telemetry import (  # noqa: E402
+        http_request_duration_seconds,
+        http_requests_total,
+    )
+except ImportError as exc:
+    print(f"middleware bench could not run, missing {exc.name}", file=sys.stderr)
+    sys.exit(2)
 
 # Pre-rewrite classes, kept here only for comparison.
 
@@ -283,12 +291,66 @@ async def run(app: FastAPI, path: str, total: int, concurrency: int) -> float:
         return total / (time.perf_counter() - t0)
 
 
-async def main() -> None:
+def check(name: str, measured: float, limit: float, ceiling: bool = True) -> bool:
+    ok = measured <= limit if ceiling else measured >= limit
+    print(
+        f"{'PASS' if ok else 'FAIL'} {name} measured={measured} limit={limit}",
+        flush=True,
+    )
+    return ok
+
+
+def evaluate(
+    results: dict[str, dict[str, float]],
+    max_new_ms: float = 5,
+    max_overhead_ms: float = 2,
+    min_speedup: float = 1.5,
+) -> int:
+    rates = [v for by_stack in results.values() for v in by_stack.values()]
+    if not rates or min(rates) <= 0:
+        print("no requests were measured", flush=True)
+        return 2
+    checks = []
+    for path, r in results.items():
+        name = path.rsplit("/", 1)[-1]
+        new_ms = round(1000 / r["new"], 3)
+        if max_new_ms > 0:
+            checks.append(check(f"{name}_new_ms_per_request", new_ms, max_new_ms))
+        if max_overhead_ms > 0:
+            over = round(new_ms - 1000 / r["bare"], 3)
+            checks.append(check(f"{name}_overhead_ms", over, max_overhead_ms))
+        if min_speedup > 0:
+            speedup = round(r["new"] / r["old"], 2)
+            checks.append(check(f"{name}_speedup", speedup, min_speedup, ceiling=False))
+    return 0 if all(checks) else 1
+
+
+async def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--requests", type=int, default=5000)
     p.add_argument("--concurrency", type=int, default=200)
     p.add_argument("--rounds", type=int, default=3)
+    p.add_argument(
+        "--max-new-ms",
+        type=float,
+        default=5,
+        help="ms per request through the new stack, 0 means not checked",
+    )
+    p.add_argument(
+        "--max-overhead-ms",
+        type=float,
+        default=2,
+        help="ms per request the new stack adds over bare, 0 means not checked",
+    )
+    p.add_argument(
+        "--min-speedup",
+        type=float,
+        default=1.5,
+        help="new req/s over old req/s, 0 means not checked",
+    )
     args = p.parse_args()
+    if min(args.requests, args.concurrency, args.rounds) <= 0:
+        p.error("--requests, --concurrency and --rounds must be above 0")
 
     rate_limit._IS_LOCAL_DEV = True
     structlog.configure(
@@ -296,6 +358,7 @@ async def main() -> None:
     )
 
     variants = {"bare": (), "old": OLD, "new": NEW}
+    measured = {}
     for path in ("/api/health", "/api/ping"):
         print(f"{path}  requests={args.requests} concurrency={args.concurrency}")
         results = {}
@@ -309,7 +372,17 @@ async def main() -> None:
             results[name] = best
             print(f"  {name:5s} {best:9.0f} req/s")
         print(f"  speedup new/old: {results['new'] / results['old']:.2f}x")
+        measured[path] = results
+    return evaluate(measured, args.max_new_ms, args.max_overhead_ms, args.min_speedup)
+
+
+def cli() -> int:
+    try:
+        return asyncio.run(main())
+    except Exception as exc:  # noqa: BLE001
+        print(f"middleware bench could not run, {exc!r}", file=sys.stderr, flush=True)
+        return 2
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    sys.exit(cli())

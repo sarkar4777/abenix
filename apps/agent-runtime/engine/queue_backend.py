@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import os
+import time
 import uuid
 from typing import Any, AsyncIterator, Optional
 
@@ -13,6 +14,12 @@ logger = logging.getLogger(__name__)
 
 # the JetStream default, so a durable created before this line behaves the same
 ACK_WAIT_SECONDS = 30
+# another process may delete a dedicated pool's durable, so a hit is only trusted this long
+CONSUMER_CHECK_SECONDS = 60
+
+
+def consumer_name(queue_name: str) -> str:
+    return f"abenix-{queue_name}-consumer"
 
 
 class QueueBackend:
@@ -23,6 +30,15 @@ class QueueBackend:
     async def stream(self, queue_name: str) -> AsyncIterator[dict]: ...
 
     async def pending(self, queue_name: str) -> int | None:
+        return None
+
+    async def ensure_consumer(self, queue_name: str) -> None:
+        return None
+
+    async def backlog(self, queue_name: str) -> int | None:
+        return None
+
+    async def remove_queue(self, queue_name: str) -> None:
         return None
 
 
@@ -88,6 +104,7 @@ class NATSBackend(QueueBackend):
         self._nc = None
         self._js = None
         self._lock = asyncio.Lock()
+        self._consumers_seen: dict[str, float] = {}
 
     async def _ensure(self):
         if self._nats is None:
@@ -108,8 +125,33 @@ class NATSBackend(QueueBackend):
             except Exception as e:
                 logger.debug("nats add_stream agents (likely already exists): %s", e)
 
-    async def submit(self, queue_name: str, payload: dict) -> str:
+    async def ensure_consumer(self, queue_name: str) -> None:
+        """Create the durable if it is missing, KEDA reads its lag before any pod exists."""
         await self._ensure()
+        seen = self._consumers_seen.get(queue_name)
+        if seen is not None and time.monotonic() - seen < CONSUMER_CHECK_SECONDS:
+            return
+        from nats.js.api import ConsumerConfig  # type: ignore
+        from nats.js.errors import NotFoundError  # type: ignore
+
+        durable = consumer_name(queue_name)
+        try:
+            await self._js.consumer_info("agents", durable)
+        except NotFoundError:
+            await self._js.add_consumer(
+                "agents",
+                config=ConsumerConfig(
+                    name=durable,
+                    durable_name=durable,
+                    filter_subject=f"agents.{queue_name}",
+                    ack_wait=ACK_WAIT_SECONDS,
+                ),
+            )
+            logger.info("created durable %s", durable)
+        self._consumers_seen[queue_name] = time.monotonic()
+
+    async def submit(self, queue_name: str, payload: dict) -> str:
+        await self.ensure_consumer(queue_name)
         task_id = str(uuid.uuid4())
         subject = f"agents.{queue_name}"
         envelope: dict[str, Any] = {"task_id": task_id, "payload": payload}
@@ -134,12 +176,37 @@ class NATSBackend(QueueBackend):
 
     async def pending(self, queue_name: str) -> int | None:
         await self._ensure()
-        info = await self._js.consumer_info("agents", f"abenix-{queue_name}-consumer")
+        info = await self._js.consumer_info("agents", consumer_name(queue_name))
         return int(info.num_pending or 0)
+
+    async def backlog(self, queue_name: str) -> int | None:
+        """Runs still queued or held on this pool, None when it has no durable."""
+        from nats.js.errors import NotFoundError  # type: ignore
+
+        await self._ensure()
+        try:
+            info = await self._js.consumer_info("agents", consumer_name(queue_name))
+        except NotFoundError:
+            return None
+        return int(info.num_pending or 0) + int(info.num_ack_pending or 0)
+
+    async def remove_queue(self, queue_name: str) -> None:
+        """Drop a retired pool's durable and its messages, a later durable would replay them."""
+        from nats.js.errors import NotFoundError  # type: ignore
+
+        await self._ensure()
+        self._consumers_seen.pop(queue_name, None)
+        try:
+            await self._js.delete_consumer("agents", consumer_name(queue_name))
+        except NotFoundError:
+            pass
+        await self._js.purge_stream("agents", subject=f"agents.{queue_name}")
 
     async def stream(self, queue_name: str) -> AsyncIterator[QueueMessage]:
         await self._ensure()
         subject = f"agents.{queue_name}"
+        from nats.errors import TimeoutError as NatsTimeout  # type: ignore
+
         try:
             from nats.js.api import ConsumerConfig  # type: ignore
 
@@ -148,15 +215,20 @@ class NATSBackend(QueueBackend):
             config = None
         psub = await self._js.pull_subscribe(
             subject,
-            durable=f"abenix-{queue_name}-consumer",
+            durable=consumer_name(queue_name),
             config=config,
         )
         try:
             while True:
                 try:
                     msgs = await psub.fetch(1, timeout=5)
-                except Exception:
+                except (NatsTimeout, asyncio.TimeoutError):
                     await asyncio.sleep(0)
+                    continue
+                except Exception as e:
+                    # a lost NATS connection fails at once, do not spin on it
+                    logger.warning("consumer: fetch from %s failed: %s", subject, e)
+                    await asyncio.sleep(1)
                     continue
                 for msg in msgs:
                     try:

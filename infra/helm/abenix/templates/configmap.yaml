@@ -15,6 +15,9 @@ data:
   {{- $features := default dict .Values.features }}
   MARKETPLACE_ENABLED: {{ (hasKey $features "marketplace" | ternary $features.marketplace true) | quote }}
   MONETIZATION_ENABLED: {{ (hasKey $features "monetization" | ternary $features.monetization false) | quote }}
+  {{- if hasKey $features "playgroundExecute" }}
+  PLAYGROUND_EXECUTE_ENABLED: {{ $features.playgroundExecute | quote }}
+  {{- end }}
   PGSSLMODE: "disable"
   RUNTIME_MODE: {{ .Values.runtimeMode | default "embedded" | quote }}
   RUNTIME_URL: "http://{{ .Release.Name }}-agent-runtime:8001"
@@ -24,6 +27,12 @@ data:
   # backend instead of running them inline. Requires per-pool
   # Deployments (scaling.enabled) + a valid queueBackend selection.
   SCALING_EXEC_REMOTE: {{ .Values.scaling.execRemote | default false | quote }}
+  {{- $dedicated := default dict .Values.scaling.dedicated }}
+  {{- if and .Values.scaling.enabled .Values.scaling.pools $dedicated.enabled }}
+  DEDICATED_POOL_TEMPLATE: "{{ .Release.Name }}-agent-runtime-{{ default "default" $dedicated.templatePool }}"
+  DEDICATED_POOL_MAX_REPLICAS: {{ default 5 $dedicated.maxReplicas | quote }}
+  DEDICATED_POOL_MAX_POOLS: {{ default 20 $dedicated.maxPools | quote }}
+  {{- end }}
   # proofs of agent improvements run on API pods, or only on the proof pool when it is on
   {{- $proofPool := default dict (default dict .Values.improvements).proofPool }}
   IMPROVEMENTS_PROOF_DRAIN: {{ if $proofPool.enabled }}"pool"{{ else }}"api"{{ end }}

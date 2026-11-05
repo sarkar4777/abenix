@@ -2,6 +2,8 @@
 
     python decision_load.py --base http://abenix-api:8000 --token JWT --key some.decision \
         --concurrency 500 --seconds 60 --publish-at 20 --publish-version 2
+
+Exits 0 when every threshold holds, 1 when one fails, 2 when it could not run or got no answers.
 """
 
 from __future__ import annotations
@@ -11,9 +13,14 @@ import asyncio
 import json
 import random
 import statistics
+import sys
 import time
 
-import httpx
+try:
+    import httpx
+except ImportError as exc:
+    print(f"decision load could not run, missing {exc.name}", file=sys.stderr)
+    sys.exit(2)
 
 FACTS = [
     {"shipment": {"date": "2026-03-01", "postcode": "IV27", "weightKg": 120}},
@@ -28,6 +35,33 @@ def pct(xs: list[float], p: float) -> float:
     xs = sorted(xs)
     k = min(len(xs) - 1, int(round(p / 100 * (len(xs) - 1))))
     return xs[k]
+
+
+def check(name: str, measured: float, limit: float, ceiling: bool = True) -> bool:
+    ok = measured <= limit if ceiling else measured >= limit
+    print(
+        f"{'PASS' if ok else 'FAIL'} {name} measured={measured} limit={limit}",
+        flush=True,
+    )
+    return ok
+
+
+def evaluate(
+    report: dict, min_rps: float, max_error_rate: float, max_p95_ms: float
+) -> int:
+    failed = sum(report["errors"].values())
+    if not report["ok"]:
+        print(f"no successful requests, errors {report['errors']}", flush=True)
+        return 2
+    results = []
+    if min_rps > 0:
+        results.append(check("rps", report["rps"], min_rps, ceiling=False))
+    if max_error_rate >= 0:
+        rate = round(failed / (report["ok"] + failed), 4)
+        results.append(check("error_rate", rate, max_error_rate))
+    if max_p95_ms > 0:
+        results.append(check("p95_ms", report["p95_ms"], max_p95_ms))
+    return 0 if all(results) else 1
 
 
 async def run(a: argparse.Namespace, share: int, do_publish: bool) -> dict:
@@ -51,7 +85,11 @@ async def run(a: argparse.Namespace, share: int, do_publish: bool) -> dict:
                 try:
                     r = await c.post(
                         f"/api/decisions/{a.key}/evaluate",
-                        json={"facts": f, "as_of": f["import"]["date"], "trace": False},
+                        json={
+                            "facts": f,
+                            "as_of": f["shipment"]["date"],
+                            "trace": False,
+                        },
                     )
                     dt = (time.perf_counter() - t0) * 1000
                     if r.status_code == 200:
@@ -100,7 +138,7 @@ def _proc(args: tuple) -> dict:
     return asyncio.run(run(a, share, first))
 
 
-def main() -> None:
+def main() -> int:
     import multiprocessing as mp
 
     ap = argparse.ArgumentParser()
@@ -115,11 +153,24 @@ def main() -> None:
     ap.add_argument(
         "--procs", type=int, default=0, help="0 means one per 32 connections"
     )
+    ap.add_argument("--min-rps", type=float, default=100, help="0 means not checked")
+    ap.add_argument(
+        "--max-error-rate", type=float, default=0.05, help="below 0 means not checked"
+    )
+    ap.add_argument(
+        "--max-p95-ms", type=float, default=5000, help="0 means not checked"
+    )
     a = ap.parse_args()
+    if a.concurrency <= 0 or a.seconds <= 0:
+        ap.error("--concurrency and --seconds must be above 0")
     a.procs = a.procs or max(1, -(-a.concurrency // 32))
     share = max(1, a.concurrency // a.procs)
-    with mp.Pool(a.procs) as pool:
-        parts = pool.map(_proc, [(a, share, i == 0) for i in range(a.procs)])
+    try:
+        with mp.Pool(a.procs) as pool:
+            parts = pool.map(_proc, [(a, share, i == 0) for i in range(a.procs)])
+    except Exception as exc:  # noqa: BLE001
+        print(f"decision load could not run, {exc!r}", file=sys.stderr, flush=True)
+        return 2
     lat = [x for p in parts for x in p["lat"]]
     errors: dict[str, int] = {}
     versions: dict[int, int] = {}
@@ -132,26 +183,23 @@ def main() -> None:
         for k, v in p["hashes"].items():
             hashes.setdefault(k, set()).update(v)
     took = max(p["took"] for p in parts)
-    print(
-        json.dumps(
-            {
-                "concurrency": share * a.procs,
-                "procs": a.procs,
-                "seconds": round(took, 1),
-                "ok": len(lat),
-                "errors": errors,
-                "rps": round(len(lat) / took, 1),
-                "p50_ms": round(pct(lat, 50), 1),
-                "p95_ms": round(pct(lat, 95), 1),
-                "p99_ms": round(pct(lat, 99), 1),
-                "mean_ms": round(statistics.mean(lat), 1) if lat else 0,
-                "versions_seen": versions,
-                "nondeterministic_cases": sum(1 for v in hashes.values() if len(v) > 1),
-            }
-        ),
-        flush=True,
-    )
+    report = {
+        "concurrency": share * a.procs,
+        "procs": a.procs,
+        "seconds": round(took, 1),
+        "ok": len(lat),
+        "errors": errors,
+        "rps": round(len(lat) / took, 1),
+        "p50_ms": round(pct(lat, 50), 1),
+        "p95_ms": round(pct(lat, 95), 1),
+        "p99_ms": round(pct(lat, 99), 1),
+        "mean_ms": round(statistics.mean(lat), 1) if lat else 0,
+        "versions_seen": versions,
+        "nondeterministic_cases": sum(1 for v in hashes.values() if len(v) > 1),
+    }
+    print(json.dumps(report), flush=True)
+    return evaluate(report, a.min_rps, a.max_error_rate, a.max_p95_ms)
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

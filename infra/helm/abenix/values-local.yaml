@@ -351,6 +351,10 @@ scaling:
     prometheusUrl: "http://abenix-prometheus.abenix.svc.cluster.local:9090"
   alerts:
     enabled: false              # PrometheusRule CRD not on vanilla minikube
+  dedicated:
+    enabled: true
+    maxReplicas: 2
+    maxPools: 3
   pools:
     # One tight pool is enough for local dev. Flip to values-local-runtime.yaml
     # if you want all four AKS pools on minikube.
