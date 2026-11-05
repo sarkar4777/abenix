@@ -120,7 +120,7 @@ async def predict(req: PredictRequest):
             result["probabilities"] = _model.predict_proba(X).tolist()
         if hasattr(_model, "classes_"):
             result["classes"] = [str(c) for c in _model.classes_]
-            result["predicted_class"] = str(_model.classes_[preds[0]])
+            result["predicted_class"] = str(preds[0])
         predictions = result
 
     elif MODEL_FRAMEWORK == "onnx":
