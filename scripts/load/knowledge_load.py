@@ -32,6 +32,42 @@ def doc_text(kb_bytes: int, rng: np.random.Generator) -> str:
     return "\n".join(out)
 
 
+FIRST = (
+    "Jana Omar Priya Lukas Mei Carlos Ingrid Tomas Aisha Henrik Sofia Daniel".split()
+)
+LAST = (
+    "Novak Haddad Sharma Weber Chen Rivera Olsen Dvorak Khan Larsen Rossi Meyer".split()
+)
+COMPANY_A = "Nordtek Alba Vantor Keystone Helion Brightwater Cobalt Meridian Sable Orion".split()
+COMPANY_B = "Steel Castings Hydraulics Logistics Energy Polymers Systems Marine Foods Pharma".split()
+SITES = "Brno Leeds Lyon Porto Gdansk Tampere Bilbao Turin Ghent Malmo".split()
+PARTS = (
+    "hydraulic pump,control valve,turbine blade,gear assembly,pressure sensor".split(
+        ","
+    )
+)
+
+
+def company_text(kb_bytes: int, rng: np.random.Generator) -> str:
+    def pick(items: list[str]) -> str:
+        return items[int(rng.integers(len(items)))]
+
+    out: list[str] = []
+    size = 0
+    while size < kb_bytes * 1024:
+        supplier = f"{pick(COMPANY_A)} {pick(COMPANY_B)}"
+        buyer = f"{pick(COMPANY_A)} {pick(COMPANY_B)}"
+        person = f"{pick(FIRST)} {pick(LAST)}"
+        line = (
+            f"{supplier} supplies the {pick(PARTS)} to the {pick(SITES)} plant of {buyer} "
+            f"under contract CT-{int(rng.integers(100000))}, managed by {person}. "
+            f"{person} reports that delivery risk at {pick(SITES)} rose this quarter."
+        )
+        out.append(line)
+        size += len(line) + 1
+    return "\n".join(out)
+
+
 def pct(values: list[float], q: float) -> float:
     return round(sorted(values)[min(len(values) - 1, int(len(values) * q))], 1)
 
@@ -94,7 +130,8 @@ async def ingest(stack: Stack, pg, args) -> str:
     rejected = [0]
 
     async def one(i: int) -> None:
-        body = doc_text(args.doc_kb, rng).encode()
+        maker = company_text if args.corpus == "company" else doc_text
+        body = maker(args.doc_kb, rng).encode()
         async with semaphore:
             res = await stack.http.post(
                 f"/api/knowledge-bases/{kb}/upload",
@@ -278,8 +315,10 @@ async def vectors(stack: Stack, pg, args) -> None:
             await pg.execute(f"DROP INDEX {index}")
         t0 = time.time()
         await load_rows(pg, uuid.UUID(big), doc, done, target - done)
-        done = target
-        stack.note(f"copy_rows_per_second_{target}", round((target - done + 1) or 0))
+        added, done = target - done, target
+        stack.note(
+            f"copy_rows_per_second_{target}", round(added / max(time.time() - t0, 0.1))
+        )
         stack.note(f"copy_seconds_to_{target}", round(time.time() - t0, 1))
         if have:
             t0 = time.time()
@@ -334,9 +373,9 @@ async def cognify(stack: Stack, pg, args, kb: str) -> None:
     if r.status_code >= 400:
         stack.note("cognify_error", r.text[:300])
         return
-    job = (r.json().get("data") or {}).get("job_id") or (r.json().get("data") or {}).get(
-        "id"
-    )
+    job = (r.json().get("data") or {}).get("job_id") or (
+        r.json().get("data") or {}
+    ).get("id")
     t0 = time.time()
     while time.time() - t0 < args.cognify_limit:
         row = await pg.fetchrow(
@@ -346,7 +385,13 @@ async def cognify(stack: Stack, pg, args, kb: str) -> None:
             uuid.UUID(job),
         )
         print(f"  cognify {int(time.time() - t0)}s {row['s']}", flush=True)
-        if row["s"].lower() in ("complete", "completed", "failed", "partial", "cancelled"):
+        if row["s"].lower() in (
+            "complete",
+            "completed",
+            "failed",
+            "partial",
+            "cancelled",
+        ):
             stack.note(
                 "cognify_result",
                 {
@@ -427,6 +472,7 @@ async def main() -> int:
     ap.add_argument("--pg-port", type=int, default=15432)
     ap.add_argument("--docs", type=int, default=500)
     ap.add_argument("--doc-kb", type=int, default=40)
+    ap.add_argument("--corpus", choices=["words", "company"], default="company")
     ap.add_argument("--upload-concurrency", type=int, default=8)
     ap.add_argument("--ingest-limit", type=int, default=1200)
     ap.add_argument("--live-insert-rows", type=int, default=5000)

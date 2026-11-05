@@ -224,6 +224,10 @@ check_running_size() {
   fi
 }
 
+# Helm 4 refuses an upgrade over any field changed with kubectl, the chart must win
+HELM_FORCE=()
+helm upgrade --help 2>/dev/null | grep -q -- '--force-conflicts' && HELM_FORCE=(--force-conflicts)
+
 # ── Ensure minikube is running (start only if needed) ────────────────────────
 ensure_minikube() {
   local host_status api_status
@@ -1757,7 +1761,7 @@ _install_edge_gateway() { # _install_edge_gateway <release> <chart> <image> <ful
   [ -z "${token}" ] && warn "  ${release}: no platform token, the gateway will not register"
   pubfile=$(_edge_pubkey_file)
   [ -s "${pubfile}" ] || warn "  ${release}: no signing pubkey, the chart refuses to install without one unless allow_unsigned=true"
-  helm upgrade --install "${release}" "${ROOT_DIR}/infra/helm/${chart}" \
+  helm upgrade --install ${HELM_FORCE[@]+"${HELM_FORCE[@]}"} "${release}" "${ROOT_DIR}/infra/helm/${chart}" \
     --namespace "${NAMESPACE}" \
     --set image.repository="localhost:5000/abenix/${image}" \
     --set image.tag="${IMAGE_TAG}" \
@@ -1835,7 +1839,7 @@ deploy_local() {
 
   step "Installing/upgrading Helm release '${RELEASE_NAME}'"
   # shellcheck disable=SC2046
-  helm upgrade --install "${RELEASE_NAME}" "${HELM_DIR}" \
+  helm upgrade --install ${HELM_FORCE[@]+"${HELM_FORCE[@]}"} "${RELEASE_NAME}" "${HELM_DIR}" \
     --namespace "${NAMESPACE}" \
     --values "${HELM_DIR}/values-local.yaml" \
     --set "web.image.tag=${IMAGE_TAG}" \
@@ -2012,7 +2016,7 @@ deploy_local_runtime() {
 
   step "Installing/upgrading with runtime pod enabled (RUNTIME_MODE=remote)"
   # shellcheck disable=SC2046
-  helm upgrade --install "${RELEASE_NAME}" "${HELM_DIR}" \
+  helm upgrade --install ${HELM_FORCE[@]+"${HELM_FORCE[@]}"} "${RELEASE_NAME}" "${HELM_DIR}" \
     --namespace "${NAMESPACE}" \
     --values "${HELM_DIR}/values-local.yaml" \
     --values "${HELM_DIR}/values-local-runtime.yaml" \
@@ -2092,7 +2096,7 @@ deploy_cloud() {
 
   step "Installing/upgrading Helm release '${RELEASE_NAME}' (production)"
   # shellcheck disable=SC2046
-  helm upgrade --install "${RELEASE_NAME}" "${HELM_DIR}" \
+  helm upgrade --install ${HELM_FORCE[@]+"${HELM_FORCE[@]}"} "${RELEASE_NAME}" "${HELM_DIR}" \
     --namespace "${NAMESPACE}" \
     --values "${HELM_DIR}/values-production.yaml" \
     --set "web.image.tag=${IMAGE_TAG}" \
@@ -2481,7 +2485,7 @@ deploy_chart() {
           --set "web.env.NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:${API_PORT}}")
   log "images: ${flags[*]}"
   # shellcheck disable=SC2046
-  helm upgrade --install "${RELEASE_NAME}" "${HELM_DIR}"     --namespace "${NAMESPACE}"     --reset-then-reuse-values     --values "${HELM_DIR}/values-local.yaml"     "${flags[@]}"     $(_build_secrets_flags)     --timeout 10m     --wait=false     2>&1 | tail -5
+  helm upgrade --install ${HELM_FORCE[@]+"${HELM_FORCE[@]}"} "${RELEASE_NAME}" "${HELM_DIR}"     --namespace "${NAMESPACE}"     --reset-then-reuse-values     --values "${HELM_DIR}/values-local.yaml"     "${flags[@]}"     $(_build_secrets_flags)     --timeout 10m     --wait=false     2>&1 | tail -5
   ok "Helm release applied"
   roll_config_consumers
   local ti
