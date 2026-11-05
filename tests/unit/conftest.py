@@ -20,6 +20,17 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 
+# A developer's .env must not reach real providers from unit tests
+for _key in (
+    "OPENAI_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "GOOGLE_API_KEY",
+    "GEMINI_API_KEY",
+    "TAVILY_API_KEY",
+    "CLAUDE_SUBSCRIPTION_TOKEN",
+):
+    os.environ[_key] = ""
+
 # Order matters: app/ resolves to apps/api/app, engine/ to
 # apps/agent-runtime/engine, models/ to packages/db/models, worker/
 # to apps/worker/worker.

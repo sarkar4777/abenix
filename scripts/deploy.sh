@@ -121,6 +121,8 @@ usage() {
   echo "  edge-demo      Run an Abenix Edge gateway in abenix-edge-demo: a CAN bus over socketcand, ECUs, GPS, the testbed meter and PLC"
   echo "  edge-demo-cut [s]  Cut the demo gateway's uplink for s seconds (default 120), then prove zero loss and in-order backfill"
   echo "  edge-demo-down Remove the demo gateway, its source and its namespace"
+  echo "  edge-e2e       End to end test of the three edge runtimes and gateway mode on this cluster, prints a pass, fail table"
+  echo "  scale-e2e      Prove the autoscalers on this cluster with real pods and load, about 30 minutes, restores everything"
   echo "  pause-apps     Scale use-case apps to zero to free memory, data and images stay. APPS=contractiq,wingman picks some"
   echo "  resume-apps    Bring paused apps back, same APPS selection"
   echo ""
@@ -278,6 +280,14 @@ ensure_minikube() {
     ok "Minikube started (apiserver verified)"
   fi
 
+  local runtime
+  runtime=$(kubectl get nodes -o jsonpath='{.items[0].status.nodeInfo.containerRuntimeVersion}' 2>/dev/null || true)
+  if [[ -n "${runtime}" && "${runtime}" != docker* ]]; then
+    err "This minikube cluster runs ${runtime%%:*}, and images are built into its Docker daemon."
+    err "Recreate it with FRESH=true bash scripts/deploy.sh ${1:-local}. That deletes the local cluster and its data."
+    exit 1
+  fi
+
   # Ensure addons (idempotent)
   minikube addons enable ingress &>/dev/null || true
   minikube addons enable metrics-server &>/dev/null || true
@@ -375,7 +385,7 @@ ensure_infra_images() {
 }
 
 # NEXT_PUBLIC_* are inlined into the web bundle at build time, so forward the ones set in .env or the shell
-WEB_PUBLIC_VARS=(NEXT_PUBLIC_API_URL NEXT_PUBLIC_APP_URL NEXT_PUBLIC_ENABLE_MONETIZATION NEXT_PUBLIC_AUDIT_NATIVE NEXT_PUBLIC_GRAFANA_URL)
+WEB_PUBLIC_VARS=(NEXT_PUBLIC_SHOW_DEMO_LOGIN NEXT_PUBLIC_API_URL NEXT_PUBLIC_APP_URL NEXT_PUBLIC_ENABLE_MONETIZATION NEXT_PUBLIC_AUDIT_NATIVE NEXT_PUBLIC_GRAFANA_URL)
 web_build_args() { # web_build_args <svc>, fills BUILD_ARGS
   BUILD_ARGS=()
   [ "$1" = "web" ] || return 0
@@ -557,7 +567,7 @@ build_images() {
   # `agentforge/edge-runtime` from Docker Hub, which does not exist, leaving a
   # permanent ImagePullBackOff pod that also makes wait_for_pods burn its full
   # timeout on every deploy. The loop below falls back to apps/<svc>/Dockerfile.
-  local services=("api" "web" "worker" "agent-runtime" "edge-runtime")
+  local services=("api" "web" "worker" "agent-runtime" "edge-runtime" "model-serving")
   # the rust and c gateways only when this deploy installs them
   if [[ "${EDGE_RUNTIME_ALL_VARIANTS:-false}" == "true" || "${EDGE_RUNTIME_VARIANT:-python}" == "rust" ]]; then
     services+=("edge-runtime-rust")
@@ -1746,7 +1756,7 @@ _install_edge_gateway() { # _install_edge_gateway <release> <chart> <image> <ful
   token=$(_edge_platform_token "${release}" || true)
   [ -z "${token}" ] && warn "  ${release}: no platform token, the gateway will not register"
   pubfile=$(_edge_pubkey_file)
-  [ -s "${pubfile}" ] || warn "  ${release}: no signing pubkey, the gateway cannot verify bundles"
+  [ -s "${pubfile}" ] || warn "  ${release}: no signing pubkey, the chart refuses to install without one unless allow_unsigned=true"
   helm upgrade --install "${release}" "${ROOT_DIR}/infra/helm/${chart}" \
     --namespace "${NAMESPACE}" \
     --set image.repository="localhost:5000/abenix/${image}" \
@@ -1759,6 +1769,7 @@ _install_edge_gateway() { # _install_edge_gateway <release> <chart> <image> <ful
     --set endpoint_url="http://${fullname}.${NAMESPACE}.svc.cluster.local:8080" \
     --set mqtt_url="mqtt://abenix-mosquitto.${NAMESPACE}.svc.cluster.local:1883" \
     --set anthropic_api_key="${ANTHROPIC_API_KEY:-}" \
+    --set anthropic_auth_token="${CLAUDE_SUBSCRIPTION_TOKEN:-}" \
     --set-file signing_pubkey="${pubfile}" \
     "$@" \
     --timeout 5m --wait=false 2>&1 | tail -3 \
@@ -1801,6 +1812,7 @@ deploy_local() {
 
   ensure_minikube
   ensure_infra_images
+  export NEXT_PUBLIC_SHOW_DEMO_LOGIN="${NEXT_PUBLIC_SHOW_DEMO_LOGIN:-true}"
   build_images "localhost:5000/abenix" "false"
 
   # Create namespace (idempotent)
@@ -1864,7 +1876,7 @@ deploy_local() {
     if [[ "${EDGE_RUNTIME_VARIANT}" == "python" || "${EDGE_RUNTIME_ALL_VARIANTS}" == "true" ]]; then
       step "Installing edge runtime (python, gateway.id=${EDGE_GATEWAY_ID:-edge-cluster-default})"
       _install_edge_gateway abenix-edge edge-runtime edge-runtime abenix-edge-edge-runtime "" \
-        --set allow_unsigned="${EDGE_ALLOW_UNSIGNED:-true}"
+        --set allow_unsigned="${EDGE_ALLOW_UNSIGNED:-false}"
     fi
     if [[ "${EDGE_RUNTIME_VARIANT}" == "rust" || "${EDGE_RUNTIME_ALL_VARIANTS}" == "true" ]]; then
       deploy_edge_runtime_rust
@@ -1969,7 +1981,7 @@ deploy_local() {
   echo -e "  ${YELLOW}Fresh restart:${NC}   FRESH=true bash scripts/deploy.sh local"
   echo -e "  ${YELLOW}Status:${NC}          bash scripts/deploy.sh status"
   echo -e "  ${YELLOW}Destroy:${NC}         bash scripts/deploy.sh destroy"
-  echo -e "  ${YELLOW}E2E Tests:${NC}       bash scripts/run-e2e.sh --k8s knowledge"
+  echo -e "  ${YELLOW}E2E Tests:${NC}       BASE=http://localhost:3000 API=http://localhost:8000 USE_K8S=true bash scripts/uat.sh"
   echo -e "  ${YELLOW}Stop forwards:${NC}   bash scripts/deploy.sh destroy (or restart them: bash scripts/deploy.sh forwards)"
   echo ""
 }
@@ -1992,6 +2004,7 @@ deploy_local_runtime() {
 
   ensure_minikube
   ensure_infra_images
+  export NEXT_PUBLIC_SHOW_DEMO_LOGIN="${NEXT_PUBLIC_SHOW_DEMO_LOGIN:-true}"
   build_images "localhost:5000/abenix" "false"
 
   kubectl create namespace "${NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f - &>/dev/null
@@ -2052,7 +2065,7 @@ deploy_local_runtime() {
   echo -e "  ${YELLOW}Fresh restart:${NC}   FRESH=true bash scripts/deploy.sh local-runtime"
   echo -e "  ${YELLOW}Status:${NC}          bash scripts/deploy.sh status"
   echo -e "  ${YELLOW}Destroy:${NC}         bash scripts/deploy.sh destroy"
-  echo -e "  ${YELLOW}E2E Tests:${NC}       bash scripts/run-e2e.sh --k8s knowledge"
+  echo -e "  ${YELLOW}E2E Tests:${NC}       BASE=http://localhost:3000 API=http://localhost:8000 USE_K8S=true bash scripts/uat.sh"
   echo -e "  ${YELLOW}Stop forwards:${NC}   bash scripts/deploy.sh destroy (or restart them: bash scripts/deploy.sh forwards)"
   echo ""
 }
@@ -2665,10 +2678,53 @@ testbed_chaos() { # testbed_chaos <svc>
     row="$(kubectl get pod -n "${TESTBED_NS}" -l "${sel}" -o jsonpath='{range .items[*]}{.metadata.uid} {.status.containerStatuses[0].ready}{"\n"}{end}' 2>/dev/null | grep -v "^${uid} " | grep ' true$' || true)"
     if [ -n "${row}" ]; then
       ok "${svc} is back after $(( $(date +%s) - start ))s"
+      _testbed_data_resumes "${svc}"
+      return $?
+    fi
+  done
+  err "${svc} is not ready after 180s"
+  return 1
+}
+
+_testbed_conn_name() { # the Abenix connection fed by a testbed service
+  case "$1" in
+    redpanda|kafka|payments|sensors) echo "Kafka (Redpanda)" ;;
+    rabbitmq|amqp|logistics) echo "RabbitMQ" ;;
+    nats|fleet) echo "NATS JetStream" ;;
+    opc-plc|opcua) echo "OPC UA PLC" ;;
+    meter|modbus) echo "Modbus energy meter" ;;
+    prices|websocket) echo "WebSocket prices" ;;
+    pusher) echo "HTTP pusher" ;;
+  esac
+}
+
+# prints <decode_errors> <last_message_at> for one testbed connection, nothing when it is not connected
+_testbed_conn_stat() {
+  _edge_api "
+rows = c.get('/api/telemetry/connections', headers=auth, params={'q': 'Testbed'}).json().get('data') or []
+row = next((r for r in rows if r['name'] == 'Testbed · $1'), None)
+if row: print(row.get('decode_errors') or 0, row.get('last_message_at') or '-')
+"
+}
+
+_testbed_data_resumes() { # _testbed_data_resumes <svc>
+  local name first now i
+  name="$(_testbed_conn_name "$1")"
+  first="$(_testbed_conn_stat "${name}" || true)"
+  if [ -z "${first}" ]; then
+    warn "no connection called Testbed · ${name} in Abenix, cannot read whether data resumed. Run: bash scripts/deploy.sh testbed-connect"
+    return 0
+  fi
+  log "waiting for new data on ${name}..."
+  for i in $(seq 1 60); do
+    sleep 3
+    now="$(_testbed_conn_stat "${name}" || true)"
+    if [ -n "${now}" ] && [ "${now#* }" != "${first#* }" ]; then
+      ok "data resumed on ${name}"
       return 0
     fi
   done
-  warn "${svc} is not ready after 180s"
+  err "no new data on ${name} within 180 s of ${1} coming back"
   return 1
 }
 
@@ -2680,8 +2736,26 @@ testbed_poison() { # testbed_poison <sim>
     payments|sensors|logistics|fleet|prices|pusher) ;;
     *) err "testbed-poison takes payments, sensors, logistics, fleet, prices or pusher"; exit 1 ;;
   esac
+  local name before now i
+  name="$(_testbed_conn_name "${sim}")"
+  before="$(_testbed_conn_stat "${name}" || true)"
   kubectl exec -n "${TESTBED_NS}" "deploy/${sim}-sim" -- python -c \
-    "import urllib.request as u; print(u.urlopen(u.Request('http://127.0.0.1:8081/poison', method='POST')).read().decode().strip())"
+    "import urllib.request as u; print(u.urlopen(u.Request('http://127.0.0.1:8081/poison', method='POST')).read().decode().strip())" || return 1
+  if [ -z "${before}" ]; then
+    warn "no connection called Testbed · ${name} in Abenix, cannot read the dead letter outcome. Run: bash scripts/deploy.sh testbed-connect"
+    return 0
+  fi
+  log "waiting for the malformed message on ${name} to reach the dead letters..."
+  for i in $(seq 1 40); do
+    sleep 3
+    now="$(_testbed_conn_stat "${name}" || true)"
+    if [ -n "${now}" ] && [ "${now%% *}" -gt "${before%% *}" ]; then
+      ok "${name} counted it as a dead letter, decode errors ${before%% *} to ${now%% *}"
+      return 0
+    fi
+  done
+  err "no new dead letter on ${name} within 120 s"
+  return 1
 }
 
 # a one-off Kafka burst: testbed-load <count> <msgs per second>
@@ -2790,13 +2864,33 @@ print(urllib.request.urlopen(urllib.request.Request('http://127.0.0.1:18001/cut?
     fi
     sleep 2
   done
-  [ -z "${drained}" ] && warn "the buffer did not drain within 180 s"
+  local problems=0 proof gaps
+  if [ -z "${drained}" ]; then
+    err "the buffer did not drain within 180 s"
+    problems=$((problems + 1))
+  fi
   # history is written in 250 ms batches, give it a moment
   sleep 5
   step "Proof"
   log "peak buffer ${peak} readings, oldest ${peak_age} s, drained ${drained:-?} s after the link came back"
   log "readings sent during the cut and backfill: $(( sent - sent0 )), lost by the gateway: ${lost}"
-  _edge_demo_py proof "${t0}" "${t1}"
+  proof="$(_edge_demo_py proof "${t0}" "${t1}")" || { err "the proof step failed"; return 1; }
+  printf '%s\n' "${proof}"
+  gaps="$(printf '%s' "${proof}" | sed -n 's/.*"gap_count": *\([0-9]*\).*/\1/p')"
+  if [ "${lost:-0}" != "0" ]; then
+    err "the gateway lost ${lost} readings"
+    problems=$((problems + 1))
+  fi
+  if [ -z "${gaps}" ] || [ "${gaps}" != "0" ]; then
+    err "Edge/Seq has ${gaps:-an unreadable number of} gaps over the cut"
+    problems=$((problems + 1))
+  fi
+  if printf '%s' "${proof}" | grep -q '"in_order": *false'; then
+    err "the backfill arrived out of order"
+    problems=$((problems + 1))
+  fi
+  [ "${problems}" -eq 0 ] || return 1
+  ok "no loss, no gaps, in order"
 }
 
 deploy_edge_demo_down() {
@@ -2846,7 +2940,9 @@ case "${1:-}" in
   edge-demo)      deploy_edge_demo     ;;
   edge-demo-cut)  edge_demo_cut "${2:-120}" ;;
   edge-demo-down) deploy_edge_demo_down ;;
+  edge-e2e)       exec bash "${ROOT_DIR}/scripts/edge-e2e.sh" ;;
   testbed-connect) testbed_connect     ;;
   rules-pool-kill) rules_pool_kill     ;;
+  scale-e2e)      exec bash "${ROOT_DIR}/scripts/scale-e2e.sh" ;;
   *)              usage                ;;
 esac

@@ -46,8 +46,11 @@ services:
     profiles:
       - tools
 
+  # Only needed for STORAGE_BACKEND=s3
   minio:
-    image: minio/minio:latest
+    image: ${MINIO_IMAGE:-minio/minio:latest}
+    profiles:
+      - s3
     container_name: abenix-minio
     environment:
       MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-abenix}
@@ -65,7 +68,7 @@ services:
       retries: 5
 
   minio-init:
-    image: minio/mc:latest
+    image: ${MINIO_MC_IMAGE:-minio/mc:latest}
     container_name: abenix-minio-init
     depends_on:
       minio:
@@ -79,6 +82,7 @@ services:
       "
     profiles:
       - init
+      - s3
 
   # NATS JetStream — default transport for per-request agent execution.
   # Same server the AKS chart deploys, so dev/prod parity is 1:1.
@@ -140,17 +144,23 @@ services:
       timeout: 5s
       retries: 5
 
-  # Python edge runtime — reference implementation, ~80 MB.
-  # Bring it up with: docker compose --profile edge-python up.
+  # Python edge runtime, the reference, about 290 MB. Bring it up with
+  # EDGE_AUTH_TOKEN and SIGNING_PUBKEY_PEM set and docker compose --profile edge-python up.
   edge-runtime:
     build:
-      context: .
-      dockerfile: apps/edge-runtime/Dockerfile
-    image: agentforge/edge-runtime:1.1.0
+      context: ./apps/edge-runtime
+      dockerfile: Dockerfile
+    image: abenix/edge-runtime:local
     container_name: abenix-edge
     environment:
       GATEWAY_ID: ${EDGE_GATEWAY_ID:-edge-local-python}
       GATEWAY_NAME: ${EDGE_GATEWAY_NAME:-edge-local-python}
+      EDGE_AUTH_TOKEN: ${EDGE_AUTH_TOKEN:-}
+      EDGE_ALLOW_NO_AUTH: ${EDGE_ALLOW_NO_AUTH:-}
+      SIGNING_PUBKEY_PEM: ${SIGNING_PUBKEY_PEM:-}
+      EDGE_ALLOW_UNSIGNED: ${EDGE_ALLOW_UNSIGNED:-}
+      TENANT_ID: ${TENANT_ID:-}
+      ANTHROPIC_AUTH_TOKEN: ${ANTHROPIC_AUTH_TOKEN:-}
       PLATFORM_URL: ${PLATFORM_URL:-http://host.docker.internal:8000}
       PLATFORM_TOKEN: ${PLATFORM_TOKEN:-}
       MQTT_URL: mqtt://mosquitto:1883
@@ -163,17 +173,23 @@ services:
     profiles:
       - edge-python
 
-  # Rust edge runtime — disabled by profile so dev-local doesn't drag in a
-  # Rust toolchain. Bring it up with: docker compose --profile edge-rust up.
+  # Rust edge runtime, behind a profile so dev-local needs no Rust toolchain. About 85 MB. Bring it up with
+  # EDGE_AUTH_TOKEN and SIGNING_PUBKEY_PEM set and docker compose --profile edge-rust up.
   edge-runtime-rust:
     build:
       context: ./apps/edge-runtime-rust
       dockerfile: Dockerfile
-    image: agentforge/edge-runtime-rust:1.1.0
+    image: abenix/edge-runtime-rust:local
     container_name: abenix-edge-rust
     environment:
       GATEWAY_ID: ${EDGE_GATEWAY_ID:-edge-local-rust}
       GATEWAY_NAME: ${EDGE_GATEWAY_NAME:-edge-local-rust}
+      EDGE_AUTH_TOKEN: ${EDGE_AUTH_TOKEN:-}
+      EDGE_ALLOW_NO_AUTH: ${EDGE_ALLOW_NO_AUTH:-}
+      SIGNING_PUBKEY_PEM: ${SIGNING_PUBKEY_PEM:-}
+      EDGE_ALLOW_UNSIGNED: ${EDGE_ALLOW_UNSIGNED:-}
+      TENANT_ID: ${TENANT_ID:-}
+      ANTHROPIC_AUTH_TOKEN: ${ANTHROPIC_AUTH_TOKEN:-}
       PLATFORM_URL: ${PLATFORM_URL:-http://host.docker.internal:8000}
       PLATFORM_TOKEN: ${PLATFORM_TOKEN:-}
       MQTT_URL: mqtt://mosquitto:1883
@@ -187,17 +203,23 @@ services:
     profiles:
       - edge-rust
 
-  # C edge runtime — built off the alpine Dockerfile, ~12-20 MB image.
-  # Bring it up with: docker compose --profile edge-c up.
+  # C edge runtime, about 95 MB with python3 in the image. Bring it up with
+  # EDGE_AUTH_TOKEN and SIGNING_PUBKEY_PEM set and docker compose --profile edge-c up.
   edge-runtime-c:
     build:
       context: ./apps/edge-runtime-c
       dockerfile: Dockerfile
-    image: agentforge/edge-runtime-c:1.1.0
+    image: abenix/edge-runtime-c:local
     container_name: abenix-edge-c
     environment:
       GATEWAY_ID: ${EDGE_GATEWAY_ID:-edge-local-c}
       GATEWAY_NAME: ${EDGE_GATEWAY_NAME:-edge-local-c}
+      EDGE_AUTH_TOKEN: ${EDGE_AUTH_TOKEN:-}
+      EDGE_ALLOW_NO_AUTH: ${EDGE_ALLOW_NO_AUTH:-}
+      SIGNING_PUBKEY_PEM: ${SIGNING_PUBKEY_PEM:-}
+      EDGE_ALLOW_UNSIGNED: ${EDGE_ALLOW_UNSIGNED:-}
+      TENANT_ID: ${TENANT_ID:-}
+      ANTHROPIC_AUTH_TOKEN: ${ANTHROPIC_AUTH_TOKEN:-}
       PLATFORM_URL: ${PLATFORM_URL:-http://host.docker.internal:8000}
       PLATFORM_TOKEN: ${PLATFORM_TOKEN:-}
       MQTT_URL: mqtt://mosquitto:1883

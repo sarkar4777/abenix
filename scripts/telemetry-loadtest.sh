@@ -6,21 +6,58 @@
 #                                                    200 live viewers, one ingest replica killed
 #   SECONDS_RUN=120 VIEWERS=200 KILL_AFTER=40 KEEP=1 bash scripts/telemetry-loadtest.sh t7
 #   RATE=40 bash scripts/telemetry-loadtest.sh t7      t7 at a fifth of the rate, for a busy node
+#   bash scripts/telemetry-loadtest.sh t2 --min-rate 800 --max-lost 0
+#   LOADTEST_MIN_RATE=800 LOADTEST_MIN_HELD_RATIO=0.9 LOADTEST_MAX_LOST=0 LOADTEST_MAX_ERRORS=0 bash scripts/telemetry-loadtest.sh t2
 #
+# Exits 0 when every threshold holds, 1 when one fails, 2 when the test could not run.
+# A flag wins over its env var, defaults are in apps/api/app/telemetry/loadtest.py.
 # t7 needs two ingest replicas first: TELEMETRY_INGEST_REPLICAS=2 bash scripts/deploy.sh chart
 set -euo pipefail
+trap 'echo "[loadtest] a step failed on line ${LINENO}, the test did not finish" >&2; exit 2' ERR
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 NAMESPACE="${NAMESPACE:-abenix}"
 RELEASE_NAME="${RELEASE_NAME:-abenix}"
 SCENARIO="${1:-t2}"
+[ "$#" -gt 0 ] && shift
 RUN_FOR="${SECONDS_RUN:-60}"
 VIEWERS="${VIEWERS:-200}"
 KILL_AFTER="${KILL_AFTER:-30}"
 JOB="telemetry-loadtest-${SCENARIO}"
-OUT_DIR="${ROOT_DIR}/logs/telemetry-loadtest"
+OUT_DIR="${LOADTEST_OUT_DIR:-${ROOT_DIR}/logs/telemetry-loadtest}"
 
-case "${SCENARIO}" in t2|t7) ;; *) echo "usage: $0 {t2|t7}"; exit 1 ;; esac
+usage() {
+  echo "usage: $0 {t2|t7} [--min-rate N] [--min-held-ratio N] [--max-lost N] [--max-errors N]" >&2
+  exit 2
+}
+
+case "${SCENARIO}" in t2|t7) ;; *) usage ;; esac
+
+args="\"${SCENARIO}\", \"--seconds\", \"${RUN_FOR}\", \"--viewers\", \"${VIEWERS}\", \"--kill-after\", \"${KILL_AFTER}\""
+[ -n "${RATE:-}" ] && args="${args}, \"--rate\", \"${RATE}\""
+[ -n "${KEEP:-}" ] && args="${args}, \"--keep\""
+
+add_threshold() {
+  case "$2" in
+    ""|*[!0-9.-]*) echo "[loadtest] $1 needs a number, got '$2'" >&2; exit 2 ;;
+  esac
+  args="${args}, \"$1\", \"$2\""
+}
+
+[ -n "${LOADTEST_MIN_RATE:-}" ] && add_threshold --min-rate "${LOADTEST_MIN_RATE}"
+[ -n "${LOADTEST_MIN_HELD_RATIO:-}" ] && add_threshold --min-held-ratio "${LOADTEST_MIN_HELD_RATIO}"
+[ -n "${LOADTEST_MAX_LOST:-}" ] && add_threshold --max-lost "${LOADTEST_MAX_LOST}"
+[ -n "${LOADTEST_MAX_ERRORS:-}" ] && add_threshold --max-errors "${LOADTEST_MAX_ERRORS}"
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --min-rate|--min-held-ratio|--max-lost|--max-errors)
+      [ "$#" -ge 2 ] || usage
+      add_threshold "$1" "$2"
+      shift 2
+      ;;
+    *) usage ;;
+  esac
+done
 
 image=$(kubectl -n "${NAMESPACE}" get deploy "${RELEASE_NAME}-api" \
   -o jsonpath='{.spec.template.spec.containers[0].image}')
@@ -31,12 +68,8 @@ replicas=$(kubectl -n "${NAMESPACE}" get deploy "${RELEASE_NAME}-telemetry-inges
 echo "[loadtest] image ${image}, ingest replicas ready: ${replicas:-0}"
 if [ "${SCENARIO}" = "t7" ] && [ "${replicas:-0}" -lt 2 ]; then
   echo "[loadtest] t7 needs two ingest replicas, run: TELEMETRY_INGEST_REPLICAS=2 bash scripts/deploy.sh chart"
-  exit 1
+  exit 2
 fi
-
-args="\"${SCENARIO}\", \"--seconds\", \"${RUN_FOR}\", \"--viewers\", \"${VIEWERS}\", \"--kill-after\", \"${KILL_AFTER}\""
-[ -n "${RATE:-}" ] && args="${args}, \"--rate\", \"${RATE}\""
-[ -n "${KEEP:-}" ] && args="${args}, \"--keep\""
 
 kubectl -n "${NAMESPACE}" delete job "${JOB}" --ignore-not-found >/dev/null
 kubectl -n "${NAMESPACE}" apply -f - >/dev/null <<EOF
@@ -94,8 +127,8 @@ for _ in $(seq 1 60); do
 done
 if [ -z "${pod}" ] || ! case "${phase}" in Running|Succeeded|Failed) true ;; *) false ;; esac; then
   echo "[loadtest] the job pod did not start: $(kubectl -n "${NAMESPACE}" get events --field-selector involvedObject.name="${pod}" -o jsonpath='{.items[-1:].message}' 2>/dev/null)"
-  kubectl -n "${NAMESPACE}" delete job "${JOB}" --ignore-not-found >/dev/null
-  exit 1
+  kubectl -n "${NAMESPACE}" delete job "${JOB}" --ignore-not-found >/dev/null || true
+  exit 2
 fi
 
 mkdir -p "${OUT_DIR}"
@@ -116,13 +149,25 @@ while :; do
   sleep 2
 done
 kubectl -n "${NAMESPACE}" logs "${pod}" > "${log}" 2>/dev/null || true
-grep -v '^REPORT ' "${log}" | tail -20
-report=$(grep '^REPORT ' "${log}" | tail -1 | sed 's/^REPORT //')
+code=$(kubectl -n "${NAMESPACE}" get pod "${pod}" \
+  -o jsonpath='{.status.containerStatuses[0].state.terminated.exitCode}' 2>/dev/null || true)
+grep -vE '^(REPORT|PASS|FAIL) ' "${log}" | tail -20 || true
+report=$(grep '^REPORT ' "${log}" | tail -1 | sed 's/^REPORT //' || true)
 if [ -z "${report}" ]; then
   echo "[loadtest] no report, the job ${phase}, full log in ${log}"
-  exit 1
+  exit 2
 fi
 echo "${report}" > "${log%.log}.json"
 python -c "import json,sys; print(json.dumps(json.loads(sys.argv[1]), indent=2))" "${report}" 2>/dev/null || echo "${report}"
 echo "[loadtest] report saved to ${log%.log}.json"
-kubectl -n "${NAMESPACE}" delete job "${JOB}" --ignore-not-found >/dev/null
+kubectl -n "${NAMESPACE}" delete job "${JOB}" --ignore-not-found >/dev/null || true
+[ "${code}" = "2" ] && exit 2
+if ! grep -E '^(PASS|FAIL) ' "${log}"; then
+  echo "[loadtest] no threshold lines, ${image} is older than the thresholds, rebuild the API image"
+  exit 2
+fi
+case "${code}" in
+  0|1) exit "${code}" ;;
+  "") if grep -q '^FAIL ' "${log}"; then exit 1; fi; exit 0 ;;
+  *) echo "[loadtest] the job container ended with code ${code}"; exit 2 ;;
+esac

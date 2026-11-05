@@ -64,10 +64,12 @@ credentials.json
 *.swp
 *.swo
 
-# Uploads
-data/
+# Uploads, anchored so the settings/data page stays tracked
+/data/
+/apps/*/data/
+/*/api/data/
 # wingman ships its demo corridors and broker emails in the image
-!wingman/api/data/
+!/wingman/api/data/
 
 # OS
 .DS_Store
@@ -266,3 +268,9 @@ e2e/uat_closed_loop/
 e2e/uat_edge_collect/
 e2e/uat_telemetry/
 e2e/uat_telemetry_rules/
+
+# helm dependency build output
+infra/helm/abenix/charts/
+
+# scratch output from local audits
+.tmpaudit/

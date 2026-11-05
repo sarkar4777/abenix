@@ -26,9 +26,7 @@ case "$(uname -s)" in
 esac
 
 # ── Detect Python ─────────────────────────────────────────────
-# An activated venv always wins, then the repo's .venv. Otherwise a system
-# Python is used only if it already has the platform packages, because Homebrew
-# and uv Pythons refuse `pip install` (PEP 668). Anything else gets a new .venv.
+# Homebrew and uv Pythons refuse pip installs, so anything without the packages gets a .venv
 PY_DEPS_CHECK="import fastapi, email_validator, nats, neo4j, zen, celery, uvicorn"
 
 venv_python() { # venv_python <dir>
@@ -205,10 +203,7 @@ if [ -f "$ROOT_DIR/.env" ]; then
   ok "Loaded environment from .env"
 fi
 
-# ── Values that only work inside the cluster, or that a service refuses ──
-# An older .env copied from the example can carry these. They fail far from the
-# cause (runs that wait forever, a Neo4j that exits), so correct them for this
-# run and say so.
+# An older .env copied from the example can carry these two bad values
 case "${NATS_URL:-}" in
   *abenix-nats*|"")
     [ -n "${NATS_URL:-}" ] && warn "NATS_URL in .env is the in-cluster address, using nats://127.0.0.1:4222 for this run"
@@ -346,8 +341,7 @@ kill_port() {
 # Usage: wait_port_listening <port> <label> <timeout_sec> [<log_basename>] [<pid>]
 # On timeout, kills the started PID (if given), tails the log file,
 # prints a clear remediation hint, then exits 1. No silent hangs.
-# `uvicorn --reload` opens the port from its supervisor even when the app fails
-# to import, so an open port proves nothing. Ask the app itself.
+# uvicorn --reload holds the port even when the app fails to import
 wait_http_ok() { # wait_http_ok <url> <label> <timeout> <log-base>
   local url=$1 label=$2 timeout=$3 log_base=$4 elapsed=0
   while [ "$elapsed" -lt "$timeout" ]; do
@@ -358,7 +352,7 @@ wait_http_ok() { # wait_http_ok <url> <label> <timeout> <log-base>
     sleep 2
     elapsed=$((elapsed + 2))
   done
-  err "$label is not answering at $url after ${timeout}s. Last lines of $LOG_DIR/${log_base}.log:"
+  err "$label is not answering at $url after ${timeout}s. The end of $LOG_DIR/${log_base}.log follows."
   tail -20 "$LOG_DIR/${log_base}.log" 2>/dev/null | sed 's/^/      /'
   return 1
 }
@@ -682,7 +676,7 @@ else
   COMPOSE_RC=$?
   sed 's/^/      /' "$COMPOSE_LOG"
   if [ "$COMPOSE_RC" -ne 0 ]; then
-    err "docker compose up failed, so nothing was started. The cause is above:"
+    err "docker compose up failed, so nothing was started. The cause is above."
     grep -iE 'denied|not found|no such|error|conflict|port is already' "$COMPOSE_LOG" | head -5 | sed 's/^/      /'
     err "A port conflict means another stack is running. An image error usually means no network or no registry access."
     rm -f "$COMPOSE_LOG"
@@ -708,19 +702,18 @@ else
       ok "Postgres, Redis, Neo4j, NATS, Mosquitto, and TimescaleDB are healthy"
       break
     fi
-    # A container that exited will not come back on its own, show why right away.
     for svc in abenix-postgres abenix-redis abenix-neo4j abenix-nats abenix-timescaledb; do
       if echo "$PS_NOW" | grep "$svc" | grep -qi "exited"; then
-        err "$svc exited during start. Its last log lines:"
+        err "$svc exited during start. Its last log lines follow."
         docker logs --tail 8 "$svc" 2>&1 | sed 's/^/      /'
-        err "Fix the cause, then run: bash scripts/dev-local.sh --restart"
+        err "Fix the cause, then run bash scripts/dev-local.sh --restart"
         exit 1
       fi
     done
     if [ "$i" -eq 120 ]; then
-      err "These containers are not healthy after 120s:"
+      err "These containers are not healthy after 120s."
       echo "$PS_NOW" | grep -v "(healthy)" | sed 's/^/      /'
-      err "See their logs with: docker logs <name>"
+      err "See their logs with docker logs <name>"
       exit 1
     fi
     sleep 1
@@ -774,15 +767,15 @@ else
   mkdir -p "$LOG_DIR"
   log "Installing the API, runtime and worker requirements, a few minutes the first time..."
   if ! $PYTHON -m pip install -r apps/api/requirements.txt -r apps/agent-runtime/requirements.txt -r apps/worker/requirements.txt >"$PIP_LOG" 2>&1; then
-    err "pip install failed. The end of $PIP_LOG:"
+    err "pip install failed. The end of $PIP_LOG follows."
     tail -15 "$PIP_LOG" | sed 's/^/      /'
     if grep -q "externally-managed-environment" "$PIP_LOG"; then
-      err "This Python does not allow installs. Run: python3.12 -m venv .venv && source .venv/bin/activate"
+      err "This Python does not allow installs. Run python3.12 -m venv .venv then source .venv/bin/activate"
     fi
     exit 3
   fi
   if ! $PYTHON -c "$PY_DEPS_CHECK" 2>"$PIP_LOG.check"; then
-    err "Packages installed but a required one still does not import:"
+    err "Packages installed but a required one still does not import."
     tail -3 "$PIP_LOG.check" | sed 's/^/      /'
     exit 3
   fi
@@ -827,7 +820,7 @@ MIGRATION_OUT=$(PYTHONPATH="." $PYTHON -m alembic upgrade heads 2>&1)
 MIGRATION_RC=$?
 echo "$MIGRATION_OUT" | grep "Running upgrade" | sed 's/^/      /' || true
 if [ "$MIGRATION_RC" -ne 0 ]; then
-  err "alembic upgrade heads failed (exit $MIGRATION_RC):"
+  err "alembic upgrade heads failed with exit $MIGRATION_RC. The end of its output follows."
   echo "$MIGRATION_OUT" | tail -15 | sed 's/^/      /'
   exit 5
 fi
@@ -853,7 +846,7 @@ if [ -n "$_missing" ]; then
   err "Schema drift after alembic upgrade head — missing:$_missing"
   err "The catchup migration didn't fully apply. Inspect:"
   err "  packages/db/alembic/versions/x4y5z6a7b8c9_schema_drift_catchup.py"
-  err "On a fresh install with nothing to keep, this recovers it and DELETES ALL LOCAL DATA:"
+  err "On a fresh install with nothing to keep, the next command recovers it and DELETES ALL LOCAL DATA."
   err "  bash scripts/verify-schema.sh --reset"
   exit 5
 fi
@@ -1168,12 +1161,12 @@ for k,v in json.load(sys.stdin).items(): print(f'{k}={v}')
       "$(app_blurb "${_app_i}")"
   done
   echo -e "  ${CYAN}Abenix API${NC}     http://localhost:8000"
-  echo -e "  ${CYAN}ContractIQ API${NC}     http://localhost:8001"
-  echo -e "  ${CYAN}Mideast Tourism API${NC}  http://localhost:8002"
-  echo -e "  ${CYAN}Industrial-IoT API${NC} http://localhost:8003"
-  echo -e "  ${CYAN}ResolveAI API${NC}      http://localhost:8004"
-  echo -e "  ${CYAN}Wingman API${NC}        http://localhost:8006"
-  echo -e "  ${CYAN}PharmaVigil API${NC}    http://localhost:8007"
+  port_listening 8001 && echo -e "  ${CYAN}ContractIQ API${NC}  http://localhost:8001"
+  port_listening 8002 && echo -e "  ${CYAN}Mideast Tourism API${NC}  http://localhost:8002"
+  port_listening 8003 && echo -e "  ${CYAN}Industrial-IoT API${NC}  http://localhost:8003"
+  port_listening 8004 && echo -e "  ${CYAN}ResolveAI API${NC}  http://localhost:8004"
+  port_listening 8006 && echo -e "  ${CYAN}Wingman API${NC}  http://localhost:8006"
+  port_listening 8007 && echo -e "  ${CYAN}PharmaVigil API${NC}  http://localhost:8007"
   echo -e "  ${CYAN}API Docs${NC}           http://localhost:8000/docs"
   echo -e "  ${CYAN}Neo4j Browser${NC}      http://localhost:7474"
   echo ""

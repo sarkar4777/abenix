@@ -15,7 +15,7 @@ cd abenix
 cp .env.example .env
 ```
 
-Open `.env` and set at least `ANTHROPIC_API_KEY`. The platform is multi-LLM but Anthropic is the default. `scripts/dev-local.sh` reads `.env` on every start, so the API, the agent runtime and the worker all see it.
+Open `.env` and set at least `ANTHROPIC_API_KEY`. With a Claude Pro or Max plan instead, leave it empty and run `bash scripts/sync-claude-subscription.sh` once the API is up. The platform is multi-LLM but Anthropic is the default. `scripts/dev-local.sh` reads `.env` on every start, so the API, the agent runtime and the worker all see it.
 
 Optional but useful:
 - `OPENAI_API_KEY`, for the moderation gate, GPT models and embeddings
@@ -30,6 +30,8 @@ When you take this to production, also set `ABENIX_DATA_KEY_KEK_BASE64`, a 32-by
 
 ## 3. Boot everything (10 min the first time)
 
+`bash scripts/doctor.sh` checks this machine first and says what to fix.
+
 ```bash
 bash scripts/dev-local.sh
 ```
@@ -37,8 +39,8 @@ bash scripts/dev-local.sh
 It asks which standalone apps to start, then:
 
 1. stops anything it left running, and any `kubectl port-forward` that would shadow local ports,
-2. runs `docker compose up -d`: Postgres, Redis, NATS, Neo4j, TimescaleDB, MinIO, Mosquitto, pgAdmin and the three edge runtimes,
-3. installs npm packages and `pip install -r requirements.txt` when they are missing,
+2. runs `docker compose up -d` for Postgres, Redis, NATS, Neo4j, TimescaleDB and Mosquitto, which is all local files need (MinIO starts with `--profile s3`, pgAdmin with `--profile tools`),
+3. installs npm packages and the API, runtime and worker requirements when they are missing, using your active virtual environment or creating `.venv` (Python 3.12 or newer),
 4. runs `packages/db/bootstrap.py` and `alembic upgrade heads`, then checks the schema,
 5. seeds the shipped agents, the default accounts, subject policies, portfolio schemas and sample ML models,
 6. starts the API on 8000, the web app on 3000, a Celery worker, the NATS consumer for the `default` agent pool, and the apps you picked.
