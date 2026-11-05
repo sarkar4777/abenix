@@ -1,5 +1,6 @@
 import { test, expect, type Page, type APIRequestContext } from '@playwright/test';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 
 const BASE = process.env.BASE || 'http://localhost:3000';
@@ -7,7 +8,16 @@ const API = process.env.API || 'http://localhost:8000';
 const EMAIL = process.env.AF_EMAIL || 'admin@abenix.dev';
 const PASSWORD = process.env.AF_PASSWORD || 'Admin123456';
 
-const CORPUS_DIR = path.resolve(__dirname, 'fixtures', 'corpus');
+// generated per run, so the spec needs no fixtures and sends new text to the embedder each time
+const CORPUS_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'abenix-e2e-corpus-'));
+const CORPUS: Record<string, string> = {
+  'heat-pump-maintenance.txt': 'Service the rooftop heat pumps every 90 days. Clean the evaporator coil, check refrigerant pressure and replace the condensate filter. A pressure below 4 bar means a leak, so stop the unit and call the mechanical contractor.',
+  'travel-expenses.txt': 'Staff may claim a rail ticket in second class for any trip under four hours. Hotels are capped at 140 euros a night. Submit receipts within 30 days through the finance portal, late claims need a director to sign them.',
+  'incident-response.txt': 'When a production database goes down the on-call engineer declares an incident in the first ten minutes, opens the status page and pages the database lead. A written review is due within five working days.',
+  'orchard-harvest.txt': 'Apples on the north slope ripen in late September. Pickers test a sample from each row with a refractometer and start when sugar reaches 12 Brix. Fruit goes into cold storage at one degree within six hours.',
+  'solar-warranty.txt': 'The panels carry a 25 year output warranty of 80 percent of rated power. Inverters are covered for ten years. Claims need the serial number and a monitoring export showing the shortfall.',
+};
+for (const [name, text] of Object.entries(CORPUS)) fs.writeFileSync(path.join(CORPUS_DIR, name), `${text}\n`);
 
 async function login(page: Page) {
   const r = await page.request.post(`${API}/api/auth/login`, { data: { email: EMAIL, password: PASSWORD } });
@@ -19,13 +29,8 @@ async function login(page: Page) {
 }
 const auth = (tok: string) => ({ Authorization: `Bearer ${tok}`, 'Content-Type': 'application/json' });
 
-function listCorpus(maxSizeMB = 5): string[] {
-  if (!fs.existsSync(CORPUS_DIR)) return [];
-  return fs.readdirSync(CORPUS_DIR)
-    .filter(f => f.endsWith('.pdf'))
-    .map(f => path.join(CORPUS_DIR, f))
-    .filter(p => fs.statSync(p).size < maxSizeMB * 1024 * 1024)
-    .sort();
+function listCorpus(): string[] {
+  return Object.keys(CORPUS).map((f) => path.join(CORPUS_DIR, f)).sort();
 }
 
 let testKbId: string | null = null;
@@ -35,9 +40,9 @@ test.describe.configure({ mode: 'serial', timeout: 600_000 });
 
 test('REAL #1 — corpus available + cluster reachable', async ({ page }) => {
   const tok = await login(page);
-  const corpus = listCorpus(50);
-  expect(corpus.length).toBeGreaterThan(10);
-  console.log(`  corpus: ${corpus.length} PDFs ready`);
+  const corpus = listCorpus();
+  expect(corpus.length).toBeGreaterThanOrEqual(5);
+  console.log(`  corpus has ${corpus.length} documents ready`);
 
   const h = await page.request.get(`${API}/api/health`, { headers: auth(tok) });
   expect(h.ok()).toBeTruthy();
@@ -59,88 +64,134 @@ test('REAL #2 — create a v2-test KB and confirm it lists', async ({ page }) =>
   expect(ids).toContain(testKbId);
 });
 
-test('REAL #3 — bulk upload 15 small PDFs to the KB', async ({ page }) => {
+test('REAL #3 bulk upload the generated documents to the KB', async ({ page }) => {
   test.skip(!testKbId, 'no KB');
   const tok = await login(page);
-  const corpus = listCorpus(5).slice(0, 15);
-  expect(corpus.length).toBeGreaterThanOrEqual(10);
+  const corpus = listCorpus();
 
   const results = await Promise.all(corpus.map(async filePath => {
     const buf = fs.readFileSync(filePath);
     const filename = path.basename(filePath);
     const r = await page.request.post(`${API}/api/knowledge-bases/${testKbId}/upload`, {
       headers: { Authorization: `Bearer ${tok}` },
-      multipart: { file: { name: filename, mimeType: 'application/pdf', buffer: buf } },
+      multipart: { file: { name: filename, mimeType: 'text/plain', buffer: buf } },
       timeout: 120_000,
     });
     return { filename, status: r.status(), body: r.ok() ? await r.json() : null, size: buf.length };
   }));
   const succeeded = results.filter(r => r.body !== null);
   console.log(`  uploaded ${succeeded.length}/${corpus.length}`);
-  expect(succeeded.length).toBeGreaterThanOrEqual(Math.floor(corpus.length * 0.8));
+  expect(succeeded.length).toBe(corpus.length);
 
   for (const r of succeeded) {
     const docId = r.body.data?.id || r.body.data?.document_id;
     if (docId) uploadedDocs.push({ id: docId, filename: r.filename, size: r.size });
   }
   console.log(`  doc ids captured: ${uploadedDocs.length}`);
+  expect(uploadedDocs.length).toBe(corpus.length);
 });
 
-test('REAL #4 — document list shows is_current=true + version_number=1', async ({ page }) => {
+test('REAL #4 every document indexes, is current and is version 1', async ({ page }) => {
   test.skip(!testKbId, 'no KB');
   const tok = await login(page);
-  await page.waitForTimeout(8_000);
-  const r = await page.request.get(`${API}/api/knowledge-bases/${testKbId}/documents`, { headers: auth(tok) });
-  expect(r.ok()).toBeTruthy();
-  const docs = (await r.json()).data || [];
-  console.log(`  documents listed: ${docs.length}`);
-  expect(docs.length).toBeGreaterThan(0);
+  let docs: any[] = [];
+  await expect.poll(async () => {
+    const r = await page.request.get(`${API}/api/knowledge-bases/${testKbId}/documents`, { headers: auth(tok) });
+    docs = r.ok() ? (await r.json()).data || [] : [];
+    return docs.filter((d) => ['ready', 'degraded', 'failed'].includes(d.status)).length;
+  }, { timeout: 300_000, intervals: [5_000] }).toBe(uploadedDocs.length);
+  console.log(`  documents ${docs.map((d) => `${d.filename}=${d.status}`).join(', ')}`);
+  for (const d of docs) {
+    expect(d.status, `${d.filename} was indexed`).toBe('ready');
+    expect(d.chunk_count, `${d.filename} has chunks`).toBeGreaterThan(0);
+    expect(d.is_current).toBe(true);
+    expect(d.version_number).toBe(1);
+  }
+});
+
+test('REAL #4b search through the embedder finds the right document', async ({ page }) => {
+  test.skip(!testKbId || uploadedDocs.length === 0, 'no docs');
+  const tok = await login(page);
+  const ask = async (query: string) => {
+    const r = await page.request.post(`${API}/api/knowledge-engines/${testKbId}/search`, {
+      headers: auth(tok),
+      data: { query, mode: 'vector', top_k: 3 },
+      timeout: 120_000,
+    });
+    expect(r.ok(), `search answered ${r.status()}`).toBeTruthy();
+    return (await r.json()).data;
+  };
+  const first = await ask('How often must the rooftop heat pumps be serviced?');
+  console.log(`  mode ${first.mode_used}, vectors ${first.vector_count}, degraded ${first.degraded}`);
+  test.skip(/keyword/i.test(String(first.mode_used)), `search fell back to keyword here (${first.degraded || 'no reason given'}), this stack has no working embedding key`);
+  expect(first.vector_count).toBeGreaterThan(0);
+  expect(first.results[0].content).toContain('heat pumps');
+  const second = await ask('What is the nightly limit for a hotel on a work trip?');
+  expect(second.results[0].content).toContain('140 euros');
+  const third = await ask('When do pickers start on the fruit on the north slope?');
+  expect(third.results[0].content).toContain('Brix');
 });
 
 test('REAL #5 — set per-tenant cognify config (parallel + threshold + budget)', async ({ page }) => {
   const tok = await login(page);
-  const r = await page.request.put(`${API}/api/knowledge/cognify-config`, {
-    headers: auth(tok),
-    data: { auto_accept_threshold: 0.7, conflict_action: 'flag', max_parallel_docs: 8, daily_budget_usd: 25 },
-  });
-  expect([200, 204]).toContain(r.status());
+  const before = (await (await page.request.get(`${API}/api/knowledge/cognify-config`, { headers: auth(tok) })).json()).data;
+  try {
+    const r = await page.request.put(`${API}/api/knowledge/cognify-config`, {
+      headers: auth(tok),
+      data: { auto_accept_threshold: 0.7, conflict_action: 'flag', max_parallel_docs: 8, daily_budget_usd: 25 },
+    });
+    expect([200, 204]).toContain(r.status());
 
-  const g = await page.request.get(`${API}/api/knowledge/cognify-config`, { headers: auth(tok) });
-  const cfg = (await g.json()).data;
-  expect(cfg.auto_accept_threshold).toBeCloseTo(0.7);
-  expect(cfg.max_parallel_docs).toBe(8);
-  expect(cfg.daily_budget_usd).toBe(25);
+    const g = await page.request.get(`${API}/api/knowledge/cognify-config`, { headers: auth(tok) });
+    const cfg = (await g.json()).data;
+    expect(cfg.auto_accept_threshold).toBeCloseTo(0.7);
+    expect(cfg.max_parallel_docs).toBe(8);
+    expect(cfg.daily_budget_usd).toBe(25);
+  } finally {
+    await page.request.put(`${API}/api/knowledge/cognify-config`, { headers: auth(tok), data: before });
+  }
 });
 
 test('REAL #6 — replace 3 docs with v2 — versioning roundtrip', async ({ page }) => {
   test.skip(!testKbId || uploadedDocs.length < 3, 'need 3+ docs');
   const tok = await login(page);
-  const corpus = listCorpus(5);
+  const tenant = (await (await page.request.get(`${API}/api/me/permissions`, { headers: auth(tok) })).json()).data.tenant_id;
+
+  // a file from anywhere else is refused
+  const foreign = await page.request.post(`${API}/api/knowledge/${testKbId}/documents/${uploadedDocs[0].id}/replace`, {
+    headers: auth(tok),
+    data: { new_filename: 'elsewhere.txt', new_storage_url: '/data/uploads/elsewhere.txt', new_file_type: 'txt', new_file_size: 10 },
+  });
+  expect(foreign.status()).toBe(400);
+
   let replaced = 0;
-  for (let i = 0; i < Math.min(3, uploadedDocs.length); i++) {
+  for (let i = 0; i < 3; i++) {
     const doc = uploadedDocs[i];
-    const newPath = corpus[corpus.length - 1 - i];
-    if (!newPath) continue;
+    const amended = Buffer.from(`${CORPUS[doc.filename]} Amended in version 2.\n`);
+    const up = await page.request.post(`${API}/api/knowledge-bases/${testKbId}/upload`, {
+      headers: { Authorization: `Bearer ${tok}` },
+      multipart: { file: { name: `amended-${doc.filename}`, mimeType: 'text/plain', buffer: amended } },
+      timeout: 120_000,
+    });
+    expect(up.ok(), `upload answered ${up.status()}`).toBeTruthy();
+    const newFile = (await up.json()).data;
+    // the API does not return the storage url, this is the key upload stores it under
     const r = await page.request.post(`${API}/api/knowledge/${testKbId}/documents/${doc.id}/replace`, {
       headers: auth(tok),
       data: {
-        new_filename: `replaced-${path.basename(newPath)}`,
-        new_storage_url: `/data/uploads/${testKbId}/replaced-${i}.pdf`,
-        new_file_type: 'application/pdf',
-        new_file_size: fs.statSync(newPath).size,
+        new_filename: `replaced-${doc.filename}`,
+        new_storage_url: `${tenant}/kb/${testKbId}/${newFile.id}.${newFile.file_type}`,
+        new_file_type: newFile.file_type,
+        new_file_size: amended.length,
       },
     });
-    if ([200, 201].includes(r.status())) {
-      const body = (await r.json()).data;
-      expect(body.version_number).toBe(2);
-      expect(body.supersedes).toBe(doc.id);
-      replaced++;
-    } else {
-      console.log(`  replace status ${r.status()} for ${doc.id}`);
-    }
+    expect(r.status(), `replace of ${doc.filename}`).toBeLessThan(300);
+    const body = (await r.json()).data;
+    expect(body.version_number).toBe(2);
+    expect(body.supersedes).toBe(doc.id);
+    replaced++;
   }
   console.log(`  versioned: ${replaced}`);
-  expect(replaced).toBeGreaterThan(0);
 });
 
 test('REAL #7 — re-embed dry-run returns cost estimate', async ({ page }) => {
@@ -265,4 +316,14 @@ test('REAL #15 — cleanup: delete test KB', async ({ page }) => {
   const r = await page.request.delete(`${API}/api/knowledge-bases/${testKbId}`, { headers: auth(tok) });
   expect([200, 204]).toContain(r.status());
   console.log(`  cleaned KB ${testKbId}`);
+  testKbId = null;
+});
+
+// a failed step skips the rest of a serial run, including the cleanup above
+test.afterAll(async ({ request }) => {
+  fs.rmSync(CORPUS_DIR, { recursive: true, force: true });
+  if (!testKbId) return;
+  const res = await request.post(`${API}/api/auth/login`, { data: { email: EMAIL, password: PASSWORD } });
+  const tok = (await res.json())?.data?.access_token;
+  await request.delete(`${API}/api/knowledge-bases/${testKbId}?force=true`, { headers: { Authorization: `Bearer ${tok}` } }).catch(() => null);
 });

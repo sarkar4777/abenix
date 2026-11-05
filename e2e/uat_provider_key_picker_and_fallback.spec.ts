@@ -73,7 +73,8 @@ async function mockLlmModels(page: Page) {
     return route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify({ data: { models }, error: null, meta: null }),
+      // the server picks default_model from the configured providers, without it the builder keeps its built in Claude default
+      body: JSON.stringify({ data: { models, default_model: 'azure-gpt-4o' }, error: null, meta: null }),
     });
   });
 }
@@ -116,41 +117,17 @@ async function clickModelTab(page: Page): Promise<void> {
   }
 }
 
-async function readAllSelectOptions(page: Page): Promise<string[]> {
-  // ModelPicker uses a native <select>, so optgroups + options are inspectable.
-  const selects = page.locator('[data-testid="model-picker-select"]');
-  const count = await selects.count();
-  const seen: string[] = [];
-  for (let i = 0; i < count; i++) {
-    const sel = selects.nth(i);
-    const opts = sel.locator('option');
-    const n = await opts.count();
-    for (let j = 0; j < n; j++) {
-      const v = (await opts.nth(j).getAttribute('value')) || '';
-      const t = (await opts.nth(j).innerText().catch(() => '')) || '';
-      if (v) seen.push(v);
-      if (t) seen.push(t);
-    }
-  }
-  return seen;
-}
-
 // Pull just the model `value` attrs (not labels) so assertions don't trip on
 // the picker's prettified display names.
-async function readSelectValues(page: Page): Promise<string[]> {
-  const selects = page.locator('[data-testid="model-picker-select"]');
-  const count = await selects.count();
-  const out: string[] = [];
-  for (let i = 0; i < count; i++) {
-    const sel = selects.nth(i);
-    const opts = sel.locator('option');
-    const n = await opts.count();
-    for (let j = 0; j < n; j++) {
-      const v = (await opts.nth(j).getAttribute('value')) || '';
-      if (v) out.push(v);
-    }
-  }
-  return out;
+async function readSelectValues(page: Page, opts: { offeredOnly?: boolean } = {}): Promise<string[]> {
+  const values = await page.locator('[data-testid="model-picker-select"] option').evaluateAll(
+    (els, offeredOnly) => els
+      .map((e) => e as HTMLOptionElement)
+      .filter((o) => !offeredOnly || !o.text.endsWith('(not available)'))
+      .map((o) => o.value),
+    !!opts.offeredOnly,
+  );
+  return values.filter(Boolean);
 }
 
 test.describe.serial('Provider key picker + fallback badge', () => {
@@ -234,7 +211,10 @@ test.describe.serial('Provider key picker + fallback badge', () => {
       },
       { timeout: 15_000 },
     ).catch(() => {});
-    const adminValues = await readSelectValues(page);
+    // a saved setting stays on screen marked (not available) so nobody thinks it changed, it is not offered as a choice
+    const carried = page.locator('[data-testid="model-picker-select"] option', { hasText: '(not available)' });
+    for (const text of await carried.allInnerTexts()) console.log('  saved but unavailable', text);
+    const adminValues = await readSelectValues(page, { offeredOnly: true });
     console.log('  admin picker values (sample):', adminValues.slice(0, 12));
     expect(adminValues.length).toBeGreaterThan(0);
     for (const v of adminValues) {
@@ -245,7 +225,7 @@ test.describe.serial('Provider key picker + fallback badge', () => {
     }
 
     // Also sanity check displayed text never advertises blocked providers.
-    const allText = (await readAllSelectOptions(page)).join(' | ').toLowerCase();
+    const allText = adminValues.join(' | ').toLowerCase();
     expect(allText).not.toContain('gemini');
     // Claude / GPT-4o label words may appear in disabled help-text; gate strictly
     // on the option *value* attribute (above) which is what the UI submits.

@@ -15,7 +15,14 @@ async function login(page: Page) {
 
 test.describe.configure({ mode: 'default' });
 
+const bodyText = async (page: Page) => (await page.locator('body').innerText()).toLowerCase();
+
+async function textAppears(page: Page, re: RegExp, timeout = 10_000) {
+  return expect.poll(async () => re.test(await bodyText(page)), { timeout }).toBe(true).then(() => true, () => false);
+}
+
 test('AGENTS: info page (Overview / API & SDK / Triggers & Events) — sample 5 agents incl pipelines', async ({ page }) => {
+  test.setTimeout(5 * 60_000);
   const tok = await login(page);
   const r = await page.request.get(`${API}/api/agents?limit=100`, { headers: { Authorization: `Bearer ${tok}` } });
   const agents = ((await r.json()).data || []).filter((a: any) => a.status === 'active').slice(0, 6);
@@ -27,9 +34,9 @@ test('AGENTS: info page (Overview / API & SDK / Triggers & Events) — sample 5 
     const url = `${BASE}/agents/${a.id}/info`;
     await page.goto(url);
     await page.waitForLoadState('domcontentloaded');
-    await page.waitForTimeout(2000);
+    await expect(page.getByRole('heading', { level: 1, name: a.name })).toBeVisible({ timeout: 30_000 });
 
-    const txt = (await page.locator('body').innerText()).toLowerCase();
+    const txt = await bodyText(page);
     const hasName = txt.includes((a.name || '').toLowerCase().slice(0, 20));
     const hasOverview = /overview/.test(txt);
     const hasApiTab = /api & sdk|api &amp; sdk|api\/sdk|sdk/.test(txt);
@@ -42,9 +49,7 @@ test('AGENTS: info page (Overview / API & SDK / Triggers & Events) — sample 5 
     let sdkOK = false;
     if (await sdkTab.count()) {
       await sdkTab.click().catch(() => {});
-      await page.waitForTimeout(1500);
-      const t = (await page.locator('body').innerText()).toLowerCase();
-      sdkOK = /curl|python|sdk|forge\.|x-api-key|bearer/.test(t);
+      sdkOK = await textAppears(page, /curl|python|forge\.|x-api-key|bearer/);
     }
 
     // Click Triggers tab
@@ -52,9 +57,7 @@ test('AGENTS: info page (Overview / API & SDK / Triggers & Events) — sample 5 
     let trigOK = false;
     if (await trigTab.count()) {
       await trigTab.click().catch(() => {});
-      await page.waitForTimeout(1500);
-      const t = (await page.locator('body').innerText()).toLowerCase();
-      trigOK = /webhook|cron|schedule|trigger/.test(t);
+      trigOK = await textAppears(page, /webhook|cron|schedule/);
     }
 
     results.push({ slug: a.slug, hasName, hasOverview, hasApiTab, hasTriggersTab, hasChat, sdkOK, trigOK });
@@ -67,6 +70,7 @@ test('AGENTS: info page (Overview / API & SDK / Triggers & Events) — sample 5 
 });
 
 test('SETTINGS: every sub-page renders without error', async ({ page }) => {
+  test.setTimeout(5 * 60_000);
   await login(page);
 
   const sub = [
@@ -79,8 +83,7 @@ test('SETTINGS: every sub-page renders without error', async ({ page }) => {
     page.removeAllListeners('console');
     page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text().slice(0, 120)); });
     await page.goto(`${BASE}/settings/${s}`);
-    await page.waitForLoadState('domcontentloaded');
-    await page.waitForTimeout(2200);
+    await page.waitForLoadState('networkidle', { timeout: 15_000 }).catch(() => {});
     const txt = (await page.locator('body').innerText()).slice(0, 4000).toLowerCase();
     const buttons = await page.locator('button').count();
     const inputs = await page.locator('input, textarea, select').count();
@@ -99,21 +102,22 @@ test('INTEGRATIONS catalog: shows providers + admin RBAC + add/remove flow', asy
   const tok = await login(page);
   await page.goto(`${BASE}/settings/integrations`);
   await page.waitForLoadState('domcontentloaded');
-  await page.waitForTimeout(2500);
+  // the list and the admin action both need the catalog and the role loaded
+  await expect(page.locator('button', { hasText: /^Setup$/ }).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId('integrations-admin-link')).toHaveText('Open Tool Configuration', { timeout: 30_000 });
 
-  const txt = (await page.locator('body').innerText()).toLowerCase();
+  const txt = await bodyText(page);
   const providers = ['slack','teams','salesforce','hubspot','jira','notion','gmail','github','google calendar','google drive'];
   const present = providers.filter(p => txt.includes(p));
   console.log(`  providers visible: ${present.length}/${providers.length}: ${present.join(', ')}`);
   expect(present.length).toBeGreaterThanOrEqual(3);
 
-  const cards = await page.locator('[class*="card" i], [class*="rounded" i] > div').count();
-  const connectBtns = await page.locator('button:has-text("Connect"), button:has-text("Add"), button:has-text("Configure")').count();
-  const removeBtns = await page.locator('button:has-text("Remove"), button:has-text("Delete"), button:has-text("Disconnect")').count();
-  console.log(`  cards=${cards}  connect/add btns=${connectBtns}  remove btns=${removeBtns}`);
+  // Setup shows the keys a service reads, live values are set on Tool Configuration
+  const setup = page.locator('button', { hasText: /^Setup$/ }).first();
+  await setup.click();
+  await expect(page.locator('[data-testid^="integration-live-"]').first()).toBeVisible();
 
   await page.screenshot({ path: 'test-results/uat-integrations-admin.png', fullPage: true });
-  expect(connectBtns + removeBtns).toBeGreaterThan(0);
 
   // Check admin-only RBAC at the API level
   const r = await page.request.get(`${API}/api/integrations`, { headers: { Authorization: `Bearer ${tok}` } });
@@ -121,6 +125,7 @@ test('INTEGRATIONS catalog: shows providers + admin RBAC + add/remove flow', asy
 });
 
 test('MCP: registry + custom server add flow', async ({ page }) => {
+  test.setTimeout(2 * 60_000);
   const tok = await login(page);
 
   // MCP servers list

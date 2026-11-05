@@ -13,6 +13,7 @@ import { test, expect, type Page } from '@playwright/test';
  *
  * The suite restores whatever state it found, so it is safe to run
  * before the rest of the UAT gate.
+ * A stored token is restored only from CLAUDE_SUBSCRIPTION_TOKEN, without it the steps that overwrite one skip.
  */
 
 const BASE = process.env.BASE || 'http://localhost:3000';
@@ -26,8 +27,19 @@ const PASSWORD = process.env.AF_PASSWORD || 'Admin123456';
 // matches /sk-ant-[a-z0-9_-]{20,}/ and cannot tell a fixture from a real key.
 const FAKE_TOKEN = ['sk', 'ant', 'oat01', 'uat-placeholder-0000'].join('-');
 
+// the API never returns a stored token, so a spec that overwrites one needs it from here to put it back
+const STORED_TOKEN = process.env.CLAUDE_SUBSCRIPTION_TOKEN || '';
+
 let TOKEN = '';
 let ORIGINAL: Record<string, string> = {};
+let storedTokenAtStart = false;
+
+function needsTokenWrites() {
+  test.skip(
+    storedTokenAtStart && !STORED_TOKEN,
+    'a subscription token is stored and cannot be read back, export CLAUDE_SUBSCRIPTION_TOKEN to run the steps that overwrite it',
+  );
+}
 
 async function api(path: string, init: RequestInit = {}) {
   const resp = await fetch(`${API}${path}`, {
@@ -82,16 +94,17 @@ test.beforeAll(async () => {
     exclusive: before.exclusive ? 'true' : 'false',
     default_model: before.default_model,
   };
+  storedTokenAtStart = before.token_source === 'settings';
 });
 
 test.afterAll(async () => {
   if (!TOKEN) return;
-  // Order matters: clear the token last, because `enabled=true` is
-  // rejected while no token exists.
+  // enabled=true is refused with no token, so the stored token goes back first
+  if (storedTokenAtStart && STORED_TOKEN) await setSetting('llm.subscription.token', STORED_TOKEN);
+  if (!storedTokenAtStart) await setSetting('llm.subscription.token', '');
   await setSetting('llm.subscription.enabled', ORIGINAL.enabled);
   await setSetting('llm.subscription.exclusive', ORIGINAL.exclusive);
   await setSetting('llm.subscription.default_model', ORIGINAL.default_model);
-  await setSetting('llm.subscription.token', '');
 });
 
 // ── API contract ─────────────────────────────────────────────────────────
@@ -106,7 +119,11 @@ test('subscription status endpoint reports a coherent initial state', async () =
 });
 
 test('enabling subscription mode without a token is refused', async () => {
+  needsTokenWrites();
+  await setSetting('llm.subscription.enabled', 'false');
   await setSetting('llm.subscription.token', '');
+  const empty = await subStatus();
+  test.skip(empty.token_set, 'the API has a subscription token in its environment, so a credential always exists and the refusal cannot fire');
   const r = await setSetting('llm.subscription.enabled', 'true');
   expect(r.status, 'should not enable without a credential').toBeGreaterThanOrEqual(400);
   const s = await subStatus();
@@ -115,6 +132,7 @@ test('enabling subscription mode without a token is refused', async () => {
 });
 
 test('the token is never echoed back in clear text', async () => {
+  needsTokenWrites();
   const saved = await setSetting('llm.subscription.token', FAKE_TOKEN);
   expect(saved.status).toBe(200);
   expect(JSON.stringify(saved.body)).not.toContain(FAKE_TOKEN);
@@ -147,6 +165,7 @@ test('model catalogue carries the subscription block and the Claude 5 family', a
 });
 
 test('subscription-served models are flagged once the mode is active', async () => {
+  needsTokenWrites();
   await setSetting('llm.subscription.token', FAKE_TOKEN);
   await setSetting('llm.subscription.exclusive', 'true');
   const on = await setSetting('llm.subscription.enabled', 'true');
@@ -171,6 +190,7 @@ test('subscription-served models are flagged once the mode is active', async () 
 });
 
 test('non-exclusive mode leaves non-Claude models on their own provider', async () => {
+  needsTokenWrites();
   await setSetting('llm.subscription.exclusive', 'false');
   const r = await api('/api/llm-models');
   const models = r.data.models as any[];
@@ -185,6 +205,7 @@ test('non-exclusive mode leaves non-Claude models on their own provider', async 
 });
 
 test('verify reports a clean, specific failure for a bad token', async () => {
+  needsTokenWrites();
   await setSetting('llm.subscription.token', FAKE_TOKEN);
   const r = await api('/api/admin/settings/subscription/verify', { method: 'POST', body: '{}' });
   // A bogus credential must surface as a handled 4xx/502 with a message,
@@ -197,6 +218,7 @@ test('verify reports a clean, specific failure for a bad token', async () => {
 });
 
 test('the platform still answers while the subscription is unusable', async () => {
+  needsTokenWrites();
   // Exclusive mode + dead token: the degradation chain must keep the
   // product working off whatever API keys exist, rather than hard-failing.
   await setSetting('llm.subscription.token', FAKE_TOKEN);
@@ -230,6 +252,7 @@ test('admin LLM settings screen renders the Claude subscription card', async ({ 
 });
 
 test('the card shows an active badge and the model it serves', async ({ page }) => {
+  needsTokenWrites();
   await setSetting('llm.subscription.token', FAKE_TOKEN);
   await setSetting('llm.subscription.enabled', 'true');
   await setSetting('llm.subscription.default_model', 'claude-opus-5');
@@ -247,6 +270,7 @@ test('the card shows an active badge and the model it serves', async ({ page }) 
 });
 
 test('subscription mode is visible in model pickers across the platform', async ({ page }) => {
+  needsTokenWrites();
   await setSetting('llm.subscription.token', FAKE_TOKEN);
   await setSetting('llm.subscription.enabled', 'true');
   await setSetting('llm.subscription.exclusive', 'true');

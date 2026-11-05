@@ -170,7 +170,11 @@ test.describe('ux walkthrough', () => {
     const vetText = await page.getByTestId('vet-result').innerText();
     await shot(page, 'guardrail-03-vet-result');
     expect.soft(/redact/i.test(vetText), 'vet box reports a redact action').toBeTruthy();
-    expect.soft(vetText.includes(marker), 'vet box does not echo the codename unmasked').toBeFalsy();
+    // the matched line names the policy pattern, what counts is the text the model would get
+    const redacted = await page.getByTestId('vet-result-redacted').innerText();
+    expect.soft(redacted, 'the codename is masked').not.toContain(marker);
+    expect.soft(redacted, 'the SSN is masked').not.toContain('123-45-6789');
+    expect.soft(redacted, 'the mask is in place').toContain('[REDACTED]');
     note({ area: 'moderation vet', severity: /redact/i.test(vetText) ? 'note' : 'major', what: vetText.slice(0, 200).replace(/\n/g, ' ') });
 
     // 4. chat with the agent through the real composer

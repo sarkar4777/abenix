@@ -289,7 +289,10 @@ test('follow-ups: shared use, failures, changes and deletes', async ({ page }) =
     // ── 4. deleting things others depend on ─────────────────────────────
     await test.step('deleting the scorer shows what breaks, then restore', async () => {
       await go(page, '/agents');
+      // the list is paged and newest first, other runs can push it off the first page
+      await page.getByLabel('Search agents').fill(NAMES.scorer);
       const del = page.getByTestId(`agent-delete-${ids.scorer}`);
+      await expect(del).toHaveCount(1, { timeout: 20_000 });
       await del.scrollIntoViewIfNeeded().catch(() => {});
       await del.click({ force: true });
       const deps = page.getByTestId('delete-dependents');

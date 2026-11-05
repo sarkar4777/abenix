@@ -1,4 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
+import * as path from 'path';
+import { artifactDir } from './uat_helpers/artifacts';
 
 const BASE = process.env.BASE   || 'http://localhost:3000';
 const API  = process.env.API    || 'http://localhost:8000';
@@ -7,7 +9,7 @@ const PASSWORD = process.env.AF_PASSWORD || 'Admin123456';
 
 const MODEL_NAME = process.env.K8S_TEST_MODEL || 'wingman-mispricing-fairvalue';
 
-async function loginViaApi(page: Page) {
+async function apiToken(): Promise<string> {
   const r = await fetch(`${API}/api/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -15,7 +17,11 @@ async function loginViaApi(page: Page) {
   });
   if (!r.ok) throw new Error(`login failed: HTTP ${r.status}`);
   const j = await r.json();
-  const token = j.data?.access_token || j.access_token;
+  return j.data?.access_token || j.access_token;
+}
+
+async function loginViaApi(page: Page) {
+  const token = await apiToken();
   const me = await fetch(`${API}/api/auth/me`, {
     headers: { Authorization: `Bearer ${token}` },
   }).then((rr) => rr.json()).then((x) => x.data ?? x).catch(() => ({}));
@@ -29,44 +35,46 @@ async function loginViaApi(page: Page) {
 }
 
 test.describe.serial('ML model — Kubernetes pod deployment via UI', () => {
-  test('navigate, select model, switch to Kubernetes Pod, click Deploy, verify status', async ({ page }) => {
-    test.setTimeout(180_000);
+  test('deploy to Kubernetes pods reaches Running or says why it did not', async ({ page }) => {
+    test.setTimeout(8 * 60_000);
+    const token = await apiToken();
+    const models = await fetch(`${API}/api/ml-models`, { headers: { Authorization: `Bearer ${token}` } }).then((r) => r.json());
+    const model = (models.data || []).find((m: any) => m.name === MODEL_NAME);
+    test.skip(!model, `model ${MODEL_NAME} is not on this stack, it comes with the Wingman app seed, or set K8S_TEST_MODEL`);
+
+    const undeploy = () => fetch(`${API}/api/ml-models/${model.id}/undeploy`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
+    // an old failed row would answer for this deploy
+    await undeploy();
     await loginViaApi(page);
+    try {
+      await page.goto(`${BASE}/ml-models`, { waitUntil: 'domcontentloaded' });
+      await page.waitForLoadState('networkidle').catch(() => {});
 
-    await page.goto(`${BASE}/ml-models`, { waitUntil: 'domcontentloaded' });
-    await page.waitForLoadState('networkidle').catch(() => {});
+      const target = page.getByText(MODEL_NAME, { exact: false }).first();
+      await expect(target).toBeVisible({ timeout: 15_000 });
+      await target.click();
 
-    const target = page.getByText(MODEL_NAME, { exact: false }).first();
-    await expect(target).toBeVisible({ timeout: 15_000 });
-    await target.click();
+      await expect(page.getByText('Test Inference', { exact: false })).toBeVisible({ timeout: 10_000 });
 
-    await expect(page.getByText('Test Inference', { exact: false })).toBeVisible({ timeout: 10_000 });
+      await page.getByTestId('deploy-type-k8s').click();
+      await expect(page.getByTestId('k8s-deploy-config')).toBeVisible();
+      await page.getByTestId('ml-deploy').click();
 
-    const k8sBtn = page.getByRole('button', { name: /Kubernetes Pod/i }).first();
-    await expect(k8sBtn).toBeVisible();
-    await k8sBtn.click();
+      const row = page.getByTestId('ml-deployment-row').filter({ hasText: 'Kubernetes' });
+      await expect(row).toBeVisible({ timeout: 60_000 });
+      await expect(row.getByText(/^(Running|Failed)$/), 'stuck on Starting with no outcome').toBeVisible({ timeout: 6 * 60_000 });
 
-    const deployBtn = page.getByRole('button', { name: /^Deploy$/ }).first();
-    await expect(deployBtn).toBeVisible();
-    await deployBtn.click();
-
-    // Wait until a k8s deployment row appears under the selected model
-    // and reaches a terminal-ish state (running, ready, or — most
-    // honestly on a single-node demo — deploying then failed because
-    // no kfserving/kserve is installed; either way we want to surface
-    // what the user would see).
-    await page.waitForFunction(() => {
-      const text = document.body.innerText.toLowerCase();
-      return /\b(running|ready|deploying|failed|error)\b/.test(text)
-        && /\bk8s\b/.test(text);
-    }, { timeout: 120_000 });
-
-    const screenshot = await page.screenshot({ fullPage: true });
-    const fs = await import('fs');
-    const path = await import('path');
-    const out = path.join(process.env.USERPROFILE || process.env.HOME || '.', 'wingman-screenshots', 'ml-models-k8s-deploy.png');
-    fs.mkdirSync(path.dirname(out), { recursive: true });
-    fs.writeFileSync(out, screenshot);
+      const failure = row.getByTestId('ml-deployment-error');
+      if (await failure.count()) {
+        const why = (await failure.innerText()).trim();
+        console.log(`  k8s deploy failed, ${why}`);
+        test.info().annotations.push({ type: 'k8s-deploy-failed', description: why });
+        await expect(failure, 'a failed deploy gives the reason').not.toContainText('the server gave no reason');
+      }
+      await page.screenshot({ path: path.join(artifactDir('ml-models'), 'k8s-deploy.png'), fullPage: true });
+    } finally {
+      await undeploy();
+    }
   });
 
   test('test inference uses model-specific default input (no 12-feature mismatch)', async ({ page }) => {
@@ -76,6 +84,7 @@ test.describe.serial('ML model — Kubernetes pod deployment via UI', () => {
     await page.waitForLoadState('networkidle').catch(() => {});
 
     const target = page.getByText(MODEL_NAME, { exact: false }).first();
+    await expect(target).toBeVisible({ timeout: 15_000 }).catch(() => test.skip(true, `model ${MODEL_NAME} is not on this stack`));
     await target.click();
 
     await expect(page.getByText('Test Inference', { exact: false })).toBeVisible();

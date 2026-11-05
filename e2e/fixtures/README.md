@@ -5,15 +5,17 @@ Binary fixtures driven by the three Abenix UAT specs in `e2e/`.
 | File                       | Used by                                  | Purpose                                                                  |
 |----------------------------|------------------------------------------|--------------------------------------------------------------------------|
 | `uat_kb_doc.pdf`           | `uat_abenix_industrial.spec.ts`      | 1-page text PDF containing `QUANTUM_GIGAFACTORY_UAT_MARKER`. Knowledge upload + cognify + retrieval check. |
-| `uat_python_app.zip`       | `uat_abenix_industrial.spec.ts`      | Tiny Python add-server. Code Runner upload + analysis test.              |
+| `uat_python_app.zip`       | `scripts/scale-e2e.sh`                   | Tiny Python add-server. `uat_abenix_industrial.spec.ts` builds the same project in a temp path at test time, and falls back to this copy without Python. |
 | `uat_ml_model.pkl`         | `uat_abenix_industrial.spec.ts`      | Pickled stub object; ML Models upload + listing test.                    |
 | `mcp_server/`              | `uat_abenix_industrial.spec.ts`      | In-cluster MCP demo server (`uat_echo` tool) for MCP discovery test.     |
 
-These three binaries (PDF, ZIP, PKL) are checked in so the test suite is hermetic. Regenerate them deterministically with:
+The PDF and ZIP are checked in so the test suite is hermetic. Regenerate the PDF and PKL with the command below. It writes the zip to a temp folder, because a new zip differs by timestamp and would dirty the tree.
 
 ```bash
 python e2e/fixtures/build.py
 ```
+
+Runtime output from specs, screenshots and JSON, goes to `e2e/test-results-artifacts/`, which is ignored. See `uat_helpers/artifacts.ts`. The images tracked under `e2e/screenshots/` are older samples and no spec writes there any more.
 
 ## MCP demo server
 

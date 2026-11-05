@@ -1,23 +1,24 @@
 import { test, expect, type Page } from '@playwright/test';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { artifactDir } from './uat_helpers/artifacts';
 
 // Real-browser UAT for ClaimsIQ (Vaadin Java front).
 // Drives http://localhost:3005 with Chromium, exercises the FNOL form,
 // then verifies an abenix-api execution actually got produced.
 //
 // Run:
-//   BASE=http://localhost:3005 API=http://localhost:8000 \
+//   CLAIMSIQ_BASE=http://localhost:3005 API=http://localhost:8000 \
 //     npx playwright test e2e/uat_claimsiq_browser_quality.spec.ts \
 //     --reporter=list --workers=1 --timeout=240000
 
-const BASE  = process.env.BASE  || 'http://localhost:3005';
+// not BASE, scripts/uat.sh points that at the platform web app
+const BASE  = process.env.CLAIMSIQ_BASE || 'http://localhost:3005';
 const API   = process.env.API   || 'http://localhost:8000';
 const EMAIL = process.env.AF_EMAIL    || 'admin@abenix.dev';
 const PASS  = process.env.AF_PASSWORD || 'Admin123456';
 
-const SHOT_DIR = path.resolve(__dirname, 'screenshots', 'claimsiq');
-fs.mkdirSync(SHOT_DIR, { recursive: true });
+const SHOT_DIR = artifactDir('claimsiq');
 
 async function shot(page: Page, name: string) {
   const p = path.join(SHOT_DIR, `${name}.png`);
@@ -38,7 +39,7 @@ async function adminToken(): Promise<string> {
   return cachedToken;
 }
 
-test.describe.configure({ mode: 'serial' });
+test.describe.configure({ mode: 'serial', timeout: 120_000 });
 
 test.describe('ClaimsIQ - Vaadin browser UAT + cross-app to abenix-api', () => {
 

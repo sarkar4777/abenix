@@ -112,6 +112,20 @@ async function waitForFiring(page: Page, ms: number) {
   return fired;
 }
 
+// the first step decides for the rest, nothing here means anything without the site streaming
+let groundworkMissing = false;
+test.beforeEach(() => {
+  test.skip(groundworkMissing, 'the Groundwork site is not streaming here, start it with the industrial testbed to run these steps');
+});
+
+test('the Groundwork site is streaming', async ({ page }) => {
+  const t = await login(page, ADMIN);
+  const r = await page.request.get(`${API}/api/telemetry/history?group=${G}&node=ipc-ex1&device=hydraulics&metric=Hydraulics/Pump1Pressure_bar&from=-10m&step=10s`, { headers: { Authorization: `Bearer ${t}` } });
+  const pts = (r.ok() ? (await r.json()).data?.series?.[0]?.points ?? [] : []) as Array<{ max: number | null }>;
+  groundworkMissing = !pts.some((p) => p.max !== null);
+  test.skip(groundworkMissing, 'the Groundwork site is not streaming here, start it with the industrial testbed to run these steps');
+});
+
 test('admin names the four PCs with a CSV, checked first', async ({ page }) => {
   await login(page, ADMIN);
   await go(page, '/telemetry/assets');

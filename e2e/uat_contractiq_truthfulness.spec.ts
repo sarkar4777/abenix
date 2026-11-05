@@ -31,7 +31,7 @@ async function gotoOk(page: Page, path: string) {
   await page.waitForLoadState('networkidle').catch(() => {});
 }
 
-test.describe.configure({ mode: 'serial' });
+test.describe.configure({ timeout: 120_000 });
 
 test.describe('contractiq truthfulness wave', () => {
   test.beforeEach(async ({ page }) => { await login(page); });
@@ -41,16 +41,21 @@ test.describe('contractiq truthfulness wave', () => {
   for (const p of explainerPages) {
     test(`explainer mounted on ${p}`, async ({ page }) => {
       await gotoOk(page, p);
-      await page.waitForTimeout(1500);
-      const count = await page.locator('[data-testid="page-explainer-trigger"]').count();
-      expect(count, `explainer mounted on ${p}`).toBeGreaterThan(0);
+      await expect(page.getByTestId('page-explainer').getByRole('button', { name: /What is this page/ }), `explainer mounted on ${p}`).toBeVisible({ timeout: 15_000 });
     });
   }
 
-  test('PageExplainer modal opens', async ({ page }) => {
+  test('PageExplainer card opens with its content', async ({ page }) => {
     await gotoOk(page, '/forecaster');
-    await page.locator('[data-testid="page-explainer-trigger"]').first().click();
-    await expect(page.locator('text=/On this page|What this does|Components|How a click flows/i').first()).toBeVisible({ timeout: 8_000 });
+    const trigger = page.getByTestId('page-explainer').getByRole('button', { name: /What is this page/ });
+    await trigger.click();
+    await expect(trigger).toHaveAttribute('aria-expanded', 'true');
+    const card = page.getByTestId('page-explainer-card');
+    await expect(card).toBeVisible({ timeout: 8_000 });
+    await card.getByTestId('explainer-tab-sections').click();
+    await expect(card.getByTestId('explainer-sections').locator('li').first()).toBeVisible();
+    await card.getByTestId('explainer-tab-flow').click();
+    await expect(card.getByTestId('explainer-flow').locator('li').first()).toBeVisible();
   });
 
   test('Model Performance reads from live Abenix registry', async ({ page }) => {
@@ -78,14 +83,17 @@ test.describe('contractiq truthfulness wave', () => {
     expect(ok).toBeTruthy();
   });
 
-  test('Data Fabric renders sources panel', async ({ page }) => {
+  test('Data Fabric renders the market data tools panel', async ({ page }) => {
     await gotoOk(page, '/data-fabric');
-    await expect(page.locator('text=/Connected sources/i').first()).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByRole('heading', { name: 'Market-data tools available to agents' })).toBeVisible({ timeout: 15_000 });
   });
 
-  test('Workbench renders attribution panel', async ({ page }) => {
+  test('Workbench Run Explain gives feature contributions or an honest error', async ({ page }) => {
     await gotoOk(page, '/workbench');
-    await expect(page.locator('text=/Feature contributions/i').first()).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText('Click Run Explain to score the current feature vector.')).toBeVisible({ timeout: 15_000 });
+    await page.getByRole('button', { name: 'Run Explain' }).click();
+    const outcome = page.getByRole('heading', { name: 'Feature contributions' }).or(page.getByTestId('explain-error'));
+    await expect(outcome).toBeVisible({ timeout: 90_000 });
   });
 
   test('Recommendations renders heading', async ({ page }) => {

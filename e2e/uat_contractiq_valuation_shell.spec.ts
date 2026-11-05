@@ -38,7 +38,7 @@ test('valuation page · h1 + subhead + explainer render synchronously within 2s'
   ).toBeVisible({ timeout: 2000 });
 
   // "What is this page?" pill (same pattern as Dashboard / Model Performance)
-  await expect(page.getByTestId('page-explainer-trigger').first()).toBeVisible({ timeout: 2000 });
+  await expect(page.getByTestId('page-explainer').getByRole('button', { name: /What is this page/ })).toBeVisible({ timeout: 2000 });
 
   const elapsed = Date.now() - started;
   expect(elapsed, 'shell should mount fast').toBeLessThan(8000);

@@ -12,7 +12,7 @@
  * The API is only used to read state back for assertions and to clean up.
  *
  *   BASE=http://localhost:3100 API=http://localhost:8000 npx playwright test e2e/uat_improvements_loop_ui.spec.ts --workers=1
- *   SECOND_EMAIL / SECOND_PASSWORD: a teammate in the same workspace with Approve improvements, optional
+ *   SECOND_EMAIL and SECOND_PASSWORD name a teammate with Approve improvements, optional, one is invited when needed
  */
 import { test, expect, type Page } from '@playwright/test';
 import * as path from 'path';
@@ -22,13 +22,14 @@ const API = process.env.API || 'http://localhost:8000';
 const ADMIN = { email: process.env.AF_EMAIL || 'admin@abenix.dev', password: process.env.AF_PASSWORD || 'Admin123456' };
 const SECOND = process.env.SECOND_EMAIL ? { email: process.env.SECOND_EMAIL, password: process.env.SECOND_PASSWORD || '' } : null;
 const SAMPLE = 'Temperature helper (sample)';
+const SAMPLE_SLUG = 'sample-temperature-helper';
 const GROUP = 'Answers in Fahrenheit when the user asks for Kelvin';
 const WORSE = "Start every answer with the words 'Hmm, let me think.'";
 const PROOF_MS = 10 * 60_000;
 const LLM_MS = 300_000;
 
 const SHOTS = path.join(__dirname, 'uat_improvements_loop_ui', 'shots');
-const ids: { agent?: string; proposal?: string; approval?: string } = {};
+const ids: { agent?: string; proposal?: string; approval?: string; invited?: string } = {};
 
 test.describe.configure({ mode: 'serial' });
 test.use({ viewport: { width: 1440, height: 900 } });
@@ -99,12 +100,43 @@ async function chat(page: Page, message: string) {
   return replies.nth(before);
 }
 
+// the author of a real agent cannot approve its fix, so a run with no SECOND_EMAIL brings its own admin
+async function inviteSecondAdmin(page: Page) {
+  const run = Date.now().toString(36);
+  const who = { email: `approver-${run}@example.com`, password: `Approver-${run}-9` };
+  const invited = await api(page, 'POST', '/api/team/invite', { email: who.email, role: 'admin' });
+  expect(invited.status, 'an admin can invite a teammate').toBe(201);
+  const accepted = await page.request.post(`${API}/api/auth/accept-invite`, {
+    data: { token: new URL(invited.json.data.invite_url).searchParams.get('token'), full_name: `Approver ${run}`, password: who.password },
+  });
+  expect(accepted.ok(), 'the invite can be accepted').toBe(true);
+  const members = (await api(page, 'GET', '/api/team/members')).json.data.members as Array<{ id: string; email: string }>;
+  ids.invited = members.find((m) => m.email === who.email)?.id;
+  return who;
+}
+
 test.beforeEach(async ({ page }) => {
   page.on('dialog', (d) => d.accept());
   await signIn(page);
 });
 
+test.afterAll(async ({ browser }) => {
+  const page = await browser.newPage();
+  const res = await page.request.post(`${API}/api/auth/login`, { data: ADMIN });
+  const tok = (await res.json())?.data?.access_token;
+  const call = (method: string, p: string) =>
+    page.request.fetch(`${API}${p}`, { method, headers: { Authorization: `Bearer ${tok}` } }).catch(() => null);
+  if (ids.agent) await call('DELETE', `/api/agents/${ids.agent}?force=true`);
+  if (ids.invited) await call('DELETE', `/api/team/members/${ids.invited}`);
+  await page.close();
+});
+
 test('1. the sample agent arrives with its planted mistake and lessons', async ({ page }) => {
+  // a run that died before its cleanup left a live proposal, and a group only takes one
+  const stale = await api(page, 'GET', `/api/agents?slug=${SAMPLE_SLUG}`);
+  for (const a of (stale.json?.data || []) as Array<{ id: string; slug: string }>) {
+    if (a.slug === SAMPLE_SLUG) await api(page, 'DELETE', `/api/agents/${a.id}?force=true`);
+  }
   await go(page, '/improvements');
   await expect(page.getByTestId('improvements-page')).toBeVisible({ timeout: 30_000 });
   const sample = page.getByTestId('improvements-sample');
@@ -194,7 +226,8 @@ test('3. separation of duties, then a planted worse change is proved and approve
   const back = await api(page, 'GET', `/api/improvements/proposals/${ids.proposal}`);
   ids.approval = back.json.data.approval_id;
 
-  if (SECOND) {
+  const approver = SECOND ?? (labelled ? null : await inviteSecondAdmin(page));
+  if (approver) {
     if (!labelled) {
       await go(page, '/approvals');
       card = page.locator(`[data-testid="improvement-approval-card"][data-approval-id="${ids.approval}"]`);
@@ -203,13 +236,15 @@ test('3. separation of duties, then a planted worse change is proved and approve
       await expect(card.getByText('Invite a teammate')).toBeVisible();
     }
     await signOut(page);
-    await signIn(page, SECOND);
+    await signIn(page, approver);
   }
   await go(page, '/approvals');
   card = page.locator(`[data-testid="improvement-approval-card"][data-approval-id="${ids.approval}"]`);
   await expect(card).toBeVisible({ timeout: 30_000 });
   await card.getByTestId('improvement-approve').click();
-  await expect(card.getByTestId('improvement-approval-msg')).toContainText('Approved', { timeout: 30_000 });
+  // the card leaves the list, so the result is a banner on the page
+  await expect(page.getByTestId('release-next')).toContainText(`Approved. The fix to ${SAMPLE} is released.`, { timeout: 30_000 });
+  await expect(page.getByTestId('approvals-to-sign').locator(`[data-approval-id="${ids.approval}"]`)).toHaveCount(0, { timeout: 30_000 });
   await shot(page, '03-approved');
 
   await expect(async () => {

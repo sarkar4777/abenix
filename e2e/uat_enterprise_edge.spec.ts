@@ -58,15 +58,12 @@ test('EDGE #2 — DLP/sandbox/retention reject invalid input with 4xx (boundary)
   const bad = await page.request.put(`${API}/api/settings/dlp`, { headers: auth(tok), data: { mode: 'TOTALLY_BOGUS' } });
   expect([400, 422]).toContain(bad.status());
 
+  const before = (await (await page.request.get(`${API}/api/settings/retention`, { headers: auth(tok) })).json()).data;
   const low = await page.request.put(`${API}/api/settings/retention`, { headers: auth(tok), data: { execution_retention_days: 1, message_retention_days: 1, audit_log_retention_days: 1 } });
-  expect([200, 204]).toContain(low.status());
-  const rr = await page.request.get(`${API}/api/settings/retention`, { headers: auth(tok) });
-  if (rr.status() === 200) {
-    const d = (await rr.json()).data || {};
-    expect(d.execution_retention_days).toBeGreaterThanOrEqual(7);
-    expect(d.message_retention_days).toBeGreaterThanOrEqual(30);
-    expect(d.audit_log_retention_days).toBeGreaterThanOrEqual(365);
-  }
+  expect(low.status()).toBe(400);
+  expect((await low.json()).error.message).toMatch(/\d+ or more/);
+  const after = (await (await page.request.get(`${API}/api/settings/retention`, { headers: auth(tok) })).json()).data;
+  expect(after).toEqual(before);
 });
 
 test('EDGE #3 — API-key revocation invalidates subsequent calls', async ({ page }) => {
@@ -226,14 +223,16 @@ test('EDGE #10 — Webhook with invalid URL is rejected at create time', async (
 test('EDGE #11 — Sandbox settings round-trip preserves the allow-list', async ({ page }) => {
   const tok = await login(page);
   const images = ['python:3.12-slim', 'node:20-alpine', 'golang:1.22-alpine'];
-  const w = await page.request.put(`${API}/api/settings/sandbox`, { headers: auth(tok), data: { enabled: true, allow_network: false, allowed_images: images } });
-  expect([200, 204, 400, 404]).toContain(w.status());
-  const r = await page.request.get(`${API}/api/settings/sandbox`, { headers: auth(tok) });
-  if (r.status() === 200) {
-    const d = (await r.json()).data || {};
-    if (Array.isArray(d.allowed_images)) {
-      for (const img of images) expect(d.allowed_images).toContain(img);
-    }
+  const url = `${API}/api/settings/sandbox`;
+  const before = (await (await page.request.get(url, { headers: auth(tok) })).json()).data.tenant_overrides;
+  try {
+    const w = await page.request.put(url, { headers: auth(tok), data: { enabled: true, allow_network: false, allowed_images: images } });
+    expect([200, 204]).toContain(w.status());
+    const d = (await (await page.request.get(url, { headers: auth(tok) })).json()).data;
+    for (const img of images) expect(d.effective.allowed_images).toContain(img);
+  } finally {
+    // later specs run agents in this tenant, and null clears an override
+    await page.request.put(url, { headers: auth(tok), data: before });
   }
 });
 

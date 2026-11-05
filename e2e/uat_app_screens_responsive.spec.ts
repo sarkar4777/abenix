@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
+import { artifactDir } from './uat_helpers/artifacts';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -10,8 +11,7 @@ const PV = process.env.PHARMAVIGIL_BASE || 'http://localhost:3007';
 const WM = process.env.BASE_WM || 'http://localhost:3006';
 const CIQ = process.env.CIQ_BASE || 'http://localhost:3001';
 const CIQ_API = process.env.CIQ_API || 'http://localhost:8001';
-const SHOTS = path.join('e2e', 'screenshots', 'app-screens');
-fs.mkdirSync(SHOTS, { recursive: true });
+const SHOTS = artifactDir('app-screens');
 
 const WIDTHS = [
   { name: '1440', width: 1440, height: 900 },

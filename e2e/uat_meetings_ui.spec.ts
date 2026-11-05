@@ -170,11 +170,14 @@ test('rehearse: answers in scope with a citation, declines off topic, hands pric
 
   // handed back, then answered by the user
   before = await sayInRehearsal(page, 'Hey assistant, can you confirm the pricing for us today?');
-  await expect(page.getByTestId('rehearsal-deferral')).toBeVisible({ timeout: BOT_WAIT });
+  const answer = 'Pricing comes in the written proposal on Friday.';
+  const handedBack = page.getByTestId('rehearsal-deferral').filter({ hasText: /pricing/i }).last();
+  await expect(handedBack).toBeVisible({ timeout: BOT_WAIT });
   await shot(page, '04-rehearsal-handed-back');
-  await page.getByTestId('rehearsal-deferral-answer').fill('Pricing comes in the written proposal on Friday.');
-  await page.getByTestId('rehearsal-deferral-send').click();
-  await expect(page.getByTestId('rehearsal-deferral-done').first()).toContainText('You answered', { timeout: 30_000 });
+  await handedBack.getByTestId('rehearsal-deferral-answer').fill(answer);
+  await handedBack.getByTestId('rehearsal-deferral-send').click();
+  // earlier rehearsal questions can also have been handed back
+  await expect(page.getByTestId('rehearsal-deferral-done').filter({ hasText: answer })).toContainText('You answered', { timeout: 30_000 });
   await expect(page.getByTestId('rehearsal-bot-line').last()).toContainText(/proposal|Friday/i, { timeout: BOT_WAIT });
 
   await page.getByTestId('rehearsal-end').click();

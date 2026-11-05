@@ -8,11 +8,11 @@ import { test, expect, type Page } from '@playwright/test';
  *   1. Log in as admin (admin@abenix.dev / Admin123456 by default).
  *   2. Open /admin/llm-settings (the Models page).
  *   3. Assert the "Builder + Pipeline validation model" section is visible.
- *   4. Change the dropdown to azure-gpt-4o-mini.
+ *   4. Change the picker to another model it offers.
  *   5. Click Save and wait for /api/admin/settings/ai_builder.validation.model PATCH.
  *   6. Navigate to /builder.
- *   7. Assert the BuilderTopBar badge + hidden input reflect azure-gpt-4o-mini.
- *   8. Reset the setting back to azure-gpt-4o so the next UAT phase starts clean.
+ *   7. Assert the BuilderTopBar badge + hidden input reflect the new model.
+ *   8. Put the setting back so the next UAT phase starts clean.
  *
  * Run:
  *   BASE=http://localhost:3000 API=http://localhost:8000 \
@@ -27,8 +27,6 @@ const EMAIL = process.env.AF_EMAIL || 'admin@abenix.dev';
 const PASSWORD = process.env.AF_PASSWORD || 'Admin123456';
 
 const KEY = 'ai_builder.validation.model';
-const DEFAULT_MODEL = 'azure-gpt-4o';
-const TARGET_MODEL = 'azure-gpt-4o-mini';
 
 async function login(page: Page): Promise<string> {
   const resp = await page.request.post(`${API}/api/auth/login`, {
@@ -89,33 +87,39 @@ test('Models page lets admin pin the Builder + Pipeline validation model', async
   expect(getBody?.data?.key).toBe(KEY);
   expect(typeof getBody?.data?.value).toBe('string');
 
+  const original: string = getBody.data.value;
+
   // 2. Open the Models page (LLM Settings).
-  await page.goto(`${BASE}/admin/llm-settings`);
-  await page.waitForLoadState('networkidle');
+  await page.goto(`${BASE}/admin/llm-settings`, { waitUntil: 'domcontentloaded' });
 
   // 3. The new "Builder + Pipeline validation model" section is visible.
   const section = page.getByTestId('builder-validation-section');
   await expect(section).toBeVisible({ timeout: 15_000 });
   await expect(section).toContainText(/Builder \+ Pipeline validation model/i);
 
-  // 4. The dropdown defaults to azure-gpt-4o (DEFAULTS value).
-  const select = page.getByTestId('builder-validation-model-select');
-  await expect(select).toBeVisible();
+  // 4. The saved model shows in the picker. Which models it offers depends on the keys this stack has.
+  const select = page.getByTestId('builder-validation-model-select').getByTestId('model-picker-select');
+  await expect(select).toBeEnabled({ timeout: 15_000 });
+  await expect(select).toHaveValue(original);
+  const offered = await select.locator('option:not([disabled])').evaluateAll((els) => els.map((e) => (e as HTMLOptionElement).value));
+  const target = offered.find((v) => v && v !== original);
+  expect(target, 'the picker offers a second model').toBeTruthy();
 
-  // 5. Change to azure-gpt-4o-mini.
-  await select.selectOption(TARGET_MODEL);
-  await expect(select).toHaveValue(TARGET_MODEL);
+  // 5. Change it.
+  await select.selectOption(target!);
+  await expect(select).toHaveValue(target!);
 
-  // 6. Save.
-  await page.getByTestId('save-settings').click();
-  // Wait for the PATCH to land, then for the reload.
-  await page.waitForResponse(
-    (r) =>
-      r.url().includes(`/api/admin/settings/${KEY}`) &&
-      r.request().method() === 'PATCH' &&
-      r.ok(),
-    { timeout: 20_000 },
-  );
+  // 6. Save and wait for the PATCH to land.
+  await Promise.all([
+    page.waitForResponse(
+      (r) =>
+        r.url().includes(`/api/admin/settings/${encodeURIComponent(KEY)}`) &&
+        r.request().method() === 'PATCH' &&
+        r.ok(),
+      { timeout: 20_000 },
+    ),
+    page.getByTestId('save-settings').click(),
+  ]);
 
   // 7. Re-read via the public endpoint — the new value must stick.
   const afterResp = await page.request.get(
@@ -123,25 +127,27 @@ test('Models page lets admin pin the Builder + Pipeline validation model', async
     { headers: { Authorization: `Bearer ${token}` } },
   );
   const afterBody = await afterResp.json();
-  expect(afterBody?.data?.value).toBe(TARGET_MODEL);
+  expect(afterBody?.data?.value).toBe(target);
 
   // 8. Hop to /builder. The badge + hidden input must reflect the new model.
-  await page.goto(`${BASE}/builder`);
-  await page.waitForLoadState('networkidle');
+  await page.goto(`${BASE}/builder`, { waitUntil: 'domcontentloaded' });
 
+  // exclusive subscription mode runs the checks on its own model and the badge says so
+  const sub = (await (await page.request.get(`${API}/api/admin/settings/subscription`, { headers: { Authorization: `Bearer ${token}` } })).json())?.data;
+  const shown = sub?.active && sub?.exclusive ? sub.default_model : target;
   const badge = page.getByTestId('builder-validation-model-badge');
   await expect(badge).toBeVisible({ timeout: 15_000 });
-  await expect(badge).toContainText(TARGET_MODEL);
+  await expect(badge).toContainText(shown, { timeout: 15_000 });
 
   const hidden = page.getByTestId('builder-validation-model-input');
-  await expect(hidden).toHaveValue(TARGET_MODEL);
+  await expect(hidden).toHaveValue(shown);
 
-  // 9. Reset to the default so the next phase starts clean.
-  await setBuilderModelViaApi(page, token, DEFAULT_MODEL);
+  // 9. Put back what it was so the next phase starts clean.
+  await setBuilderModelViaApi(page, token, original);
   const resetResp = await page.request.get(
     `${API}/api/settings/builder_model`,
     { headers: { Authorization: `Bearer ${token}` } },
   );
   const resetBody = await resetResp.json();
-  expect(resetBody?.data?.value).toBe(DEFAULT_MODEL);
+  expect(resetBody?.data?.value).toBe(original);
 });

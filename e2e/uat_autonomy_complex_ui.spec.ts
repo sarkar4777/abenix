@@ -773,9 +773,20 @@ test('Promote: the author is refused, a teammate invited from Settings approves 
     const mine = promotionCard(page, AGENT);
     await expect(mine).toBeVisible({ timeout: 30_000 });
     await expect(mine.getByTestId('approval-promotion')).toContainText('Watching to Asks first');
-    await mine.getByTestId('approval-approve').click();
-    await expect(mine.getByTestId('approval-error')).toContainText('You built this agent, so someone else has to approve its promotion.');
-    await expect(mine.getByTestId('approval-error')).not.toContainText('AUTHOR_CANNOT_GRANT');
+    // no button to fail on, the card says why and the API still refuses
+    await expect(mine.getByTestId('approval-approve')).toHaveCount(0);
+    await expect(mine.getByTestId('approval-cannot-sign')).toContainText('You built this agent, so someone else has to approve it.');
+    await expect(mine.getByTestId('approval-cannot-sign')).not.toContainText('BUILT_IT');
+    const approvalId = await mine.getAttribute('data-approval-id');
+    const tok = await page.evaluate(() => localStorage.getItem('access_token') || '');
+    const refused = await page.request.post(`${API}/api/approvals/${encodeURIComponent(approvalId!)}/signoff`, {
+      headers: { Authorization: `Bearer ${tok}` },
+      data: { decision: 'approve' },
+    });
+    expect(refused.status()).toBe(403);
+    const refusal = await refused.json();
+    expect(refusal.error.error_code).toBe('AUTHOR_CANNOT_GRANT');
+    expect(refusal.error.message).toBe('You built this agent, so someone else has to approve its promotion.');
     await shot(page, '16-author-refused-in-approvals');
     expect((await grantOf(page, state.agentGrant!)).level).toBe(1);
 

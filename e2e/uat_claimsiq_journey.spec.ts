@@ -11,8 +11,11 @@
  */
 
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
+import * as path from 'node:path';
+import { artifactDir } from './uat_helpers/artifacts';
 
 const CIQ = process.env.CLAIMSIQ_URL || 'http://localhost:3005';
+const SHOTS = artifactDir('claimsiq-journey');
 const API = `${CIQ}/api/claimsiq`;
 
 type Gaps = { console: string[]; failed: string[] };
@@ -99,7 +102,7 @@ test('claimsiq: every view renders', async ({ page }) => {
   }
   // Identical sizes everywhere would mean routing is not really happening.
   expect(new Set(sizes).size, 'every view rendered the same thing').toBeGreaterThan(1);
-  await page.screenshot({ path: 'e2e/screenshots/claimsiq-views.png', fullPage: true });
+  await page.screenshot({ path: path.join(SHOTS, 'views.png'), fullPage: true });
   report('views', g);
 });
 
@@ -112,7 +115,7 @@ test('claimsiq: file an FNOL and adjudicate it end to end', async ({ page, reque
 
   await page.goto(`${CIQ}/fnol`, { waitUntil: 'domcontentloaded' });
   await settled(page);
-  await page.screenshot({ path: 'e2e/screenshots/claimsiq-fnol.png', fullPage: true });
+  await page.screenshot({ path: path.join(SHOTS, 'fnol.png'), fullPage: true });
 
   // Vaadin labels the inputs, so target by label rather than position.
   const fill = async (label: string, value: string) => {
@@ -212,8 +215,8 @@ test('claimsiq: file an FNOL and adjudicate it end to end', async ({ page, reque
   const detail = await settled(page);
   console.log(`  /claims/{id} -> ${detail.length} chars`);
   expect(detail.length, 'claim detail looks blank').toBeGreaterThan(400);
-  await page.screenshot({ path: 'e2e/screenshots/claimsiq-detail.png', fullPage: true });
+  await page.screenshot({ path: path.join(SHOTS, 'detail.png'), fullPage: true });
 
-  await page.screenshot({ path: 'e2e/screenshots/claimsiq-after-fnol.png', fullPage: true });
+  await page.screenshot({ path: path.join(SHOTS, 'after-fnol.png'), fullPage: true });
   report('fnol', g);
 });

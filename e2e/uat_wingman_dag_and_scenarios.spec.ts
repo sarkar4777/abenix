@@ -19,20 +19,21 @@ async function gotoOk(page: Page, path: string) {
 }
 
 test.describe.serial('Wingman — DAG drawer + Forward Scenarios', () => {
+  test.describe.configure({ timeout: 480_000 });
+
   test('sidebar exposes the Forward Scenarios entry', async ({ page }) => {
     await gotoOk(page, '/');
     await expect(page.getByText('Forward Scenarios').first()).toBeVisible({ timeout: 10_000 });
   });
 
-  test('Operations Watch: snapshot + DAG drawer renders nodes', async ({ page }) => {
+  test('Operations Watch Refresh runs the agent and the DAG drawer renders nodes', async ({ page }) => {
     await gotoOk(page, '/ops');
     await expect(page.getByText('Operations Watch').first()).toBeVisible();
-    // ops_snapshot is fired by the page on mount; the platform-side
-    // wingman-ops-monitor agent runs (~30-60s) and the DAG drawer chip
-    // appears as soon as the execution_id is known.
+    // on mount the page only reads the cache, and the snapshot call waits up to 300 s for the agent
+    await page.getByRole('main').getByRole('button', { name: 'Refresh', exact: true }).click();
     await expect(
       page.locator('[data-testid="dag-drawer-open"], [data-testid="dag-drawer"]').first(),
-    ).toBeVisible({ timeout: 180_000 });
+    ).toBeVisible({ timeout: 330_000 });
     // Ensure the drawer panel itself can be opened and shows DAG nodes.
     const collapsed = page.locator('[data-testid="dag-drawer-open"]').first();
     if (await collapsed.isVisible().catch(() => false)) {
@@ -40,16 +41,15 @@ test.describe.serial('Wingman — DAG drawer + Forward Scenarios', () => {
     }
     const drawer = page.locator('[data-testid="dag-drawer"]');
     await expect(drawer).toBeVisible({ timeout: 30_000 });
-    // DAG nodes header lands when at least one row is composed (agent
-    // node from snapshot or chips from expectedTools).
-    await expect(drawer.getByText(/DAG nodes/i).first()).toBeVisible({ timeout: 60_000 });
+    await expect(drawer.getByText('DAG', { exact: true })).toBeVisible({ timeout: 60_000 });
+    await expect(drawer.getByText(/^\d+ nodes?$/i).first()).toBeVisible({ timeout: 60_000 });
     // Agent name renders in the snapshot header.
     await expect(drawer.getByText(/Wingman/i).first()).toBeVisible({ timeout: 60_000 });
   });
 
   test('Forward Scenarios: page renders the corridor selector and run button', async ({ page }) => {
     await gotoOk(page, '/scenarios');
-    await expect(page.getByText('What might happen, weighted').first()).toBeVisible();
+    await expect(page.getByText('Forward Weighted Scenario Curves').first()).toBeVisible();
     // Corridor chips are rendered from /api/wingman/corridors.
     await expect(page.locator('[data-testid^="corridor-chip-"]').first()).toBeVisible({ timeout: 15_000 });
     await expect(page.getByTestId('run-forecast')).toBeVisible();
@@ -69,11 +69,9 @@ test.describe.serial('Wingman — DAG drawer + Forward Scenarios', () => {
     await expect(
       page.locator('[data-testid="dag-drawer-open"], [data-testid="dag-drawer"]').first(),
     ).toBeVisible({ timeout: 30_000 });
-    // Wait for the forecast to land — the Bayesian prior strip is the
-    // first piece of structured output we render.
-    await expect(page.getByText(/Bayesian prior/i).first()).toBeVisible({ timeout: 240_000 });
-    // Probability-weighted expected-curve series renders in the chart.
-    await expect(page.getByText(/Expected curve/i).first()).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText(/Bayesian prior/i).first()).toBeVisible();
+    // the pipeline strip always names the prior, the curve only appears when the forecast lands
+    await expect(page.getByText(/Expected curve/i).first()).toBeVisible({ timeout: 240_000 });
     // At least the base scenario card lands.
     await expect(page.locator('[data-testid="scenario-card-base"]').first())
       .toBeVisible({ timeout: 30_000 });

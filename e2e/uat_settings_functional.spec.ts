@@ -155,16 +155,22 @@ test('9. /settings/sandbox — read + write config', async ({ page }) => {
   const tok = await login(page);
   const r = await page.request.get(`${API}/api/settings/sandbox`, { headers: auth(tok) });
   expect([200, 404]).toContain(r.status());
-  const w = await page.request.put(`${API}/api/settings/sandbox`, {
-    headers: auth(tok),
-    data: { enabled: true, allow_network: false, allowed_images: ['python:3.12-slim'] },
-  });
-  expect([200, 204, 400, 404]).toContain(w.status());
-  await page.goto(`${BASE}/settings/sandbox`);
-  await page.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => {});
-  await page.waitForTimeout(3500);
-  const txt = (await page.locator('body').innerText()).toLowerCase();
-  expect(txt).toMatch(/sandbox|isolation|container|image/i);
+  const before = (await r.json()).data?.tenant_overrides;
+  try {
+    const w = await page.request.put(`${API}/api/settings/sandbox`, {
+      headers: auth(tok),
+      data: { enabled: true, allow_network: false, allowed_images: ['python:3.12-slim'] },
+    });
+    expect([200, 204, 400, 404]).toContain(w.status());
+    await page.goto(`${BASE}/settings/sandbox`);
+    await page.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => {});
+    await page.waitForTimeout(3500);
+    const txt = (await page.locator('body').innerText()).toLowerCase();
+    expect(txt).toMatch(/sandbox|isolation|container|image/i);
+  } finally {
+    // later specs run agents in this tenant, and null clears an override
+    if (before) await page.request.put(`${API}/api/settings/sandbox`, { headers: auth(tok), data: before });
+  }
 });
 
 test('10. /settings/security — sessions + activity', async ({ page }) => {

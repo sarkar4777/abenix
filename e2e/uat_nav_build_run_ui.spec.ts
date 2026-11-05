@@ -246,7 +246,13 @@ test('My Agents: search, filter, open, duplicate, share, delete and restore', as
   await expect(cat.locator('option[value="research"]')).toHaveCount(1, { timeout: 20_000 });
   await cat.selectOption('research');
   await expect(page.getByText(AGENT).first()).toBeVisible({ timeout: 20_000 });
-  await cat.selectOption('other');
+  // options come from the agents that exist, so use any category this one is not in
+  const otherCat = await cat.locator('option').evaluateAll((els) =>
+    els.map((e) => (e as HTMLOptionElement).value).find((v) => v && v !== 'research'));
+  expect(otherCat, 'a second category among the built-in agents').toBeTruthy();
+  await page.getByTestId('agents-tab-my').click();
+  await expect(page.getByTestId('agents-tab-my')).toHaveAttribute('aria-pressed', 'true');
+  await cat.selectOption(otherCat!);
   await expect(page.getByText('No agents match')).toBeVisible({ timeout: 20_000 });
   await cat.selectOption('');
   await shot(page, '03-agents-search');
@@ -902,15 +908,14 @@ test('Edge: what works without hardware, a token that can be revoked', async ({ 
   test.setTimeout(3 * 60_000);
   await page.context().grantPermissions(['clipboard-read', 'clipboard-write'], { origin: BASE });
   await go(page, '/edge');
-  await expect(page.getByRole('heading', { name: 'Edge Gateways' })).toBeVisible();
-  // the steps read in order
-  const step1 = page.getByText(/^Step 1\. What the gateway box needs/);
-  const step2 = page.getByText(/^Step 2\. Get a gateway token/);
+  await expect(page.getByRole('heading', { name: 'Edge', exact: true })).toBeVisible();
+  // the guide says what happens, in order, before anyone adds a gateway
+  const how = page.getByTestId('how-it-works-toggle');
+  if ((await how.getAttribute('aria-expanded')) !== 'true') await how.click();
+  const step1 = page.getByText('Say what it collects');
+  const step2 = page.getByText('Run the install command');
   await expect(step1).toBeVisible();
   await expect(step2).toBeVisible();
-  expect((await step1.boundingBox())!.y).toBeLessThan((await step2.boundingBox())!.y);
-  await step1.click();
-  await expect(page.getByText('Three tiers. Pick by hardware.')).toBeVisible();
 
   // runtime choices with copyable install lines
   const variants = page.getByTestId('edge-runtime-variants');
@@ -922,8 +927,8 @@ test('Edge: what works without hardware, a token that can be revoked', async ({ 
 
   // registered gateways, or a plain note on how one appears
   const gws = (await api(page, 'GET', '/api/edge/gateways')).json.data.gateways as any[];
-  if (!gws.length) await expect(page.getByText('No edge gateways registered yet.')).toBeVisible();
-  else await expect(page.getByText(`Registered gateways (${gws.length})`)).toBeVisible();
+  await expect(page.getByRole('heading', { name: `Gateways (${gws.length})` })).toBeVisible({ timeout: 20_000 });
+  if (!gws.length) await expect(page.getByTestId('edge-empty')).toContainText('No edge gateways yet.');
 
   // a token and the signing key, once
   await page.getByTestId('edge-mint').click();

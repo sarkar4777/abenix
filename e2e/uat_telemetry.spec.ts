@@ -186,7 +186,7 @@ test('a first-time admin is guided to a live stream over HTTP, with device keys'
   await expect(page.getByTestId('tel-push-snippet')).toContainText('Idempotency-Key');
   await page.getByTestId('tel-push-test').click();
   // stored, or arrived and waiting for the mapping set up next
-  await expect(page.getByTestId('tel-push-result')).toContainText(/Accepted|Stored as|arrived|mapping/, { timeout: 15_000 });
+  await expect(page.getByTestId('tel-push-result')).toContainText(/Test message sent|It arrived but was not stored/, { timeout: 15_000 });
   await shot(page, '04-push-endpoint');
   await page.getByTestId('tel-push-map').click();
   await expect(wiz).toHaveAttribute('data-step', 'mapping');

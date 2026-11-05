@@ -1,6 +1,7 @@
 import { test, expect, type Page } from '@playwright/test';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { artifactDir } from './uat_helpers/artifacts';
 
 // Deep PM UAT for ClaimsIQ against Azure (Vaadin Java + abenix-api).
 //
@@ -26,8 +27,7 @@ const PASS = process.env.AF_PASSWORD || 'Admin123456';
 const VIEWER_EMAIL = process.env.AF_VIEWER_EMAIL || 'viewer@abenix.dev';
 const VIEWER_PASS = process.env.AF_VIEWER_PASSWORD || 'Viewer123456';
 
-const SHOT_DIR = path.resolve(__dirname, 'screenshots', 'claimsiq-deep');
-fs.mkdirSync(SHOT_DIR, { recursive: true });
+const SHOT_DIR = artifactDir('claimsiq-deep');
 
 async function shot(page: Page, name: string) {
   const p = path.join(SHOT_DIR, `${name}.png`);

@@ -168,8 +168,9 @@ test.describe('Abenix v1.1 · admin pages', () => {
   test('admin: /edge renders the gateway token action and runtime variants', async ({ page }) => {
     await gotoOk(page, '/edge');
     await expect(page.getByTestId('edge-page')).toBeVisible();
-    await expect(page.getByRole('button', { name: /Get gateway token/ }).first()).toBeVisible();
+    await expect(page.getByTestId('edge-mint')).toBeVisible();
+    await expect(page.getByTestId('edge-add')).toBeVisible();
     await expect(page.getByTestId('edge-runtime-variants')).toBeVisible();
-    await expect(page.getByText(/Registered gateways \(\d+\)/)).toBeVisible();
+    await expect(page.getByRole('heading', { name: /^Gateways \(\d+\)$/ })).toBeVisible();
   });
 });

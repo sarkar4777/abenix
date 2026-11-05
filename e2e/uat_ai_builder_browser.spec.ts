@@ -40,7 +40,7 @@ async function waitForToast(page: Page, fragment: string, timeoutMs = 30000) {
   return false;
 }
 
-test.describe.configure({ mode: 'default' });
+test.describe.configure({ mode: 'default', timeout: 6 * 60_000 });
 
 test.describe('AI Builder + Validation + Execution + Edge', () => {
 

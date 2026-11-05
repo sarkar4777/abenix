@@ -20,6 +20,8 @@ async function gotoOk(page: Page, p: string) {
 }
 
 test.describe.serial('Wingman — 12 demo screenshots', () => {
+  test.describe.configure({ timeout: 120_000 });
+
   test('01 sidebar shell on workbench', async ({ page }) => {
     await gotoOk(page, '/workbench');
     await page.waitForTimeout(2500);
@@ -69,7 +71,8 @@ test.describe.serial('Wingman — 12 demo screenshots', () => {
   test('07 broker inbox classify', async ({ page }) => {
     await gotoOk(page, '/inbox');
     await page.waitForTimeout(2000);
-    const classify = page.getByRole('button', { name: /Classify intent/i }).first();
+    // the composer has a plain Classify intent button that stays disabled until text is pasted
+    const classify = page.getByRole('button', { name: /Classify intent \(ML\)/ }).first();
     if (await classify.isVisible().catch(() => false)) {
       await classify.click();
       await page.waitForTimeout(15000);
@@ -80,7 +83,8 @@ test.describe.serial('Wingman — 12 demo screenshots', () => {
   test('08 broker inbox parse', async ({ page }) => {
     await gotoOk(page, '/inbox');
     await page.waitForTimeout(2000);
-    const parse = page.getByRole('button', { name: /Extract structured offer/i }).first();
+    // index 0 is the disabled composer button, index 1 is the first email card
+    const parse = page.getByRole('button', { name: /Extract structured offer/i }).nth(1);
     if (await parse.isVisible().catch(() => false)) {
       await parse.click();
       await page.waitForTimeout(20000);

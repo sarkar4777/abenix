@@ -14,9 +14,12 @@
  */
 
 import { test, expect, type APIRequestContext } from '@playwright/test';
+import * as path from 'node:path';
+import { artifactDir } from './uat_helpers/artifacts';
 
 const WEB = process.env.PHARMAVIGIL_BASE || 'http://localhost:3007';
 const API = process.env.PHARMAVIGIL_API || 'http://localhost:8007';
+const SHOTS = artifactDir('pharmavigil');
 
 type Case = Record<string, any>;
 
@@ -145,7 +148,7 @@ test('pharmavigil: file a report in the UI and assess it end to end', async ({ p
   const narrative = await page.getByTestId('intake-narrative').inputValue();
   expect(narrative.length, 'sample prefilled the narrative').toBeGreaterThan(50);
   await page.getByTestId('intake-narrative').fill(`${narrative}\nReported again by the pharmacist at follow-up.`);
-  await page.screenshot({ path: 'e2e/screenshots/pharmavigil/intake-1440.png', fullPage: true });
+  await page.screenshot({ path: path.join(SHOTS, 'intake-1440.png'), fullPage: true });
   await page.getByTestId('intake-submit').click();
   await page.waitForURL(/\/cases\/[0-9a-f-]{36}$/, { timeout: 30_000 });
   const id = page.url().split('/').pop()!;
@@ -225,7 +228,7 @@ test('pharmavigil: file a report in the UI and assess it end to end', async ({ p
   await page.reload({ waitUntil: 'domcontentloaded' });
   await expect(page.getByTestId('review-reviewer')).toBeVisible({ timeout: 30_000 });
   await expect(page.getByRole('heading', { name: 'MedDRA coding' })).toBeVisible();
-  await page.screenshot({ path: 'e2e/screenshots/pharmavigil/assessed-1440.png', fullPage: true });
+  await page.screenshot({ path: path.join(SHOTS, 'assessed-1440.png'), fullPage: true });
   await page.getByTestId('review-reviewer').fill('uat.reviewer');
   await page.getByTestId('review-reject').click();
   await expect(page.getByTestId('review-message')).toContainText('Say why you reject');
@@ -254,14 +257,14 @@ test('pharmavigil: file a report in the UI and assess it end to end', async ({ p
   await expect(page.getByTestId('review-outcome')).toBeVisible({ timeout: 20_000 });
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
   expect(overflow, 'case page scrolls sideways on a phone').toBeLessThanOrEqual(1);
-  await page.screenshot({ path: 'e2e/screenshots/pharmavigil/case-390.png', fullPage: true });
+  await page.screenshot({ path: path.join(SHOTS, 'case-390.png'), fullPage: true });
   await page.goto(`${WEB}/cases/new`, { waitUntil: 'domcontentloaded' });
-  await page.screenshot({ path: 'e2e/screenshots/pharmavigil/intake-390.png', fullPage: true });
+  await page.screenshot({ path: path.join(SHOTS, 'intake-390.png'), fullPage: true });
   await page.goto(`${WEB}/`, { waitUntil: 'domcontentloaded' });
   await page.waitForTimeout(1500);
   const qOverflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
   expect(qOverflow, 'queue scrolls sideways on a phone').toBeLessThanOrEqual(1);
-  await page.screenshot({ path: 'e2e/screenshots/pharmavigil/queue-390.png', fullPage: true });
+  await page.screenshot({ path: path.join(SHOTS, 'queue-390.png'), fullPage: true });
 });
 
 test('pharmavigil: disproportionality is arithmetic, and says so', async ({ request }) => {

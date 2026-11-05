@@ -156,12 +156,18 @@ test('quickwin module pages · forecaster sliders + price-engine + workbench int
   await expect(page.locator('text=Analyst Workbench').first()).toBeVisible();
 });
 
-test('quickwin · DAG viewer rail visible on every page', async ({ page }) => {
+test('quickwin · live activity rail opens from every page', async ({ page }) => {
+  test.setTimeout(120_000);
+  const rail = page.locator('aside').filter({ hasText: 'Live agents' });
+  // collapsed by default so it does not crowd the page
   for (const p of ['/dashboard', '/credit-risk', '/forecaster', '/contracts', '/help']) {
     await gotoOk(page, p);
-    const sidebar = page.locator('aside').filter({ hasText: 'Live activity' }).first();
-    await expect(sidebar).toBeVisible({ timeout: 10000 });
+    await expect(rail).toHaveCount(0);
+    await page.getByTitle('Show live activity').click({ timeout: 10000 });
+    await expect(rail).toBeVisible({ timeout: 10000 });
   }
+  await gotoOk(page, '/recommendations');
+  await expect(rail).toBeVisible({ timeout: 10000 });
 });
 
 test('help page · 5-module diagram + glossary visible', async ({ page }) => {

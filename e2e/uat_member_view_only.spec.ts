@@ -135,7 +135,16 @@ test('a Member is told what is view only, and no button they can press ends in a
   const refused: string[] = [];
   page.on('response', (r) => { if (r.status() === 403 && r.url().startsWith(API)) refused.push(`${r.request().method()} ${new URL(r.url()).pathname}`); });
 
+  const tok = await page.evaluate(() => localStorage.getItem('access_token') || '');
   for (const { route, note } of PAGES) {
+    // this decision comes with the Groundwork site, a stack without it has no page to check
+    if (route === '/decisions/gw.safety.exclusion') {
+      const there = await page.request.get(`${API}/api/decisions/gw.safety.exclusion`, { headers: { Authorization: `Bearer ${tok}` } });
+      if (there.status() === 404) {
+        test.info().annotations.push({ type: 'skipped-route', description: `${route}, the Groundwork decision is not on this stack` });
+        continue;
+      }
+    }
     await go(page, route);
     refused.length = 0;
     if (note) {

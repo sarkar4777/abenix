@@ -74,11 +74,11 @@ test.describe('ML Models page — audit remediation', () => {
     await page.goto(`${BASE}/ml-models`);
     await page.waitForLoadState('domcontentloaded');
     // Schema details element is collapsed by default; click to expand.
-    const schemaSummary = page.locator('summary', { hasText: 'Schemas' }).first();
+    const schemaSummary = page.locator('summary', { hasText: 'Inputs and outputs' }).first();
     await expect(schemaSummary).toBeVisible({ timeout: 10_000 });
     await schemaSummary.click();
-    await expect(page.locator('textarea[placeholder*="features"]')).toBeVisible();
-    await expect(page.locator('textarea[placeholder*="returns"]')).toBeVisible();
+    await expect(page.locator('#ml-in-schema')).toHaveAttribute('placeholder', /features/);
+    await expect(page.locator('#ml-out-schema')).toHaveAttribute('placeholder', /classification/);
   });
 
   test('detail page shows Use-in-Agent + Edit-metadata; metadata save round-trips', async ({ page }) => {

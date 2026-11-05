@@ -1,12 +1,13 @@
 import { test, expect } from '@playwright/test';
 import * as fs from 'fs';
 import * as path from 'path';
+import { artifactDir } from './uat_helpers/artifacts';
 
 /**
  * Industrial-IoT browser quality UAT.
  *
  * Drives the standalone showcase at http://localhost:3003 in real Chromium
- * and records evidence to e2e/screenshots/industrial/. The prompt asked for
+ * and records evidence to e2e/test-results-artifacts/industrial/. The prompt asked for
  * a multi-page app (login → dashboard tiles → sensor detail with SHAP →
  * Maintenance/Scheduler → /assets) but the live app at 3003 is a
  * single-page tabbed showcase (Pump Vibration / Cold Chain / Design Studio
@@ -17,8 +18,7 @@ import * as path from 'path';
  */
 const BASE = process.env.IIOT_BASE || 'http://localhost:3003';
 const API  = process.env.IIOT_API  || 'http://localhost:8003';
-const SHOTS = path.resolve(__dirname, 'screenshots', 'industrial');
-fs.mkdirSync(SHOTS, { recursive: true });
+const SHOTS = artifactDir('industrial');
 const shot = (p: any, name: string) => p.screenshot({ path: path.join(SHOTS, name), fullPage: true });
 
 test.describe.configure({ mode: 'serial' });
@@ -73,21 +73,22 @@ test('4. Pipeline catalog API responds with the 5 IoT pipelines', async ({ reque
   fs.writeFileSync(path.join(SHOTS, '04_pipeline_catalog.json'), JSON.stringify(list, null, 2));
 });
 
-test('5. Code-asset catalog API names the 3 expected assets', async ({ request }) => {
-  // The standalone API proxies to the parent. Either route shape is acceptable.
-  let r = await request.get(`${API}/api/industrial-iot/code-assets`).catch(() => null);
-  if (!r || !r.ok()) {
-    r = await request.get(`${API}/api/code-assets`).catch(() => null);
-  }
-  expect(r, 'code-asset catalog responded').toBeTruthy();
-  expect(r!.ok(), `code-asset catalog HTTP ${r!.status()}`).toBeTruthy();
-  const body = await r!.json();
-  const items = (body.data ?? body.items ?? body) as any[];
-  const names = (items ?? []).map((a: any) => (a.name || a.slug || '')).join('|');
-  expect(names, 'pump-dsp asset listed').toMatch(/pump-dsp/i);
-  expect(names, 'rul-estimator asset listed').toMatch(/rul/i);
-  expect(names, 'cold-chain-corrector asset listed').toMatch(/cold.chain/i);
+test('5. Code-asset catalog answers through the web proxy and names the 3 assets', async ({ request }) => {
+  const expected = ['pump-dsp-correction', 'rul-estimator', 'cold-chain-corrector'];
+  // the API refuses direct callers, the web app adds its proxy secret on the server side
+  const r = await request.get(`${BASE}/api/code-assets?scope=all`);
+  expect(r.ok(), `code-asset catalog HTTP ${r.status()}`).toBeTruthy();
+  const items = (await r.json()).data as any[];
+  expect(Array.isArray(items), 'catalog is array').toBeTruthy();
   fs.writeFileSync(path.join(SHOTS, '05_assets.json'), JSON.stringify(items, null, 2));
+  // the Deploy buttons upload these bundles
+  for (const slug of expected) {
+    const zip = await request.get(`${BASE}/industrial-iot/${slug}.zip`);
+    expect(zip.ok(), `${slug}.zip served by the app`).toBeTruthy();
+  }
+  const names = items.map((a: any) => String(a.name || ''));
+  const missing = expected.filter((s) => !names.some((n) => n === s || n.startsWith(`${s}-`)));
+  expect(missing, 'assets from packages/db/seeds/seed_code_assets.py').toEqual([]);
 });
 
 test('6. Alarm-desk tab renders without crashing (anomaly surface)', async ({ page }) => {

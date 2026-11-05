@@ -12,6 +12,8 @@
  */
 
 import { test, expect, type Page } from '@playwright/test';
+import * as path from 'path';
+import { artifactDir } from './uat_helpers/artifacts';
 
 const BASE = process.env.BASE || 'http://localhost:3100';
 const API = process.env.API || 'http://localhost:8000';
@@ -185,7 +187,7 @@ test('1. builder: set a failing step to carry on and run it, the next steps run 
   await ask.getByTestId('run-input-region').fill('apac-builder');
   await ask.getByTestId('run-inputs-submit').click();
   await expect(page.getByText(/^Pipeline (completed|failed)$/)).toBeVisible({ timeout: 120_000 });
-  await page.screenshot({ path: 'e2e/screenshots/pipeline-carry-on-builder.png', fullPage: true });
+  await page.screenshot({ path: path.join(artifactDir('pipelines'), 'carry-on-builder.png'), fullPage: true });
 
   const run = await latestRun(page, ids.agent!, before);
   expectCarriedOn(run, 'apac-builder', 'builder run');

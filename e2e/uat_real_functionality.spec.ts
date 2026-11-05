@@ -26,7 +26,7 @@ test('REAL #1 — API key minted via UI works as Bearer in subsequent calls', as
   // Use the af_ key as Bearer against a tenant-scoped endpoint
   const meCall = await request.get(`${API}/api/me`, { headers: { Authorization: `Bearer ${af}` } });
   expect(meCall.ok()).toBeTruthy();
-  const me = (await meCall.json()).data;
+  const me = (await meCall.json()).data.user;
   expect(me.email).toBe(EMAIL);
   console.log(`  af_ key authenticated as ${me.email} role=${me.role}`);
 
@@ -39,20 +39,20 @@ test('REAL #1 — API key minted via UI works as Bearer in subsequent calls', as
 test('REAL #2 — Profile name change reflects in /api/me + persists across login', async ({ page, request }) => {
   const tok = await login(page);
 
-  const original = (await (await page.request.get(`${API}/api/me`, { headers: auth(tok) })).json()).data;
+  const original = (await (await page.request.get(`${API}/api/me`, { headers: auth(tok) })).json()).data.user;
 
   const newName = `UAT ${Date.now()}`;
   const w = await page.request.put(`${API}/api/settings/profile`, { headers: auth(tok), data: { full_name: newName, avatar_url: null } });
   expect(w.ok() || w.status() === 204).toBeTruthy();
 
   // Confirm reflected
-  const me2 = (await (await page.request.get(`${API}/api/me`, { headers: auth(tok) })).json()).data;
+  const me2 = (await (await page.request.get(`${API}/api/me`, { headers: auth(tok) })).json()).data.user;
   expect(me2.full_name).toBe(newName);
 
   // Re-login (fresh token) and confirm persistence
   const re = await request.post(`${API}/api/auth/login`, { data: { email: EMAIL, password: PASSWORD } });
   const newTok = (await re.json()).data.access_token;
-  const me3 = (await (await request.get(`${API}/api/me`, { headers: { Authorization: `Bearer ${newTok}` } })).json()).data;
+  const me3 = (await (await request.get(`${API}/api/me`, { headers: { Authorization: `Bearer ${newTok}` } })).json()).data.user;
   expect(me3.full_name).toBe(newName);
   console.log(`  profile name persisted across re-login: ${me3.full_name}`);
 
@@ -137,19 +137,32 @@ test('REAL #4 — MCP: install registry server, discover tools, use in agent exe
 test('REAL #5 — Sandbox config write + read round-trip persists allowed_images', async ({ page }) => {
   const tok = await login(page);
   const stamp = `python:3.12-uat-${Date.now()}`;
+  const url = `${API}/api/settings/sandbox`;
+  const before = (await (await page.request.get(url, { headers: auth(tok) })).json()).data.tenant_overrides;
 
-  const w = await page.request.put(`${API}/api/settings/sandbox`, {
-    headers: auth(tok),
-    data: { enabled: true, allow_network: false, allowed_images: ['python:3.12-slim', stamp] },
-  });
-  expect([200, 204]).toContain(w.status());
+  try {
+    const w = await page.request.put(url, {
+      headers: auth(tok),
+      data: { enabled: true, allow_network: false, allowed_images: ['python:3.12-slim', stamp] },
+    });
+    expect([200, 204]).toContain(w.status());
 
-  const r = await page.request.get(`${API}/api/settings/sandbox`, { headers: auth(tok) });
-  expect(r.ok()).toBeTruthy();
-  const cfg = (await r.json()).data;
-  const allowed = cfg.allowed_images || cfg.allowed_image_list || [];
-  console.log(`  allowed_images after write: ${JSON.stringify(allowed).slice(0, 200)}`);
-  expect(JSON.stringify(allowed)).toContain(stamp);
+    const r = await page.request.get(url, { headers: auth(tok) });
+    expect(r.ok()).toBeTruthy();
+    const cfg = (await r.json()).data;
+    expect(cfg.effective.allowed_images).toContain(stamp);
+    expect(cfg.effective.allow_network).toBe(false);
+    expect(cfg.tenant_overrides.allowed_images).toEqual([stamp, 'python:3.12-slim'].sort());
+
+    // only image references get on the allow list
+    const bad = await page.request.put(url, { headers: auth(tok), data: { allowed_images: ['not an image!'] } });
+    expect(bad.status()).toBe(400);
+    const after = (await (await page.request.get(url, { headers: auth(tok) })).json()).data;
+    expect(after.effective.allowed_images).toContain(stamp);
+  } finally {
+    // later specs run agents in this tenant, and null clears an override
+    await page.request.put(url, { headers: auth(tok), data: before });
+  }
 });
 
 test('REAL #6 — Notification prefs round-trip', async ({ page }) => {
@@ -205,9 +218,15 @@ test('REAL #8 — Team invite happy path (admin invites a fake email)', async ({
 test('REAL #9 — Edge bundle compile + load on Rust runtime + execute returns shape', async ({ page, request }) => {
   const tok = await login(page);
 
-  const aid = '248ccc45-000e-4783-a0d0-7e8a21fc6a98';
-  const cmp = await page.request.post(`${API}/api/edge/agents/${aid}/compile`, { headers: auth(tok), data: {} });
-  expect(cmp.ok()).toBeTruthy();
+  let edgeAgent: any;
+  for (let offset = 0; offset < 500 && !edgeAgent; offset += 100) {
+    const rows = (await (await page.request.get(`${API}/api/agents?limit=100&offset=${offset}`, { headers: auth(tok) })).json()).data || [];
+    if (!rows.length) break;
+    edgeAgent = rows.find((a: any) => a.model_config?.edge_compatible);
+  }
+  expect(edgeAgent, 'no edge_compatible agent is seeded').toBeTruthy();
+  const cmp = await page.request.post(`${API}/api/edge/agents/${edgeAgent.id}/compile`, { headers: auth(tok), data: {} });
+  expect(cmp.ok(), `compile answered ${cmp.status()}`).toBeTruthy();
   const digest = cmp.headers()['x-bundle-digest'];
   expect(digest && digest.length === 64).toBeTruthy();
 
@@ -275,37 +294,25 @@ test('REAL #11 — Direct tool execute via SDK path (yahoo_finance + ml_model)',
   console.log(`  ml_model(contractiq-counterparty-default) ran ok`);
 });
 
-test('REAL #12 — Webhook UI: create through the web page, see it in list', async ({ page }) => {
+test('REAL #12 Event subscription UI creates through the web page and lists it', async ({ page }) => {
   const tok = await login(page);
+  const name = `UAT hook ${Date.now()}`;
   await page.goto(`${BASE}/settings/webhooks`);
-  await page.waitForLoadState('domcontentloaded');
-  await page.waitForTimeout(2500);
+  await page.getByTestId('sub-new').click();
+  await page.locator('#sub-name').fill(name);
+  await expect(page.getByTestId('sub-create')).toBeDisabled();
+  await page.locator('[data-testid^="sub-event-"]').first().check();
+  await page.getByTestId('sub-url').fill('https://uat.example.com/hook-ui');
+  await page.getByTestId('sub-create').click();
+  await expect(page.getByTestId(`sub-${name}`)).toBeVisible({ timeout: 20_000 });
 
-  // The modal hosts the URL field, so open it first
-  const addBtn = page.locator('button', { hasText: /Add Endpoint|Add Webhook/i }).first();
-  expect(await addBtn.count()).toBeGreaterThan(0);
-  await addBtn.click();
-  await page.waitForTimeout(500);
-  const urlInput = page.locator('input[type="url"], input[placeholder*="http" i], input[name*="url" i]').first();
-  const inputs = await page.locator('input').count();
-  console.log(`  webhooks UI: total inputs=${inputs}, url input found=${await urlInput.count()}`);
-  expect(inputs).toBeGreaterThan(0);
-  expect(await urlInput.count()).toBeGreaterThan(0);
-
-  // Confirm POST flow returns the created row
-  const create = await page.request.post(`${API}/api/webhooks`, {
-    headers: auth(tok),
-    data: { url: 'https://uat.example.com/hook-ui', events: ['execution.completed'] },
-  });
-  expect([200, 201]).toContain(create.status());
-  const w = (await create.json()).data;
-
-  // Reload list and confirm visibility
-  await page.reload();
-  await page.waitForTimeout(2500);
-  const pageText = (await page.locator('body').innerText()).toLowerCase();
-  expect(pageText).toContain('uat.example.com');
-  console.log('  webhook visible on page after reload');
-
-  await page.request.delete(`${API}/api/webhooks/${w.id}`, { headers: auth(tok) });
+  const rows = (await (await page.request.get(`${API}/api/webhooks`, { headers: auth(tok) })).json()).data as Array<{ id: string; name: string; url: string }>;
+  const made = rows.find((w) => w.name === name);
+  try {
+    expect(made?.url).toBe('https://uat.example.com/hook-ui');
+    await page.reload();
+    await expect(page.getByTestId(`sub-${name}`)).toContainText('uat.example.com', { timeout: 20_000 });
+  } finally {
+    if (made) await page.request.delete(`${API}/api/webhooks/${made.id}`, { headers: auth(tok) });
+  }
 });

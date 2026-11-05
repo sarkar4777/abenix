@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
+import { fallbackBlocker } from './uat_helpers/llm_env';
 
 const API = process.env.API_URL || 'http://localhost:8000';
 const ABX_BASE = process.env.ABENIX_BASE || 'http://localhost:3000';
@@ -31,8 +32,28 @@ async function gotoOk(page: Page, url: string) {
 }
 
 test.describe.serial('Model availability + fallback — Abenix → ContractIQ → Wingman', () => {
-  test('A1. abenix: /api/llm-models lists Azure provider models', async ({ request }) => {
+  let blocker: string | null = null;
+  let forced = false;
+  const restore = (request: any) => request.post(`${API}/api/admin/model-availability/force-status`, {
+    headers: { Authorization: `Bearer ${adminToken}` },
+    data: { model: claudeModel, status: 'available' },
+  });
+
+  test.beforeAll(async ({ request }) => {
     adminToken = await loginAdmin(request);
+    blocker = await fallbackBlocker(request, API, adminToken);
+  });
+
+  test.beforeEach(() => {
+    test.skip(!!blocker, blocker ?? '');
+  });
+
+  // a failed step skips the rest of a serial run, the model must not stay forced off
+  test.afterAll(async ({ request }) => {
+    if (forced) await restore(request);
+  });
+
+  test('A1. abenix: /api/llm-models lists Azure provider models', async ({ request }) => {
     const r = await request.get(`${API}/api/llm-models`, {
       headers: { Authorization: `Bearer ${adminToken}` },
     });
@@ -66,6 +87,7 @@ test.describe.serial('Model availability + fallback — Abenix → ContractIQ �
       data: { model: claudeModel, status: 'unavailable' },
     });
     expect(r.status()).toBeLessThan(300);
+    forced = true;
   });
 
   test('A4. abenix: resolver now returns azure-gpt-4o as effective', async ({ request }) => {
@@ -145,24 +167,22 @@ test.describe.serial('Model availability + fallback — Abenix → ContractIQ �
     console.log('  metals extract:', JSON.stringify(body).slice(0, 200));
   });
 
-  test('C1. wingman: insight agent runs through fallback model', async ({ request }) => {
-    test.setTimeout(180_000);
-    const r = await request.post(`${WM_API}/api/agent/run`, {
-      headers: { Authorization: `Bearer ${adminToken}` },
-      data: { use_case: 'insight', context: { corridor: 'USGC->NWE' } },
-      timeout: 150_000,
-    }).catch((e) => ({ status: () => 500, json: async () => ({ error: String(e) }) }));
-    const status = (r as any).status();
-    if (status >= 400) {
-      const body = await (r as any).json().catch(() => ({}));
-      console.log('  wingman run error:', body);
-      test.skip(true, `wingman insight agent unreachable (${status})`);
-      return;
-    }
-    const body = await (r as any).json();
-    const modelUsed = body?.data?.model_used || body?.model_used;
-    console.log('  wingman insight ran with model:', modelUsed);
-    if (modelUsed) expect(String(modelUsed)).not.toMatch(/^claude/);
+  test('C1. wingman arb analysis stays reachable while Claude is forced off', async ({ request }) => {
+    test.setTimeout(6 * 60_000);
+    const health = await request.get(`${WM_API}/health`, { timeout: 10_000 }).catch(() => null);
+    test.skip(!health?.ok(), `Wingman API is not reachable at ${WM_API}`);
+    const r = await request.post(`${WM_API}/api/wingman/corridors/USGC-NWE/analyze`, { data: { methodology: 'quick' } });
+    expect(r.status(), await r.text()).toBeLessThan(400);
+    const executionId = (await r.json()).data.execution_id;
+    let row: any = null;
+    await expect.poll(async () => {
+      const got = await request.get(`${WM_API}/api/wingman/executions/${executionId}`);
+      row = got.ok() ? (await got.json()).data : null;
+      return row?.status;
+    }, { timeout: 5 * 60_000, intervals: [5_000] }).toMatch(/^(completed|failed)$/);
+    console.log('  wingman ran with model:', row.model_used, row.status);
+    expect(row.status, row.error_message || '').toBe('completed');
+    if (row.model_requested === claudeModel) expect(String(row.model_used)).not.toMatch(/^claude/);
   });
 
   test('Z. restore claude availability', async ({ request }) => {
@@ -171,5 +191,6 @@ test.describe.serial('Model availability + fallback — Abenix → ContractIQ �
       data: { model: claudeModel, status: 'available' },
     });
     expect(r.status()).toBeLessThan(400);
+    forced = false;
   });
 });

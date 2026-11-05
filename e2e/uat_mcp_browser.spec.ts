@@ -32,11 +32,11 @@ test('MCP: page renders, shows registry + connect controls, drives add-from-regi
     await registryTab.click();
     await page.waitForTimeout(1500);
   }
-  const installBtns = await page.locator('button:has-text("Install"), button:has-text("Connect")').count();
-  console.log(`MCP install buttons: ${installBtns}`);
+  // the first read of an empty registry seeds it
+  const install = page.locator('button:has-text("Install"), button:has-text("Connect")');
+  await expect(install.first()).toBeVisible({ timeout: 30_000 });
+  console.log(`MCP install buttons: ${await install.count()}`);
   await page.screenshot({ path: 'test-results/uat-mcp-page.png', fullPage: true });
-
-  expect(installBtns).toBeGreaterThan(0);
 });
 
 test('Integrations page: MCP link card + setup expand + admin badge', async ({ page }) => {
@@ -63,7 +63,9 @@ test('Integrations page: MCP link card + setup expand + admin badge', async ({ p
 
   const copyBtns = await page.locator('button', { hasText: /^Copy$|✓ copied/i }).count();
   console.log(`Copy buttons in expanded view: ${copyBtns}`);
-  expect(copyBtns).toBeGreaterThanOrEqual(3);
+  // shell export and .env, live values moved to Tool Configuration
+  expect(copyBtns).toBe(2);
+  await expect(page.locator('[data-testid^="integration-live-"]').first()).toBeVisible();
 
   await page.screenshot({ path: 'test-results/uat-integrations-setup-expanded.png', fullPage: true });
 });

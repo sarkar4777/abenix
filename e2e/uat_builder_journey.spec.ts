@@ -9,6 +9,8 @@
  */
 
 import { test, expect, type Page } from '@playwright/test';
+import * as path from 'path';
+import { artifactDir } from './uat_helpers/artifacts';
 
 const WEB = process.env.BASE_URL || 'http://localhost:3100';
 const API = process.env.API_URL || 'http://localhost:8000';
@@ -117,7 +119,7 @@ test('builder journey: describe, build, save, publish and run through the UI', a
     await page.waitForTimeout(10_000);
   }
   console.log(`STEP 4: published; url = ${page.url()}`);
-  await page.screenshot({ path: 'e2e/screenshots/journey-publish.png', fullPage: true });
+  await page.screenshot({ path: path.join(artifactDir('builder-journey'), 'publish.png'), fullPage: true });
 
   // ── 5. Run it and read the answer ──────────────────────────────────────
   const agents = await fetch(`${API}/api/agents?limit=3`, {
@@ -146,7 +148,7 @@ test('builder journey: describe, build, save, publish and run through the UI', a
       break;
     }
   }
-  await page.screenshot({ path: 'e2e/screenshots/journey-answer.png', fullPage: true });
+  await page.screenshot({ path: path.join(artifactDir('builder-journey'), 'answer.png'), fullPage: true });
   const tail = answer.slice(-1800);
   console.log('\n===== the answer =====');
   console.log(tail || '(no answer rendered in time)');

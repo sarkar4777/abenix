@@ -1,10 +1,9 @@
 import { test, expect, type Page } from '@playwright/test';
-import * as fs from 'fs';
 import * as path from 'path';
+import { artifactDir } from './uat_helpers/artifacts';
 
 const BASE = process.env.BASE_WM || 'http://localhost:3006';
-const SHOTS = path.join(process.cwd(), 'e2e', 'screenshots', 'wingman');
-fs.mkdirSync(SHOTS, { recursive: true });
+const SHOTS = artifactDir('wingman');
 
 let _n = 0;
 async function shot(page: Page, label: string) {

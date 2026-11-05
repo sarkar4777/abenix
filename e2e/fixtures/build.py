@@ -5,16 +5,18 @@ Run from repo root::
 
     python e2e/fixtures/build.py
 
-Re-run is idempotent — it overwrites the outputs and never adds noise.
+The zip goes to a temp path because each build carries the current time. With --zip <path> only the zip is written.
 """
 from __future__ import annotations
 
 import io
 import sys
+import tempfile
 import zipfile
 from pathlib import Path
 
 OUT_DIR = Path(__file__).resolve().parent
+ZIP_TMP = Path(tempfile.gettempdir()) / "abenix-e2e-fixtures" / "uat_python_app.zip"
 
 # ─── PDF ──────────────────────────────────────────────────────────────
 # Hand-rolled single-page PDF using only stdlib. Contains the marker
@@ -135,23 +137,24 @@ def build_model() -> bytes:
 
 # ─── Main ─────────────────────────────────────────────────────────────
 def main() -> int:
+    if len(sys.argv) == 3 and sys.argv[1] == "--zip":
+        target = Path(sys.argv[2])
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(build_zip())
+        print(f"  wrote {target} ({target.stat().st_size}B)")
+        return 0
+
     pdf_path = OUT_DIR / "uat_kb_doc.pdf"
-    zip_path = OUT_DIR / "uat_python_app.zip"
     pkl_path = OUT_DIR / "uat_ml_model.pkl"
+    ZIP_TMP.parent.mkdir(parents=True, exist_ok=True)
 
     pdf_path.write_bytes(build_pdf())
-    zip_path.write_bytes(build_zip())
+    ZIP_TMP.write_bytes(build_zip())
     pkl_path.write_bytes(build_model())
 
-    print(
-        f"  wrote {pdf_path.relative_to(OUT_DIR.parent.parent)} ({pdf_path.stat().st_size}B)"
-    )
-    print(
-        f"  wrote {zip_path.relative_to(OUT_DIR.parent.parent)} ({zip_path.stat().st_size}B)"
-    )
-    print(
-        f"  wrote {pkl_path.relative_to(OUT_DIR.parent.parent)} ({pkl_path.stat().st_size}B)"
-    )
+    print(f"  wrote {pdf_path.relative_to(OUT_DIR.parent.parent)} ({pdf_path.stat().st_size}B)")
+    print(f"  wrote {ZIP_TMP} ({ZIP_TMP.stat().st_size}B)")
+    print(f"  wrote {pkl_path.relative_to(OUT_DIR.parent.parent)} ({pkl_path.stat().st_size}B)")
     return 0
 
 

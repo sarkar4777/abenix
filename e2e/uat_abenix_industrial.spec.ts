@@ -1,5 +1,7 @@
 import { test, expect, type Page, type APIRequestContext, type Browser } from '@playwright/test';
+import { execFileSync } from 'child_process';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 
 /**
@@ -17,7 +19,7 @@ import * as path from 'path';
  *
  * Fixtures used:
  *   • e2e/fixtures/uat_kb_doc.pdf       — 1-page PDF with marker phrase
- *   • e2e/fixtures/uat_python_app.zip   — Python add-server project
+ *   • e2e/fixtures/build.py --zip        Python add-server project, built in a temp path
  *   • e2e/fixtures/uat_ml_model.pkl     — tiny sklearn LinearRegression
  *   • e2e/fixtures/mcp_server/          — in-cluster MCP server
  *
@@ -32,6 +34,17 @@ const PASSWORD = process.env.AF_PASSWORD || 'Admin123456';
 
 const RUN_TAG = `ind-${Date.now().toString(36)}`;
 const FIXTURES = path.resolve(__dirname, 'fixtures');
+
+// made in a temp path so the run leaves the tracked copy alone, which stays as the fallback without Python
+function pythonAppZip(): string {
+  const out = path.join(os.tmpdir(), `abenix-e2e-${process.pid}`, 'uat_python_app.zip');
+  try {
+    execFileSync('python3', [path.join(FIXTURES, 'build.py'), '--zip', out], { stdio: 'ignore' });
+    return out;
+  } catch {
+    return path.join(FIXTURES, 'uat_python_app.zip');
+  }
+}
 
 // In-cluster URL for the UAT MCP server. The abenix-api pod
 // resolves this via Kubernetes DNS.
@@ -303,8 +316,7 @@ test.describe('Industrial · Code Runner', () => {
 
   test('Upload Python zip → analyser detects → run with input → output matches', async ({ page }) => {
     test.setTimeout(240_000);
-    const zipPath = path.join(FIXTURES, 'uat_python_app.zip');
-    const buf = fs.readFileSync(zipPath);
+    const buf = fs.readFileSync(pythonAppZip());
     // /api/code-assets accepts file + a `metadata` JSON Form field.
     const fd = new FormData();
     fd.append('file', new Blob([buf], { type: 'application/zip' }), 'uat_python_app.zip');
