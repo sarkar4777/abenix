@@ -26,22 +26,49 @@ case "$(uname -s)" in
 esac
 
 # ── Detect Python ─────────────────────────────────────────────
-find_python() {
-  for cmd in python3.12 python3.13 python3 python; do
-    if command -v "$cmd" &>/dev/null; then
-      echo "$cmd"
-      return
-    fi
-  done
-  if command -v py &>/dev/null; then
-    echo "py"
-    return
+# An activated venv always wins, then the repo's .venv. Otherwise a system
+# Python is used only if it already has the platform packages, because Homebrew
+# and uv Pythons refuse `pip install` (PEP 668). Anything else gets a new .venv.
+PY_DEPS_CHECK="import fastapi, email_validator, nats, neo4j, zen, celery, uvicorn"
+
+venv_python() { # venv_python <dir>
+  if [ -x "$1/bin/python" ]; then echo "$1/bin/python"
+  elif [ -x "$1/Scripts/python.exe" ]; then echo "$1/Scripts/python.exe"
   fi
-  err "No Python found. Install Python 3.12+."
-  exit 1
 }
 
-PYTHON=$(find_python)
+find_base_python() {
+  for cmd in python3.12 python3.13 python3 python py; do
+    if command -v "$cmd" &>/dev/null && "$cmd" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 12) else 1)' 2>/dev/null; then
+      echo "$cmd"
+      return 0
+    fi
+  done
+  return 1
+}
+
+find_python() {
+  local found=""
+  if [ -n "${VIRTUAL_ENV:-}" ]; then found="$(venv_python "$VIRTUAL_ENV")"; fi
+  [ -z "$found" ] && found="$(venv_python "$ROOT_DIR/.venv")"
+  if [ -n "$found" ]; then echo "$found"; return 0; fi
+
+  local base
+  if ! base="$(find_base_python)"; then
+    err "No Python 3.12 or newer found. Install it, for example: brew install python@3.12" >&2
+    return 1
+  fi
+  if "$base" -c "$PY_DEPS_CHECK" >/dev/null 2>&1; then echo "$base"; return 0; fi
+
+  log "Creating a virtual environment at .venv with $base..." >&2
+  if ! "$base" -m venv "$ROOT_DIR/.venv" >&2; then
+    err "Could not create .venv with $base. Create one yourself, activate it and run this again." >&2
+    return 1
+  fi
+  venv_python "$ROOT_DIR/.venv"
+}
+
+PYTHON=$(find_python) || exit 1
 log "Using Python: $PYTHON ($($PYTHON --version 2>&1))"
 
 # ── Normalise AZURE_OPENAI_* in .env BEFORE we source it ──────
@@ -146,7 +173,7 @@ _force_stop_azure_portforwards() {
   fi
   [ "$any" = false ] && return 0
   warn "Detected active kubectl port-forward(s) — tearing down before local boot"
-  if [ -x "$ROOT_DIR/scripts/portforward-azure.sh" ]; then
+  if [ -f "$ROOT_DIR/scripts/portforward-azure.sh" ]; then
     bash "$ROOT_DIR/scripts/portforward-azure.sh" stop >/dev/null 2>&1 || true
   fi
   pkill -f "kubectl.*port-forward" 2>/dev/null || true
@@ -177,6 +204,23 @@ if [ -f "$ROOT_DIR/.env" ]; then
   done < "$ROOT_DIR/.env"
   ok "Loaded environment from .env"
 fi
+
+# ── Values that only work inside the cluster, or that a service refuses ──
+# An older .env copied from the example can carry these. They fail far from the
+# cause (runs that wait forever, a Neo4j that exits), so correct them for this
+# run and say so.
+case "${NATS_URL:-}" in
+  *abenix-nats*|"")
+    [ -n "${NATS_URL:-}" ] && warn "NATS_URL in .env is the in-cluster address, using nats://127.0.0.1:4222 for this run"
+    export NATS_URL="nats://127.0.0.1:4222"
+    ;;
+esac
+if [ "${#NEO4J_PASSWORD}" -gt 0 ] && [ "${#NEO4J_PASSWORD}" -lt 8 ]; then
+  warn "NEO4J_PASSWORD in .env is under the 8 characters Neo4j requires, using abenix-neo4j-pass for this run"
+  export NEO4J_PASSWORD="abenix-neo4j-pass"
+fi
+: "${NEO4J_PASSWORD:=abenix-neo4j-pass}"
+export NEO4J_PASSWORD
 
 # ── Sandboxed-job runner is on by default in dev ──────────────
 # These two vars must always be set or the sandboxed_job tool returns
@@ -302,6 +346,23 @@ kill_port() {
 # Usage: wait_port_listening <port> <label> <timeout_sec> [<log_basename>] [<pid>]
 # On timeout, kills the started PID (if given), tails the log file,
 # prints a clear remediation hint, then exits 1. No silent hangs.
+# `uvicorn --reload` opens the port from its supervisor even when the app fails
+# to import, so an open port proves nothing. Ask the app itself.
+wait_http_ok() { # wait_http_ok <url> <label> <timeout> <log-base>
+  local url=$1 label=$2 timeout=$3 log_base=$4 elapsed=0
+  while [ "$elapsed" -lt "$timeout" ]; do
+    if [ "$(curl -s -m 3 -o /dev/null -w '%{http_code}' "$url" 2>/dev/null)" = "200" ]; then
+      ok "$label is answering (after ${elapsed}s)"
+      return 0
+    fi
+    sleep 2
+    elapsed=$((elapsed + 2))
+  done
+  err "$label is not answering at $url after ${timeout}s. Last lines of $LOG_DIR/${log_base}.log:"
+  tail -20 "$LOG_DIR/${log_base}.log" 2>/dev/null | sed 's/^/      /'
+  return 1
+}
+
 wait_port_listening() {
   local port=$1
   local label=$2
@@ -616,34 +677,51 @@ docker compose ps 2>/dev/null | grep "abenix-timescaledb" | grep -q "healthy" &&
 if [ "$PG_HEALTHY" = true ] && [ "$REDIS_HEALTHY" = true ] && [ "$NEO4J_HEALTHY" = true ] && [ "$NATS_HEALTHY" = true ] && [ "$TSDB_HEALTHY" = true ]; then
   ok "Postgres, Redis, Neo4j, NATS, Mosquitto, and TimescaleDB already running and healthy"
 else
-  docker compose up -d 2>&1 | sed 's/^/      /'
+  COMPOSE_LOG="$(mktemp)"
+  docker compose up -d >"$COMPOSE_LOG" 2>&1
+  COMPOSE_RC=$?
+  sed 's/^/      /' "$COMPOSE_LOG"
+  if [ "$COMPOSE_RC" -ne 0 ]; then
+    err "docker compose up failed, so nothing was started. The cause is above:"
+    grep -iE 'denied|not found|no such|error|conflict|port is already' "$COMPOSE_LOG" | head -5 | sed 's/^/      /'
+    err "A port conflict means another stack is running. An image error usually means no network or no registry access."
+    rm -f "$COMPOSE_LOG"
+    exit 1
+  fi
+  rm -f "$COMPOSE_LOG"
+
   log "Waiting for containers to be healthy..."
-  for i in $(seq 1 45); do
+  for i in $(seq 1 120); do
     PG_OK=false
     RD_OK=false
     N4_OK=false
     NA_OK=false
     TS_OK=false
-    docker compose ps 2>/dev/null | grep "abenix-postgres" | grep -q "healthy" && PG_OK=true
-    docker compose ps 2>/dev/null | grep "abenix-redis" | grep -q "healthy" && RD_OK=true
-    docker compose ps 2>/dev/null | grep "abenix-neo4j" | grep -q "healthy" && N4_OK=true
-    docker compose ps 2>/dev/null | grep "abenix-nats" | grep -q "healthy" && NA_OK=true
-    docker compose ps 2>/dev/null | grep "abenix-timescaledb" | grep -q "healthy" && TS_OK=true
+    PS_NOW="$(docker compose ps -a 2>/dev/null)"
+    echo "$PS_NOW" | grep "abenix-postgres" | grep -q "(healthy)" && PG_OK=true
+    echo "$PS_NOW" | grep "abenix-redis" | grep -q "(healthy)" && RD_OK=true
+    echo "$PS_NOW" | grep "abenix-neo4j" | grep -q "(healthy)" && N4_OK=true
+    echo "$PS_NOW" | grep "abenix-nats" | grep -q "(healthy)" && NA_OK=true
+    echo "$PS_NOW" | grep "abenix-timescaledb" | grep -q "(healthy)" && TS_OK=true
 
     if [ "$PG_OK" = true ] && [ "$RD_OK" = true ] && [ "$N4_OK" = true ] && [ "$NA_OK" = true ] && [ "$TS_OK" = true ]; then
       ok "Postgres, Redis, Neo4j, NATS, Mosquitto, and TimescaleDB are healthy"
       break
     fi
-    if [ "$i" -eq 45 ]; then
-      if [ "$PG_OK" = true ] && [ "$RD_OK" = true ] && [ "$NA_OK" = true ]; then
-        warn "Neo4j/TimescaleDB still starting — knowledge or tsdb features may be delayed"
-      elif [ "$PG_OK" = true ] && [ "$RD_OK" = true ]; then
-        warn "NATS is still starting — agent execution will fall back to inline"
-      else
-        err "Containers failed to become healthy after 45s"
-        docker compose ps 2>/dev/null
+    # A container that exited will not come back on its own, show why right away.
+    for svc in abenix-postgres abenix-redis abenix-neo4j abenix-nats abenix-timescaledb; do
+      if echo "$PS_NOW" | grep "$svc" | grep -qi "exited"; then
+        err "$svc exited during start. Its last log lines:"
+        docker logs --tail 8 "$svc" 2>&1 | sed 's/^/      /'
+        err "Fix the cause, then run: bash scripts/dev-local.sh --restart"
         exit 1
       fi
+    done
+    if [ "$i" -eq 120 ]; then
+      err "These containers are not healthy after 120s:"
+      echo "$PS_NOW" | grep -v "(healthy)" | sed 's/^/      /'
+      err "See their logs with: docker logs <name>"
+      exit 1
     fi
     sleep 1
   done
@@ -689,10 +767,25 @@ fi
 
 # ── Step 4: Install Python dependencies if needed ─────────────
 log "Step 3/7 — Python dependencies..."
-if $PYTHON -c "import fastapi" >/dev/null 2>&1; then
+if $PYTHON -c "$PY_DEPS_CHECK" >/dev/null 2>&1; then
   ok "Python packages already installed"
 else
-  $PYTHON -m pip install -r requirements.txt 2>&1 | tail -3 | sed 's/^/      /'
+  PIP_LOG="$LOG_DIR/pip-install.log"
+  mkdir -p "$LOG_DIR"
+  log "Installing the API, runtime and worker requirements, a few minutes the first time..."
+  if ! $PYTHON -m pip install -r apps/api/requirements.txt -r apps/agent-runtime/requirements.txt -r apps/worker/requirements.txt >"$PIP_LOG" 2>&1; then
+    err "pip install failed. The end of $PIP_LOG:"
+    tail -15 "$PIP_LOG" | sed 's/^/      /'
+    if grep -q "externally-managed-environment" "$PIP_LOG"; then
+      err "This Python does not allow installs. Run: python3.12 -m venv .venv && source .venv/bin/activate"
+    fi
+    exit 3
+  fi
+  if ! $PYTHON -c "$PY_DEPS_CHECK" 2>"$PIP_LOG.check"; then
+    err "Packages installed but a required one still does not import:"
+    tail -3 "$PIP_LOG.check" | sed 's/^/      /'
+    exit 3
+  fi
   ok "Python packages installed"
 fi
 
@@ -717,15 +810,27 @@ find . -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
 # Bootstrap fast-path for a brand-new database — Base.metadata.create_all
 # in one shot, then alembic stamp heads. No-ops if alembic_version
 # already exists. See packages/db/bootstrap.py.
-PYTHONPATH="." $PYTHON -m bootstrap 2>&1 | sed 's/^/      /' || true
+BOOTSTRAP_OUT=$(PYTHONPATH="." $PYTHON -m bootstrap 2>&1)
+BOOTSTRAP_RC=$?
+echo "$BOOTSTRAP_OUT" | sed 's/^/      /'
+if [ "$BOOTSTRAP_RC" -ne 0 ]; then
+  err "Database bootstrap failed (exit $BOOTSTRAP_RC), the error is above. No schema was changed."
+  exit 5
+fi
 
 # Run alembic to heads — applies every independent migration chain (we
 # have multiple heads in the repo, e.g. the dead_letter branch + the
 # approvals additions branch). The singular `head` form errors with
 # "Multiple head revisions are present" and the swallow below would
 # hide it; the sentinel check at the bottom is what catches drift.
-MIGRATION_OUT=$(PYTHONPATH="." $PYTHON -m alembic upgrade heads 2>&1) || true
+MIGRATION_OUT=$(PYTHONPATH="." $PYTHON -m alembic upgrade heads 2>&1)
+MIGRATION_RC=$?
 echo "$MIGRATION_OUT" | grep "Running upgrade" | sed 's/^/      /' || true
+if [ "$MIGRATION_RC" -ne 0 ]; then
+  err "alembic upgrade heads failed (exit $MIGRATION_RC):"
+  echo "$MIGRATION_OUT" | tail -15 | sed 's/^/      /'
+  exit 5
+fi
 
 # Sentinel column list lives in scripts/_schema-sentinels.sh — single
 # source of truth shared with verify-schema.sh and deploy-azure.sh.
@@ -748,7 +853,7 @@ if [ -n "$_missing" ]; then
   err "Schema drift after alembic upgrade head — missing:$_missing"
   err "The catchup migration didn't fully apply. Inspect:"
   err "  packages/db/alembic/versions/x4y5z6a7b8c9_schema_drift_catchup.py"
-  err "If this is a fresh install you can recover with:"
+  err "On a fresh install with nothing to keep, this recovers it and DELETES ALL LOCAL DATA:"
   err "  bash scripts/verify-schema.sh --reset"
   exit 5
 fi
@@ -877,6 +982,7 @@ ok "API server starting (PID $API_PID) — port 8000 — log: $LOG_DIR/abenix-ap
 # Hard-cap wait for the API to actually open the port. If it doesn't,
 # wait_port_listening kills the PID and bails with a tailed log.
 wait_port_listening 8000 "API server" 45 "abenix-api" "$API_PID" || exit 1
+wait_http_ok "http://localhost:8000/api/health" "API server" 120 "abenix-api" || exit 1
 
 # Start Web server
 cd "$ROOT_DIR/apps/web"
@@ -1075,7 +1181,7 @@ for k,v in json.load(sys.stdin).items(): print(f'{k}={v}')
   echo -e "    API:     PID $API_PID — port 8000"
   echo -e "    Web:     PID $WEB_PID — port 3000"
   echo -e "    Celery:  PID $CELERY_PID — queues: documents, cognify"
-  echo -e "    Neo4j:   bolt://localhost:7687 (user: neo4j, pass: abenix)"
+  echo -e "    Neo4j:   bolt://localhost:7687 (user: ${NEO4J_USER:-neo4j}, pass: ${NEO4J_PASSWORD})"
   echo ""
   echo -e "  ${YELLOW}Logs:${NC} (per-process — $LOG_DIR/)"
   echo -e "    API:     tail -f $LOG_DIR/abenix-api.log"

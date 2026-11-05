@@ -256,7 +256,7 @@ ensure_minikube() {
     local start_log
     start_log=$(mktemp)
     set +e
-    minikube start --driver=docker --cpus="${MK_CPUS}" --memory="${MK_MEMORY}" --disk-size=30g ${reserved[@]+"${reserved[@]}"} >"${start_log}" 2>&1
+    minikube start --driver=docker --container-runtime=docker --cpus="${MK_CPUS}" --memory="${MK_MEMORY}" --disk-size=30g ${reserved[@]+"${reserved[@]}"} >"${start_log}" 2>&1
     local rc=$?
     set -e
     tail -5 "${start_log}"
@@ -1894,11 +1894,11 @@ deploy_local() {
 
   # After the apps deploy, not before: each manifest recreates its own
   # *-secrets from the environment and would overwrite a freshly minted key.
-  if [ -x "${ROOT_DIR}/scripts/seed-standalone-keys.sh" ] && [ "${#SELECTED_APPS[@]}" -gt 0 ]; then
+  if [ "${#SELECTED_APPS[@]}" -gt 0 ]; then
     step "Seeding standalone app API keys"
     local seed_app
     for seed_app in "${SELECTED_APPS[@]}"; do
-      NAMESPACE="${NAMESPACE}" bash "${ROOT_DIR}/scripts/seed-standalone-keys.sh" "${seed_app}" 2>&1 | tail -6 \
+      ( set -o pipefail; NAMESPACE="${NAMESPACE}" bash "${ROOT_DIR}/scripts/seed-standalone-keys.sh" "${seed_app}" 2>&1 | tail -6 ) \
         || CORE_FAILURES+=("${seed_app} has no working Abenix API key, rerun: bash scripts/seed-standalone-keys.sh ${seed_app}")
     done
   fi
