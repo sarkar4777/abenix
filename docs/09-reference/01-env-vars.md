@@ -71,7 +71,14 @@ also from a `.env` at the repo root when one exists.
 | `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `GOOGLE_API_KEY` | empty | A warning logs when all three are empty |
 | `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` / `STRIPE_CONNECT_CLIENT_ID` | empty | Billing |
 | `MARKETPLACE_ENABLED` | `true` | Default for the marketplace switch. A platform operator's value on Admin, Marketplace & Billing wins. Chart from `features.marketplace` |
-| `ABENIX_PLATFORM_OPERATORS` | empty | Comma separated admin emails allowed to change the marketplace and monetization switches. Empty means the admins of the platform tenant, the one holding `system@abenix.dev` |
+| `TENANT_DATABASE_URL` | empty | Saved per tenant under Admin, Tool Configuration. The Postgres database `database_query` and `database_writer` use for that tenant. The host must pass the private target check. Agents outside the platform tenant have no other database |
+| `TOOL_ALLOW_CONNECTION_STRINGS` | `false` | Lets an agent pass `connection_string` in a tool call. The host still has to pass the private target check |
+| `TOOL_PLATFORM_FILE_ROOTS` | empty | Comma separated folders the platform tenant's file tools may read besides its own tenant folders. `KYC_UPLOAD_DIR` counts as one |
+| `CODE_EXECUTOR_SANDBOX_IMAGE` | empty | Runs `code_executor` in a sandboxed job when the sandbox is on and this image is allowed. Empty means a local process with no secrets, resource limits and audit hooks |
+| `SANDBOX_MEMORY_MB` | `2048` | Memory limit for a code run or a model load, where the operating system honours it |
+| `PLAYGROUND_SANDBOX_IMAGE` | empty | Runs playground code in a sandboxed job instead of the API pod. The image needs the SDK, and the sandbox must allow network since the snippet calls the API. It also lifts the off by default rule |
+| `PLAYGROUND_EXECUTE_ENABLED` | empty | `true` or `false` turns running code in the SDK and load playgrounds on or off. Empty means on only when `ENVIRONMENT` is `local`, `dev`, `development`, `ci` or `test`, or `IS_LOCAL_DEV` is set. Chart from `features.playgroundExecute` |
+| `ABENIX_PLATFORM_OPERATORS` | empty | Comma separated admin emails who count as platform operators. Only they can change platform settings, pricing, model availability, tool limits, shared credentials, shipped agents and marketplace reviews, see every tenant on the scaling screens, or run tools that reach shared resources directly. Empty means the admins of the platform tenant, the one holding `system@abenix.dev` |
 | `MONETIZATION_ENABLED` | `false` | Default for the monetization switch. A platform operator's value wins. Chart from `features.monetization` |
 | `STRIPE_PRO_PRICE_ID` / `STRIPE_BUSINESS_PRICE_ID` | empty | Stripe price ids for the Pro and Business plans, read in `app/core/stripe.py` |
 | `SCALING_EXEC_REMOTE` | `false` | `true` queues executions whose agent pool is not `inline` instead of running them in the API. Chart from `scaling.execRemote` |
@@ -188,6 +195,9 @@ Tenants can override the three `SANDBOXED_JOB_*` switches from
 | `OIDC_INTERNAL_URL_MAP` | empty | Dev only, `public=internal` pairs so a localhost SSO issuer is reached by service name. Set by `devCatchers.enabled` |
 | `PUBLIC_API_BASE_URL` | `http://localhost:8000` | Where SSO providers send the browser back. Helm `publicApiUrl` |
 | `STALE_EXECUTION_MAX_MINUTES` | `10` | A run still `running` after this long is marked failed by the sweeper, which runs every minute. Runs with a live queue lease are skipped |
+| `DEDICATED_POOL_TEMPLATE` | set by the chart | Deployment that dedicated pools are cloned from. Unset turns dedicated mode off |
+| `DEDICATED_POOL_MAX_REPLICAS` | `5` | Replicas one dedicated pool may reach, from `scaling.dedicated.maxReplicas` |
+| `DEDICATED_POOL_MAX_POOLS` | `20` | Dedicated pools allowed on the cluster, from `scaling.dedicated.maxPools` |
 | `WORKER_GONE_SECONDS` | `300` | A run whose runtime pod's lease lapsed this long ago, with no pod taking it over, fails with `WORKER_STOPPED` |
 | `DRIFT_DETECTION_ENABLED` | `true` | Platform default for drift scoring. An agent's `model_config.drift_detection` and the tenant toggle win |
 | `DRIFT_SCAN_INTERVAL_SECONDS` | `300` | Floor 30 |
@@ -657,7 +667,7 @@ effect, the bundle is already built.
 ## Edge runtimes
 
 Read by `apps/edge-runtime/runtime.py`, `apps/edge-runtime-rust` and
-`apps/edge-runtime-c`, all three the same contract unless noted.
+`apps/edge-runtime-c`, all three the same contract.
 
 | Variable | Default | Notes |
 |---|---|---|
@@ -665,14 +675,20 @@ Read by `apps/edge-runtime/runtime.py`, `apps/edge-runtime-rust` and
 | `GATEWAY_NAME` | `GATEWAY_ID` | |
 | `PLATFORM_URL` | `http://host.docker.internal:8000` | API base |
 | `PLATFORM_TOKEN` | empty | `af_*` key from `POST /api/edge/tokens/mint`. Empty skips registration |
-| `MQTT_URL` | empty | Broker for `edge.<gateway_id>.deploy`. Empty means bundles arrive over HTTP only |
-| `SIGNING_PUBKEY_PEM` | empty | Bundle verification key. Python and Rust only |
+| `MQTT_URL` | empty | Broker for `edge/<gateway_id>/deploy/+`, `mqtt://user:password@host:1883`. Empty means bundles arrive over HTTP only |
+| `SIGNING_PUBKEY_PEM` | empty | Bundle verification key |
 | `SIGNING_PUBKEY_PATH` | `/etc/edge/signing_pub.pem` | Used when the PEM variable is empty |
-| `EDGE_ALLOW_UNSIGNED` | off | Only the literal `true` accepts unsigned bundles. Python only. Local development |
-| `TENANT_ID` | empty | Refuses bundles signed for another tenant. Python only |
+| `EDGE_ALLOW_UNSIGNED` | off | Only the literal `true` lets it start without a key and accept unsigned bundles. Local development |
+| `EDGE_AUTH_TOKEN` | empty | Bearer token for bundle install and execute. Required to start |
+| `EDGE_ALLOW_NO_AUTH` | off | Only the literal `true` lets it start with no token. Local development |
+| `EDGE_ENABLE_CODE_EXECUTOR` | off | Only the literal `true` lets `params.code` run |
+| `EDGE_MODE` | empty | Python image only, `legacy` or `gateway` |
+| `ABENIX_EDGE_COLLECTORS_FILE` | empty | Gateway mode, a JSON list of collectors added to those from the platform |
+| `TENANT_ID` | empty | Refuses bundles signed for another tenant |
 | `BUNDLE_DIR` | `/var/edge/agents` | |
 | `ENDPOINT_URL` | empty | URL the platform can push bundles to. Sent on register |
-| `ANTHROPIC_API_KEY` | empty | Without it execute returns a stub answer |
+| `ANTHROPIC_API_KEY` | empty | The model credential. With this and the next one empty, execute returns a stub answer |
+| `ANTHROPIC_AUTH_TOKEN`, `CLAUDE_SUBSCRIPTION_TOKEN` | empty | A subscription token, sent as a bearer token |
 | `ANTHROPIC_BASE_URL` | `https://api.anthropic.com` | |
 | `PORT` | `8080` | |
 

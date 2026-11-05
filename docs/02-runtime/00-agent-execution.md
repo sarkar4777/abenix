@@ -247,6 +247,15 @@ about.
 actually run. Anything that branches on the raw configured model rather than the
 effective one will quietly bypass the subscription.
 
+### Outside exclusive mode
+
+A Claude request runs on the subscription under the model it names. A non-Claude
+model runs on its own provider when it has a key. With no key it maps to a
+comparable Claude tier on the subscription, so a Gemini agent still runs. A 429
+from the subscription on any model other than `default_model` retries once on
+`default_model`, because plan limits are per model. A stream gets the same chain
+as a normal call until its first token arrives, after that a failure ends the run.
+
 ### The token rotates
 
 The subscription credential is an OAuth access token that expires within hours,

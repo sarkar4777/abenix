@@ -350,6 +350,10 @@ sequenceDiagram
 | `ABENIX_CA_FILE` | none | A CA bundle when Abenix uses a private certificate |
 | `LOG_LEVEL` | `INFO` | Log detail |
 | `PORT` | `8080` | Serves `/health` and `/status` on the box. One port up when the gateway also runs agents |
+| `EDGE_AUTH_TOKEN` | none | Only with the agents role, the install step adds it. Bundle install and execute need it, and the role stays off without it, which the gateway's health says |
+| `ABENIX_EDGE_COLLECTORS_FILE` | none | A JSON list of collectors set on this box, added to those from the platform |
+
+With the agents role, an agent makes one model call and returns the text. There is no tool loop on the box, so answering with the site offline needs an Anthropic compatible server on the site network, see [what an agent on the edge can do](../06-deployment/05-edge-runtime.md#what-an-agent-on-the-edge-can-and-cannot-do). Collecting and buffering need no model at all.
 
 ---
 

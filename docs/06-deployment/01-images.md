@@ -143,10 +143,10 @@ self-contained Dockerfile, built with their own directory as the context.
   it, tags it with the SHA and installs the gateway from
   `localhost:5000/abenix/<variant>`.
 - **AKS.** `deploy-azure.sh` never builds them. Its edge releases pull
-  `<acr>/abenix/<variant>` at the version pinned in each chart's `values.yaml`,
-  currently `1.1.0`. Push a new image to ACR by hand, then set
-  `EDGE_IMAGE_TAG`. Passing the git SHA instead leaves the pods in
-  `ImagePullBackOff`, because no such image was ever pushed.
+  `<acr>/abenix/<variant>` at the tag in each chart's `values.yaml`, `latest`.
+  Push a new image to ACR by hand, and set `EDGE_IMAGE_TAG` when it has another
+  tag. Passing the git SHA instead leaves the pods in `ImagePullBackOff`,
+  because no such image was ever pushed.
 
 ---
 

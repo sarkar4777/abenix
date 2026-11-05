@@ -140,7 +140,7 @@ An optional `conversation_id` names a chat thread the caller owns. The API loads
 | `wait_mode: "until_gate"` | Like `completed`, but returns early with `status: "paused"` and `paused_at` when a human approval gate opens |
 | `wait: false` or `wait_mode: "submitted"` | Returns at once with `execution_id`. On the pool path the body also has `task_id`, `pool` and `mode: "async"` |
 
-When `wait` is omitted, API-key callers (the SDKs) get `wait: true` and `stream: false`. Browser callers keep the stream. The SDK exposes this as `execute(slug, message, wait=...)`, see [03-sdk/00-overview](../03-sdk/00-overview.md).
+When `wait` is omitted, API-key callers (the SDKs) get `wait: true` and `stream: false`, unless they sent `stream: true` themselves. An explicit `stream: true` always streams. Browser callers keep the stream. The SDK exposes this as `execute(slug, message, wait=...)`, see [03-sdk/00-overview](../03-sdk/00-overview.md).
 
 ### 8-9. Agent runtime picks up
 
@@ -236,7 +236,7 @@ When the loop ends the consumer writes the terminal state (`status`, `output_mes
 
 1. Finds executions still `running` whose `created_at` is older than `STALE_EXECUTION_MAX_MINUTES` (default 10), and runs a runtime pod held whose lease lapsed more than `WORKER_GONE_SECONDS` (default 300) ago with no pod taking them over.
 2. Skips runs parked on a human approval gate (`hitl:waiting:<id>` in Redis) and runs whose queue lease (`lease_expires_at`) is still live.
-3. Marks the runs whose pod stopped `failed` with `failure_code='WORKER_STOPPED'` and "The worker running this stopped before it finished. Run it again.", the rest with `STALE_SWEEP`, then notifies the owners in-app.
+3. Marks the runs whose pod stopped `failed` with `failure_code='WORKER_STOPPED'` and "The worker running this stopped before it finished. Run it again.", queued runs no worker ever claimed with `QUEUE_NOT_PICKED_UP`, the rest with `STALE_SWEEP`, then notifies the owners in-app.
 
 This is what unsticks the dashboard when a pod gets OOM-killed mid-loop.
 

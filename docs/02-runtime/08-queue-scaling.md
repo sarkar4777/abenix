@@ -69,9 +69,17 @@ consumer: abenix-<pool>-consumer   (pull, durable, subject agents.<pool>)
   ack_wait: 30s                # renewed by in_progress heartbeats while the run lives
 ```
 
+KEDA reads a pool's lag from its durable, and answers with an error when the durable does not exist, so a pool at zero must have one before any pod starts. The API creates the durable before it publishes the first run to a pool, and the scheduler job `reconcile_runtime_pools` creates one for every deployed pool every 30 seconds, so the ScaledObject reads Ready from the start.
+
 The only size bound is the server's `max_file_store` of 5GB (`templates/nats-jetstream.yaml`).
 
-The API publishes to `agents.<runtime_pool>`, using the agent's `runtime_pool` column (default `default`). An agent set to `inline` runs in the API pod. There is no per-run override. Triggers use the same rule.
+The API publishes to `agents.<runtime_pool>`, using the agent's `runtime_pool` column (default `default`), or to `agents.dedicated-<agent id>` for an agent in dedicated mode. An agent set to `inline` runs in the API pod. There is no per-run override. Triggers and dead letter replays use the same rule.
+
+### A pool that cannot serve the run
+
+Before it publishes, the API looks up the pools on the cluster, cached for 15 seconds. A pool with no Deployment, or with no replicas and no ScaledObject to wake it, fails the run at once with `POOL_NOT_DEPLOYED` and answers 503, naming the pools that exist. A pool at zero with a ScaledObject is accepted and wakes. `PATCH /api/admin/scaling/agents/{id}` refuses to move an agent to a pool that is not deployed. Outside a cluster, or if the API cannot read the cluster, nothing is refused.
+
+A run that is queued but that no worker ever claims, because the consumers cannot reach NATS or the backlog is too long, is failed by the stale sweep with `QUEUE_NOT_PICKED_UP` once it is older than `STALE_EXECUTION_MAX_MINUTES` (default 10). The message says so, and clients on the stream or on `wait` hear about it. If its message is delivered later, the consumer drops it as finished. Raise that limit if a backlog longer than 10 minutes is normal for you.
 
 ### At-least-once delivery
 
@@ -102,9 +110,19 @@ The base chart defines no pools (`scaling.pools: []`). `values-local.yaml` defin
 
 `concurrency_per_replica` becomes `AGENT_CONCURRENCY` on the pod (template default 3, consumer fallback 8). Pools at 0 replicas start a pod on the first queued run, so that run waits for a pod to start. Agents that need the lowest latency use `runtime_pool: inline`.
 
-The admin screen `/admin/scaling` offers a fixed list of pools (`POOLS` in [`admin_scaling.py`](../../apps/api/app/routers/admin_scaling.py)): `inline`, `default`, `chat`, `heavy-reasoning`, `gpu` and `long-running`, with its own suggested replica counts. The chart deploys none of `gpu`, so an agent set to it waits on `agents.gpu` with no consumer unless you add one.
+The admin screen `/admin/scaling` offers a fixed list of pools (`POOLS` in [`admin_scaling.py`](../../apps/api/app/routers/admin_scaling.py)): `inline`, `default`, `chat`, `heavy-reasoning`, `gpu` and `long-running`. It marks the ones this cluster has not deployed and does not let you pick them. No overlay deploys `gpu`, so a run sent to it fails with `POOL_NOT_DEPLOYED` until you add the pool.
 
 Isolation is the reason for pools. A 30-minute backtest on `long-running` does not hold a slot a chat agent needs.
+
+### Dedicated mode
+
+`POST /api/admin/scaling/agents/{id}/dedicated-mode` with `{"enabled": true}` gives one agent its own pool. The API clones the Deployment of `scaling.dedicated.templatePool` (default `default`), so image, secrets and volumes match the chart, and points it at `agents.dedicated-<agent id>`. It clones that pool's ScaledObject too, so the cooldowns match, without the latency trigger since Prometheus scrapes pools through a Service and a dedicated pool has none. With KEDA off there is no ScaledObject and the Deployment keeps one replica.
+
+The agent's `min_replicas`, `max_replicas` and `concurrency_per_replica` size the pool, with replicas capped by `scaling.dedicated.maxReplicas`. `scaling.dedicated.maxPools` caps how many dedicated pools a cluster may have, because any tenant admin can ask for one. If the pool cannot be created the call answers 502 and the agent stays where it was.
+
+With `{"enabled": false}` new runs go back to the shared pool at once. The Deployment, the ScaledObject and the durable are removed as soon as nothing is queued or held on the pool, right away or within 30 seconds of the backlog clearing. Queued runs still finish where they were queued. The call says `removed` or `draining` in `dedicated_state`.
+
+The job `reconcile_runtime_pools` keeps these objects in step every 30 seconds. It brings a new runtime image and changed replica fields to each dedicated pool, puts back what was deleted by hand, and removes the pool of an agent that was deleted. Each dedicated Deployment is owned by the template Deployment, so uninstalling the chart removes it. Set `scaling.dedicated.enabled: false` to turn the feature off, the API then only reads Deployments and ScaledObjects.
 
 ### Adding a pool
 
@@ -141,15 +159,15 @@ spec:
         lagThreshold: "3"     # keda_queue_trigger, default 3
 ```
 
-Scale-down waits 600 s and then drops one pod at a time, at most one every 300 s (`scaling.keda.scaleDownPeriodSeconds`). Scale-up has no wait and can double, or add 4 pods, every 15 s.
+Scale-down waits 600 s (`scaling.keda.scaleDownStabilizationSeconds`) and then drops one pod at a time, at most one every 300 s (`scaling.keda.scaleDownPeriodSeconds`). Scale-up has no wait and can double, or add 4 pods, every 15 s. `scaling.keda.pollingInterval` and `cooldownPeriod` set the other two numbers above. `bash scripts/deploy.sh scale-e2e` proves all of this on a live cluster with the shorter windows in `values-scale-test.yaml`.
 
 **A pod that is stopped finishes its runs.** On SIGTERM, whether from a scale-down, a rollout or a node drain, the consumer stops taking messages at once, even from an idle queue, and hands back any message that arrives after the signal. It then waits for the runs it holds, renewing their leases as usual, for up to `RUNTIME_DRAIN_SECONDS`. The chart gives each pool pod `terminationGracePeriodSeconds` of `termination_grace_seconds` (default 300) and sets the drain to 30 seconds less. A run still going at the deadline is cancelled unacked, so another pod takes it over. Give a pool of long runs a longer grace, `values-azure.yaml` sets 900 for `long-running`.
 
 `lagThreshold: "3"` targets at most 3 pending messages per replica. With 27 pending, KEDA aims for ⌈27/3⌉ = 9 replicas, capped at `maxReplicaCount`.
 
-`min_replicas: 0` renders as 0. With KEDA on the pool scales to zero and the NATS trigger wakes it when a message lands. With KEDA off the Deployment keeps at least one replica, since nothing would wake it.
+`min_replicas: 0` renders as 0. With KEDA on the pool scales to zero and the NATS trigger wakes it when a message lands, through the durable described above. With KEDA off the Deployment keeps at least one replica, since nothing would wake it.
 
-When `scaling.keda.prometheusUrl` is set, a second trigger is rendered on `abenix_execution_duration_seconds_bucket{pool=…}` p95 above 90 s. The pool consumer records that histogram for every run it finishes, labelled by `pool` and `status`. The query ends in `or vector(0)`, so an idle pool reads 0 instead of no data. KEDA scales on whichever trigger asks for more replicas.
+When `scaling.keda.prometheusUrl` is set, a second trigger is rendered on `abenix_execution_duration_seconds_bucket{pool=…}` p95 above 90 s (`scaling.keda.p95ThresholdMs`). The pool consumer records that histogram for every run it finishes, labelled by `pool` and `status`. The query ends in `or vector(0)`, so an idle pool reads 0 instead of no data. KEDA scales on whichever trigger asks for more replicas.
 
 Check that the trigger has data:
 
@@ -177,7 +195,7 @@ What does refuse work before it is enqueued: the execute handler checks the tena
 
 The per-agent `rate_limit_qps` is a token bucket in Redis keyed by tenant and agent slug, with a one-second burst. When Redis is down it lets the run through and counts `abenix_rate_limit_fail_open_total`. Each refusal counts `abenix_rate_limit_hits_total{tenant_id, agent_slug}`.
 
-Per-agent `min_replicas`, `max_replicas` and `concurrency_per_replica` are stored but not applied. Pools are shared, so their replica bounds and concurrency come from `scaling.pools` in the chart. Admin, Scaling and the builder say so next to those fields.
+Per-agent `min_replicas`, `max_replicas` and `concurrency_per_replica` apply only in dedicated mode. Shared pools take their replica bounds and concurrency from `scaling.pools` in the chart. Admin, Scaling and the builder say so next to those fields.
 
 ---
 
@@ -192,7 +210,7 @@ Per-agent `min_replicas`, `max_replicas` and `concurrency_per_replica` are store
 | `abenix_executions_in_flight{pool}` | API, gauge | Inline runs going on now |
 | `abenix_executions_completed_total`, `abenix_executions_failed_total` | API and consumer | Outcomes and failure codes |
 
-The chart installs no NATS, Redis or KEDA exporter, so queue depth is read with `nats` CLI or the monitoring endpoint, not Prometheus. The dashboard "Abenix — Scaling Ops" (`infra/observability/dashboards/scaling-ops.json`) has rate-limit, circuit-breaker and cost panels. Its queue-depth and duration panels read `abenix_queue_depth` and `abenix_execution_duration_seconds`, which nothing emits. See [06-deployment/04-observability](../06-deployment/04-observability.md).
+The chart installs no NATS, Redis or KEDA exporter. Queue depth reaches Prometheus only from a running pool pod, so a pool at zero shows none, read it with `nats` CLI or the monitoring endpoint. The dashboard "Abenix — Scaling Ops" (`infra/observability/dashboards/scaling-ops.json`) has rate-limit, circuit-breaker, cost, queue-depth and duration panels. See [06-deployment/04-observability](../06-deployment/04-observability.md).
 
 ---
 
@@ -247,7 +265,7 @@ A pipeline runs in the pod of its own `runtime_pool`. Every node runs there too.
 
 ## When users report slow responses
 
-1. Open `/admin/scaling`. If the pool is at `max_replicas`, raise `max_replicas` for that pool in `scaling.pools`, or move the agent to another pool. The per-agent replica fields on that screen are stored but not applied to any Deployment.
+1. Open `/admin/scaling`. If the pool is at `max_replicas`, raise `max_replicas` for that pool in `scaling.pools`, or move the agent to another pool. The per-agent replica fields on that screen apply only to an agent in dedicated mode.
 2. Look at `abenix_agent_execution_duration_seconds` and `abenix_tool_execution_duration_seconds`. One slow agent can move to `heavy-reasoning` or `long-running`. A slow tool points at its provider.
 3. If replicas are not at max but runs wait, lower `keda_queue_trigger` or raise `min_replicas`.
 4. If nothing is queued and runs are still slow, the bottleneck is downstream: an LLM provider's rate limit, KB search or an external API.
@@ -272,6 +290,7 @@ Raising `max_replicas` alone often moves the problem to the database pool or the
 | **Queue consumer and lease** | [`apps/agent-runtime/consumer.py`](../../apps/agent-runtime/consumer.py) |
 | **Queue backend** | [`apps/agent-runtime/engine/queue_backend.py`](../../apps/agent-runtime/engine/queue_backend.py) |
 | **Pools, ScaledObjects** | [`infra/helm/abenix/templates/agent-runtime-pools.yaml`](../../infra/helm/abenix/templates/agent-runtime-pools.yaml), values in `values-azure.yaml` and `values-local.yaml` |
+| **Pool lookup, dedicated pools, durable upkeep** | [`apps/api/app/core/runtime_pools.py`](../../apps/api/app/core/runtime_pools.py), RBAC in `templates/agent-runtime-pools-rbac.yaml` |
 | **Agent pool settings** | model [`packages/db/models/agent.py`](../../packages/db/models/agent.py), API [`apps/api/app/routers/admin_scaling.py`](../../apps/api/app/routers/admin_scaling.py), UI [`apps/web/src/app/(app)/admin/scaling/page.tsx`](../../apps/web/src/app/(app)/admin/scaling/page.tsx) |
 | **Tool gate** | config [`packages/db/models/tool_runtime_config.py`](../../packages/db/models/tool_runtime_config.py), gate [`apps/api/app/core/tool_gate.py`](../../apps/api/app/core/tool_gate.py), dispatch [`apps/api/app/core/tool_worker_dispatch.py`](../../apps/api/app/core/tool_worker_dispatch.py), inline or runtime choice in [`apps/api/app/routers/tools.py`](../../apps/api/app/routers/tools.py), runtime worker [`apps/agent-runtime/tool_stream_consumer.py`](../../apps/agent-runtime/tool_stream_consumer.py), UI [`apps/web/src/app/(app)/admin/tool-scaling/page.tsx`](../../apps/web/src/app/(app)/admin/tool-scaling/page.tsx) |
 | **Pipeline view** | [`apps/web/src/app/(app)/admin/pipeline-scaling/page.tsx`](../../apps/web/src/app/(app)/admin/pipeline-scaling/page.tsx) |

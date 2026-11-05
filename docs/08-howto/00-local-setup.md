@@ -311,7 +311,8 @@ one, the worker and the runtime fall back to a built-in hashed embedder in
 `packages/db/local_embeddings.py`. It is lexical, not semantic. It finds the
 chunk that contains the words you searched for, but will not connect synonyms.
 `ABENIX_LOCAL_EMBEDDINGS=1` forces it even with a key, which gives an offline,
-repeatable test run.
+repeatable test run. A key that the provider refuses falls back the same way when
+the collection is empty, and the document says so.
 
 `seed_kb.py` creates the collections and grants, then chunks and embeds the
 sample documents itself, so a seeded collection is searchable as soon as the

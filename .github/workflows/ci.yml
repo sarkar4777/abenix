@@ -104,6 +104,47 @@ jobs:
       # TOOL_DOCS in the web app is generated from the runtime tool classes.
       - run: python scripts/gen-tool-docs.py --check
 
+  edge-python-tests:
+    needs: python-lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r apps/edge-runtime/requirements.txt -r apps/code-runner/requirements.txt pytest pytest-asyncio
+      - run: python -m pytest -q apps/edge-runtime/tests
+      - run: python -m pytest -q tests
+        working-directory: apps/code-runner
+
+  edge-rust-tests:
+    needs: python-lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: cargo test in the image's toolchain
+        run: >-
+          docker run --rm -v "$PWD/apps/edge-runtime-rust":/src -w /src rust:1.90-alpine
+          sh -c "apk add --no-cache musl-dev python3 >/dev/null && cargo test --locked"
+
+  edge-c-tests:
+    needs: python-lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: build and smoke test on the image's alpine
+        run: >-
+          docker run --rm -v "$PWD/apps/edge-runtime-c":/src:ro alpine:3.20
+          sh -c "apk add --no-cache gcc musl-dev make pkgconf curl curl-dev json-c-dev libmicrohttpd-dev mosquitto-dev openssl-dev python3 py3-cryptography bash >/dev/null && cp -r /src/. /tmp/b && cd /tmp/b && make release && bash tests/test_smoke.sh"
+
+  edge-conformance:
+    needs: [edge-python-tests, edge-rust-tests, edge-c-tests]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # the three runtimes and gateway mode against one contract, with a real broker
+      - run: bash scripts/edge-conformance.sh
+
   web-lint-typecheck-build:
     runs-on: ubuntu-latest
     env:

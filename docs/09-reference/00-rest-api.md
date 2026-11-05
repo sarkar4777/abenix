@@ -151,8 +151,8 @@ Keys start with `af_` and go in `X-API-Key`. Roles and scopes are in [01-archite
 | `POST` | `/api/agents/import` | signed in | Import from an exported JSON template |
 | `GET` | `/api/agents/{agent_id}` | signed in | Detail |
 | `GET` | `/api/agents/{agent_id}/self-check` | signed in | Check the stored config for structural issues |
-| `POST` | `/api/agents` | signed in | Create. Only admins can create `oob` agents |
-| `PUT` | `/api/agents/{agent_id}` | signed in | Update. Creator, admin or a user with edit access. Only admins edit `oob` agents |
+| `POST` | `/api/agents` | signed in | Create. Only admins can create `oob` agents. `warnings` lists a model or tool a run cannot use, the agent is saved anyway |
+| `PUT` | `/api/agents/{agent_id}` | signed in | Update. Creator, admin or a user with edit access. Only admins edit `oob` agents. `warnings` as on create |
 | `GET` | `/api/agents/{agent_id}/revisions` | signed in | Version history |
 | `POST` | `/api/agents/{agent_id}/revisions/{revision_id}/revert` | signed in | Restore a saved version, or the state before it with `?which=before`. Owner or admin |
 | `GET` | `/api/agents/{agent_id}/dependents` | signed in | Pipelines, agents and triggers that use it |
@@ -180,10 +180,10 @@ Keys start with `af_` and go in `X-API-Key`. Roles and scopes are in [01-archite
 | `POST` | `/api/ai/build-iterative` | signed in | SSE. Generate, validate and judge in a loop |
 | `POST` | `/api/ai/simulate-meeting` | signed in | Run a meeting agent against a synthetic transcript, no real room |
 | `POST` | `/api/load-playground/generate` | signed in | Generate a Python load-test script for an agent or pipeline |
-| `POST` | `/api/load-playground/execute` | signed in | Run a generated load-test script with a one-hour API key. Streams stdout over SSE |
+| `POST` | `/api/load-playground/execute` | `playground.execute` | Run a generated load-test script with a one-hour API key. Streams stdout over SSE. Runs in the API process, so it is off outside dev unless `PLAYGROUND_EXECUTE_ENABLED` is true |
 | `GET` | `/api/sdk-playground/asset-context/{asset_type}/{asset_id}` | signed in | Resolve an asset to the details the playground needs |
 | `POST` | `/api/sdk-playground/generate` | signed in | Generate SDK code with the LLM, using the SDK source as context |
-| `POST` | `/api/sdk-playground/execute` | signed in | Run Python with the SDK available, in a sandbox |
+| `POST` | `/api/sdk-playground/execute` | `playground.execute` | Run Python with the SDK available. Runs in the API process with a scrubbed environment, so it is off outside dev unless `PLAYGROUND_EXECUTE_ENABLED` is true |
 | `GET` | `/api/sdk-playground/use-cases` | public | Use case templates |
 
 ---
@@ -637,7 +637,7 @@ See [02-runtime/15-v2-knowledge-enterprise](../02-runtime/15-v2-knowledge-enterp
 | `POST` | `/api/knowledge-engines/{kb_id}/cognify` | signed in | Build the knowledge graph from the documents |
 | `GET` | `/api/knowledge-engines/{kb_id}/graph-stats` | signed in | Graph statistics |
 | `GET` | `/api/knowledge-engines/{kb_id}/graph` | signed in | Subgraph for visualization |
-| `POST` | `/api/knowledge-engines/{kb_id}/search` | signed in | Hybrid search across graph and vectors. Restricted documents the caller cannot read are dropped before ranking, `hidden_documents` counts them. Chunk hits carry `metadata.citation` |
+| `POST` | `/api/knowledge-engines/{kb_id}/search` | signed in | Hybrid search across graph and vectors. Restricted documents the caller cannot read are dropped before ranking, `hidden_documents` counts them. Chunk hits carry `metadata.citation`. `degraded` holds the reason when results came from keywords or the local embedder, else null |
 | `POST` | `/api/knowledge-engines/{kb_id}/feedback` | signed in | Feedback on search results |
 | `GET` | `/api/knowledge-engines/{kb_id}/cognify-jobs` | signed in | Cognify job history, with `entities_held_back`, `relationships_held_back` and `conflicts_recorded` per job |
 
@@ -723,7 +723,7 @@ Agent-facing tools (`atlas_describe`, `atlas_query`, `atlas_traverse`, `atlas_se
 
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
-| `POST` | `/api/ml-models` | signed in | Upload a model file with metadata (multipart). The file is loaded first. `422 MODEL_LOAD_FAILED` with the reason when it does not load, `409 VERSION_EXISTS` with `next_version` for a taken version. A blank version gets the next free one |
+| `POST` | `/api/ml-models` | signed in, `ml_models.upload_pickle` for joblib, pickle and PyTorch files | Upload a model file with metadata (multipart). The file is loaded first, pickle formats in a separate process. `422 MODEL_LOAD_FAILED` with the reason when it does not load, `409 VERSION_EXISTS` with `next_version` for a taken version. A blank version gets the next free one |
 | `POST` | `/api/ml-models/samples/{sample_id}` | signed in | Register a sample model shipped with Abenix (`iris`) for the caller. Returns the caller's existing copy on a repeat call |
 | `GET` | `/api/ml-models` | signed in | List models visible to the caller. `scope=tenant` needs admin |
 | `GET` | `/api/ml-models/{model_id}` | signed in | Detail with deployments |
@@ -795,7 +795,7 @@ Call history for code assets, ML models and knowledge collections.
 | `DELETE` | `/api/tool-presets/{preset_slug}` | signed in | Delete a preset |
 | `POST` | `/api/tool-presets/{preset_slug}/run` | signed in | Run a preset, caller args merged over its defaults |
 | `GET` | `/api/tools` | signed in | Built-in tools with metadata |
-| `POST` | `/api/tools/{tool_slug}/execute` | signed in | Run one tool directly, outside the agent loop |
+| `POST` | `/api/tools/{tool_slug}/execute` | `tools.execute`, platform operator for tools that reach shared resources | Run one tool directly, outside the agent loop. `config` takes only `thresholds`, `custom_patterns`, `default_action` and `timeout_seconds` |
 | `GET` | `/api/tools/invocations` | signed in | Recent direct tool calls |
 
 ---
@@ -821,8 +821,8 @@ Call history for code assets, ML models and knowledge collections.
 | `GET` | `/api/mcp/agents/{agent_id}/tools` | signed in | MCP tools attached to an agent |
 | `POST` | `/api/mcp/agents/{agent_id}/tools` | signed in | Attach an MCP tool |
 | `DELETE` | `/api/mcp/agents/{agent_id}/tools` | signed in | Detach an MCP tool |
-| `GET` | `/api/mcp/registry` | signed in | Browse the MCP server registry |
-| `POST` | `/api/mcp/registry/install` | signed in | Install a registry server as a connection |
+| `GET` | `/api/mcp/registry` | signed in | Browse the MCP server registry. An empty catalogue seeds itself with the curated servers |
+| `POST` | `/api/mcp/registry/install` | signed in | Install a registry server as a connection. Body takes `registry_id` or `registry_entry_id`, either the slug or the row id. `server_name` defaults to the entry's name |
 | `POST` | `/api/mcp/registry/sync` | signed in | Seed or sync the registry with curated servers |
 
 ---
@@ -914,7 +914,7 @@ Call history for code assets, ML models and knowledge collections.
 | `POST` | `/api/edge/tokens/mint` | signed in | Mint an API key for the edge runtime's `PLATFORM_TOKEN` |
 | `POST` | `/api/edge/gateways/register` | signed in | Register a gateway. Idempotent on `gateway_id` |
 | `GET` | `/api/edge/gateways` | signed in | Registered gateways |
-| `POST` | `/api/edge/gateways/{gateway_pk}/deploy` | signed in | Compile, sign and push a `.agent` bundle to a gateway |
+| `POST` | `/api/edge/gateways/{gateway_pk}/deploy` | signed in | Compile, sign and send a `.agent` bundle. `deployed` is true only when the gateway confirmed it, 502 when it cannot be reached, 422 when it refused. See [05-edge-runtime](../06-deployment/05-edge-runtime.md#what-a-deploy-tells-you) |
 | `GET` | `/api/edge/gateways/{gateway_pk}/agents` | signed in | Agents on a gateway, proxied from it |
 | `DELETE` | `/api/edge/gateways/{gateway_pk}` | signed in | Forget a gateway. It registers again on its next start |
 | `POST` | `/api/edge/agents/{agent_id}/compile` | signed in | Compile an agent into a `.agent` bundle |
@@ -957,7 +957,8 @@ Invoke runs a published agent, or one the key's user may execute, and answers 40
 
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
-| `GET` | `/api/files/download` | signed in | Download a file by storage URI |
+| `GET` | `/api/admin/api-keys/privileged` | admin | Read only list of active keys holding `can_delegate` or telemetry scopes and who created them. Operators see every tenant |
+| `GET` | `/api/files/download` | signed in | Download a file by storage URI. Only files under the caller's tenant prefix, anything else is 404 |
 | `GET` | `/api/files/export/{filename}` | signed in | Download an agent-generated export |
 | `GET` | `/api/files/list` | signed in | Files of the tenant |
 
@@ -1079,7 +1080,7 @@ Two switches gate this group, see [Marketplace and monetization](../08-howto/14-
 
 BPM threads are private to the user who uploaded them, admins included. Another user's thread answers 404.
 
-Model routing follows the agent runtime. With a usable Claude subscription, every request in exclusive mode and every Claude request otherwise runs on the subscription at no per-token cost. A provider is only swapped when the chosen model has no credential or on an outage (rejected credential, rate limit, quota), and the reply says so. Audio and video always go to Gemini.
+Model routing follows the agent runtime. With a usable Claude subscription, every request in exclusive mode, and otherwise every Claude request and every model with no key of its own, runs on the subscription at no per-token cost. A provider is only swapped when the chosen model has no credential or on an outage (rejected credential, rate limit, quota), and the reply says so. Audio and video always go to Gemini.
 
 ---
 
@@ -1130,7 +1131,7 @@ Tool configuration detail in [08-howto/08-tool-configuration](../08-howto/08-too
 | `PATCH` | `/api/admin/scaling/agents/{agent_id}` | admin role | Change an agent's scaling settings |
 | `POST` | `/api/admin/scaling/agents/{agent_id}/pause` | admin role | Pause an agent, the runtime refuses new runs |
 | `POST` | `/api/admin/scaling/agents/{agent_id}/resume` | admin role | Resume a paused agent |
-| `POST` | `/api/admin/scaling/agents/{agent_id}/dedicated-mode` | admin role | Turn per-agent dedicated pod scaling on or off |
+| `POST` | `/api/admin/scaling/agents/{agent_id}/dedicated-mode` | admin role | Create or remove the agent's own Deployment and ScaledObject and route its runs there |
 | `GET` | `/api/admin/scaling/agents/{agent_id}/cost-projection` | admin role | Hourly, daily and monthly cost projection |
 | `GET` | `/api/admin/scaling/tenants/{tenant_id}/spend` | admin role | Tenant spend today and this month against `daily_budget_usd` |
 | `GET` | `/api/admin/scaling/pipelines` | admin | Pipeline agents with their node DAG resolved to scaling routes |
@@ -1169,7 +1170,7 @@ Defined in `main.py`, not a router.
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
 | `GET` | `/api/health` | public | Liveness. Always `{"status": "ok"}` |
-| `GET` | `/api/health/ready` | public | Readiness. Checks postgres, redis, neo4j and that an LLM key is set. `status` is `ok` or `degraded` |
+| `GET` | `/api/health/ready` | public | Readiness. Checks postgres, redis, neo4j and that an LLM key or an active Claude subscription is set. `status` is `ok` or `degraded` |
 | `GET` | `/api/metrics` | public | Prometheus scrape, multiprocess aware |
 | `GET` | `/` | public | API banner |
 

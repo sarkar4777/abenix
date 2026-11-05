@@ -1,125 +1,76 @@
-# `.agent` Bundle Format — v1
+# `.agent` bundle format, version 1
 
-The `.agent` file is the unit of deployment from AgentForge to an edge gateway.
-It's a plain gzipped tarball with a fixed layout, a manifest, an optional
-inline-tool directory, an optional model-weight slot, and a detached signature.
+The `.agent` file is the unit of deployment from Abenix to an edge gateway. It is a plain tar file, not compressed, built by `apps/api/app/services/edge_compiler.py`.
 
 ## File layout
 
 ```
-my-agent.agent      (== gzipped tar)
-├── agent.yaml          required — manifest (see Manifest schema)
-├── system_prompt.md    required — prompt body, UTF-8
-├── tools/              optional — *.py for inline code-executor tools
-│   └── *.py
-├── model_weights/      optional — reserved for Phase-2 distilled local model
-│   └── *
-└── signature.sig       required — RSA-PSS signature, see Signature
+my-agent.agent
+├── agent.yaml        the manifest
+├── system_prompt.md  the prompt, UTF-8
+└── signature.sig     RSA-PSS signature
 ```
 
-Anything not in that list is rejected by the runtime on load.
+The compiler writes these three and nothing else. Every entry must be a plain file or folder under a safe relative name. Links, devices, absolute paths, `..` segments, backslashes and duplicate names refuse the whole bundle. A runtime that finds files under `model_weights/` refuses to run the agent, local inference is not shipped. Compressed bundles are refused.
+
+A bundle carries no tool code and no tool definitions. It cannot, today, give a model anything to call on the device.
 
 ## Manifest schema (`agent.yaml`)
 
-| field | required | type | notes |
+| Field | Required | Type | Notes |
 |---|---|---|---|
-| `name` | yes | str | human-readable name |
-| `slug` | yes | str | `[a-z0-9_-]+`, unique on the gateway |
-| `tenant_id` | yes | str | platform tenant that compiled the bundle, covered by the signature. A gateway with `TENANT_ID` set refuses any other value |
-| `version` | yes | str | semver, e.g. `1.0.0` |
-| `model` | yes | str | provider model id, e.g. `claude-sonnet-4-5-20250929`; ignored if `model_weights/` is present |
-| `temperature` | yes | float | 0.0 to 2.0 |
-| `max_iterations` | yes | int | 1 to 50; tool-use loop ceiling |
-| `max_tokens` | yes | int | 1 to 200000 |
-| `tools` | yes | list[str] | edge-safe tool names only; see Edge-safe tools |
-| `edge_constraints` | yes | object | runtime caps; see below |
-| `description` | no | str | optional UI hint |
-| `system_prompt_path` | no | str | defaults to `system_prompt.md` |
+| `name` | yes | str | Human readable name |
+| `slug` | yes | str | `[A-Za-z0-9][A-Za-z0-9._-]*`, at most 95 characters, no `..`. It names the folder on the gateway, so anything else is refused |
+| `tenant_id` | yes | str | The platform tenant that compiled the bundle, covered by the signature. A gateway with `TENANT_ID` set refuses any other value |
+| `version` | yes | str | Such as `1.0.0` |
+| `model` | yes | str | The model id sent to the Messages API |
+| `temperature` | yes | float | Sent to the model |
+| `max_iterations` | yes | int | Carried and not used, there is no tool loop |
+| `max_tokens` | yes | int | Sent to the model |
+| `tools` | yes | list | Names from the list below. Checked at load |
+| `edge_constraints` | yes | object | See below |
+| `description` | no | str | A hint for the UI |
+| `system_prompt_path` | no | str | Always `system_prompt.md` |
 
 ### `edge_constraints`
 
-| field | required | type | notes |
-|---|---|---|---|
-| `max_payload_bytes` | yes | int | per-request body cap, default 65536 |
-| `max_runtime_seconds` | yes | int | per-execution wall clock cap, default 30 |
-| `mqtt_subscribe` | no | list[str] | topic patterns the agent may subscribe to |
-| `mqtt_publish` | no | list[str] | topic patterns the agent may publish to |
+| Field | Type | Notes |
+|---|---|---|
+| `max_payload_bytes` | int | Enforced on the request message, default 65536 |
+| `max_runtime_seconds` | int | Enforced on the whole execute, default 30 |
+| `mqtt_subscribe` | list | Carried and not enforced, agents do not use MQTT on the gateway |
+| `mqtt_publish` | list | Carried and not enforced, agents do not use MQTT on the gateway |
 
-The runtime enforces these by configuration; an agent that calls
-`mqtt_publish` to a topic outside `mqtt_publish[]` gets a permission denial,
-not a silent succeed.
+## Tool names
 
-## Edge-safe tools
+`mqtt_publish`, `mqtt_subscribe`, `current_time`, `windowed_state`, `connector_call`, `code_executor`.
 
-Allowed (will be implemented or shimmed in the runtime):
+Listing one of these lets the bundle load. It does not give the model the tool, the model call has no `tools` field and no runtime implements them. The one effect is that `code_executor` allows `params.code` on an execute call, and only on a gateway that also sets `EDGE_ENABLE_CODE_EXECUTOR=true`.
 
-- `mqtt_publish`
-- `mqtt_subscribe`
-- `current_time`
-- `windowed_state` — backed by local Redis if reachable, else in-memory
-  TTL dict (last-write wins, no cross-pod replication)
-- `connector_call` — only if the gateway's helm values pre-seed the
-  connector definition; otherwise tool errors at first call
-- `code_executor` — inline Python in `tools/*.py`, run in a subprocess
-  with no network and a 5-second wall clock
-
-Forbidden — the bundle compiler refuses to pack an agent referencing any of
-these:
-
-- `knowledge_search`, `kb_query`, anything that needs the platform DB
-- `atlas_*` (graph ops require platform Neo4j)
-- `human_approval`, `approval_gate` (needs platform `approvals` table)
-- `agent_step`, `pipeline_*` (multi-agent orchestration is platform-only)
-- `mcp_*`, MCP tool calls (require platform MCP registry)
-
-The compiler runs the validation; the runtime double-checks the manifest on
-load and refuses to register an agent with disallowed tools.
+The compiler refuses anything else, including `knowledge_search`, `kb_query`, `atlas_*`, `human_approval`, `approval_gate`, `agent_step`, `pipeline_*` and `mcp_*`. A runtime checks the list again at load.
 
 ## Signature
 
 ```
-signature.sig   = RSA-PSS(SHA-256(bundle_without_signature_sig), private_key)
-mgf             = MGF1-SHA-256
-salt_length     = 32
-public_key      = shipped to the runtime via helm value `signing_pubkey` (PEM)
+signature.sig = RSA-PSS(bundle bytes with the signature.sig entry cut out)
+hash          = SHA-256
+mgf           = MGF1-SHA-256
+salt_length   = 32
+public_key    = helm value signing_pubkey, or SIGNING_PUBKEY_PEM, or SIGNING_PUBKEY_PATH
 ```
 
-Algorithm details:
+The compiler lays the tar out with a zeroed `signature.sig`, signs the bytes with that entry's header and data blocks cut out, then writes the signature into place. The gateway cuts the same blocks and verifies. The Python and Rust runtimes also accept a signature over a rebuilt tar, for older bundles.
 
-1. Compiler builds the tarball with `signature.sig` omitted.
-2. `digest = sha256(bytes_of_tar)`.
-3. `signature.sig = RSA-PSS-Sign(digest, signing_key)`.
-4. Compiler appends `signature.sig` to the tarball and writes the final
-   `.agent` file.
+A bad or missing signature, or a gateway with no public key, refuses the bundle and the previous version keeps serving. The only bypass is `EDGE_ALLOW_UNSIGNED` set to the literal `true`, for local development, logged at start and on every load. A gateway with no key and no bypass does not start. With `TENANT_ID` set, `manifest.tenant_id` must match or the bundle is refused with `bundle_tenant_mismatch` naming both ids.
 
-On the edge runtime:
+The runtime saves the received bytes as `bundle.agent` in the agent's folder and verifies them again on every restart.
 
-1. Read the tarball, split out `signature.sig`.
-2. Re-compute `sha256` of the remaining bytes.
-3. Verify the signature against the configured public key.
-4. Reject the bundle if verification fails — no fallback, no warning, the
-   pod logs a `bundle_signature_invalid` event and ignores the deployment.
-   The previously loaded bundle for that slug keeps running.
-5. A bundle with no `signature.sig`, or a gateway with no public key, is
-   rejected the same way. The only bypass is `EDGE_ALLOW_UNSIGNED=true`,
-   meant for local development, logged at startup and on every load. A
-   gateway without a public key and without that flag refuses to start.
-6. If `TENANT_ID` is set on the gateway, `manifest.tenant_id` must match or
-   the bundle is rejected with `bundle_tenant_mismatch` naming both ids.
+Rotating the signing key is a helm upgrade with the new `signing_pubkey`. Bundles signed by the old key stop loading at the next restart, so deploy them again.
 
-Rotating the signing key is a helm upgrade with the new `signing_pubkey`;
-in-flight bundles signed by the old key remain trusted until the rollout
-completes (StatefulSet does this serially).
+## Delivery
+
+MQTT topic `edge/<gateway_id>/deploy/<slug>`, QoS 1, retained. The gateway answers on `edge/<gateway_id>/ack/<slug>` with `{"slug", "digest", "ok", "error"}`. An empty message clears a retained bundle and is ignored by gateways. HTTP is `POST <endpoint_url>/agents/<slug>/bundle` with `Authorization: Bearer <token>`.
 
 ## Bundle digest
 
-The platform's `POST /api/edge/gateways/{id}/deploy` returns
-`{deployed: true, bundle_digest: "<hex sha256 of full tarball>"}`. The same
-digest is what the runtime logs on successful load — operators reconcile by
-matching strings.
-
-## Version compatibility
-
-Bundle format version is implicit in the manifest's structure today. A
-`bundle_format_version: 2` field will be added at the top of `agent.yaml`
-when an incompatible change lands; the runtime defaults to `1` when absent.
+`POST /api/edge/gateways/{id}/deploy` returns `bundle_digest`, the SHA-256 of the whole file, and `GET /agents` on the gateway lists the same value.

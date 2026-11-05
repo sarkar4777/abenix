@@ -93,7 +93,8 @@ Local LiveKit server for meeting work, from `scripts/livekit-dev.yaml`. Subcomma
 | `check-before-push.sh` | Runs the gates CI runs. `--fast` skips the web build, `--python` and `--web` narrow it further. Use this before pushing rather than waiting for CI to go red. |
 | `uat.sh` | The canonical browser UAT: sanity, deep and industrial specs in that order. Stops on the first failing spec. Needs forwards on 3000 and 8000. `BASE` and `API` override the URLs. |
 | `run-e2e.sh [--k8s] [--headed] [sanity\|deep\|industrial\|all] [extra args]` | Playwright UAT specs. Checks `API_URL` and `BASE_URL` answer first. Anything else on the line goes to Playwright. |
-| `edge-smoke.sh` | Edge runtime smoke test on minikube. Installs the chart, deploys a sample agent to the gateway and calls it. Needs `PLATFORM_URL` and `PLATFORM_TOKEN`. |
+| `edge-e2e.sh` | End to end test of the three edge runtimes and gateway mode on the live minikube cluster, same as `deploy.sh edge-e2e`. Prints a pass, fail table and exits nonzero on any failure. See [05-edge-runtime](../06-deployment/05-edge-runtime.md#testing-it). |
+| `edge-conformance.sh` | The three edge images against one contract in Docker, with a real broker and no cluster. |
 | `build-edge-rust.sh` | Builds the Rust edge runtime in release mode and reports the binary size. |
 | `python scripts/test_all_agents.py` | Runs every OOB agent through the API on `localhost:8000` and reports which ones work. |
 

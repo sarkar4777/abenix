@@ -41,7 +41,10 @@ turns KEDA off, so under `deploy.sh local-runtime` every pool stays at its
 
 Agents pick a pool with `model_config.runtime_pool`. With
 `scaling.execRemote` on, an agent whose pool is `inline` still runs in the API
-process.
+process. A run to a pool that is not deployed fails at once with
+`POOL_NOT_DEPLOYED`. Dedicated mode gives one agent a Deployment and
+ScaledObject of its own, see
+[08-queue-scaling](../02-runtime/08-queue-scaling.md#dedicated-mode).
 
 ### The ScaledObject
 

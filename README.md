@@ -75,7 +75,7 @@
 
 Most AI agent platforms give your agents amnesia — they retrieve documents, forget context, and re-derive the world model on every turn. Most also assume "agent" means "a chatbot in the cloud talking to OpenAI." That's fine for support tickets. It's not fine for a wind turbine, a refrigerated trailer, a contract worth seven figures, or a control room with a 50 ms hard limit.
 
-**Abenix gives agents a brain, a body, and a rulebook.** A typed graph that lives next to the knowledge base so agents traverse evidence like a researcher follows citations. A deterministic rule engine that makes the decisions an agent should not make on its own, with risk tiers that decide who signs off and what an agent may touch. Per-agent runtime pools, multi-signoff approvals, idempotency, and a dead-letter queue so you actually trust them in production. And lean edge runtimes — Python, Rust, or C — that take the same agent definition, sign it into a 12–80 MB bundle, and run it next to the equipment.
+**Abenix gives agents a brain, a body, and a rulebook.** A typed graph that lives next to the knowledge base so agents traverse evidence like a researcher follows citations. A deterministic rule engine that makes the decisions an agent should not make on its own, with risk tiers that decide who signs off and what an agent may touch. Per-agent runtime pools, multi-signoff approvals, idempotency, and a dead-letter queue so you actually trust them in production. And edge runtimes in Python, Rust or C that take a signed copy of an agent's prompt and settings, keep it next to the equipment, and call a model from there.
 
 Same agent. Same definition. Cloud or edge. Built for the long-running, knowledge-heavy, accountability-mandatory work that workflow tools choke on.
 
@@ -181,7 +181,7 @@ Around that sit the controls an auditor asks for:
 
 ### 3. The unit of deployment is an agent — not a workflow
 
-Every agent has its own pod pool, KEDA queue-depth scaler, NATS subject, budget cap, and telemetry channel. Flip `dedicated_mode = true` and a single agent gets its own Deployment + ScaledObject. The `/admin/scaling` page projects shared / dedicated / peak cost before you flip.
+Every agent has its own budget cap and telemetry channel, and runs on a pod pool with its own KEDA queue-depth scaler and NATS subject. Pools are shared by default. Turn on dedicated mode and the API creates a Deployment and ScaledObject for that agent alone, with its own NATS subject, and removes them when you turn it off. The `/admin/scaling` page projects shared, dedicated and peak cost before you flip.
 
 **Three scaling layers** — three admin screens, no overlap:
 
@@ -233,15 +233,15 @@ Connect agents to the systems enterprise ops actually run on, without burning a 
 
 ### 7. Edge runtimes — Python · Rust · C
 
-Cloud-built agents, edge-deployed pods. Mark an agent **Edge eligible** in the Builder, the platform compiles a signed `.agent` bundle (RSA-PSS over a deterministic tar) and ships it over MQTT to a runtime sitting next to the equipment. Three runtime variants for three classes of plant hardware:
+Cloud-built agents, edge-deployed pods. Mark an agent **Edge eligible** in the Builder, the platform compiles a signed `.agent` bundle (RSA-PSS over a tar) and ships it over MQTT or HTTP to a runtime next to the equipment. Three runtime variants, image sizes from local arm64 builds:
 
 | Variant | Image size | Targets | When |
 |---|---|---|---|
-| **Python** (reference) | ~80 MB | x86_64 / arm64 | Default. Easiest to extend with new tool shims. |
-| **Rust** (single static binary) | ~25 MB | x86_64 / arm64 / armv7 | Rugged industrial PCs — Moxa UC-8580, Siemens RUGGEDCOM, Beckhoff CX, NVIDIA Jetson. No Python needed on the box. |
-| **C** (musl static) | ~12 MB | armv7 / arm64 / x86_64 | Ultra-constrained gateways — Phoenix Contact PLCnext, Allen-Bradley CompactLogix, OpenWRT, ARM Cortex-A7 with 256 MB RAM. |
+| **Python** (reference) | 286 MB | x86_64 / arm64 | Default. The only one that also runs Abenix Edge, with enrolment, collectors and store and forward. |
+| **Rust** | 83 MB, 3.2 MB binary | x86_64 / arm64 / armv7 | Rugged industrial PCs. Agent bundles only. |
+| **C** | 96 MB, 67 KB binary | armv7 / arm64 / x86_64 | Small gateways. Agent bundles only. |
 
-Same `.agent` bundle, same MQTT delivery topic, same HTTP contract. Tool budget on edge: `mqtt_publish, mqtt_subscribe, current_time, windowed_state, connector_call, code_executor`. OTA updates via one MQTT message. Bundle tampering refuses to load. The bit nobody else ships.
+Same `.agent` bundle, same MQTT topics, same HTTP contract, the same refusals. Updates go out at QoS 1 and retained, so a gateway that was off picks them up. Tampered, unsigned or foreign bundles refuse to load, and install and execute need a token. **An edge agent makes one model call and returns the text, there is no tool loop on the device**, so answering with the site offline needs an Anthropic compatible server on the site network. The tool list is only checked at load. [What offline can really do](docs/06-deployment/05-edge-runtime.md#what-an-agent-on-the-edge-can-and-cannot-do).
 
 ### 8. Multimodal end-to-end
 
@@ -292,7 +292,7 @@ flowchart LR
         EXEC["agent runtime<br/>per-pool pods<br/>KEDA-scaled"]
         TOOLS["100+ tools<br/>connectors · MQTT<br/>code-asset sandbox"]
         DB[("Postgres + pgvector<br/>+ Neo4j<br/>agents · gateways<br/>connectors · approvals")]
-        MQ[("mosquitto<br/>edge.{gw}.deploy")]
+        MQ[("mosquitto<br/>edge/{gw}/deploy/{slug}")]
         TSDB[("TimescaleDB<br/>hypertables")]
         NATS[("NATS JetStream<br/>at-least-once")]
         OBS["Prometheus + Grafana<br/>structured failure codes<br/>Slack + email"]
@@ -316,7 +316,7 @@ flowchart LR
     USER --> API
     EXEC --> LLM[("LLM provider<br/>Anthropic · OpenAI<br/>Google · MCP")]
     API -- ".agent bundle (signed)" --> MQ
-    MQ -- "edge.{gw}.deploy<br/>QoS 1" --> RT
+    MQ -- "edge/{gw}/deploy/{slug}<br/>QoS 1, retained" --> RT
     RT -- "register every 60s<br/>Bearer af_…" --> API
     RT --> LLM
 
@@ -333,7 +333,7 @@ flowchart LR
 
 **Transport.** NATS for at-least-once internal delivery + replay. mosquitto for MQTT triggers, agent-published topics, and signed bundle delivery to edge gateways. TimescaleDB for time-series ingest the agents read with `tsdb_query`.
 
-**Edge fleet.** One helm install per gateway. The runtime registers itself with the platform every 60 seconds, subscribes to `edge.{gateway_id}.deploy`, and hot-loads any signed bundle for an agent the platform has flagged `edge_compatible`. RSA-PSS signature verification gates every load.
+**Edge fleet.** One helm install per gateway. The runtime registers itself with the platform every 60 seconds, subscribes to `edge/{gateway_id}/deploy/+`, and hot-loads any signed bundle for an agent the platform has flagged `edge_compatible`. RSA-PSS signature verification gates every load.
 
 ---
 
@@ -612,7 +612,7 @@ unavailable rather than showing a number nobody produced.
 <a id="edge-runtimes"></a>
 ## 🛰 Edge runtimes
 
-The edge story in three lines: download a runtime → mint an `af_` token → helm-install on the gateway. The pod registers within 60 seconds and shows up on the platform's `/edge` page.
+The edge story in three lines. Build a runtime image, mint an `af_` token, helm-install on the gateway. The pod registers at once and shows up on the platform's `/edge` page.
 
 <a id="how-a-cloud-agent-reaches-the-edge"></a>
 ### How a cloud agent reaches the edge
@@ -634,31 +634,27 @@ sequenceDiagram
       API->>DB: upsert gateway_id, last_seen_at
       API-->>Edge: 200 OK
     end
-    Edge->>MQTT: SUBSCRIBE edge.{gateway_id}.deploy (QoS 1)
+    Edge->>MQTT: SUBSCRIBE edge/{gateway_id}/deploy/+ (QoS 1)
 
-    Author->>API: mark agent edge_compatible<br/>+ edge_constraints (max payload, MQTT ACL)
+    Author->>API: mark agent edge_compatible<br/>+ edge_constraints (max payload, max runtime)
     Author->>API: POST /api/edge/gateways/{id}/deploy<br/>{agent_id}
-    API->>Compiler: build .agent bundle<br/>(tar: agent.yaml + system_prompt.md + tools/*)
+    API->>Compiler: build .agent bundle<br/>(tar: agent.yaml + system_prompt.md)
     Compiler->>Compiler: SHA-256 + RSA-PSS sign<br/>(MGF1-SHA-256, salt 32)
     Compiler-->>API: bundle bytes + digest
-    API->>MQTT: PUBLISH edge.{gateway_id}.deploy<br/>(retained=false, QoS 1)
-    MQTT-->>Edge: bundle bytes
+    API->>MQTT: PUBLISH edge/{gateway_id}/deploy/{slug}<br/>(retained, QoS 1)
+    MQTT-->>Edge: bundle bytes, now or when it next connects
     Edge->>Edge: verify signature with mounted pubkey<br/>(refuse on mismatch)
-    Edge->>Edge: extract to /var/edge/agents/{slug}/
+    Edge->>Edge: swap into /var/edge/agents/{slug}/
+    Edge->>MQTT: edge/{gateway_id}/ack/{slug}
+    MQTT-->>API: gateway confirmed, or HTTP push when it did not
 
     Note over Edge: agent ready — bundle digest matches platform record
 
-    par sync execution
-      Note left of Edge: caller on plant LAN
-      Edge->>Edge: POST /agents/{slug}/execute
-      Edge->>LLM: HTTPS (or local distilled model)
-      LLM-->>Edge: tool calls + final result
-      Edge-->>Edge: 200 {slug, duration_ms, result}
-    and async over MQTT
-      MQTT->>Edge: agents.{slug}.input
-      Edge->>LLM: same loop, inline tools only
-      Edge->>MQTT: agents.{slug}.output<br/>(constrained by mqtt_publish ACL)
-    end
+    Note left of Edge: caller on the plant LAN, with the gateway's token
+    Edge->>Edge: POST /agents/{slug}/execute
+    Edge->>LLM: one Messages call, no tools
+    LLM-->>Edge: text
+    Edge-->>Edge: 200 {slug, duration_ms, result}
 ```
 
 **The cohesive story.** Cloud authoring, signed delivery, edge execution. The `.agent` bundle is the *only* mutable artefact crossing the trust boundary — it's RSA-PSS signed at compile time, verified at every load, and constrained by a tool whitelist that's enforced twice (once by the compiler, once by the runtime). MQTT is the default transport because plants already have a broker, and HTTP is the fallback when MQTT publish fails. Tool budget on edge is deliberately small — `mqtt_publish, mqtt_subscribe, current_time, windowed_state, connector_call, code_executor` — so an agent that needs `knowledge_search` or `atlas_*` can't accidentally be edge-deployed and stall on a missing dependency. Every gateway re-registers on a 60-second loop, so a network blip just delays the next OTA update — nothing is permanently broken by an offline window.
@@ -669,16 +665,21 @@ sequenceDiagram
 The `/edge` page renders three colour-coded cards with copy-to-clipboard install commands, or hit the unauthenticated `GET /api/edge/runtime/download` for the JSON manifest.
 
 ```bash
-# Python (default — works everywhere with python3.12+)
+# Python, the default
 helm install abenix-edge ./infra/helm/edge-runtime -n abenix-edge \
-  --set platform.url=$PLATFORM_URL \
-  --set platform.token=$EDGE_TOKEN \
-  --set gateway.id=$GATEWAY_ID
+  --set platform_url=$PLATFORM_URL \
+  --set platform_token=$EDGE_TOKEN \
+  --set gateway_id=$GATEWAY_ID \
+  --set-file signing_pubkey=signing_pub.pem
 
-# Rust (rugged industrial PCs — single static binary)
+# Abenix Edge on the same chart, with the token from the Edge page
+helm install yard ./infra/helm/edge-runtime -n abenix-edge \
+  --set mode=gateway --set platform_url=$PLATFORM_URL --set enroll_token=$ETK_TOKEN
+
+# Rust
 helm install abenix-edge-rust ./infra/helm/edge-runtime-rust -n abenix-edge ...
 
-# C (low-RAM PLCs / OpenWRT — musl static)
+# C
 helm install abenix-edge-c ./infra/helm/edge-runtime-c -n abenix-edge ...
 ```
 
@@ -689,18 +690,20 @@ docker run -d --name abenix-edge \
   -e PLATFORM_URL=$PLATFORM_URL \
   -e PLATFORM_TOKEN=$EDGE_TOKEN \
   -e GATEWAY_ID=$GATEWAY_ID \
+  -e EDGE_AUTH_TOKEN=$EDGE_AUTH_TOKEN \
   -e MQTT_URL=mqtt://mqtt.your-plant:1883 \
   -e ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY \
   -e TENANT_ID=$TENANT_ID \
   -v /etc/edge:/etc/edge:ro \             # signing_pub.pem lives here
+  -v edge-agents:/var/edge/agents \
   -p 8080:8080 \
-  agentforge/edge-runtime:latest          # or :rust, :c — variant in the image name
+  localhost:5000/abenix/edge-runtime:latest   # build it from apps/edge-runtime, or edge-runtime-rust, edge-runtime-c
 ```
 
 <a id="signing-keys-fail-closed"></a>
 ### Signing keys, fail closed
 
-Bundles are RSA-PSS signed and the chain refuses rather than degrades. Outside dev the API returns `503` on compile, deploy and token mint until `EDGE_SIGNING_KEY_PEM` is set, it never mints a key into `/tmp`. A gateway refuses to start without the matching public key and refuses any unsigned, tampered or foreign-tenant bundle, keeping the previous bundle running. `EDGE_ALLOW_UNSIGNED=true` is the only bypass and it is logged on every load.
+Bundles are RSA-PSS signed and the chain refuses rather than degrades. Outside dev the API returns `503` on compile, deploy and token mint until `EDGE_SIGNING_KEY_PEM` is set, it never mints a key into `/tmp`. A gateway refuses to start without the matching public key or without `EDGE_AUTH_TOKEN` and refuses any unsigned, tampered or foreign-tenant bundle, keeping the previous bundle running. `EDGE_ALLOW_UNSIGNED=true` is the only bypass and it is logged on every load.
 
 ```bash
 openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out edge_signing_priv.pem
@@ -710,7 +713,7 @@ EDGE_SIGNING_KEY_FILE=./edge_signing_priv.pem EDGE_SIGNING_PUBKEY_FILE=./edge_si
 curl -s $PLATFORM_URL/api/edge/signing-key | jq -r .data.public_key_pem > /etc/edge/signing_pub.pem
 ```
 
-Local dev keeps working without any of this. The API mints one dev key under the data dir and warns once, and `values-local.yaml` allows unsigned bundles. Details in [`docs/06-deployment/05-edge-runtime.md`](docs/06-deployment/05-edge-runtime.md).
+Local dev keeps working without any of this. The API mints one dev key under the data dir and warns once, and `deploy.sh` hands the gateway that key. Details in [`docs/06-deployment/05-edge-runtime.md`](docs/06-deployment/05-edge-runtime.md).
 
 <a id="lifecycle"></a>
 ### Lifecycle
@@ -719,10 +722,10 @@ Local dev keeps working without any of this. The API mints one dev key under the
 |---|---|---|
 | 1. Mint token | platform UI → API Keys | `af_…` key with scopes `agents:execute, edge:register` |
 | 2. Helm-install | plant gateway | runtime calls `POST /api/edge/gateways/register` every 60 s with `Authorization: Bearer af_…` |
-| 3. Mark agent edge-eligible | Builder → Advanced | tool whitelist + `edge_constraints` (max payload, max runtime, MQTT topic ACLs) |
-| 4. Deploy | `/edge` → gateway card → Deploy agent | platform compiles signed `.agent` bundle, publishes to `edge.{gateway_id}.deploy` |
-| 5. Hot-load | runtime | RSA-PSS verify → extract to `/var/edge/agents/{slug}/` → ready to execute |
-| 6. Call | sync `POST {gateway}/agents/{slug}/execute` or async via MQTT topic `agents.{slug}.input` | tool calls run locally and only `mqtt_publish` ACL'd topics escape the edge |
+| 3. Mark agent edge-eligible | Builder → Advanced | tool list checked at load, `edge_constraints` with max payload and max runtime enforced |
+| 4. Deploy | `/edge` → gateway card → Deploy agent | platform compiles signed `.agent` bundle, publishes to `edge/{gateway_id}/deploy/{slug}` retained at QoS 1, HTTP when the gateway does not confirm, and says which happened |
+| 5. Hot-load | runtime | RSA-PSS verify → swap into `/var/edge/agents/{slug}/` → ready to execute |
+| 6. Call | `POST {gateway}/agents/{slug}/execute` with the gateway's token | one model call, no tools on the device |
 
 The full bundle format (manifest schema, signing math, failure modes) is documented in-product at `/help → Edge runtimes`.
 

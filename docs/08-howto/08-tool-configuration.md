@@ -29,7 +29,7 @@ Not on this screen: MCP tools carry their credentials on the MCP connection at `
 
 Where else the same information appears:
 
-- `/tools` shows a badge per tool, "needs key", "optional key" or "key set", resolved for the caller's tenant, and a Configure link for admins.
+- `/tools` shows a badge per tool, "needs key", "optional key" or "key set", resolved for the caller's tenant, and a Configure link for admins. One optional key is enough for "key set", because optional keys are often alternatives. A required key still has to be there.
 - The builder palette shows the same badge, and the agent panel's checklist counts "tool credentials configured x/y" for the tools on the canvas.
 - `/settings/integrations` lists the same keys for everyone and tells non-admins to ask an admin.
 
