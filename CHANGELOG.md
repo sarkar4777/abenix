@@ -1,5 +1,32 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- The enterprise context graph. An Atlas graph bound to a collection types what Cognify extracts, entities record their concept, and Atlas shows entity counts and browses and queries the real instances in Neo4j
+- `atlas_instances` lets agents read the entities behind a concept
+- Cognify dry run with a cost estimate, a budget per job, a stop button, sampling and salient chunk selection, and a cheap default model
+- Atlas overview, viewport, neighbourhood and search routes. The page opens a graph of any size without loading it all
+- OCR for scanned pages behind `KB_OCR_MODE`, with Tesseract, PyMuPDF and unstructured in the worker image
+- Neo4j heap and page cache sizing guide, install time checks of the memory settings, and an Enterprise edition option
+
+### Changed
+- Cognify runs one task per document with progress in Postgres. Reruns skip finished chunks by hash, and what the model returned survives a crash
+- Entity resolution uses blocking on tokens and rare trigrams, off the event loop, streaming from Neo4j
+- Atlas snapshots store only what changed, with pruning. Older full snapshots still restore
+- `/sync-kb` works in background batches past 500 documents, and export streams
+
+### Fixed
+- `graph_explorer` failed on every call, it opened its session wrongly
+- Reruns replaced `source_doc_ids`, which broke graph ACLs, they now merge
+- Relationship writes failed as one transaction with failures only logged, they are now batched, retried and counted on the job
+- `documents.cognified_at` was never written
+- Graph retrieval had no timeouts and capped results only after expanding them
+- Creating an Atlas graph could bind a collection the caller could not read
+- A long Cognify job was called stalled after 6 hours even while working
+- Reruns added duplicate `graph_relationships` rows
+- The API and worker disagreed on the default Celery broker database
+
 ## v2.5.10 — 2026-10-12
 
 ### Added

@@ -71,9 +71,14 @@ spec:
             - -l
             - info
             - --concurrency={{ .Values.cognifyWorker.concurrency | default 2 }}
+          ports:
+            - name: metrics
+              containerPort: 9108
           env:
             - name: CELERY_TASK_ACKS_LATE
               value: "true"
+            - name: WORKER_METRICS_PORT
+              value: "9108"
           envFrom:
             - secretRef:
                 name: abenix-secrets

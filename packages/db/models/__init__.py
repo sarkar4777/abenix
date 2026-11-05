@@ -19,7 +19,9 @@ from models.collection_grant import (
     UserCollectionGrant,
 )
 from models.knowledge_engine import (
+    CognifyChunk,
     CognifyJob,
+    CognifyJobDocument,
     CognifyReport,
     CognifyStatus,
     GraphEntity,
@@ -124,6 +126,14 @@ from models.governance import (
     RiskPolicy,
 )
 from models.source_watch import SourceChange, SourceSnapshot, WatchSource
+from models.knowledge_ops import (
+    KBDeleteJob,
+    KBReembedDocument,
+    KBReembedJob,
+    KnowledgeSpend,
+    TenantKnowledgeQuota,
+)
+from models.kb_connector import KBConnectorItem, KBConnectorSource
 from models.autonomy import ActionType, AgentAction, AutonomyChange, AutonomyGrant
 from models.improvement import (
     Feedback,
@@ -131,7 +141,14 @@ from models.improvement import (
     Lesson,
     LessonCluster,
 )
-from models.atlas import AtlasEdge, AtlasGraph, AtlasNode, AtlasNodeKind, AtlasSnapshot
+from models.atlas import (
+    AtlasEdge,
+    AtlasGraph,
+    AtlasNode,
+    AtlasNodeKind,
+    AtlasSnapshot,
+    AtlasSnapshotRow,
+)
 from models.edge_gateway import EdgeGateway
 from models.memory_palace import (
     HallType,
@@ -180,7 +197,9 @@ __all__ = [
     "PERMISSION_RANK",
     "Document",
     "DocumentStatus",
+    "CognifyChunk",
     "CognifyJob",
+    "CognifyJobDocument",
     "CognifyReport",
     "CognifyStatus",
     "GraphEntity",
@@ -302,6 +321,7 @@ __all__ = [
     "AtlasNodeKind",
     "AtlasEdge",
     "AtlasSnapshot",
+    "AtlasSnapshotRow",
     "EdgeGateway",
     "HallType",
     "MemoryWing",
@@ -318,4 +338,11 @@ __all__ = [
     "TelemetryRule",
     "TelemetryRuleFiring",
     "TelemetryDeviceKey",
+    "KBDeleteJob",
+    "KBReembedDocument",
+    "KBReembedJob",
+    "KnowledgeSpend",
+    "TenantKnowledgeQuota",
+    "KBConnectorItem",
+    "KBConnectorSource",
 ]

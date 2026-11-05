@@ -6,9 +6,17 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
-from engine.knowledge.neo4j_client import get_neo4j_driver, is_neo4j_available
+from engine.knowledge.neo4j_client import (
+    _NEO4J_DATABASE,
+    WRITE_TIMEOUT_S,
+    cypher,
+    get_neo4j_driver,
+    is_neo4j_available,
+)
 
 logger = logging.getLogger(__name__)
+
+MAX_DERIVE_CANDIDATES = 500
 
 
 @dataclass
@@ -43,24 +51,28 @@ async def run_memify(
 
     driver = await get_neo4j_driver()
 
-    async with driver.session() as session:
+    async with driver.session(database=_NEO4J_DATABASE) as session:
         # Boost edges between entities that are both frequently accessed
         strengthen_result = await session.run(
-            """
+            cypher(
+                """
             MATCH (a:Entity {kb_id: $kb_id})-[r]->(b:Entity {kb_id: $kb_id})
             WHERE a.access_count > 3 AND b.access_count > 3
               AND r.weight < 5.0
             SET r.weight = r.weight + 0.1
             RETURN count(r) AS strengthened
             """,
+                timeout=WRITE_TIMEOUT_S,
+            ),
             kb_id=kb_id,
         )
         record = await strengthen_result.single()
         result.edges_strengthened = record["strengthened"] if record else 0
 
-    async with driver.session() as session:
+    async with driver.session(database=_NEO4J_DATABASE) as session:
         weaken_result = await session.run(
-            """
+            cypher(
+                """
             MATCH (a:Entity {kb_id: $kb_id})-[r]->(b:Entity {kb_id: $kb_id})
             WHERE r.weight > 0.2
               AND (a.access_count IS NULL OR a.access_count = 0)
@@ -69,15 +81,18 @@ async def run_memify(
             SET r.weight = r.weight * 0.9
             RETURN count(r) AS weakened
             """,
+                timeout=WRITE_TIMEOUT_S,
+            ),
             kb_id=kb_id,
             days=prune_threshold_days,
         )
         record = await weaken_result.single()
         result.edges_weakened = record["weakened"] if record else 0
 
-    async with driver.session() as session:
+    async with driver.session(database=_NEO4J_DATABASE) as session:
         prune_result = await session.run(
-            """
+            cypher(
+                """
             MATCH (e:Entity {kb_id: $kb_id})
             WHERE e.confidence < $min_conf
               AND (e.access_count IS NULL OR e.access_count = 0)
@@ -86,6 +101,8 @@ async def run_memify(
             DETACH DELETE e
             RETURN count(e) AS pruned
             """,
+                timeout=WRITE_TIMEOUT_S,
+            ),
             kb_id=kb_id,
             min_conf=min_confidence,
             days=prune_threshold_days,
@@ -94,7 +111,7 @@ async def run_memify(
         result.nodes_pruned = record["pruned"] if record else 0
 
     if feedback_data:
-        async with driver.session() as session:
+        async with driver.session(database=_NEO4J_DATABASE) as session:
             for fb in feedback_data:
                 rating = fb.get("rating", 0)
                 entity_ids = fb.get("entity_ids", [])
@@ -107,7 +124,8 @@ async def run_memify(
 
                 # Adjust edges connected to the feedback entities
                 await session.run(
-                    """
+                    cypher(
+                        """
                     MATCH (e:Entity {kb_id: $kb_id})
                     WHERE e.pg_id IN $entity_ids
                     SET e.access_count = COALESCE(e.access_count, 0) + 1,
@@ -116,12 +134,14 @@ async def run_memify(
                             ELSE GREATEST(e.confidence + $delta, 0.1)
                         END
                     WITH e
-                    MATCH (e)-[r]-()
+                    MATCH (e)-[r]-(:Entity {kb_id: $kb_id})
                     SET r.weight = CASE
                         WHEN $delta > 0 THEN LEAST(r.weight + $delta, 5.0)
                         ELSE GREATEST(r.weight + $delta, 0.1)
                     END
                     """,
+                        timeout=WRITE_TIMEOUT_S,
+                    ),
                     kb_id=kb_id,
                     entity_ids=entity_ids,
                     delta=weight_delta,
@@ -129,12 +149,19 @@ async def run_memify(
 
     # If two entities frequently appear in the same search results
     # but aren't directly connected, create a weak RELATED_TO edge
-    async with driver.session() as session:
+    async with driver.session(database=_NEO4J_DATABASE) as session:
         derive_result = await session.run(
-            """
-            MATCH (a:Entity {kb_id: $kb_id}), (b:Entity {kb_id: $kb_id})
-            WHERE a <> b
-              AND a.access_count > 5 AND b.access_count > 5
+            cypher(
+                """
+            MATCH (a:Entity {kb_id: $kb_id})
+            WHERE a.access_count > 5
+            WITH a LIMIT $candidates
+            WITH collect(a) AS busy
+            UNWIND busy AS a
+            UNWIND busy AS b
+            WITH a, b
+            WHERE elementId(a) < elementId(b)
+              AND b.kb_id = $kb_id
               AND NOT (a)--(b)
               AND any(doc IN a.source_doc_ids WHERE doc IN b.source_doc_ids)
             MERGE (a)-[r:CO_OCCURS]->(b)
@@ -142,6 +169,8 @@ async def run_memify(
                          r.updated_at = datetime()
             RETURN count(r) AS derived
             """,
+                timeout=WRITE_TIMEOUT_S,
+            ),
             kb_id=kb_id,
         )
         record = await derive_result.single()

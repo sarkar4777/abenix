@@ -56,6 +56,12 @@ data:
   {{- end }}
   NEO4J_URI: "bolt://{{ .Release.Name }}-neo4j:7687"
   NEO4J_DATABASE: {{ .Values.neo4j.database | default "neo4j" | quote }}
+  COGNIFY_DEFAULT_MODEL: {{ .Values.cognifyWorker.defaultModel | default "claude-haiku-4-5-20251001" | quote }}
+  COGNIFY_JOB_BUDGET_USD: {{ .Values.cognifyWorker.jobBudgetUsd | default 50 | quote }}
+  COGNIFY_MAX_PARALLEL_CHUNKS: {{ .Values.cognifyWorker.maxParallelChunks | default 4 | quote }}
+  COGNIFY_REQUESTS_PER_MINUTE: {{ .Values.cognifyWorker.requestsPerMinute | default 300 | quote }}
+  COGNIFY_TOKENS_PER_MINUTE: {{ .Values.cognifyWorker.tokensPerMinute | default 400000 | quote }}
+  KB_OCR_MODE: {{ .Values.worker.ocrMode | default "auto" | quote }}
   # Default matches the index the worker code references and the README
   # documents. The previous default of plain "abenix" 404'd in
   # every real account because nobody's index is named that.

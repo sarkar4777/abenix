@@ -163,6 +163,7 @@ async def send_guarded(
     allowed_hosts: Iterable[str] = (),
     max_redirects: int = MAX_REDIRECTS,
     sensitive_headers: Iterable[str] = (),
+    stream: bool = False,
 ) -> httpx.Response:
     """Send with redirects followed by hand, each hop checked first.
 
@@ -179,7 +180,7 @@ async def send_guarded(
         )
         if reason:
             raise Blocked(reason, str(request.url), hop)
-        resp = await client.send(request, follow_redirects=False)
+        resp = await client.send(request, follow_redirects=False, stream=stream)
         nxt: Any = resp.next_request
         if not resp.is_redirect or nxt is None:
             return resp

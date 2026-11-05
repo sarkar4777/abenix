@@ -16,7 +16,7 @@ spec:
       labels:
         {{- include "worker.selectorLabels" . | nindent 8 }}
     spec:
-      terminationGracePeriodSeconds: 120
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds | default 720 }}
       securityContext:
         runAsNonRoot: true
         runAsUser: 1001
@@ -110,9 +110,14 @@ spec:
             readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
+          ports:
+            - name: metrics
+              containerPort: {{ .Values.metricsPort | default 9108 }}
           env:
             - name: CELERY_TASK_ACKS_LATE
               value: "true"
+            - name: WORKER_METRICS_PORT
+              value: {{ .Values.metricsPort | default 9108 | quote }}
             {{- with .Values.env }}
             {{- range $key, $value := . }}
             - name: {{ $key }}
@@ -153,7 +158,7 @@ spec:
                 command:
                   - sh
                   - -c
-                  - 'celery -A worker.celery_app control cancel_consumer celery --destination=celery@$HOSTNAME || true'
+                  - 'celery -A worker.celery_app control cancel_consumer documents --destination=celery@$HOSTNAME || true'
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           volumeMounts:
@@ -163,9 +168,16 @@ spec:
               # Must be the same hostPath the API mounts so document_processor
               # can read uploads at /data/uploads/<tenant>/kb/...
               mountPath: /data
+            {{- with .Values.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
       volumes:
+        {{- with .Values.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
         - name: tmp
-          emptyDir: {}
+          emptyDir:
+            sizeLimit: {{ .Values.tmpSizeLimit | default "50Gi" }}
         - name: data
           {{- if .Values.sharedDataPVC.enabled }}
           persistentVolumeClaim:

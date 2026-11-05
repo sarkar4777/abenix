@@ -15,12 +15,35 @@ resources:
 
 autoscaling:
   enabled: true
+  # hpa follows CPU, which stays low while a worker waits on the embedding provider.
+  # keda follows the documents queue and needs the KEDA operator in the cluster.
+  kind: hpa
   minReplicas: 2
   maxReplicas: 5
   targetCPUUtilizationPercentage: 75
+  keda:
+    listLength: "10"
+    databaseIndex: "0"
+    pollingInterval: 15
+    cooldownPeriod: 300
+    passwordSecret: abenix-secrets
+    passwordKey: redis-password
+
+# a stopping worker finishes its current slice of a document, see KB_INGEST_SLICE_SECONDS
+terminationGracePeriodSeconds: 720
+# files from object storage are downloaded here while they are read
+tmpSizeLimit: 50Gi
+
+# Prometheus scrapes worker metrics here
+metricsPort: 9108
 
 env: {}
 envFrom: []
+
+# A filesystem or NFS connector reads a share mounted here, list its path in
+# env.KB_CONNECTOR_FS_ROOTS or the connector refuses it
+extraVolumes: []
+extraVolumeMounts: []
 
 nodeSelector: {}
 tolerations: []

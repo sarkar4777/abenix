@@ -1,58 +1,72 @@
-"""Cognify Pipeline — Transform documents into a knowledge graph."""
+"""Cognify Pipeline, transform documents into a knowledge graph batch by batch."""
 
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
+import os
+import re
 import time
-from dataclasses import dataclass, field
+from collections import deque
+from collections.abc import Awaitable, Callable
+from dataclasses import asdict, dataclass, field
 from typing import Any
 
+from engine.knowledge import cognify_store as store
 from engine.knowledge.entity_extractor import (
-    extract_from_document,
-    DocumentExtractionResult,
+    DEFAULT_COGNIFY_MODEL,
+    ChunkExtractionResult,
+    ExtractedEntity,
+    ExtractedRelationship,
+    estimate_chunk_tokens,
+    extract_chunks,
 )
 from engine.knowledge.entity_resolver import resolve_entities
-from engine.knowledge.graph_writer import write_entities, write_relationships
-from engine.knowledge.neo4j_client import ensure_schema, is_neo4j_available
+from engine.knowledge.graph_writer import (
+    GraphUnavailable,
+    fetch_existing_entities,
+    stamp_pg_ids,
+    write_entities,
+    write_relationships,
+)
+from engine.knowledge.neo4j_client import (
+    ensure_kb_keys,
+    ensure_schema,
+    is_neo4j_available,
+)
+from engine.knowledge.ontology import (
+    MAX_ONTOLOGY_ROWS,
+    BoundOntology,
+    apply_ontology,
+    as_bound,
+)
+from engine.knowledge.rate_limit import CallLimiter
 
 logger = logging.getLogger(__name__)
 
+STOP_JOB_BUDGET = "job_budget"
+STOP_DAILY_BUDGET = "daily_budget"
+STOP_REQUESTED = "user_requested"
+STOP_TIME_SLICE = "time_slice"
+STOP_GRAPH_DOWN = "graph_unavailable"
 
-def _flush_progress(db_url: str, job_id: str, result: "CognifyResult") -> None:
-    """Write in-flight counts back to cognify_jobs so the UI can show them."""
-    if not db_url:
-        return
+STOP_MESSAGES = {
+    STOP_JOB_BUDGET: "Stopped at the job budget of ${budget:.2f} with ${spent:.2f} spent. "
+    "Run Cognify again with a higher limit to continue, finished chunks are not paid for twice.",
+    STOP_DAILY_BUDGET: "Stopped at the daily budget of ${budget:.2f}. "
+    "Run Cognify again tomorrow or raise it in Settings > Cognify.",
+    STOP_REQUESTED: "Stopped on request. Run Cognify again to continue from where it stopped.",
+    STOP_GRAPH_DOWN: "Stopped because Neo4j stopped answering. "
+    "What was extracted is saved and is written on the next run.",
+}
+
+
+def _env_float(name: str, default: float) -> float:
     try:
-        from sqlalchemy import create_engine, text as _t
-
-        eng = create_engine(db_url)
-        with eng.begin() as conn:
-            conn.execute(
-                _t(
-                    "UPDATE cognify_jobs SET "
-                    "documents_processed = :d, entities_extracted = :e, "
-                    "relationships_extracted = :r, tokens_used = :t, "
-                    "cost_usd = :c, "
-                    "anthropic_cost = :ac, openai_cost = :oc, "
-                    "google_cost = :gc, other_cost = :xc "
-                    "WHERE id = :id"
-                ),
-                {
-                    "d": result.documents_processed,
-                    "e": result.entities_extracted,
-                    "r": result.relationships_extracted,
-                    "t": result.total_tokens,
-                    "c": result.total_cost,
-                    "ac": result.anthropic_cost,
-                    "oc": result.openai_cost,
-                    "gc": result.google_cost,
-                    "xc": result.other_cost,
-                    "id": job_id,
-                },
-            )
-    except Exception as _exc:
-        logger.debug("progress flush failed (non-fatal): %s", _exc)
+        return float(os.environ.get(name, default))
+    except ValueError:
+        return default
 
 
 @dataclass
@@ -64,11 +78,16 @@ class CognifyResult:
     status: str = "complete"
     documents_processed: int = 0
     chunks_analyzed: int = 0
+    chunks_skipped: int = 0
+    chunks_failed: int = 0
     entities_extracted: int = 0
     entities_after_resolution: int = 0
     entities_merged: int = 0
+    entities_failed: int = 0
     relationships_extracted: int = 0
     relationships_written: int = 0
+    relationships_failed: int = 0
+    off_ontology_dropped: int = 0
     total_tokens: int = 0
     total_cost: float = 0.0
     # Per-provider spend breakdown so the KB engine page can show
@@ -79,6 +98,7 @@ class CognifyResult:
     other_cost: float = 0.0
     duration_seconds: float = 0.0
     error: str | None = None
+    stop_reason: str | None = None
     # Report data
     entities_by_type: dict[str, int] = field(default_factory=dict)
     top_entities: list[dict[str, Any]] = field(default_factory=list)
@@ -99,17 +119,22 @@ DEFAULT_COGNIFY_CONFIG: dict[str, Any] = {
     "daily_budget_usd": None,
 }
 
+DEFAULT_JOB_BUDGET_USD = _env_float("COGNIFY_JOB_BUDGET_USD", 50.0)
+DEFAULT_PARALLEL_CHUNKS = int(_env_float("COGNIFY_MAX_PARALLEL_CHUNKS", 4))
+DEFAULT_BATCH_CHUNKS = int(_env_float("COGNIFY_GRAPH_BATCH_CHUNKS", 20))
+DEFAULT_RPM = _env_float("COGNIFY_REQUESTS_PER_MINUTE", 300)
+DEFAULT_TPM = _env_float("COGNIFY_TOKENS_PER_MINUTE", 400000)
 
-def _load_cognify_config(tenant_id: str, db_url: str) -> dict[str, Any]:
+
+def load_cognify_config(tenant_id: str, db_url: str) -> dict[str, Any]:
     """The tenant's cognify_configs row over the defaults the settings page shows."""
     cfg = dict(DEFAULT_COGNIFY_CONFIG)
     if not db_url or not tenant_id:
         return cfg
     try:
-        from sqlalchemy import create_engine, text
+        from sqlalchemy import text
 
-        engine = create_engine(db_url)
-        with engine.connect() as conn:
+        with store.engine_for(db_url).connect() as conn:
             row = conn.execute(
                 text(
                     "SELECT auto_accept_threshold, conflict_action, max_parallel_docs, "
@@ -176,6 +201,514 @@ def _provider_key(model: str) -> str:
     return "other"
 
 
+def daily_budget_error(budget: float, spent: float) -> str:
+    return (
+        f"Daily Cognify budget of ${budget:.2f} is used up "
+        f"(${spent:.2f} spent today). Raise it in Settings > Cognify "
+        "or wait until tomorrow (UTC)."
+    )
+
+
+def chunk_hash(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8", "replace")).hexdigest()
+
+
+def price_per_token(model: str) -> tuple[float, float]:
+    from engine.llm_router import DEFAULT_PRICING, PRICING
+
+    p = PRICING.get(model) or DEFAULT_PRICING
+    return float(p["input"]), float(p["output"])
+
+
+def estimate_cost(chunks: int, model: str, avg_chars: int = 1000) -> float:
+    """What extracting this many chunks costs before anyone pays for it."""
+    from engine.knowledge.entity_extractor import EXPECTED_OUTPUT_TOKENS
+
+    tokens_in = estimate_chunk_tokens("x" * avg_chars) - EXPECTED_OUTPUT_TOKENS
+    inp, out = price_per_token(model)
+    return chunks * (tokens_in * inp + EXPECTED_OUTPUT_TOKENS * out)
+
+
+_SIGNAL = re.compile(r"\b(?:[A-Z][\w&.-]+|\d[\d,.%-]*)\b")
+
+
+def chunk_salience(text: str) -> float:
+    """Names and numbers per word, the things extraction can use."""
+    words = text.split()
+    if len(words) < 8:
+        return 0.0
+    return (
+        len(_SIGNAL.findall(text))
+        / len(words)
+        * min(1.0, len(set(words)) / len(words) * 2)
+    )
+
+
+@dataclass
+class ChunkSelection:
+    mode: str = "all"
+    sample_rate: float = 1.0
+    max_chunks_per_doc: int | None = None
+
+    @classmethod
+    def from_config(cls, cfg: dict[str, Any]) -> "ChunkSelection":
+        mode = (cfg.get("selection") or "all").lower()
+        return cls(
+            mode=mode if mode in ("all", "sample", "salient") else "all",
+            sample_rate=max(0.0, min(1.0, float(cfg.get("sample_rate") or 1.0))),
+            max_chunks_per_doc=cfg.get("max_chunks_per_doc"),
+        )
+
+    def pick(self, chunks: list[str], hashes: list[str]) -> list[int]:
+        """Stable for the same input, so a rerun of a sample does not pay for a new one."""
+        live = [i for i, c in enumerate(chunks) if c.strip()]
+        picked = live
+        limit = self.max_chunks_per_doc
+        if self.mode == "sample":
+            picked = [
+                i
+                for i in live
+                if int(hashes[i][:8], 16) / 0xFFFFFFFF < self.sample_rate
+            ]
+        elif self.mode == "salient":
+            keep = max(1, round(len(live) * self.sample_rate))
+            ranked = sorted(live, key=lambda i: (-chunk_salience(chunks[i]), i))
+            picked = sorted(ranked[:keep])
+        if limit and len(picked) > limit:
+            ranked = sorted(picked, key=lambda i: (-chunk_salience(chunks[i]), i))
+            picked = sorted(ranked[: int(limit)])
+        return picked
+
+    @property
+    def covers_everything(self) -> bool:
+        return (
+            self.mode == "all" or self.sample_rate >= 1.0
+        ) and not self.max_chunks_per_doc
+
+
+ExtractFn = Callable[..., Awaitable[list[ChunkExtractionResult]]]
+
+
+@dataclass
+class CognifyContext:
+    kb_id: str
+    tenant_id: str
+    job_id: str
+    db_url: str = ""
+    model: str = DEFAULT_COGNIFY_MODEL
+    force: bool = False
+    threshold: float = 0.85
+    conflict_action: str = "flag"
+    ontology: BoundOntology | None = None
+    selection: ChunkSelection = field(default_factory=ChunkSelection)
+    limiter: CallLimiter | None = None
+    max_parallel_chunks: int = DEFAULT_PARALLEL_CHUNKS
+    batch_chunks: int = DEFAULT_BATCH_CHUNKS
+    job_budget: float | None = None
+    daily_budget: float | None = None
+    deadline: float | None = None
+    extract: ExtractFn = extract_chunks
+    # spend seen by this process, the only ledger when there is no database
+    local_cost: float = 0.0
+    local_chunks: int = 0
+
+
+def build_context(
+    kb_id: str,
+    tenant_id: str,
+    job_id: str,
+    config: dict[str, Any],
+    db_url: str,
+    tenant_cfg: dict[str, Any] | None = None,
+    ontology: BoundOntology | None = None,
+) -> CognifyContext:
+    tenant_cfg = (
+        tenant_cfg if tenant_cfg is not None else load_cognify_config(tenant_id, db_url)
+    )
+    budget = config.get("max_cost_usd")
+    return CognifyContext(
+        kb_id=kb_id,
+        tenant_id=tenant_id,
+        job_id=job_id,
+        db_url=db_url,
+        model=config.get("model") or DEFAULT_COGNIFY_MODEL,
+        force=bool(config.get("force", False)),
+        threshold=float(tenant_cfg["auto_accept_threshold"]),
+        conflict_action=tenant_cfg["conflict_action"],
+        ontology=ontology,
+        selection=ChunkSelection.from_config(config),
+        limiter=CallLimiter(
+            float(config.get("requests_per_minute") or DEFAULT_RPM),
+            float(config.get("tokens_per_minute") or DEFAULT_TPM),
+        ),
+        max_parallel_chunks=int(
+            config.get("max_parallel_chunks") or DEFAULT_PARALLEL_CHUNKS
+        ),
+        batch_chunks=int(config.get("graph_batch_chunks") or DEFAULT_BATCH_CHUNKS),
+        job_budget=float(budget) if budget is not None else DEFAULT_JOB_BUDGET_USD,
+        daily_budget=tenant_cfg.get("daily_budget_usd"),
+    )
+
+
+def stop_message(reason: str, budget: float | None = None, spent: float = 0.0) -> str:
+    template = STOP_MESSAGES.get(reason, "Stopped.")
+    return template.format(budget=budget or 0.0, spent=spent)
+
+
+async def check_stop(
+    ctx: CognifyContext, upcoming_cost: float = 0.0, chunks: int = 0
+) -> str | None:
+    """Why this batch must not start, if there is a reason."""
+    if ctx.deadline is not None and time.monotonic() >= ctx.deadline:
+        return STOP_TIME_SLICE
+    state = await asyncio.to_thread(
+        store.job_state, ctx.db_url, ctx.job_id, ctx.tenant_id
+    )
+    if state.stop_requested:
+        return state.stop_reason or STOP_REQUESTED
+    spent = max(state.cost, ctx.local_cost)
+    # what this job has really paid per chunk beats the price list estimate
+    if state.chunks_paid and chunks:
+        upcoming_cost = max(upcoming_cost, state.cost / state.chunks_paid * chunks)
+    budget = state.budget if state.budget is not None else ctx.job_budget
+    if budget is not None and spent + upcoming_cost > budget:
+        return STOP_JOB_BUDGET
+    if ctx.daily_budget is not None and (
+        state.spent_today + upcoming_cost >= ctx.daily_budget
+    ):
+        return STOP_DAILY_BUDGET
+    return None
+
+
+@dataclass
+class DocumentOutcome:
+    document_id: str
+    filename: str = ""
+    chunks_total: int = 0
+    chunks_selected: int = 0
+    chunks_skipped: int = 0
+    chunks_done: int = 0
+    chunks_failed: int = 0
+    tokens: int = 0
+    cost: float = 0.0
+    entities_raw: int = 0
+    entities_written: int = 0
+    entities_failed: int = 0
+    entities_merged: int = 0
+    relationships_raw: int = 0
+    relationships_written: int = 0
+    relationships_failed: int = 0
+    off_ontology: int = 0
+    entities_held: int = 0
+    relationships_held: int = 0
+    conflicts: int = 0
+    held_back: list[dict[str, Any]] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
+    stop_reason: str | None = None
+    entity_types: dict[str, int] = field(default_factory=dict)
+    relationship_types: dict[str, int] = field(default_factory=dict)
+    top_entities: list[dict[str, Any]] = field(default_factory=list)
+
+    @property
+    def finished(self) -> bool:
+        return self.stop_reason is None and self.chunks_failed == 0
+
+
+def _result_to_json(r: ChunkExtractionResult) -> dict[str, Any]:
+    return {
+        "entities": [asdict(e) for e in r.entities],
+        "relationships": [asdict(x) for x in r.relationships],
+    }
+
+
+def _result_from_json(
+    data: dict[str, Any] | None, index: int, doc_id: str
+) -> ChunkExtractionResult:
+    data = data or {}
+    return ChunkExtractionResult(
+        entities=[ExtractedEntity(**e) for e in data.get("entities") or []],
+        relationships=[
+            ExtractedRelationship(**x) for x in data.get("relationships") or []
+        ],
+        chunk_index=index,
+        doc_id=doc_id,
+    )
+
+
+async def _commit(
+    ctx: CognifyContext,
+    outcome: DocumentOutcome,
+    results: list[ChunkExtractionResult],
+    hashes: list[str],
+    batch_id: str,
+) -> None:
+    """Resolve one batch against the stored graph, write it, then mark its chunks done."""
+    counts = store.BatchCounts(chunks=len(hashes))
+    raw_entities = []
+    raw_relationships = []
+    for r in results:
+        raw_entities.extend(r.entities)
+        raw_relationships.extend(r.relationships)
+    counts.entities_extracted = len(raw_entities)
+    counts.relationships_extracted = len(raw_relationships)
+
+    existing = await fetch_existing_entities(
+        ctx.kb_id, [e.name for e in raw_entities], ctx.tenant_id
+    )
+    resolution = await resolve_entities(
+        raw_entities=raw_entities,
+        raw_relationships=raw_relationships,
+        existing_entities=existing,
+        model=ctx.model,
+        conflict_action=ctx.conflict_action,
+        llm_resolve=False,
+    )
+    entities, relationships, held = _hold_back(
+        resolution.entities, resolution.relationships, ctx.threshold
+    )
+    counts.entities_held = sum(1 for h in held if h["kind"] == "entity")
+    counts.relationships_held = len(held) - counts.entities_held
+    counts.held_back = sorted(held, key=lambda h: -h["confidence"])[:10]
+    counts.entities_merged = resolution.merges_performed
+    if ctx.ontology and ctx.ontology.graph_id:
+        for e in entities:
+            if (e.properties or {}).get("atlas_concept_id"):
+                e.properties["atlas_graph_id"] = ctx.ontology.graph_id
+
+    entity_stats = await write_entities(
+        ctx.kb_id, entities, tenant_id=ctx.tenant_id, batch_id=batch_id
+    )
+    rel_stats = await write_relationships(ctx.kb_id, relationships, batch_id=batch_id)
+    counts.entities_written = entity_stats.written
+    counts.entities_failed = entity_stats.failed
+    counts.relationships_written = rel_stats.written
+    counts.relationships_failed = rel_stats.failed
+    counts.errors = (entity_stats.errors + rel_stats.errors)[:10]
+
+    if ctx.db_url and resolution.conflicts:
+        counts.conflicts = await asyncio.to_thread(
+            _record_conflicts,
+            ctx.tenant_id,
+            ctx.kb_id,
+            resolution.conflicts,
+            ctx.db_url,
+        )
+    written = set(entity_stats.ids)
+    mirror_rels = [
+        r for r in relationships if r.source in written and r.target in written
+    ]
+    pg_ids = await asyncio.to_thread(
+        store.commit_batch,
+        ctx.db_url,
+        ctx.kb_id,
+        ctx.tenant_id,
+        outcome.document_id,
+        ctx.job_id,
+        [e for e in entities if e.canonical_name in written],
+        mirror_rels,
+        entity_stats.ids,
+        hashes,
+        counts,
+    )
+    try:
+        await stamp_pg_ids(ctx.kb_id, pg_ids)
+    except Exception as e:
+        logger.warning("could not stamp Postgres ids on graph nodes: %s", e)
+
+    outcome.chunks_done += len(hashes)
+    outcome.entities_raw += counts.entities_extracted
+    outcome.relationships_raw += counts.relationships_extracted
+    outcome.entities_written += entity_stats.written
+    outcome.entities_failed += entity_stats.failed
+    outcome.entities_merged += resolution.merges_performed
+    outcome.relationships_written += rel_stats.written
+    outcome.relationships_failed += rel_stats.failed
+    outcome.entities_held += counts.entities_held
+    outcome.relationships_held += counts.relationships_held
+    outcome.conflicts += counts.conflicts
+    outcome.held_back = (outcome.held_back + counts.held_back)[:50]
+    outcome.errors = (outcome.errors + counts.errors)[:20]
+    for e in entities:
+        outcome.entity_types[e.entity_type] = (
+            outcome.entity_types.get(e.entity_type, 0) + 1
+        )
+        outcome.top_entities.append(
+            {
+                "name": e.canonical_name,
+                "type": e.entity_type,
+                "mentions": e.mention_count,
+                "description": e.description,
+            }
+        )
+    outcome.top_entities = sorted(outcome.top_entities, key=lambda t: -t["mentions"])[
+        :20
+    ]
+    for r in relationships:
+        outcome.relationship_types[r.relationship_type] = (
+            outcome.relationship_types.get(r.relationship_type, 0) + 1
+        )
+
+
+async def cognify_document(
+    ctx: CognifyContext, doc: dict[str, Any], count_totals: bool = True
+) -> DocumentOutcome:
+    """Process what one document still needs. Safe to call again after any failure."""
+    doc_id = str(doc["id"])
+    chunks: list[str] = doc.get("chunks") or []
+    outcome = DocumentOutcome(document_id=doc_id, filename=doc.get("filename", ""))
+    outcome.chunks_total = len(chunks)
+    hashes = [chunk_hash(c) for c in chunks]
+
+    ledger = await asyncio.to_thread(store.ledger_state, ctx.db_url, ctx.kb_id, doc_id)
+
+    selected = ctx.selection.pick(chunks, hashes)
+    outcome.chunks_selected = len(selected)
+    seen: set[str] = set()
+    todo: list[int] = []
+    for i in selected:
+        h = hashes[i]
+        if h in seen or h in ledger.done or h in ledger.pending:
+            outcome.chunks_skipped += 0 if h in ledger.pending else 1
+            seen.add(h)
+            continue
+        seen.add(h)
+        todo.append(i)
+    if count_totals:
+        await asyncio.to_thread(
+            store.add_job_totals,
+            ctx.db_url,
+            ctx.job_id,
+            len(selected),
+            outcome.chunks_skipped,
+        )
+
+    # a crash after the model answered and before the graph write costs nothing to replay
+    if ledger.pending:
+        rows = sorted(ledger.pending.values(), key=lambda r: r.chunk_index)
+        for start in range(0, len(rows), max(ctx.batch_chunks, 1)):
+            batch = rows[start : start + ctx.batch_chunks]
+            await _commit(
+                ctx,
+                outcome,
+                [_result_from_json(r.result, r.chunk_index, doc_id) for r in batch],
+                [r.chunk_hash for r in batch],
+                _batch_id([r.chunk_hash for r in batch]),
+            )
+
+    known: deque[str] = deque(maxlen=50)
+    provider_column = f"{_provider_key(ctx.model)}_cost"
+    for start in range(0, len(todo), max(ctx.batch_chunks, 1)):
+        batch = todo[start : start + ctx.batch_chunks]
+        est = _batch_estimate(ctx.model, [chunks[i] for i in batch])
+        if ctx.local_chunks:
+            est = max(est, ctx.local_cost / ctx.local_chunks * len(batch))
+        reason = await check_stop(ctx, est, len(batch))
+        if reason:
+            outcome.stop_reason = reason
+            if reason != STOP_TIME_SLICE:
+                await asyncio.to_thread(
+                    store.request_stop, ctx.db_url, ctx.job_id, reason
+                )
+            break
+        results = await ctx.extract(
+            [(i, chunks[i]) for i in batch],
+            doc_id,
+            known_entities=list(known),
+            model=ctx.model,
+            ontology=ctx.ontology,
+            limiter=ctx.limiter,
+            max_parallel=ctx.max_parallel_chunks,
+        )
+        ok: list[tuple[int, ChunkExtractionResult]] = []
+        rows_out: list[store.LedgerRow] = []
+        tokens = cost = failed = 0
+        for i, r in zip(batch, results):
+            tokens += r.tokens_used
+            cost += r.cost
+            if r.error:
+                failed += 1
+                outcome.errors = (outcome.errors + [f"chunk {i} {r.error}"])[:20]
+                continue
+            outcome.off_ontology += apply_ontology(r, ctx.ontology)
+            ok.append((i, r))
+            rows_out.append(
+                store.LedgerRow(hashes[i], i, _result_to_json(r), r.tokens_used, r.cost)
+            )
+        outcome.tokens += tokens
+        outcome.cost += cost
+        outcome.chunks_failed += failed
+        ctx.local_cost += cost
+        ctx.local_chunks += len(batch)
+        await asyncio.to_thread(
+            store.record_extractions,
+            ctx.db_url,
+            ctx.kb_id,
+            doc_id,
+            ctx.job_id,
+            rows_out,
+            tokens,
+            cost,
+            provider_column,
+            failed,
+        )
+        if ok:
+            await _commit(
+                ctx,
+                outcome,
+                [r for _i, r in ok],
+                [hashes[i] for i, _r in ok],
+                _batch_id([hashes[i] for i, _r in ok]),
+            )
+        for _i, r in ok:
+            for e in r.entities:
+                if e.name not in known:
+                    known.append(e.name)
+    return outcome
+
+
+def _batch_id(hashes: list[str]) -> str:
+    return hashlib.sha256("|".join(sorted(hashes)).encode()).hexdigest()[:24]
+
+
+def _batch_estimate(model: str, texts: list[str]) -> float:
+    inp, out = price_per_token(model)
+    return sum(estimate_chunk_tokens(t) * inp for t in texts) + len(texts) * 400 * out
+
+
+def _merge_outcome(result: CognifyResult, o: DocumentOutcome, model: str) -> None:
+    result.chunks_analyzed += o.chunks_done
+    result.chunks_skipped += o.chunks_skipped
+    result.chunks_failed += o.chunks_failed
+    result.total_tokens += o.tokens
+    result.total_cost += o.cost
+    setattr(
+        result,
+        f"{_provider_key(model)}_cost",
+        getattr(result, f"{_provider_key(model)}_cost") + o.cost,
+    )
+    result.entities_extracted += o.entities_raw
+    result.relationships_extracted += o.relationships_raw
+    result.entities_after_resolution += o.entities_written
+    result.entities_failed += o.entities_failed
+    result.entities_merged += o.entities_merged
+    result.relationships_written += o.relationships_written
+    result.relationships_failed += o.relationships_failed
+    result.off_ontology_dropped += o.off_ontology
+    result.entities_held_back += o.entities_held
+    result.relationships_held_back += o.relationships_held
+    result.conflicts_recorded += o.conflicts
+    result.held_back = sorted(
+        result.held_back + o.held_back, key=lambda h: -h["confidence"]
+    )[:50]
+    for k, v in o.entity_types.items():
+        result.entities_by_type[k] = result.entities_by_type.get(k, 0) + v
+    for k, v in o.relationship_types.items():
+        result.relationship_types[k] = result.relationship_types.get(k, 0) + v
+    result.top_entities = sorted(
+        result.top_entities + o.top_entities, key=lambda t: -t["mentions"]
+    )[:20]
+
+
 async def run_cognify(
     kb_id: str,
     tenant_id: str,
@@ -184,351 +717,191 @@ async def run_cognify(
     config: dict[str, Any] | None = None,
     db_url: str = "",
 ) -> CognifyResult:
-    """Execute the full cognify pipeline."""
+    """Run every document in this process. The worker runs one task per document instead."""
     start = time.monotonic()
     cfg = config or {}
-    model = cfg.get("model", "claude-sonnet-4-5-20250929")
     result = CognifyResult(kb_id=kb_id, job_id=job_id)
-    tenant_cfg = _load_cognify_config(tenant_id, db_url)
+    db_url = store.usable_url(db_url, kb_id)
+    tenant_cfg = load_cognify_config(tenant_id, db_url)
     result.auto_accept_threshold = float(tenant_cfg["auto_accept_threshold"])
     budget = tenant_cfg.get("daily_budget_usd")
     spent_before = float(tenant_cfg.get("spent_today_usd") or 0)
     if budget is not None and spent_before >= budget:
         result.status = "failed"
-        result.error = (
-            f"Daily Cognify budget of ${budget:.2f} is used up "
-            f"(${spent_before:.2f} spent today). Raise it in Settings > Cognify "
-            "or wait until tomorrow (UTC)."
-        )
+        result.error = daily_budget_error(budget, spent_before)
         result.duration_seconds = time.monotonic() - start
         return result
 
-    if cfg.get("incremental", True) and not cfg.get("force", False):
-        if await _no_new_documents_since_last_cognify(kb_id, db_url, documents):
-            logger.info(
-                "Cognify [%s] skipped — no new documents since last_cognified_at",
-                job_id[:8],
-            )
-            result.status = "skipped"
-            result.duration_seconds = time.monotonic() - start
-            return result
-
-    # KB v2 phase 3: load the project's active ontology schema (if any)
-    # and pass it through as a typing prior to the LLM extractor. The
-    # schema is project-scoped, so we resolve the project from kb_id.
-    ontology = await _load_active_ontology(kb_id, db_url)
-    if ontology:
-        logger.info(
-            "Cognify [%s] using ontology schema with %d entity types, %d rel types",
-            job_id[:8],
-            len((ontology or {}).get("entity_types") or []),
-            len((ontology or {}).get("relationship_types") or []),
-        )
-
-    # Ensure Neo4j schema
     if not await is_neo4j_available():
         result.status = "failed"
         result.error = "Neo4j is not available. Start the Neo4j container."
         return result
 
     await ensure_schema()
-
-    logger.info(
-        "Cognify [%s] Phase 1: Extracting entities from %d documents",
-        job_id[:8],
-        len(documents),
-    )
-    all_extraction_results: list[DocumentExtractionResult] = []
+    await ensure_kb_keys(kb_id, tenant_id)
+    ontology = await asyncio.to_thread(load_active_ontology, kb_id, db_url)
+    ctx = build_context(kb_id, tenant_id, job_id, cfg, db_url, tenant_cfg, ontology)
+    if ctx.force:
+        for doc in documents:
+            await asyncio.to_thread(
+                store.clear_ledger, db_url, kb_id, str(doc.get("id"))
+            )
     gate = asyncio.Semaphore(max(1, int(tenant_cfg["max_parallel_docs"])))
-    over_budget = asyncio.Event()
 
-    async def _extract(doc: dict[str, Any]) -> DocumentExtractionResult | None:
+    async def _one(doc: dict[str, Any]) -> DocumentOutcome | None:
         async with gate:
-            if over_budget.is_set():
+            if result.stop_reason:
                 result.documents_skipped_budget += 1
                 return None
-            return await extract_from_document(
-                chunks=doc["chunks"],
-                doc_id=doc["id"],
-                filename=doc.get("filename", "unknown"),
-                model=model,
-                ontology=ontology,
+            return await cognify_document(ctx, doc)
+
+    todo = [doc for doc in documents if doc.get("chunks")]
+    for fut in asyncio.as_completed([_one(doc) for doc in todo]):
+        try:
+            outcome = await fut
+        except GraphUnavailable as e:
+            result.stop_reason = STOP_GRAPH_DOWN
+            result.error = f"{stop_message(STOP_GRAPH_DOWN)} {e}"
+            continue
+        if outcome is None:
+            continue
+        result.documents_processed += 1
+        _merge_outcome(result, outcome, ctx.model)
+        if outcome.stop_reason and not result.stop_reason:
+            result.stop_reason = outcome.stop_reason
+        if outcome.finished and ctx.selection.covers_everything and db_url:
+            await asyncio.to_thread(
+                store.mark_document_cognified, db_url, outcome.document_id, job_id
             )
 
-    todo = []
-    for doc in documents:
-        if not doc.get("chunks"):
-            logger.warning("Document %s has no chunks, skipping", doc["id"])
-            continue
-        todo.append(asyncio.ensure_future(_extract(doc)))
-
-    for fut in asyncio.as_completed(todo):
-        doc_result = await fut
-        if doc_result is None:
-            continue
-        all_extraction_results.append(doc_result)
-        result.documents_processed += 1
-        result.chunks_analyzed += doc_result.chunks_processed
-        result.total_tokens += doc_result.total_tokens
-        result.total_cost += doc_result.total_cost
-        # Provider split — every call in Phase 1 uses the same `model`
-        # unless the router fell back, which is invisible at this level.
-        # Bucket conservatively by the requested model; the router has
-        # already emitted exact Prometheus spend per call.
-        _prov = _provider_key(model)
-        if _prov == "anthropic":
-            result.anthropic_cost += doc_result.total_cost
-        elif _prov == "openai":
-            result.openai_cost += doc_result.total_cost
-        elif _prov == "google":
-            result.google_cost += doc_result.total_cost
-        else:
-            result.other_cost += doc_result.total_cost
-        # Running counts so the UI banner can show something ticking.
-        result.entities_extracted = sum(len(r.entities) for r in all_extraction_results)
-        result.relationships_extracted = sum(
-            len(r.relationships) for r in all_extraction_results
+    if result.stop_reason in STOP_MESSAGES and not result.error:
+        result.error = stop_message(
+            result.stop_reason, ctx.job_budget, result.total_cost
         )
-        _flush_progress(db_url, job_id, result)
-        if budget is not None and spent_before + result.total_cost >= budget:
-            over_budget.set()
-
-    if result.documents_skipped_budget:
+        if result.documents_skipped_budget:
+            result.error += (
+                f" {result.documents_skipped_budget} document(s) were not processed."
+            )
+    if result.stop_reason:
+        result.status = "stopped"
+    elif result.chunks_failed:
         result.error = (
-            f"Stopped at the daily budget of ${budget:.2f}: "
-            f"{result.documents_skipped_budget} document(s) were not processed"
+            f"{result.chunks_failed} chunk(s) failed. Run Cognify again to retry them."
         )
-
-    # Aggregate raw entities and relationships
-    all_raw_entities = []
-    all_raw_relationships = []
-    for dr in all_extraction_results:
-        all_raw_entities.extend(dr.entities)
-        all_raw_relationships.extend(dr.relationships)
-
-    result.entities_extracted = len(all_raw_entities)
-    result.relationships_extracted = len(all_raw_relationships)
-
-    if not all_raw_entities:
-        logger.warning(
-            "Cognify [%s] No entities extracted from %d documents",
-            job_id[:8],
-            len(documents),
-        )
-        result.duration_seconds = time.monotonic() - start
-        return result
-
-    logger.info(
-        "Cognify [%s] Phase 2: Resolving %d entities, %d relationships",
-        job_id[:8],
-        len(all_raw_entities),
-        len(all_raw_relationships),
-    )
-
-    # Fetch existing entities from the KB for cross-document dedup
-    existing_entities = await _fetch_existing_entities(kb_id, db_url)
-
-    resolution = await resolve_entities(
-        raw_entities=all_raw_entities,
-        raw_relationships=all_raw_relationships,
-        existing_entities=existing_entities,
-        model=model,
-        conflict_action=tenant_cfg["conflict_action"],
-    )
-    resolution.entities, resolution.relationships, held = _hold_back(
-        resolution.entities,
-        resolution.relationships,
-        result.auto_accept_threshold,
-    )
-    result.entities_held_back = sum(1 for h in held if h["kind"] == "entity")
-    result.relationships_held_back = len(held) - result.entities_held_back
-    result.held_back = sorted(held, key=lambda h: -h["confidence"])[:50]
-
-    result.entities_after_resolution = len(resolution.entities)
-    result.entities_merged = resolution.merges_performed
-    result.total_tokens += resolution.tokens_used
-    result.total_cost += resolution.cost
-
-    logger.info(
-        "Cognify [%s] Phase 3: Writing %d entities, %d relationships to Neo4j",
-        job_id[:8],
-        len(resolution.entities),
-        len(resolution.relationships),
-    )
-
-    # Write entities to Neo4j
-    neo4j_id_map = await write_entities(kb_id, resolution.entities)
-
-    # Write relationships to Neo4j
-    rels_written = await write_relationships(kb_id, resolution.relationships)
-    result.relationships_written = rels_written
-
-    logger.info("Cognify [%s] Phase 4: Updating PostgreSQL metadata", job_id[:8])
-
-    if db_url and resolution.conflicts:
-        result.conflicts_recorded = _record_conflicts(
-            tenant_id, kb_id, resolution.conflicts, db_url
-        )
-
-    if db_url:
-        await _update_pg_metadata(
-            kb_id=kb_id,
-            tenant_id=tenant_id,
-            job_id=job_id,
-            entities=resolution.entities,
-            relationships=resolution.relationships,
-            neo4j_id_map=neo4j_id_map,
-            db_url=db_url,
-        )
-
-    # Entities by type
-    for e in resolution.entities:
-        t = e.entity_type
-        result.entities_by_type[t] = result.entities_by_type.get(t, 0) + 1
-
-    # Top entities by mention count
-    sorted_entities = sorted(
-        resolution.entities, key=lambda e: e.mention_count, reverse=True
-    )
-    result.top_entities = [
-        {
-            "name": e.canonical_name,
-            "type": e.entity_type,
-            "mentions": e.mention_count,
-            "description": e.description,
-        }
-        for e in sorted_entities[:20]
-    ]
-
-    # Relationship types
-    for r in resolution.relationships:
-        t = r.relationship_type
-        result.relationship_types[t] = result.relationship_types.get(t, 0) + 1
-
+    if result.entities_after_resolution or result.chunks_analyzed:
+        await asyncio.to_thread(store.refresh_kb_counters, db_url, kb_id)
     result.duration_seconds = time.monotonic() - start
     logger.info(
-        "Cognify [%s] Complete: %d entities, %d relationships, %.1fs, $%.4f",
+        "Cognify [%s] %s: %d entities, %d relationships, %.1fs, $%.4f",
         job_id[:8],
+        result.status,
         result.entities_after_resolution,
         result.relationships_written,
         result.duration_seconds,
         result.total_cost,
     )
-
     return result
 
 
-async def _no_new_documents_since_last_cognify(
-    kb_id: str,
-    db_url: str,
-    documents: list[dict[str, Any]],
-) -> bool:
-    """True iff every passed document was created at-or-before the"""
-    if not db_url or not documents:
-        return False
-    try:
-        from sqlalchemy import create_engine, text
-
-        engine = create_engine(db_url)
-        with engine.connect() as conn:
-            row = conn.execute(
-                text(
-                    "SELECT last_cognified_at FROM knowledge_collections "
-                    "WHERE id = CAST(:kb_id AS uuid)"
-                ),
-                {"kb_id": kb_id},
-            ).fetchone()
-            if row is None or row[0] is None:
-                return False
-            last = row[0]
-            doc_ids = [d["id"] for d in documents if d.get("id")]
-            if not doc_ids:
-                return False
-            cnt = (
-                conn.execute(
-                    text(
-                        "SELECT COUNT(*) FROM documents "
-                        "WHERE id = ANY(:ids) AND created_at > :last"
-                    ),
-                    {"ids": doc_ids, "last": last},
-                ).scalar()
-                or 0
-            )
-            return cnt == 0
-    except Exception:
-        return False
-
-
-async def _load_active_ontology(kb_id: str, db_url: str) -> dict | None:
-    """Load the active ontology schema for the KB's project."""
+def load_active_ontology(kb_id: str, db_url: str) -> BoundOntology | None:
+    """The Atlas graph bound to this KB governs extraction, then the project's ontology."""
     if not db_url:
         return None
     try:
-        from sqlalchemy import create_engine, text
+        from sqlalchemy import text
 
-        engine = create_engine(db_url)
-        with engine.connect() as conn:
+        with store.engine_for(db_url).connect() as conn:
+            graph = conn.execute(
+                text(
+                    """
+                    SELECT g.id, g.version, g.settings
+                    FROM atlas_graphs g
+                    JOIN knowledge_collections kb ON kb.id = g.kb_id
+                    WHERE g.kb_id = CAST(:kb AS uuid)
+                      AND g.tenant_id = kb.tenant_id
+                      AND coalesce(g.settings->>'governs_extraction', 'true') <> 'false'
+                      AND EXISTS (SELECT 1 FROM atlas_nodes n
+                                  WHERE n.graph_id = g.id AND n.kind = 'concept')
+                    ORDER BY (g.settings->>'governs_extraction') = 'true' DESC NULLS LAST,
+                             g.updated_at DESC
+                    LIMIT 1
+                    """
+                ),
+                {"kb": kb_id},
+            ).fetchone()
+            if graph is not None:
+                concepts = conn.execute(
+                    text(
+                        "SELECT id, label, description FROM atlas_nodes "
+                        "WHERE graph_id = :g AND kind = 'concept' ORDER BY label LIMIT :n"
+                    ),
+                    {"g": graph[0], "n": MAX_ONTOLOGY_ROWS},
+                ).fetchall()
+                edges = conn.execute(
+                    text(
+                        """
+                        SELECT e.id, e.label, e.description, f.label, t.label
+                        FROM atlas_edges e
+                        JOIN atlas_nodes f ON f.id = e.from_node_id AND f.kind = 'concept'
+                        JOIN atlas_nodes t ON t.id = e.to_node_id AND t.kind = 'concept'
+                        WHERE e.graph_id = :g ORDER BY e.label LIMIT :n
+                        """
+                    ),
+                    {"g": graph[0], "n": MAX_ONTOLOGY_ROWS},
+                ).fetchall()
+                settings = graph[2] or {}
+                return BoundOntology(
+                    entity_types=[
+                        {
+                            "name": c[1],
+                            "description": c[2] or "",
+                            "concept_id": str(c[0]),
+                        }
+                        for c in concepts
+                    ],
+                    relationship_types=[
+                        {
+                            "name": e[1],
+                            "description": e[2] or "",
+                            "edge_id": str(e[0]),
+                            "from": e[3],
+                            "to": e[4],
+                        }
+                        for e in edges
+                    ],
+                    graph_id=str(graph[0]),
+                    version=int(graph[1] or 0),
+                    source="atlas",
+                    strict=settings.get("ontology_mode", "strict") != "guided",
+                )
             row = conn.execute(
                 text(
                     """
-                SELECT s.entity_types, s.relationship_types
-                FROM knowledge_collections kb
-                JOIN knowledge_projects p ON p.id = kb.project_id
-                JOIN ontology_schemas s ON s.id = p.ontology_schema_id
-                WHERE kb.id = CAST(:kb_id AS uuid)
-                LIMIT 1
-                """
+                    SELECT s.entity_types, s.relationship_types
+                    FROM knowledge_collections kb
+                    JOIN knowledge_projects p ON p.id = kb.project_id
+                    JOIN ontology_schemas s ON s.id = p.ontology_schema_id
+                    WHERE kb.id = CAST(:kb_id AS uuid)
+                    LIMIT 1
+                    """
                 ),
                 {"kb_id": kb_id},
             ).fetchone()
             if row is None:
                 return None
-            return {
-                "entity_types": row[0] or [],
-                "relationship_types": row[1] or [],
-            }
+            return as_bound(
+                {"entity_types": row[0] or [], "relationship_types": row[1] or []}
+            )
     except Exception as e:
         logger.warning("Failed to load active ontology for kb %s: %s", kb_id, e)
         return None
-
-
-async def _fetch_existing_entities(kb_id: str, db_url: str) -> list[dict[str, Any]]:
-    """Fetch existing entities from PostgreSQL for cross-document dedup."""
-    if not db_url:
-        return []
-
-    try:
-        from sqlalchemy import create_engine, text
-
-        engine = create_engine(db_url)
-        with engine.connect() as conn:
-            rows = conn.execute(
-                text(
-                    "SELECT canonical_name, entity_type, aliases, source_doc_ids, confidence "
-                    "FROM graph_entities WHERE kb_id = :kb_id"
-                ),
-                {"kb_id": kb_id},
-            ).fetchall()
-            return [
-                {
-                    "canonical_name": r[0],
-                    "entity_type": r[1],
-                    "aliases": r[2] or [],
-                    "source_doc_ids": r[3] if isinstance(r[3], list) else [],
-                    "confidence": float(r[4]) if r[4] is not None else 1.0,
-                }
-                for r in rows
-            ]
-    except Exception as e:
-        logger.warning("Could not fetch existing entities: %s", e)
-        return []
 
 
 def _record_conflicts(tenant_id: str, kb_id: str, conflicts: list, db_url: str) -> int:
     """One cognify_conflicts row per disagreement, skipping ones already on file."""
     import uuid as uuid_mod
 
-    from sqlalchemy import create_engine, text
+    from sqlalchemy import text
 
     def _doc(v: str) -> str | None:
         try:
@@ -538,8 +911,7 @@ def _record_conflicts(tenant_id: str, kb_id: str, conflicts: list, db_url: str) 
 
     written = 0
     try:
-        engine = create_engine(db_url)
-        with engine.begin() as conn:
+        with store.engine_for(db_url).begin() as conn:
             for c in conflicts:
                 a_doc, b_doc = _doc(c.a_doc_id), _doc(c.b_doc_id)
                 if not a_doc or not b_doc:
@@ -585,116 +957,3 @@ def _record_conflicts(tenant_id: str, kb_id: str, conflicts: list, db_url: str) 
     except Exception as e:
         logger.warning("Could not record cognify conflicts for kb %s: %s", kb_id, e)
     return written
-
-
-async def _update_pg_metadata(
-    kb_id: str,
-    tenant_id: str,
-    job_id: str,
-    entities: list,
-    relationships: list,
-    neo4j_id_map: dict[str, str],
-    db_url: str,
-) -> None:
-    """Write entity_registry and relationship_registry rows to PostgreSQL.
-
-    This keeps PG as the source of truth for metadata while Neo4j stores the graph.
-    """
-    try:
-        import json
-        import uuid as uuid_mod
-        from sqlalchemy import create_engine, text
-
-        engine = create_engine(db_url)
-
-        with engine.begin() as conn:
-            # Upsert entities
-            for e in entities:
-                neo4j_id = neo4j_id_map.get(e.canonical_name, "")
-                conn.execute(
-                    text(
-                        """
-                        INSERT INTO graph_entities (id, tenant_id, kb_id, canonical_name, entity_type,
-                            description, aliases, source_doc_ids, neo4j_node_id, mention_count,
-                            access_count, confidence)
-                        VALUES (:id, :tenant_id, CAST(:kb_id AS uuid), :name, :type, :desc, CAST(:aliases AS jsonb),
-                            CAST(:doc_ids AS jsonb), :neo4j_id, :mentions, 0, :confidence)
-                        ON CONFLICT (kb_id, canonical_name)
-                        DO UPDATE SET
-                            description = CASE WHEN length(EXCLUDED.description) > length(COALESCE(graph_entities.description, ''))
-                                          THEN EXCLUDED.description ELSE graph_entities.description END,
-                            aliases = EXCLUDED.aliases,
-                            neo4j_node_id = EXCLUDED.neo4j_node_id,
-                            mention_count = graph_entities.mention_count + EXCLUDED.mention_count,
-                            updated_at = now()
-                    """
-                    ),
-                    {
-                        "id": str(uuid_mod.uuid4()),
-                        "tenant_id": tenant_id,
-                        "kb_id": kb_id,
-                        "name": e.canonical_name,
-                        "type": e.entity_type,
-                        "desc": e.description or "",
-                        "aliases": json.dumps(e.aliases or []),
-                        "doc_ids": json.dumps(e.source_doc_ids or []),
-                        "neo4j_id": neo4j_id,
-                        "mentions": e.mention_count,
-                        "confidence": float(e.confidence),
-                    },
-                )
-
-            # Upsert relationships (entities must exist from step above)
-            rels_written = 0
-            for r in relationships:
-                result = conn.execute(
-                    text(
-                        """
-                        INSERT INTO graph_relationships (id, kb_id, source_entity_id, target_entity_id,
-                            relationship_type, description, weight, source_doc_ids,
-                            access_count, confidence)
-                        SELECT :id, CAST(:kb_id AS uuid), src.id, tgt.id, :rel_type, :desc, :weight, CAST(:doc_ids AS jsonb),
-                               0, 1.0
-                        FROM graph_entities src, graph_entities tgt
-                        WHERE src.kb_id = CAST(:kb_id AS uuid) AND src.canonical_name = :src_name
-                          AND tgt.kb_id = CAST(:kb_id AS uuid) AND tgt.canonical_name = :tgt_name
-                        ON CONFLICT DO NOTHING
-                    """
-                    ),
-                    {
-                        "id": str(uuid_mod.uuid4()),
-                        "kb_id": kb_id,
-                        "src_name": r.source,
-                        "tgt_name": r.target,
-                        "rel_type": r.relationship_type,
-                        "desc": r.description or "",
-                        "weight": float(r.weight),
-                        "doc_ids": json.dumps(r.source_doc_ids or []),
-                    },
-                )
-                rels_written += result.rowcount
-
-            if rels_written < len(relationships):
-                logger.warning(
-                    "Only %d/%d relationships written to PG (some entities may not have matched)",
-                    rels_written,
-                    len(relationships),
-                )
-
-            # Update KB counters
-            conn.execute(
-                text(
-                    """
-                    UPDATE knowledge_collections SET
-                        entity_count = (SELECT count(*) FROM graph_entities WHERE kb_id = :kb_id),
-                        relationship_count = (SELECT count(*) FROM graph_relationships WHERE kb_id = :kb_id),
-                        graph_enabled = true,
-                        last_cognified_at = now()
-                    WHERE id = CAST(:kb_id AS uuid)
-                """
-                ),
-                {"kb_id": kb_id},
-            )
-
-    except Exception as e:
-        logger.error("Failed to update PG metadata for kb %s: %s", kb_id, e)

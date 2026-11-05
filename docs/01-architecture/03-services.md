@@ -180,7 +180,9 @@ The `agent-runtime` subchart (one Deployment running `uvicorn server:app` on 800
 |---|---|---|
 | `worker.tasks.document_processor.process_document` | `documents` | KB uploads. Parse, chunk, embed |
 | `worker.tasks.cognify_task.run_cognify_job` | `cognify` | Cognify runs. Entity and relationship extraction into Neo4j |
-| `worker.tasks.kb_reembed.run` | `documents` | Re-embedding a collection after an embedding model change |
+| `worker.tasks.kb_reembed.run` | `documents` | One slice of a re-embed, each slice queues the next |
+| `worker.tasks.kb_delete.run` | `documents` | One slice of a background collection delete |
+| `worker.tasks.kb_connector_sync.run` | `documents` | One slice of a connector sync, started by the `knowledge_ops` scheduler job |
 | `worker.tasks.pinecone_vacuum.run` | `documents` | Daily Pinecone orphan clean-up, queued at 02:30 UTC by the API scheduler |
 
 ### `cognify-worker`: graph extraction

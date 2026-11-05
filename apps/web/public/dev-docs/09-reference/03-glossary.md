@@ -18,7 +18,7 @@
 
 **Assertion** — One check on an eval case's run, stored in `eval_cases.assertions`. Types are `json_path_equals`, `json_path_contains`, `regex`, `contains`, `not_contains`, `schema_valid`, `required_tools_called`, `max_cost`, `max_duration_ms`, `cited_sources_present` and the LLM-scored `judge`.
 
-**Atlas** — The knowledge graph canvas. Typed nodes and edges in `atlas_graphs` / `atlas_nodes` / `atlas_edges`, with Neo4j for traversal. Optional. Used by the `/atlas` page + the Cognify pipeline.
+**Atlas** — The knowledge graph canvas. Typed nodes and edges in `atlas_graphs` / `atlas_nodes` / `atlas_edges`, in Postgres. Bound to a collection it governs what Cognify writes to Neo4j, see Enterprise context graph. Optional. Used by the `/atlas` page + the Cognify pipeline.
 
 **Atlas as-of** — The `atlas_as_of` tool. Shows an Atlas graph as it stood at a past moment, from the newest row in `atlas_snapshots` saved at or before that time, or the live graph when nothing changed since.
 
@@ -61,6 +61,8 @@
 **Effect** — What a tool call changes in the world, declared on the tool class as `effect = Effect(kind, label, ...)` or per call with `effect_for`. `READ_ONLY` for tools that only read. Required at medium tier and above.
 
 **Embedding model** — The model a collection's chunks are embedded with, stored on `knowledge_collections.embedding_model` and used by ingest and search. Changed by the re-embed job, which re-reads every document and switches the collection in one step.
+
+**Enterprise context graph** An Atlas graph, which holds the governed ontology, together with the Neo4j entities Cognify extracted from the collection bound to it. Each entity records its Atlas concept. See [Atlas and the Knowledge Engine](../01-architecture/06-atlas-knowledge-engine.md).
 
 **Escalation** — A notification to tenant admins when a tiered approval has waited longer than the tier's `escalate_after_hours`. Sent once per approval and recorded in `approvals.escalated_at`.
 

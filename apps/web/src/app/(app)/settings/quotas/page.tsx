@@ -7,6 +7,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { quotaProblem } from '@/lib/settings-validation';
 import { toastSuccess } from '@/stores/toastStore';
 import PageHeader from '@/components/layout/PageHeader';
+import { KnowledgeQuotaSection } from '@/components/knowledge/KnowledgeQuotaSection';
 
 interface UserQuota {
   id: string;
@@ -275,6 +276,8 @@ export default function QuotasPage() {
           </tbody>
         </table>
       </div>
+
+      <KnowledgeQuotaSection />
 
       <div className="bg-slate-900/40 border border-slate-700/30 rounded-lg p-3">
         <p className="text-[11px] text-slate-400">

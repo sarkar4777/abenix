@@ -27,9 +27,10 @@ from models.meeting import PersonaItem
 logger = logging.getLogger(__name__)
 
 
-STORES = ("postgres", "pinecone", "neo4j", "blob", "trajectory")
+STORES = ("knowledge", "postgres", "pinecone", "neo4j", "blob", "trajectory")
 _RETRY_DELAYS = (0.5, 2.0, 5.0)
 _PINECONE_BATCH = 1000
+_KB_BATCH = 500
 
 
 @dataclass
@@ -652,7 +653,363 @@ async def _purge_trajectory(db: AsyncSession, subject: Subject) -> int:
     )
 
 
+# Documents the person uploaded. A document with no recorded uploader counts as
+# theirs when they created its collection and no connector brought it in.
+_OWN_DOCUMENTS = """
+SELECT d.id::text, d.kb_id::text, d.storage_url, d.chunk_count, k.vector_backend,
+       k.embedding_generation, d.cognified_at IS NOT NULL
+FROM documents d JOIN knowledge_collections k ON k.id = d.kb_id
+WHERE k.tenant_id = CAST(:t AS uuid) AND (
+    d.uploaded_by = CAST(:uid AS uuid)
+    OR (d.uploaded_by IS NULL AND k.created_by = CAST(:uid AS uuid)
+        AND NOT EXISTS (SELECT 1 FROM kb_connector_items i WHERE i.document_id = d.id)))
+LIMIT :n
+"""
+
+# Only entities or relationships that lose all their sources go, shared ones keep the rest.
+NEO4J_DOCUMENT_RELATIONSHIPS = """
+MATCH (a:Entity)-[r]->(:Entity)
+WHERE a.kb_id IN $kb_ids
+  AND any(d IN coalesce(r.source_doc_ids, []) WHERE d IN $doc_ids)
+WITH r, [d IN r.source_doc_ids WHERE NOT d IN $doc_ids] AS keep
+FOREACH (_ IN CASE WHEN size(keep) = 0 THEN [1] ELSE [] END | DELETE r)
+FOREACH (_ IN CASE WHEN size(keep) > 0 THEN [1] ELSE [] END | SET r.source_doc_ids = keep)
+RETURN count(*) AS touched
+"""
+NEO4J_DOCUMENT_ENTITIES = """
+MATCH (e:Entity)
+WHERE e.kb_id IN $kb_ids
+  AND any(d IN coalesce(e.source_doc_ids, []) WHERE d IN $doc_ids)
+WITH e, [d IN e.source_doc_ids WHERE NOT d IN $doc_ids] AS keep
+FOREACH (_ IN CASE WHEN size(keep) = 0 THEN [1] ELSE [] END | DETACH DELETE e)
+FOREACH (_ IN CASE WHEN size(keep) > 0 THEN [1] ELSE [] END | SET e.source_doc_ids = keep)
+RETURN count(*) AS touched
+"""
+
+_MIRROR_HAS_DOC = (
+    "jsonb_typeof(source_doc_ids) = 'array' AND source_doc_ids ?| CAST(:docs AS text[])"
+)
+_MIRROR_STRIP = (
+    "SET source_doc_ids = COALESCE((SELECT jsonb_agg(x) FROM "
+    "jsonb_array_elements_text(source_doc_ids) x WHERE x <> ALL(CAST(:docs AS text[]))), "
+    "'[]'::jsonb)"
+)
+
+
+async def _strip_graph_provenance(
+    db: AsyncSession, kb_ids: list[str], doc_ids: list[str]
+) -> int:
+    """Neo4j first, a failure here keeps the documents so the purge can be repeated."""
+    if not doc_ids:
+        return 0
+    params = {"kbs": kb_ids, "docs": doc_ids}
+    mirror = (
+        await db.execute(
+            text(
+                f"SELECT count(*) FROM graph_entities WHERE kb_id = ANY(CAST(:kbs AS uuid[])) "
+                f"AND {_MIRROR_HAS_DOC}"
+            ),
+            params,
+        )
+    ).scalar() or 0
+    from engine.knowledge.neo4j_client import get_neo4j_session, is_neo4j_available
+
+    touched = 0
+    if await is_neo4j_available():
+        session = await get_neo4j_session()
+        async with session:
+            for cypher in (NEO4J_DOCUMENT_RELATIONSHIPS, NEO4J_DOCUMENT_ENTITIES):
+                result = await session.run(cypher, kb_ids=kb_ids, doc_ids=doc_ids)
+                record = await result.single()
+                touched += int(record["touched"]) if record else 0
+    elif mirror:
+        raise RuntimeError(
+            f"Neo4j is unreachable and {mirror} graph entities came from this "
+            "person's documents"
+        )
+    for table in ("graph_relationships", "graph_entities"):
+        await db.execute(
+            text(
+                f"UPDATE {table} {_MIRROR_STRIP} WHERE kb_id = ANY(CAST(:kbs AS uuid[])) "
+                f"AND {_MIRROR_HAS_DOC}"
+            ),
+            params,
+        )
+    bare = (
+        "SELECT id FROM graph_entities WHERE kb_id = ANY(CAST(:kbs AS uuid[])) "
+        "AND source_doc_ids = '[]'::jsonb"
+    )
+    await db.execute(
+        text(
+            "DELETE FROM graph_relationships WHERE source_doc_ids = '[]'::jsonb "
+            "AND kb_id = ANY(CAST(:kbs AS uuid[]))"
+        ),
+        {"kbs": kb_ids},
+    )
+    await db.execute(
+        text(
+            f"DELETE FROM graph_relationships WHERE source_entity_id IN ({bare}) "
+            f"OR target_entity_id IN ({bare})"
+        ),
+        {"kbs": kb_ids},
+    )
+    await db.execute(text(bare.replace("SELECT id", "DELETE", 1)), {"kbs": kb_ids})
+    await db.commit()
+    return touched
+
+
+def _delete_document_vectors(rows: list[tuple[str, str, int, int]]) -> int:
+    """(kb, doc, chunk count, generation), ids work on every Pinecone index kind."""
+    from engine.knowledge.kb_state import pinecone_namespace
+    from pinecone import Pinecone
+
+    pc = Pinecone(api_key=os.environ["PINECONE_API_KEY"])
+    index = pc.Index(os.environ.get("PINECONE_INDEX_NAME", "agentforge-knowledge"))
+    removed = 0
+    for kb, doc, count, generation in rows:
+        namespace = pinecone_namespace(kb, generation)
+        ids = {f"{doc}_{i}" for i in range(count)}
+        try:
+            for page in index.list(prefix=f"{doc}_", namespace=namespace):
+                ids.update(page if isinstance(page, (list, tuple)) else [page])
+        except Exception as e:
+            logger.info(
+                "gdpr: cannot list namespace %s, using counts: %s", namespace, e
+            )
+        ordered = sorted(ids)
+        for i in range(0, len(ordered), _PINECONE_BATCH):
+            index.delete(ids=ordered[i : i + _PINECONE_BATCH], namespace=namespace)
+        removed += len(ordered)
+    return removed
+
+
+def _scan_pinecone_mentions(
+    kb: str, generation: int, docs: list[tuple[str, int]], needles: list[str]
+) -> dict[str, list[str]]:
+    """Text lives in vector metadata here, so matching has to read it. Doc id to vector ids."""
+    from engine.knowledge.kb_state import pinecone_namespace
+    from pinecone import Pinecone
+
+    pc = Pinecone(api_key=os.environ["PINECONE_API_KEY"])
+    index = pc.Index(os.environ.get("PINECONE_INDEX_NAME", "agentforge-knowledge"))
+    namespace = pinecone_namespace(kb, generation)
+    found: dict[str, list[str]] = {}
+    for doc, count in docs:
+        ids = [f"{doc}_{i}" for i in range(count)]
+        for i in range(0, len(ids), 500):
+            resp = index.fetch(ids=ids[i : i + 500], namespace=namespace)
+            vectors = getattr(resp, "vectors", None) or (
+                resp.get("vectors", {}) if isinstance(resp, dict) else {}
+            )
+            for vid, v in vectors.items():
+                meta = getattr(v, "metadata", None) or (
+                    v.get("metadata", {}) if isinstance(v, dict) else {}
+                )
+                body = str(meta.get("text") or "").lower()
+                if any(n in body for n in needles):
+                    found.setdefault(doc, []).append(vid)
+    for doc, vids in found.items():
+        for i in range(0, len(vids), _PINECONE_BATCH):
+            index.delete(ids=vids[i : i + _PINECONE_BATCH], namespace=namespace)
+    return found
+
+
+async def _drop_documents(db: AsyncSession, doc_ids: list[str]) -> None:
+    """Every row hanging off these documents, including ones with no foreign key."""
+    params = {"ids": doc_ids}
+    for stmt in (
+        "DELETE FROM document_grants WHERE document_id = ANY(CAST(:ids AS uuid[]))",
+        "DELETE FROM cognify_chunks WHERE document_id = ANY(CAST(:ids AS uuid[]))",
+        "DELETE FROM cognify_job_documents WHERE document_id = ANY(CAST(:ids AS uuid[]))",
+        "UPDATE atlas_nodes SET document_id = NULL "
+        "WHERE document_id = ANY(CAST(:ids AS uuid[]))",
+        "DELETE FROM documents WHERE id = ANY(CAST(:ids AS uuid[]))",
+    ):
+        await db.execute(text(stmt), params)
+
+
+async def _erase_own_documents(db: AsyncSession, subject: Subject) -> int:
+    from engine.storage import get_storage
+
+    affected = 0
+    params = {"t": str(subject.tenant_id), "uid": str(subject.user_id), "n": _KB_BATCH}
+    while True:
+        rows = (await db.execute(text(_OWN_DOCUMENTS), params)).all()
+        if not rows:
+            return affected
+        doc_ids = [r[0] for r in rows]
+        await _strip_graph_provenance(
+            db, sorted({r[1] for r in rows}), [r[0] for r in rows if r[6]]
+        )
+        remote = [
+            (r[1], r[0], r[3] or 0, r[5] or 0) for r in rows if r[4] != "pgvector"
+        ]
+        if remote:
+            # a running re-embed staged these too, and that namespace is about to go live
+            staged = (
+                await db.execute(
+                    text(
+                        "SELECT kb_id::text, target_generation FROM kb_reembed_jobs "
+                        "WHERE kb_id = ANY(CAST(:kbs AS uuid[])) AND finished_at IS NULL"
+                    ),
+                    {"kbs": sorted({r[0] for r in remote})},
+                )
+            ).all()
+            remote += [
+                (k, d, c, target)
+                for kb, target in staged
+                for k, d, c, _g in list(remote)
+                if k == kb
+            ]
+            if not os.environ.get("PINECONE_API_KEY", "").strip():
+                raise RuntimeError(
+                    "This person's documents have vectors in Pinecone but "
+                    "PINECONE_API_KEY is not set"
+                )
+            affected += await asyncio.to_thread(_delete_document_vectors, remote)
+        storage = get_storage()
+        for r in rows:
+            if r[2] and not r[2].startswith("agent://"):
+                affected += int(await storage.delete(r[2]))
+        result = await db.execute(
+            text("DELETE FROM chunks WHERE document_id = ANY(CAST(:ids AS uuid[]))"),
+            {"ids": doc_ids},
+        )
+        affected += result.rowcount or 0
+        await _drop_documents(db, doc_ids)
+        affected += len(doc_ids)
+        await db.commit()
+
+
+_MENTION_NOTE = (
+    "Parts of this document were erased under a data subject request, "
+    "its original file was removed."
+)
+
+
+async def _erase_mentions(db: AsyncSession, subject: Subject) -> int:
+    """Other people's documents that name this person lose those chunks and the original file."""
+    needles = [n for n in subject.emails + subject.names if n]
+    if not needles:
+        return 0
+    from engine.storage import get_storage
+
+    affected = 0
+    matched: dict[str, str] = {}
+    params = {"t": str(subject.tenant_id), "needles": needles}
+    result = await db.execute(
+        text(
+            "DELETE FROM chunks c USING knowledge_collections k "
+            "WHERE k.id = c.collection_id AND k.tenant_id = CAST(:t AS uuid) "
+            "AND EXISTS (SELECT 1 FROM unnest(CAST(:needles AS text[])) n "
+            "WHERE strpos(lower(c.content), n) > 0) "
+            "RETURNING c.document_id::text, c.collection_id::text"
+        ),
+        params,
+    )
+    for doc, kb in result.all():
+        matched[doc] = kb
+        affected += 1
+    collections = (
+        await db.execute(
+            text(
+                "SELECT id::text, embedding_generation FROM knowledge_collections "
+                "WHERE tenant_id = CAST(:t AS uuid) AND vector_backend <> 'pgvector'"
+            ),
+            {"t": str(subject.tenant_id)},
+        )
+    ).all()
+    if collections and os.environ.get("PINECONE_API_KEY", "").strip():
+        for kb, generation in collections:
+            docs = (
+                await db.execute(
+                    text(
+                        "SELECT id::text, chunk_count FROM documents "
+                        "WHERE kb_id = CAST(:k AS uuid) AND chunk_count > 0"
+                    ),
+                    {"k": kb},
+                )
+            ).all()
+            found = await asyncio.to_thread(
+                _scan_pinecone_mentions,
+                kb,
+                generation or 0,
+                [(d[0], d[1]) for d in docs],
+                needles,
+            )
+            for doc, vids in found.items():
+                matched[doc] = kb
+                affected += len(vids)
+    elif collections:
+        raise RuntimeError(
+            f"{len(collections)} collections keep their text in Pinecone but "
+            "PINECONE_API_KEY is not set, so mentions could not be searched"
+        )
+    if not matched:
+        await db.commit()
+        return affected
+    doc_ids = sorted(matched)
+    rows = (
+        await db.execute(
+            text(
+                "SELECT storage_url FROM documents WHERE id = ANY(CAST(:ids AS uuid[]))"
+            ),
+            {"ids": doc_ids},
+        )
+    ).all()
+    storage = get_storage()
+    for (url,) in rows:
+        if url and not url.startswith("agent://"):
+            affected += int(await storage.delete(url))
+    await db.execute(
+        text(
+            "UPDATE documents SET storage_url = '', error_message = :note "
+            "WHERE id = ANY(CAST(:ids AS uuid[]))"
+        ),
+        {"ids": doc_ids, "note": _MENTION_NOTE},
+    )
+    await db.execute(
+        text(
+            "DELETE FROM cognify_chunks WHERE document_id = ANY(CAST(:ids AS uuid[]))"
+        ),
+        {"ids": doc_ids},
+    )
+    await db.commit()
+    return affected
+
+
+async def _erase_kb_queries(db: AsyncSession, subject: Subject) -> int:
+    """What they searched for, logged against their runs."""
+    params = {
+        "uid": str(subject.user_id),
+        "t": str(subject.tenant_id),
+        "erased": ERASED,
+    }
+    runs = (
+        "SELECT id FROM executions WHERE user_id = CAST(:uid AS uuid) "
+        "AND tenant_id = CAST(:t AS uuid)"
+    )
+    total = 0
+    for stmt in (
+        f"UPDATE kb_query_invocations SET query_text = :erased, results = NULL "
+        f"WHERE execution_id IN ({runs}) AND query_text IS DISTINCT FROM :erased",
+        f"UPDATE retrieval_feedback SET query = :erased, comment = NULL "
+        f"WHERE execution_id IN ({runs}) AND query <> :erased",
+    ):
+        total += (await db.execute(text(stmt), params)).rowcount or 0
+    await db.commit()
+    return total
+
+
+async def _purge_knowledge(db: AsyncSession, subject: Subject) -> int:
+    """Their documents and every copy of them, then chunks elsewhere that name them."""
+    affected = await _erase_own_documents(db, subject)
+    affected += await _erase_mentions(db, subject)
+    return affected + await _erase_kb_queries(db, subject)
+
+
 _PURGERS = {
+    "knowledge": _purge_knowledge,
     "postgres": _purge_postgres,
     "pinecone": _purge_pinecone,
     "neo4j": _purge_neo4j,

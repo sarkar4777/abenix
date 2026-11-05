@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
 import sys
 import uuid
@@ -10,15 +12,18 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
-from fastapi.responses import JSONResponse, Response
-from sqlalchemy import desc, or_, select
+from fastapi.responses import JSONResponse, Response, StreamingResponse
+from sqlalchemy import desc, func, insert, or_, select, text, tuple_
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.attributes import set_committed_value
 
 from app.core.deps import get_current_user, get_db
 from app.core.permissions import is_admin, sees_other_users_resources
 from app.core.responses import error, success
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "packages" / "db"))
+from app.services import atlas_snapshots
 from models.atlas import AtlasEdge, AtlasGraph, AtlasNode, AtlasNodeKind, AtlasSnapshot  # type: ignore
 from models.knowledge_base import Document, KnowledgeBase  # type: ignore
 from models.resource_share import ResourceShare, SharePermission  # type: ignore
@@ -36,6 +41,16 @@ from app.routers.bpm_analyzer import (  # type: ignore
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/atlas", tags=["atlas"])
+
+# past this the canvas works on a window of the graph and never loads it whole
+FULL_GRAPH_LIMIT = 5000
+WINDOW_LIMIT = 1000
+READ_TIMEOUT_MS = 8000
+SYNC_INLINE_DOCS = 500
+SYNC_BATCH = 500
+SUGGEST_FULL_NODES = 2000
+QUERY_CANDIDATES = 200
+QUERY_STEPS = 200_000
 
 
 def _node_to_dict(n: AtlasNode) -> dict[str, Any]:
@@ -204,18 +219,43 @@ async def _load_graph(
     return _annotate(g, user, share, names.get(g.owner_user_id))
 
 
-async def _bump_version(db: AsyncSession, graph: AtlasGraph) -> None:
-    """Bump version + refresh counts. Runs in the caller's transaction."""
-    node_count = (
-        await db.execute(select(AtlasNode).where(AtlasNode.graph_id == graph.id))
-    ).all()
-    edge_count = (
-        await db.execute(select(AtlasEdge).where(AtlasEdge.graph_id == graph.id))
-    ).all()
-    graph.node_count = len(node_count)
-    graph.edge_count = len(edge_count)
-    graph.version = (graph.version or 0) + 1
-    graph.updated_at = datetime.now(timezone.utc)
+async def _bump_version(
+    db: AsyncSession,
+    graph: AtlasGraph,
+    nodes: int = 0,
+    edges: int = 0,
+    recount: bool = False,
+) -> None:
+    """Version and counts in one row update. Bulk writers ask for a recount."""
+    await db.flush()
+    node_expr = "node_count + :nodes"
+    edge_expr = "edge_count + :edges"
+    if recount:
+        node_expr = "(SELECT count(*) FROM atlas_nodes WHERE graph_id = :g)"
+        edge_expr = "(SELECT count(*) FROM atlas_edges WHERE graph_id = :g)"
+    row = (
+        await db.execute(
+            text(
+                f"""
+                UPDATE atlas_graphs SET version = version + 1,
+                    node_count = GREATEST({node_expr}, 0),
+                    edge_count = GREATEST({edge_expr}, 0),
+                    updated_at = now()
+                WHERE id = :g
+                RETURNING version, node_count, edge_count, updated_at
+                """
+            ),
+            (
+                {"g": graph.id}
+                if recount
+                else {"g": graph.id, "nodes": nodes, "edges": edges}
+            ),
+        )
+    ).one()
+    set_committed_value(graph, "version", row[0])
+    set_committed_value(graph, "node_count", row[1])
+    set_committed_value(graph, "edge_count", row[2])
+    set_committed_value(graph, "updated_at", row[3])
 
 
 async def _maybe_snapshot(
@@ -226,51 +266,24 @@ async def _maybe_snapshot(
     label: str | None = None,
 ) -> None:
     """Snapshot the graph, rate-limited to one per 60s per graph."""
-    last = (
-        await db.execute(
-            select(AtlasSnapshot)
-            .where(AtlasSnapshot.graph_id == graph.id)
-            .order_by(desc(AtlasSnapshot.created_at))
-            .limit(1)
-        )
-    ).scalar_one_or_none()
-    now = datetime.now(timezone.utc)
-    if last and last.created_at and (now - last.created_at) < timedelta(seconds=60):
-        return
-    existing_at_version = (
-        await db.execute(
-            select(AtlasSnapshot).where(
-                AtlasSnapshot.graph_id == graph.id,
-                AtlasSnapshot.version == graph.version,
-            )
-        )
-    ).scalar_one_or_none()
-    if existing_at_version is not None:
-        return
-    nodes = (
-        (await db.execute(select(AtlasNode).where(AtlasNode.graph_id == graph.id)))
-        .scalars()
-        .all()
+    await atlas_snapshots.maybe_capture(
+        db, graph, user_id, label=label, meta=_graph_meta(graph)
     )
-    edges = (
-        (await db.execute(select(AtlasEdge).where(AtlasEdge.graph_id == graph.id)))
-        .scalars()
-        .all()
+
+
+async def _read_guard(db: AsyncSession) -> None:
+    """A browse query that cannot use its index gives up instead of tying up the pool."""
+    await db.execute(
+        text("SELECT set_config('statement_timeout', :ms, true)"),
+        {"ms": str(READ_TIMEOUT_MS)},
     )
-    snap = AtlasSnapshot(
-        id=uuid.uuid4(),
-        graph_id=graph.id,
-        version=graph.version,
-        label=label,
-        created_by=user_id,
-        auto=label is None,
-        payload={
-            "graph": _graph_meta(graph),
-            "nodes": [_node_to_dict(n) for n in nodes],
-            "edges": [_edge_to_dict(e) for e in edges],
-        },
+
+
+def _too_slow() -> JSONResponse:
+    return error(
+        "That query took too long on a graph this size. Narrow it with a search term or a kind.",
+        422,
     )
-    db.add(snap)
 
 
 @router.get("/graphs")
@@ -331,6 +344,8 @@ async def create_graph(
             kb_id = uuid.UUID(kb_id_raw)
         except ValueError:
             return error("Invalid kb_id", 400)
+        if not await _load_kb(db, kb_id, user):
+            return error("Knowledge base not found", 404)
     g = AtlasGraph(
         id=uuid.uuid4(),
         tenant_id=user.tenant_id,
@@ -351,38 +366,408 @@ async def get_graph(
     graph_id: str,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    node_limit: int = FULL_GRAPH_LIMIT,
+    after: str | None = None,
 ) -> JSONResponse:
-    """Full graph snapshot — meta + every node + every edge."""
+    """Graph meta plus one page of nodes and the edges among them."""
     g = await _load_graph(db, graph_id, user)
     if isinstance(g, JSONResponse):
         return g
-    nodes = (
+    limit = max(0, min(node_limit, FULL_GRAPH_LIMIT))
+    if limit == 0:
+        return success(
+            {
+                "graph": _graph_meta(g),
+                "nodes": [],
+                "edges": [],
+                "truncated": (g.node_count or 0) > 0,
+                "next_cursor": None,
+                "limit": 0,
+            }
+        )
+    q = select(AtlasNode).where(AtlasNode.graph_id == g.id)
+    if after:
+        try:
+            stamp, last_id = after.split("|", 1)
+            q = q.where(
+                tuple_(AtlasNode.created_at, AtlasNode.id)
+                > (datetime.fromisoformat(stamp), uuid.UUID(last_id))
+            )
+        except ValueError:
+            return error("Invalid cursor", 400)
+    rows = (
         (
             await db.execute(
-                select(AtlasNode)
-                .where(AtlasNode.graph_id == g.id)
-                .order_by(AtlasNode.created_at)
+                q.order_by(AtlasNode.created_at, AtlasNode.id).limit(limit + 1)
             )
         )
         .scalars()
         .all()
     )
-    edges = (
-        (
-            await db.execute(
-                select(AtlasEdge)
-                .where(AtlasEdge.graph_id == g.id)
-                .order_by(AtlasEdge.created_at)
-            )
-        )
-        .scalars()
-        .all()
-    )
+    more = len(rows) > limit
+    nodes = rows[:limit]
+    edges = await _edges_among(db, g.id, [n.id for n in nodes], limit * 5)
     return success(
         {
             "graph": _graph_meta(g),
             "nodes": [_node_to_dict(n) for n in nodes],
             "edges": [_edge_to_dict(e) for e in edges],
+            "truncated": more,
+            "next_cursor": (
+                f"{nodes[-1].created_at.isoformat()}|{nodes[-1].id}" if more else None
+            ),
+            "limit": limit,
+        }
+    )
+
+
+async def _edges_among(
+    db: AsyncSession, graph_id: uuid.UUID, ids: list[uuid.UUID], limit: int
+) -> list[AtlasEdge]:
+    if not ids:
+        return []
+    return list(
+        (
+            await db.execute(
+                select(AtlasEdge)
+                .where(
+                    AtlasEdge.graph_id == graph_id,
+                    AtlasEdge.from_node_id.in_(ids),
+                    AtlasEdge.to_node_id.in_(ids),
+                )
+                .order_by(AtlasEdge.created_at)
+                .limit(limit)
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+
+def _window_limit(raw: int, default: int = 300) -> int:
+    return max(1, min(raw or default, WINDOW_LIMIT))
+
+
+def _window_payload(
+    g: AtlasGraph, nodes: list[AtlasNode], edges: list[AtlasEdge], **extra: Any
+) -> dict[str, Any]:
+    return {
+        "graph": _graph_meta(g),
+        "nodes": [_node_to_dict(n) for n in nodes],
+        "edges": [_edge_to_dict(e) for e in edges],
+        **extra,
+    }
+
+
+@router.get("/graphs/{graph_id}/overview")
+async def graph_overview(
+    graph_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    limit: int = 200,
+) -> JSONResponse:
+    """The most connected nodes, the place to start on a graph too big to draw."""
+    g = await _load_graph(db, graph_id, user)
+    if isinstance(g, JSONResponse):
+        return g
+    limit = _window_limit(limit, 200)
+    try:
+        await _read_guard(db)
+        hubs = (
+            await db.execute(
+                text(
+                    """
+                    SELECT id FROM (
+                        SELECT from_node_id AS id FROM atlas_edges WHERE graph_id = :g
+                        UNION ALL
+                        SELECT to_node_id FROM atlas_edges WHERE graph_id = :g
+                    ) ends GROUP BY id ORDER BY count(*) DESC LIMIT :n
+                    """
+                ),
+                {"g": g.id, "n": limit},
+            )
+        ).all()
+        ids = [r[0] for r in hubs]
+        nodes: list[AtlasNode] = []
+        if ids:
+            nodes = list(
+                (await db.execute(select(AtlasNode).where(AtlasNode.id.in_(ids))))
+                .scalars()
+                .all()
+            )
+        if len(nodes) < limit:
+            have = {n.id for n in nodes}
+            extra = (
+                (
+                    await db.execute(
+                        select(AtlasNode)
+                        .where(AtlasNode.graph_id == g.id)
+                        .order_by(AtlasNode.created_at, AtlasNode.id)
+                        .limit(limit)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            nodes += [n for n in extra if n.id not in have][: limit - len(nodes)]
+        edges = await _edges_among(db, g.id, [n.id for n in nodes], limit * 5)
+    except DBAPIError as e:
+        await db.rollback()
+        logger.warning("atlas overview failed: %s", e)
+        return _too_slow()
+    return success(
+        _window_payload(
+            g,
+            nodes,
+            edges,
+            limit=limit,
+            center=str(ids[0]) if ids else None,
+            truncated=(g.node_count or 0) > len(nodes),
+        )
+    )
+
+
+@router.get("/graphs/{graph_id}/viewport")
+async def graph_viewport(
+    graph_id: str,
+    min_x: float,
+    min_y: float,
+    max_x: float,
+    max_y: float,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    limit: int = 300,
+    kind: str | None = None,
+) -> JSONResponse:
+    """Nodes inside a canvas rectangle, an even sample when more than the limit are there."""
+    g = await _load_graph(db, graph_id, user)
+    if isinstance(g, JSONResponse):
+        return g
+    limit = _window_limit(limit)
+    conditions = [
+        AtlasNode.graph_id == g.id,
+        AtlasNode.position_x.between(min_x, max_x),
+        AtlasNode.position_y.between(min_y, max_y),
+    ]
+    if kind:
+        try:
+            conditions.append(AtlasNode.kind == AtlasNodeKind(kind))
+        except ValueError:
+            return error(f"Invalid node kind {kind}", 400)
+    try:
+        await _read_guard(db)
+        inside = (
+            await db.execute(
+                select(func.count()).select_from(
+                    select(AtlasNode.id).where(*conditions).limit(10_001).subquery()
+                )
+            )
+        ).scalar() or 0
+        # ids are random, so sorting by them is a stable sample while panning
+        nodes = list(
+            (
+                await db.execute(
+                    select(AtlasNode)
+                    .where(*conditions)
+                    .order_by(AtlasNode.id)
+                    .limit(limit)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        edges = await _edges_among(db, g.id, [n.id for n in nodes], limit * 5)
+    except DBAPIError as e:
+        await db.rollback()
+        logger.warning("atlas viewport failed: %s", e)
+        return _too_slow()
+    return success(
+        _window_payload(
+            g,
+            nodes,
+            edges,
+            limit=limit,
+            in_view=inside,
+            in_view_capped=inside > 10_000,
+            truncated=inside > len(nodes),
+        )
+    )
+
+
+@router.get("/graphs/{graph_id}/neighbourhood")
+async def graph_neighbourhood(
+    graph_id: str,
+    node_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    hops: int = 1,
+    limit: int = 100,
+    fanout: int = 50,
+) -> JSONResponse:
+    """A node and what it connects to, a set number of edges per node so hubs stay usable."""
+    g = await _load_graph(db, graph_id, user)
+    if isinstance(g, JSONResponse):
+        return g
+    try:
+        start = uuid.UUID(node_id)
+    except ValueError:
+        return error("Invalid node id", 400)
+    limit = _window_limit(limit, 100)
+    hops = max(1, min(hops, 3))
+    fanout = max(1, min(fanout, 200))
+    try:
+        await _read_guard(db)
+        origin = (
+            await db.execute(
+                select(AtlasNode).where(
+                    AtlasNode.id == start, AtlasNode.graph_id == g.id
+                )
+            )
+        ).scalar_one_or_none()
+        if origin is None:
+            return error("Node not found", 404)
+        seen: dict[uuid.UUID, int] = {start: 0}
+        edge_ids: list[uuid.UUID] = []
+        frontier = [start]
+        truncated = False
+        for hop in range(1, hops + 1):
+            rows = (
+                await db.execute(
+                    text(
+                        """
+                        SELECT e.id, e.from_node_id, e.to_node_id
+                        FROM unnest(CAST(:frontier AS uuid[])) AS f(id)
+                        CROSS JOIN LATERAL (
+                            (SELECT x.id, x.from_node_id, x.to_node_id FROM atlas_edges x
+                             WHERE x.from_node_id = f.id AND x.graph_id = :g LIMIT :fan)
+                            UNION ALL
+                            (SELECT x.id, x.from_node_id, x.to_node_id FROM atlas_edges x
+                             WHERE x.to_node_id = f.id AND x.graph_id = :g LIMIT :fan)
+                        ) e
+                        """
+                    ),
+                    {"frontier": frontier, "g": g.id, "fan": fanout},
+                )
+            ).all()
+            if len(rows) >= fanout * len(frontier):
+                truncated = True
+            next_frontier: list[uuid.UUID] = []
+            for eid, a, b in rows:
+                for other in (a, b):
+                    if other not in seen:
+                        if len(seen) >= limit:
+                            truncated = True
+                            continue
+                        seen[other] = hop
+                        next_frontier.append(other)
+                if a in seen and b in seen:
+                    edge_ids.append(eid)
+            frontier = next_frontier
+            if not frontier:
+                break
+        nodes = list(
+            (await db.execute(select(AtlasNode).where(AtlasNode.id.in_(list(seen)))))
+            .scalars()
+            .all()
+        )
+        edges = list(
+            (
+                await db.execute(
+                    select(AtlasEdge).where(AtlasEdge.id.in_(list(set(edge_ids))))
+                )
+            )
+            .scalars()
+            .all()
+        )
+        degree = (
+            await db.execute(
+                text(
+                    """
+                    SELECT count(*) FROM (
+                        SELECT 1 FROM atlas_edges WHERE from_node_id = :n
+                        UNION ALL SELECT 1 FROM atlas_edges WHERE to_node_id = :n
+                        LIMIT 10001) d
+                    """
+                ),
+                {"n": start},
+            )
+        ).scalar()
+    except DBAPIError as e:
+        await db.rollback()
+        logger.warning("atlas neighbourhood failed: %s", e)
+        return _too_slow()
+    return success(
+        _window_payload(
+            g,
+            nodes,
+            edges,
+            center=str(start),
+            hops=hops,
+            limit=limit,
+            degree=degree,
+            truncated=truncated,
+        )
+    )
+
+
+@router.get("/graphs/{graph_id}/search")
+async def search_nodes(
+    graph_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    q: str = "",
+    kind: str | None = None,
+    limit: int = 50,
+    after: str | None = None,
+) -> JSONResponse:
+    """Nodes whose label contains the text, keyset paged by label."""
+    g = await _load_graph(db, graph_id, user)
+    if isinstance(g, JSONResponse):
+        return g
+    limit = max(1, min(limit, 200))
+    term = q.strip().lower()
+    conditions = [AtlasNode.graph_id == g.id]
+    if term:
+        escaped = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        conditions.append(func.lower(AtlasNode.label).like(f"%{escaped}%", escape="\\"))
+    if kind:
+        try:
+            conditions.append(AtlasNode.kind == AtlasNodeKind(kind))
+        except ValueError:
+            return error(f"Invalid node kind {kind}", 400)
+    if after:
+        try:
+            label, last = after.rsplit("|", 1)
+            conditions.append(
+                tuple_(AtlasNode.label, AtlasNode.id) > (label, uuid.UUID(last))
+            )
+        except ValueError:
+            return error("Invalid cursor", 400)
+    try:
+        await _read_guard(db)
+        rows = (
+            (
+                await db.execute(
+                    select(AtlasNode)
+                    .where(*conditions)
+                    .order_by(AtlasNode.label, AtlasNode.id)
+                    .limit(limit + 1)
+                )
+            )
+            .scalars()
+            .all()
+        )
+    except DBAPIError as e:
+        await db.rollback()
+        logger.warning("atlas search failed: %s", e)
+        return _too_slow()
+    more = len(rows) > limit
+    rows = rows[:limit]
+    return success(
+        {
+            "nodes": [_node_to_dict(n) for n in rows],
+            "next_cursor": f"{rows[-1].label}|{rows[-1].id}" if more else None,
+            "limit": limit,
         }
     )
 
@@ -456,7 +841,7 @@ async def create_node(
         tags=body.get("tags") or [],
     )
     db.add(n)
-    await _bump_version(db, g)
+    await _bump_version(db, g, nodes=1)
     await _maybe_snapshot(db, g, user.id)
     await db.commit()
     await db.refresh(n)
@@ -532,8 +917,15 @@ async def delete_node(
     ).scalar_one_or_none()
     if not n:
         return error("Node not found", 404)
+    cascaded = (
+        await db.execute(
+            select(func.count())
+            .select_from(AtlasEdge)
+            .where(or_(AtlasEdge.from_node_id == nid, AtlasEdge.to_node_id == nid))
+        )
+    ).scalar() or 0
     await db.delete(n)
-    await _bump_version(db, g)
+    await _bump_version(db, g, nodes=-1, edges=-cascaded)
     await _maybe_snapshot(db, g, user.id)
     await db.commit()
     return success({"deleted": True})
@@ -582,7 +974,7 @@ async def create_edge(
         confidence=body.get("confidence"),
     )
     db.add(e)
-    await _bump_version(db, g)
+    await _bump_version(db, g, edges=1)
     await db.commit()
     await db.refresh(e)
     await db.refresh(g)
@@ -660,7 +1052,7 @@ async def delete_edge(
     if not e:
         return error("Edge not found", 404)
     await db.delete(e)
-    await _bump_version(db, g)
+    await _bump_version(db, g, edges=-1)
     await db.commit()
     return success({"deleted": True})
 
@@ -863,13 +1255,27 @@ async def apply_ops(
         return error("ops must be an array", 400)
     auto_layout = bool(body.get("auto_layout", True))
 
-    # Pre-load existing nodes by lowercase label so we can dedupe
-    # across the import (extractor often references a label that the
-    # user already drew).
+    # Only the labels these ops mention, the extractor often names what the user drew
+    mentioned: set[str] = set()
+    for op in ops:
+        if isinstance(op, dict):
+            for key in ("label", "from", "to"):
+                value = op.get(key)
+                if isinstance(value, str) and value.strip():
+                    mentioned.add(value.strip()[:255].lower())
     existing_nodes = (
-        (await db.execute(select(AtlasNode).where(AtlasNode.graph_id == g.id)))
+        (
+            await db.execute(
+                select(AtlasNode).where(
+                    AtlasNode.graph_id == g.id,
+                    func.lower(AtlasNode.label).in_(mentioned),
+                )
+            )
+        )
         .scalars()
         .all()
+        if mentioned
+        else []
     )
     by_label: dict[str, AtlasNode] = {n.label.lower(): n for n in existing_nodes}
 
@@ -917,14 +1323,21 @@ async def apply_ops(
     if auto_layout and created_nodes:
         import math
 
-        existing_pos = [
-            (n.position_x, n.position_y)
-            for n in existing_nodes
-            if n.position_x is not None and n.position_y is not None
-        ]
-        if existing_pos:
-            cx = sum(p[0] for p in existing_pos) / len(existing_pos)
-            cy = sum(p[1] for p in existing_pos) / len(existing_pos)
+        created_ids = [n.id for n in created_nodes]
+        centre = (
+            await db.execute(
+                select(
+                    func.avg(AtlasNode.position_x), func.avg(AtlasNode.position_y)
+                ).where(
+                    AtlasNode.graph_id == g.id,
+                    AtlasNode.position_x.is_not(None),
+                    AtlasNode.position_y.is_not(None),
+                    AtlasNode.id.not_in(created_ids),
+                )
+            )
+        ).one()
+        if centre[0] is not None:
+            cx, cy = float(centre[0]), float(centre[1])
         else:
             cx, cy = 400.0, 300.0
         radius = 240 + 18 * len(created_nodes)
@@ -966,7 +1379,7 @@ async def apply_ops(
         db.add(e)
         created_edges.append(e)
 
-    await _bump_version(db, g)
+    await _bump_version(db, g, nodes=len(created_nodes), edges=len(created_edges))
     await _maybe_snapshot(db, g, user.id, label="ops apply")
     await db.commit()
     await db.refresh(g)
@@ -1095,6 +1508,10 @@ async def suggestions(
     g = await _load_graph(db, graph_id, user)
     if isinstance(g, JSONResponse):
         return g
+    if (g.node_count or 0) > SUGGEST_FULL_NODES:
+        return success(
+            {"suggestions": await _suggestions_at_scale(db, g), "sampled": True}
+        )
     nodes = (
         (await db.execute(select(AtlasNode).where(AtlasNode.graph_id == g.id)))
         .scalars()
@@ -1106,6 +1523,65 @@ async def suggestions(
         .all()
     )
     return success({"suggestions": _suggestions_for_graph(list(nodes), list(edges))})
+
+
+async def _suggestions_at_scale(
+    db: AsyncSession, g: AtlasGraph
+) -> list[dict[str, Any]]:
+    """The checks SQL can do on a big graph, exact duplicates and orphans, a few of each."""
+    out: list[dict[str, Any]] = []
+    try:
+        await _read_guard(db)
+        dupes = (
+            await db.execute(
+                text(
+                    """
+                    SELECT lower(label), array_agg(id) FROM atlas_nodes
+                    WHERE graph_id = :g GROUP BY lower(label)
+                    HAVING count(*) > 1 LIMIT 20
+                    """
+                ),
+                {"g": g.id},
+            )
+        ).all()
+        for label, ids in dupes:
+            out.append(
+                {
+                    "kind": "possible_duplicate",
+                    "title": f"{len(ids)} nodes are labelled `{label}`",
+                    "detail": "Merge them if they mean the same thing.",
+                    "severity": "warning",
+                    "node_ids": [str(i) for i in ids[:10]],
+                }
+            )
+        orphans = (
+            await db.execute(
+                text(
+                    """
+                    SELECT n.id, n.label FROM atlas_nodes n
+                    WHERE n.graph_id = :g AND NOT EXISTS (
+                        SELECT 1 FROM atlas_edges e
+                        WHERE e.from_node_id = n.id OR e.to_node_id = n.id)
+                    LIMIT 20
+                    """
+                ),
+                {"g": g.id},
+            )
+        ).all()
+        for node_id, label in orphans:
+            out.append(
+                {
+                    "kind": "orphan_node",
+                    "title": f"`{label}` has no relationships",
+                    "detail": "Connect it or remove it.",
+                    "severity": "info",
+                    "node_ids": [str(node_id)],
+                }
+            )
+    except DBAPIError as e:
+        await db.rollback()
+        logger.warning("atlas suggestions failed: %s", e)
+    return out
 
 
 @router.get("/graphs/{graph_id}/snapshots")
@@ -1157,33 +1633,17 @@ async def capture_snapshot(
     g = await _load_graph(db, graph_id, user, need="edit")
     if isinstance(g, JSONResponse):
         return g
-    nodes = (
-        (await db.execute(select(AtlasNode).where(AtlasNode.graph_id == g.id)))
-        .scalars()
-        .all()
-    )
-    edges = (
-        (await db.execute(select(AtlasEdge).where(AtlasEdge.graph_id == g.id)))
-        .scalars()
-        .all()
-    )
-    snap = AtlasSnapshot(
-        id=uuid.uuid4(),
-        graph_id=g.id,
-        version=g.version,
+    snap = await atlas_snapshots.capture(
+        db,
+        g,
+        user.id,
         label=(body.get("label") or "manual checkpoint")[:255],
-        created_by=user.id,
         auto=False,
-        payload={
-            "graph": _graph_meta(g),
-            "nodes": [_node_to_dict(n) for n in nodes],
-            "edges": [_edge_to_dict(e) for e in edges],
-        },
+        meta=_graph_meta(g),
     )
-    db.add(snap)
+    snapshot_id, version = snap.id, snap.version
     await db.commit()
-    await db.refresh(snap)
-    return success({"id": str(snap.id), "version": snap.version})
+    return success({"id": str(snapshot_id), "version": version})
 
 
 @router.post("/graphs/{graph_id}/snapshots/{snapshot_id}/restore")
@@ -1212,25 +1672,21 @@ async def restore_snapshot(
     if not snap:
         return error("Snapshot not found", 404)
 
-    # Save the current state first.
-    await _maybe_snapshot(db, g, user.id, label="pre-restore")
+    # Save the current state first, the rate limit does not apply to a restore.
+    await atlas_snapshots.capture(
+        db, g, user.id, label="pre-restore", meta=_graph_meta(g)
+    )
 
-    # Clear live tables.
-    nodes = (
-        (await db.execute(select(AtlasNode).where(AtlasNode.graph_id == g.id)))
-        .scalars()
-        .all()
-    )
-    edges = (
-        (await db.execute(select(AtlasEdge).where(AtlasEdge.graph_id == g.id)))
-        .scalars()
-        .all()
-    )
-    for e in edges:
-        await db.delete(e)
-    for n in nodes:
-        await db.delete(n)
-    await db.flush()
+    if atlas_snapshots.is_diff(snap):
+        await atlas_snapshots.restore(db, g, snap)
+        await _bump_version(db, g, recount=True)
+        version = g.version
+        await db.commit()
+        return success({"restored": True, "version": version})
+
+    # Snapshots from before row versions hold the whole graph in their payload
+    await db.execute(text("DELETE FROM atlas_edges WHERE graph_id = :g"), {"g": g.id})
+    await db.execute(text("DELETE FROM atlas_nodes WHERE graph_id = :g"), {"g": g.id})
 
     payload = snap.payload or {}
     label_to_id: dict[str, uuid.UUID] = {}
@@ -1284,9 +1740,10 @@ async def restore_snapshot(
         )
         db.add(e)
 
-    await _bump_version(db, g)
+    await _bump_version(db, g, recount=True)
+    version = g.version
     await db.commit()
-    return success({"restored": True, "version": g.version})
+    return success({"restored": True, "version": version})
 
 
 @router.get("/graphs/{graph_id}/export")
@@ -1296,85 +1753,102 @@ async def export_graph(
     db: AsyncSession = Depends(get_db),
     format: str = "json-ld",
 ) -> Response:
-    """Export the graph as JSON-LD or plain JSON."""
+    """Export the graph as JSON-LD or plain JSON, streamed so size does not matter."""
     g = await _load_graph(db, graph_id, user)
     if isinstance(g, JSONResponse):
         return g
-    nodes = (
-        (await db.execute(select(AtlasNode).where(AtlasNode.graph_id == g.id)))
-        .scalars()
-        .all()
-    )
-    edges = (
-        (await db.execute(select(AtlasEdge).where(AtlasEdge.graph_id == g.id)))
-        .scalars()
-        .all()
-    )
-
-    def _iri(label: str) -> str:
-        # Stable per-graph IRI; lowercased + space → underscore.
-        slug = "".join(c if c.isalnum() else "_" for c in label.strip())
-        return f"atlas:{g.id}#{slug}"
-
-    if format == "json":
-        body = {
-            "graph": _graph_meta(g),
-            "nodes": [_node_to_dict(n) for n in nodes],
-            "edges": [_edge_to_dict(e) for e in edges],
-        }
-    else:
-        # JSON-LD
-        graph_arr: list[dict[str, Any]] = []
-        for n in nodes:
-            graph_arr.append(
-                {
-                    "@id": _iri(n.label),
-                    "@type": {
-                        AtlasNodeKind.CONCEPT: "owl:Class",
-                        AtlasNodeKind.INSTANCE: "owl:NamedIndividual",
-                        AtlasNodeKind.DOCUMENT: "rdfs:Resource",
-                        AtlasNodeKind.PROPERTY: "owl:DatatypeProperty",
-                    }.get(n.kind, "owl:Class"),
-                    "rdfs:label": n.label,
-                    "rdfs:comment": n.description or "",
-                    "atlas:properties": n.properties or {},
-                }
-            )
-        for e in edges:
-            from_n = next((n for n in nodes if n.id == e.from_node_id), None)
-            to_n = next((n for n in nodes if n.id == e.to_node_id), None)
-            if not from_n or not to_n:
-                continue
-            graph_arr.append(
-                {
-                    "@id": f"atlas:{g.id}#edge_{e.id}",
-                    "@type": "owl:ObjectProperty",
-                    "rdfs:label": e.label,
-                    "rdfs:domain": {"@id": _iri(from_n.label)},
-                    "rdfs:range": {"@id": _iri(to_n.label)},
-                    "atlas:cardinality_from": e.cardinality_from,
-                    "atlas:cardinality_to": e.cardinality_to,
-                }
-            )
-        body = {
-            "@context": {
-                "atlas": f"https://abenix/atlas/{g.id}#",
-                "owl": "http://www.w3.org/2002/07/owl#",
-                "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
-            },
-            "@graph": graph_arr,
-            "atlas:meta": _graph_meta(g),
-        }
-
+    gid = g.id
+    meta = _graph_meta(g)
     fname = (
         "".join(c if c.isalnum() else "_" for c in (g.name or "atlas"))[:60] or "atlas"
     )
     suffix = "jsonld" if format != "json" else "json"
-    return Response(
-        content=__import__("json").dumps(body, indent=2, default=str),
+    # the stream opens its own session and this one must not sit idle under it
+    await db.close()
+    return StreamingResponse(
+        _export_stream(gid, meta, format),
         media_type="application/ld+json" if format != "json" else "application/json",
         headers={"Content-Disposition": f'attachment; filename="{fname}.{suffix}"'},
     )
+
+
+async def _export_stream(gid: uuid.UUID, meta: dict[str, Any], format: str):
+    import json as _json
+
+    from sqlalchemy.orm import aliased
+
+    from app.core.deps import async_session
+
+    def dump(value: Any) -> str:
+        return _json.dumps(value, default=str)
+
+    def iri(label: str) -> str:
+        slug = "".join(c if c.isalnum() else "_" for c in label.strip())
+        return f"atlas:{gid}#{slug}"
+
+    kinds = {
+        AtlasNodeKind.CONCEPT: "owl:Class",
+        AtlasNodeKind.INSTANCE: "owl:NamedIndividual",
+        AtlasNodeKind.DOCUMENT: "rdfs:Resource",
+        AtlasNodeKind.PROPERTY: "owl:DatatypeProperty",
+    }
+    from_node, to_node = aliased(AtlasNode), aliased(AtlasNode)
+    node_query = (
+        select(AtlasNode)
+        .where(AtlasNode.graph_id == gid)
+        .execution_options(yield_per=1000)
+    )
+    edge_query = (
+        select(AtlasEdge, from_node.label, to_node.label)
+        .join(from_node, from_node.id == AtlasEdge.from_node_id)
+        .join(to_node, to_node.id == AtlasEdge.to_node_id)
+        .where(AtlasEdge.graph_id == gid)
+        .execution_options(yield_per=1000)
+    )
+    async with async_session() as session:
+        if format == "json":
+            yield '{"graph": ' + dump(meta) + ', "nodes": ['
+            first = True
+            async for n in await session.stream_scalars(node_query):
+                yield ("" if first else ",") + dump(_node_to_dict(n))
+                first = False
+            yield '], "edges": ['
+            first = True
+            async for e, _a, _b in await session.stream(edge_query):
+                yield ("" if first else ",") + dump(_edge_to_dict(e))
+                first = False
+            yield "]}"
+            return
+        context = {
+            "atlas": f"https://abenix/atlas/{gid}#",
+            "owl": "http://www.w3.org/2002/07/owl#",
+            "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
+        }
+        yield '{"@context": ' + dump(context) + ', "@graph": ['
+        first = True
+        async for n in await session.stream_scalars(node_query):
+            item = {
+                "@id": iri(n.label),
+                "@type": kinds.get(n.kind, "owl:Class"),
+                "rdfs:label": n.label,
+                "rdfs:comment": n.description or "",
+                "atlas:properties": n.properties or {},
+            }
+            yield ("" if first else ",") + dump(item)
+            first = False
+        async for e, from_label, to_label in await session.stream(edge_query):
+            item = {
+                "@id": f"atlas:{gid}#edge_{e.id}",
+                "@type": "owl:ObjectProperty",
+                "rdfs:label": e.label,
+                "rdfs:domain": {"@id": iri(from_label)},
+                "rdfs:range": {"@id": iri(to_label)},
+                "atlas:cardinality_from": e.cardinality_from,
+                "atlas:cardinality_to": e.cardinality_to,
+            }
+            yield ("" if first else ",") + dump(item)
+            first = False
+        yield '], "atlas:meta": ' + dump(meta) + "}"
 
 
 async def _load_kb(
@@ -1479,10 +1953,173 @@ async def bind_kb(
         if not kb:
             return error("Knowledge base not found", 404)
         g.kb_id = kb.id
+    if isinstance(body.get("governs_extraction"), bool):
+        g.settings = {
+            **(g.settings or {}),
+            "governs_extraction": body["governs_extraction"],
+        }
+    if body.get("ontology_mode") in ("strict", "guided"):
+        g.settings = {**(g.settings or {}), "ontology_mode": body["ontology_mode"]}
     await _bump_version(db, g)
     await db.commit()
     await db.refresh(g)
     return success({"graph": _graph_meta(g)})
+
+
+_SYNC_TASKS: set[asyncio.Task] = set()
+_SYNC_RUNNING = "running"
+_SYNC_STALE = timedelta(minutes=10)
+
+
+def _doc_node_values(
+    graph_id: uuid.UUID, kb: Any, row: Any, index: int
+) -> dict[str, Any]:
+    status = row.status.value if hasattr(row.status, "value") else str(row.status)
+    now = datetime.now(timezone.utc)
+    return {
+        "id": uuid.uuid4(),
+        "graph_id": graph_id,
+        "label": row.filename[:255],
+        "kind": AtlasNodeKind.DOCUMENT,
+        "description": (
+            f"Imported from KB {kb['name']} · {row.file_type} · {row.file_size or 0} bytes"
+        ),
+        "properties": {
+            "kb_id": str(kb["id"]),
+            "kb_name": kb["name"],
+            "file_type": row.file_type,
+            "file_size": row.file_size,
+            "status": status,
+        },
+        "document_id": row.id,
+        "source": "kb_sync",
+        "confidence": 1.0,
+        "tags": ["kb-doc"],
+        "position_x": 80.0 + (index % 6) * 220,
+        "position_y": 80.0 + (index // 6) * 160,
+        "created_at": now,
+        "updated_at": now,
+        "recorded_at": now,
+    }
+
+
+def _unsynced_documents(graph_id: uuid.UUID, kb_id: uuid.UUID, after: uuid.UUID | None):
+    q = (
+        select(
+            Document.id,
+            Document.filename,
+            Document.file_type,
+            Document.file_size,
+            Document.status,
+        )
+        .where(
+            Document.kb_id == kb_id,
+            ~select(AtlasNode.id)
+            .where(AtlasNode.graph_id == graph_id, AtlasNode.document_id == Document.id)
+            .exists(),
+        )
+        .order_by(Document.id)
+    )
+    return q.where(Document.id > after) if after else q
+
+
+async def _sync_batches(
+    db: AsyncSession,
+    g: AtlasGraph,
+    kb: dict[str, Any],
+    user_id: uuid.UUID,
+    on_batch=None,
+    max_batches: int | None = None,
+) -> tuple[int, list[uuid.UUID]]:
+    """Insert document nodes a batch per transaction. A rerun continues where this stopped."""
+    imported = 0
+    created: list[uuid.UUID] = []
+    after: uuid.UUID | None = None
+    start = g.node_count or 0
+    batches = 0
+    while max_batches is None or batches < max_batches:
+        rows = (
+            await db.execute(
+                _unsynced_documents(g.id, kb["id"], after).limit(SYNC_BATCH)
+            )
+        ).all()
+        if not rows:
+            break
+        values = [
+            _doc_node_values(g.id, kb, row, start + imported + i)
+            for i, row in enumerate(rows)
+        ]
+        await db.execute(insert(AtlasNode), values)
+        created += [v["id"] for v in values]
+        imported += len(rows)
+        after = rows[-1].id
+        await _bump_version(db, g, nodes=len(rows))
+        if on_batch:
+            await on_batch(imported)
+        await db.commit()
+        batches += 1
+        if len(rows) < SYNC_BATCH:
+            break
+    return imported, created
+
+
+async def _run_kb_sync(
+    graph_id: uuid.UUID, kb: dict[str, Any], user_id: uuid.UUID, total: int
+) -> None:
+    from app.core.deps import bg_session
+
+    async with bg_session() as db:
+        g = (
+            await db.execute(select(AtlasGraph).where(AtlasGraph.id == graph_id))
+        ).scalar_one()
+
+        async def progress(imported: int) -> None:
+            await _set_sync_state(
+                db, g, status=_SYNC_RUNNING, imported=imported, total=total
+            )
+
+        try:
+            imported, _ = await _sync_batches(db, g, kb, user_id, on_batch=progress)
+            await atlas_snapshots.capture(
+                db, g, user_id, label=f"sync-kb {kb['name']}", meta=_graph_meta(g)
+            )
+            await _set_sync_state(
+                db, g, status="complete", imported=imported, total=total, error=None
+            )
+            await db.commit()
+        except Exception as e:
+            logger.exception("atlas kb sync failed for %s", graph_id)
+            await db.rollback()
+            await _set_sync_state(db, g, status="failed", error=str(e)[:500])
+            await db.commit()
+
+
+async def _set_sync_state(db: AsyncSession, g: AtlasGraph, **state: Any) -> None:
+    await db.execute(
+        text(
+            "UPDATE atlas_graphs SET settings = "
+            "coalesce(settings, '{}'::jsonb) || jsonb_build_object('kb_sync', "
+            "coalesce(settings->'kb_sync', '{}'::jsonb) || CAST(:state AS jsonb)) "
+            "WHERE id = :g"
+        ),
+        {
+            "g": g.id,
+            "state": json.dumps(
+                {**state, "updated_at": datetime.now(timezone.utc).isoformat()}
+            ),
+        },
+    )
+
+
+def _sync_is_running(g: AtlasGraph) -> bool:
+    state = (g.settings or {}).get("kb_sync") or {}
+    if state.get("status") != _SYNC_RUNNING:
+        return False
+    try:
+        stamp = datetime.fromisoformat(state.get("updated_at") or "")
+    except ValueError:
+        return False
+    return datetime.now(timezone.utc) - stamp < _SYNC_STALE
 
 
 @router.post("/graphs/{graph_id}/sync-kb")
@@ -1491,77 +2128,96 @@ async def sync_kb(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
-    """Project the bound KB's documents into the canvas as document"""
+    """Project the bound KB's documents onto the canvas, in the background when there are many."""
     g = await _load_graph(db, graph_id, user, need="edit")
     if isinstance(g, JSONResponse):
         return g
     if not g.kb_id:
         return error("Graph is not bound to a knowledge collection", 400)
-    kb = await _load_kb(db, g.kb_id, user)
-    if not kb:
+    kb_row = await _load_kb(db, g.kb_id, user)
+    if not kb_row:
         return error("Bound KB no longer exists or is inaccessible", 404)
+    kb = {"id": kb_row.id, "name": kb_row.name}
 
-    docs = (
-        (await db.execute(select(Document).where(Document.kb_id == kb.id)))
-        .scalars()
-        .all()
-    )
+    if _sync_is_running(g):
+        return success(
+            {
+                "graph": _graph_meta(g),
+                "imported": 0,
+                "skipped": 0,
+                "created_nodes": [],
+                "queued": True,
+                "sync": (g.settings or {}).get("kb_sync"),
+            }
+        )
 
-    existing_doc_ids: set[uuid.UUID] = {
-        n.document_id
-        for n in (
-            await db.execute(
-                select(AtlasNode).where(
-                    AtlasNode.graph_id == g.id, AtlasNode.document_id.is_not(None)
-                )
+    missing = (
+        await db.execute(
+            select(func.count()).select_from(
+                _unsynced_documents(g.id, kb["id"], None).order_by(None).subquery()
             )
         )
-        .scalars()
-        .all()
-        if n.document_id
-    }
-
-    created: list[AtlasNode] = []
-    cx, cy = 80.0, 80.0
-    for i, d in enumerate(docs):
-        if d.id in existing_doc_ids:
-            continue
-        n = AtlasNode(
-            id=uuid.uuid4(),
-            graph_id=g.id,
-            label=d.filename[:255],
-            kind=AtlasNodeKind.DOCUMENT,
-            description=f"Imported from KB {kb.name} · {d.file_type} · {d.file_size or 0} bytes",
-            properties={
-                "kb_id": str(kb.id),
-                "kb_name": kb.name,
-                "file_type": d.file_type,
-                "file_size": d.file_size,
-                "status": (
-                    d.status.value if hasattr(d.status, "value") else str(d.status)
-                ),
-            },
-            document_id=d.id,
-            source="kb_sync",
-            confidence=1.0,
-            tags=["kb-doc"],
-            position_x=cx + (i % 6) * 220,
-            position_y=cy + (i // 6) * 160,
+    ).scalar() or 0
+    total = (
+        await db.execute(
+            select(func.count()).select_from(Document).where(Document.kb_id == kb["id"])
         )
-        db.add(n)
-        created.append(n)
+    ).scalar() or 0
 
-    await _bump_version(db, g)
-    await _maybe_snapshot(db, g, user.id, label=f"sync-kb {kb.name}")
+    if missing > SYNC_INLINE_DOCS:
+        await _set_sync_state(db, g, status=_SYNC_RUNNING, imported=0, total=missing)
+        await db.commit()
+        await db.refresh(g)
+        task = asyncio.create_task(_run_kb_sync(g.id, kb, user.id, missing))
+        _SYNC_TASKS.add(task)
+        task.add_done_callback(_SYNC_TASKS.discard)
+        return success(
+            {
+                "graph": _graph_meta(g),
+                "imported": 0,
+                "skipped": total - missing,
+                "created_nodes": [],
+                "queued": True,
+                "sync": (g.settings or {}).get("kb_sync"),
+            }
+        )
+
+    imported, created_ids = await _sync_batches(db, g, kb, user.id)
+    if imported:
+        await _maybe_snapshot(db, g, user.id, label=f"sync-kb {kb['name']}")
+    else:
+        await _bump_version(db, g)
     await db.commit()
     await db.refresh(g)
+    created = (
+        (await db.execute(select(AtlasNode).where(AtlasNode.id.in_(created_ids))))
+        .scalars()
+        .all()
+        if created_ids
+        else []
+    )
     return success(
         {
             "graph": _graph_meta(g),
-            "imported": len(created),
-            "skipped": len(docs) - len(created),
+            "imported": imported,
+            "skipped": total - imported,
             "created_nodes": [_node_to_dict(n) for n in created],
+            "queued": False,
         }
+    )
+
+
+@router.get("/graphs/{graph_id}/sync-kb")
+async def sync_kb_status(
+    graph_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    g = await _load_graph(db, graph_id, user)
+    if isinstance(g, JSONResponse):
+        return g
+    return success(
+        {"sync": (g.settings or {}).get("kb_sync"), "running": _sync_is_running(g)}
     )
 
 
@@ -1572,7 +2228,7 @@ async def visual_query(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
-    """Match a small graph pattern."""
+    """Match a small graph pattern, each pattern's candidates fetched and capped in SQL."""
     g = await _load_graph(db, graph_id, user)
     if isinstance(g, JSONResponse):
         return g
@@ -1582,33 +2238,55 @@ async def visual_query(
     if not isinstance(patterns, list) or not patterns:
         return error("At least one pattern is required", 400)
 
-    nodes = (
-        (await db.execute(select(AtlasNode).where(AtlasNode.graph_id == g.id)))
-        .scalars()
-        .all()
-    )
-    edges = (
-        (await db.execute(select(AtlasEdge).where(AtlasEdge.graph_id == g.id)))
-        .scalars()
-        .all()
-    )
-
-    def pattern_candidates(p: dict) -> list[AtlasNode]:
+    async def pattern_candidates(p: dict) -> list[AtlasNode]:
+        q = select(AtlasNode).where(AtlasNode.graph_id == g.id)
         like = (p.get("label_like") or "").lower().strip()
+        if like:
+            escaped = like.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            q = q.where(func.lower(AtlasNode.label).like(f"%{escaped}%", escape="\\"))
         kind = p.get("kind")
-        out = []
-        for n in nodes:
-            if like and like not in n.label.lower():
-                continue
-            if (
-                kind
-                and (n.kind.value if hasattr(n.kind, "value") else str(n.kind)) != kind
-            ):
-                continue
-            out.append(n)
-        return out
+        if kind:
+            try:
+                q = q.where(AtlasNode.kind == AtlasNodeKind(kind))
+            except ValueError:
+                return []
+        return list(
+            (
+                await db.execute(
+                    q.order_by(AtlasNode.created_at, AtlasNode.id).limit(
+                        QUERY_CANDIDATES
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
 
-    cand_lists = [pattern_candidates(p) for p in patterns]
+    try:
+        await _read_guard(db)
+        cand_lists = [await pattern_candidates(p) for p in patterns]
+        ids = list({n.id for c in cand_lists for n in c})
+        edges = (
+            list(
+                (
+                    await db.execute(
+                        select(AtlasEdge).where(
+                            AtlasEdge.graph_id == g.id,
+                            AtlasEdge.from_node_id.in_(ids),
+                            AtlasEdge.to_node_id.in_(ids),
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            if traversals and ids
+            else []
+        )
+    except DBAPIError as e:
+        await db.rollback()
+        logger.warning("atlas query failed: %s", e)
+        return _too_slow()
 
     edge_index_fwd: dict[tuple[uuid.UUID, uuid.UUID], list[AtlasEdge]] = {}
     for e in edges:
@@ -1624,9 +2302,12 @@ async def visual_query(
         return None
 
     matches: list[dict[str, Any]] = []
+    steps = 0
 
     def backtrack(i: int, picked: list[AtlasNode]) -> None:
-        if len(matches) >= limit:
+        nonlocal steps
+        steps += 1
+        if len(matches) >= limit or steps > QUERY_STEPS:
             return
         if i == len(patterns):
             ok = True
@@ -1661,6 +2342,8 @@ async def visual_query(
             "matches": matches,
             "count": len(matches),
             "limit": limit,
+            "truncated": steps > QUERY_STEPS
+            or any(len(c) >= QUERY_CANDIDATES for c in cand_lists),
         }
     )
 
@@ -2329,6 +3012,50 @@ async def import_starter(
     return apply_resp
 
 
+async def _relayout_in_sql(
+    db: AsyncSession, g: AtlasGraph, user: User, mode: str
+) -> JSONResponse:
+    """A big graph is laid out in one statement and the canvas reloads its window."""
+    count = g.node_count or 0
+    if mode == "circle":
+        position = (
+            "480 + (260 + 14 * :count) * cos(2 * pi() * o.i / :count)",
+            "320 + (260 + 14 * :count) * sin(2 * pi() * o.i / :count)",
+        )
+    else:
+        # embedding every node of a graph this size is not a layout decision to take here
+        mode = "grid"
+        position = (
+            "80 + (o.i % ceil(sqrt(:count))::int) * 240",
+            "80 + floor(o.i / ceil(sqrt(:count)))::int * 180",
+        )
+    await db.execute(
+        text(
+            f"""
+            UPDATE atlas_nodes n SET position_x = {position[0]}, position_y = {position[1]},
+                updated_at = now()
+            FROM (SELECT id, row_number() OVER (ORDER BY created_at, id) - 1 AS i
+                  FROM atlas_nodes WHERE graph_id = :g) o
+            WHERE n.id = o.id
+            """
+        ),
+        {"g": g.id, "count": count},
+    )
+    await _bump_version(db, g)
+    await _maybe_snapshot(db, g, user.id, label=f"relayout {mode}")
+    await db.commit()
+    await db.refresh(g)
+    return success(
+        {
+            "relaid_out": count,
+            "mode": mode,
+            "graph": _graph_meta(g),
+            "nodes": [],
+            "reload": True,
+        }
+    )
+
+
 @router.post("/graphs/{graph_id}/relayout")
 async def relayout(
     graph_id: str,
@@ -2343,6 +3070,8 @@ async def relayout(
     if isinstance(g, JSONResponse):
         return g
     mode = (body.get("mode") or "semantic").lower()
+    if (g.node_count or 0) > FULL_GRAPH_LIMIT:
+        return await _relayout_in_sql(db, g, user, mode)
     nodes = (
         (
             await db.execute(
@@ -2426,6 +3155,12 @@ async def persist_to_kb(
     if len(raw) > 50 * 1024 * 1024:
         return error("Upload exceeds 50 MB", 413)
 
+    from app.services.kb_quota import quota_error
+
+    refused = await quota_error(db, user.tenant_id, add_documents=1, add_bytes=len(raw))
+    if refused is not None:
+        return refused
+
     fn = file.filename or "atlas-upload"
     ext = fn.rsplit(".", 1)[-1].lower() if "." in fn else "txt"
     doc_id = uuid.uuid4()
@@ -2461,6 +3196,7 @@ async def persist_to_kb(
         chunk_count=0,
         status=DocumentStatus.PROCESSING,
         storage_url=storage_url,
+        uploaded_by=user.id,
     )
     db.add(doc)
     kb.doc_count = (kb.doc_count or 0) + 1
@@ -2477,3 +3213,258 @@ async def persist_to_kb(
             },
         }
     )
+
+
+async def _context_kb(
+    db: AsyncSession, g: AtlasGraph, user: User
+) -> KnowledgeBase | JSONResponse:
+    if not g.kb_id:
+        return error(
+            "Bind this atlas to a knowledge collection first, then run Cognify on it.",
+            400,
+        )
+    kb = await _load_kb(db, g.kb_id, user)
+    if not kb:
+        return error("Bound KB no longer exists or is inaccessible", 404)
+    return kb
+
+
+async def _hidden_documents(user: User, kb_id: uuid.UUID) -> list[str]:
+    """The same document ACL search applies, an entity only from hidden documents stays hidden."""
+    from engine.knowledge.document_acl import hidden_for_search
+
+    role = getattr(user.role, "value", str(user.role))
+    return sorted(
+        await hidden_for_search([str(kb_id)], user_id=str(user.id), user_role=role)
+    )
+
+
+@router.get("/graphs/{graph_id}/context")
+async def context_graph(
+    graph_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """The enterprise context graph for this atlas, the ontology with its live entity counts."""
+    g = await _load_graph(db, graph_id, user)
+    if isinstance(g, JSONResponse):
+        return g
+    settings = g.settings or {}
+    out: dict[str, Any] = {
+        "graph_id": str(g.id),
+        "kb_id": str(g.kb_id) if g.kb_id else None,
+        "governs_extraction": settings.get("governs_extraction", True),
+        "ontology_mode": settings.get("ontology_mode", "strict"),
+        "bound": False,
+        "concepts": [],
+    }
+    if not g.kb_id:
+        return success(out)
+    kb = await _load_kb(db, g.kb_id, user)
+    if not kb:
+        return success(out)
+    out.update(
+        bound=True,
+        kb_name=kb.name,
+        last_cognified_at=(
+            kb.last_cognified_at.isoformat() if kb.last_cognified_at else None
+        ),
+    )
+    await _read_guard(db)
+    concepts = (
+        await db.execute(
+            select(AtlasNode.id, AtlasNode.label)
+            .where(AtlasNode.graph_id == g.id, AtlasNode.kind == AtlasNodeKind.CONCEPT)
+            .order_by(AtlasNode.label)
+            .limit(500)
+        )
+    ).all()
+    counts = (
+        await db.execute(
+            text(
+                "SELECT atlas_concept_id, entity_type, count(*) FROM graph_entities "
+                "WHERE kb_id = :kb GROUP BY 1, 2"
+            ),
+            {"kb": kb.id},
+        )
+    ).all()
+    by_concept: dict[Any, int] = {}
+    by_type: dict[str, int] = {}
+    unmapped = 0
+    for concept_id, entity_type, n in counts:
+        by_type[entity_type] = by_type.get(entity_type, 0) + n
+        if concept_id:
+            by_concept[concept_id] = by_concept.get(concept_id, 0) + n
+        else:
+            unmapped += n
+    out["concepts"] = [
+        {"id": str(c[0]), "label": c[1], "entity_count": by_concept.get(c[0], 0)}
+        for c in concepts
+    ]
+    out["entity_count"] = sum(by_type.values())
+    out["mapped_entities"] = sum(by_concept.values())
+    out["unmapped_entities"] = unmapped
+    out["entities_by_type"] = by_type
+    out["relationship_count"] = (
+        await db.execute(
+            text("SELECT count(*) FROM graph_relationships WHERE kb_id = :kb"),
+            {"kb": kb.id},
+        )
+    ).scalar() or 0
+    job = (
+        await db.execute(
+            text(
+                "SELECT id, status, chunks_processed, chunks_total, cost_usd, "
+                "off_ontology_dropped, stop_reason, created_at FROM cognify_jobs "
+                "WHERE kb_id = :kb ORDER BY created_at DESC LIMIT 1"
+            ),
+            {"kb": kb.id},
+        )
+    ).first()
+    if job:
+        out["latest_job"] = {
+            "id": str(job[0]),
+            "status": str(job[1]).lower(),
+            "chunks_processed": job[2],
+            "chunks_total": job[3],
+            "cost_usd": float(job[4] or 0),
+            "off_ontology_dropped": job[5],
+            "stop_reason": job[6],
+            "created_at": job[7].isoformat() if job[7] else None,
+        }
+    try:
+        from engine.knowledge.neo4j_client import concept_counts
+
+        live = await asyncio.wait_for(
+            concept_counts(str(kb.id), str(user.tenant_id)), timeout=5
+        )
+        out["neo4j_available"] = True
+        out["neo4j_entity_count"] = live["total"]
+    except Exception as e:
+        logger.info("context graph live count unavailable: %s", e)
+        out["neo4j_available"] = False
+    return success(out)
+
+
+@router.get("/graphs/{graph_id}/entities")
+async def browse_context_entities(
+    graph_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    concept_id: str | None = None,
+    entity_type: str | None = None,
+    q: str | None = None,
+    after: str = "",
+    limit: int = 50,
+) -> JSONResponse:
+    """Real instances from Neo4j, by Atlas concept, by type or by name."""
+    g = await _load_graph(db, graph_id, user)
+    if isinstance(g, JSONResponse):
+        return g
+    kb = await _context_kb(db, g, user)
+    if isinstance(kb, JSONResponse):
+        return kb
+    type_name = entity_type
+    if concept_id:
+        try:
+            concept = uuid.UUID(concept_id)
+        except ValueError:
+            return error("Invalid concept id", 400)
+        node = (
+            await db.execute(
+                select(AtlasNode.label).where(
+                    AtlasNode.id == concept, AtlasNode.graph_id == g.id
+                )
+            )
+        ).scalar_one_or_none()
+        if node is None:
+            return error("Concept not found in this atlas", 404)
+        type_name = type_name or node
+    from engine.knowledge.neo4j_client import browse_entities
+
+    try:
+        page = await browse_entities(
+            str(kb.id),
+            tenant_id=str(user.tenant_id),
+            entity_type=type_name,
+            concept_id=concept_id,
+            query=q,
+            after=after,
+            limit=limit,
+            hidden=await _hidden_documents(user, kb.id),
+        )
+    except Exception as e:
+        logger.warning("context graph browse failed: %s", e)
+        return error(
+            "Neo4j did not answer. The entity counts on this page still come from Postgres.",
+            503,
+        )
+    return success({**page, "kb_id": str(kb.id), "source": "neo4j"})
+
+
+@router.get("/graphs/{graph_id}/entities/neighbourhood")
+async def context_entity_neighbourhood(
+    graph_id: str,
+    name: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    limit: int = 50,
+    relationship: str | None = None,
+) -> JSONResponse:
+    """One real entity and the entities it relates to."""
+    g = await _load_graph(db, graph_id, user)
+    if isinstance(g, JSONResponse):
+        return g
+    kb = await _context_kb(db, g, user)
+    if isinstance(kb, JSONResponse):
+        return kb
+    from engine.knowledge.neo4j_client import entity_neighbourhood
+
+    try:
+        hood = await entity_neighbourhood(
+            str(kb.id),
+            name,
+            tenant_id=str(user.tenant_id),
+            limit=limit,
+            relationship=relationship,
+            hidden=await _hidden_documents(user, kb.id),
+        )
+    except Exception as e:
+        logger.warning("context graph neighbourhood failed: %s", e)
+        return error("Neo4j did not answer. Try again in a moment.", 503)
+    if hood["entity"] is None:
+        return error("Entity not found", 404)
+    return success({**hood, "kb_id": str(kb.id), "source": "neo4j"})
+
+
+@router.post("/graphs/{graph_id}/entities/query")
+async def query_context_entities(
+    graph_id: str,
+    body: dict,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """Entities of one concept related to entities of another, read from Neo4j."""
+    g = await _load_graph(db, graph_id, user)
+    if isinstance(g, JSONResponse):
+        return g
+    kb = await _context_kb(db, g, user)
+    if isinstance(kb, JSONResponse):
+        return kb
+    from engine.knowledge.neo4j_client import query_entities
+
+    try:
+        rows = await query_entities(
+            str(kb.id),
+            tenant_id=str(user.tenant_id),
+            from_type=body.get("from"),
+            relationship=body.get("relationship"),
+            to_type=body.get("to"),
+            name=body.get("name"),
+            limit=int(body.get("limit") or 50),
+            hidden=await _hidden_documents(user, kb.id),
+        )
+    except Exception as e:
+        logger.warning("context graph query failed: %s", e)
+        return error("Neo4j did not answer. Try again in a moment.", 503)
+    return success({"matches": rows, "count": len(rows), "source": "neo4j"})

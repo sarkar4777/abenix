@@ -697,9 +697,13 @@ class KnowledgeClient {
     return platformCall(this.client, 'POST', `/api/knowledge-bases/${kbId}/upload`, form);
   }
 
-  /** Documents in a collection with their status. */
-  documents(kbId: string): Promise<KnowledgeDocument[]> {
-    return platformCall(this.client, 'GET', `/api/knowledge-bases/${kbId}/documents`);
+  /** One page of documents in a collection with their status. */
+  documents(kbId: string, options?: { limit?: number; offset?: number }): Promise<KnowledgeDocument[]> {
+    const page = new URLSearchParams({
+      limit: String(options?.limit ?? 100),
+      offset: String(options?.offset ?? 0),
+    });
+    return platformCall(this.client, 'GET', `/api/knowledge-bases/${kbId}/documents?${page}`);
   }
 
   async cognify(kbId: string, options?: CognifyOptions): Promise<CognifyResult> {

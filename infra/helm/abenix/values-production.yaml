@@ -181,10 +181,13 @@ postgresql:
       shared_buffers = 2GB
       effective_cache_size = 6GB
       work_mem = 16MB
-      maintenance_work_mem = 512MB
+      maintenance_work_mem = 2GB
+      max_parallel_maintenance_workers = 4
       wal_buffers = 64MB
       checkpoint_completion_target = 0.9
       random_page_cost = 1.1
+      # a stopped WAL archiver must not fill the primary's disk
+      max_slot_wal_keep_size = 50GB
   readReplicas:
     replicaCount: 2
     networkPolicy:
@@ -286,9 +289,10 @@ ingress:
     secretName: abenix-tls
   annotations:
     cert-manager.io/cluster-issuer: letsencrypt-prod
-    nginx.ingress.kubernetes.io/proxy-body-size: "100m"
-    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
-    nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-body-size: "21g"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-request-buffering: "off"
     nginx.ingress.kubernetes.io/rate-limit: "100"
     nginx.ingress.kubernetes.io/rate-limit-window: "1m"
 
@@ -304,9 +308,16 @@ backup:
   s3Bucket: abenix-backups
   persistentVolume:
     enabled: false
+  postgres:
+    strategy: physical
+    physical:
+      walVolumeSize: 100Gi
+      storageClass: managed-premium
   neo4j:
     enabled: true
     schedule: "0 3 * * *"
+    activeDeadlineSeconds: 14400
+    scratchSize: 50Gi
 
 # -- Monitoring — enabled for production -----------------------------------
 monitoring:

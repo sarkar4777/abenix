@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: pgvector/pgvector:pg16
+    image: pgvector/pgvector:0.8.7-pg16
     container_name: abenix-postgres
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-abenix}
@@ -239,8 +239,8 @@ services:
     environment:
       NEO4J_AUTH: ${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD:-abenix-neo4j-pass}
       NEO4J_PLUGINS: '["apoc"]'
-      NEO4J_server_memory_heap_max__size: 1G
-      NEO4J_server_memory_pagecache_size: 512M
+      NEO4J_server_memory_heap_max__size: ${NEO4J_HEAP_MAX:-1G}
+      NEO4J_server_memory_pagecache_size: ${NEO4J_PAGECACHE:-512M}
     ports:
       - "7474:7474"
       - "7687:7687"

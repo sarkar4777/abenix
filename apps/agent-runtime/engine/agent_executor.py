@@ -2317,6 +2317,7 @@ def _ensure_tool_classes() -> None:
         AtlasSearchGroundedTool,
         AtlasDescribeTool,
         AtlasAsOfTool,
+        AtlasInstancesTool,
     )
     from engine.tools.decision_tools import DECISION_TOOLS
     from engine.tools.source_tools import SOURCE_TOOLS
@@ -2354,6 +2355,7 @@ def _ensure_tool_classes() -> None:
             "atlas_search_grounded": AtlasSearchGroundedTool,
             "atlas_describe": AtlasDescribeTool,
             "atlas_as_of": AtlasAsOfTool,
+            "atlas_instances": AtlasInstancesTool,
         }
     )
     _TOOL_CLASSES_LOADED = True
@@ -2768,7 +2770,9 @@ def build_tool_registry(
             try:
                 from engine.tools.graph_explorer_tool import GraphExplorerTool
 
-                registry.register(GraphExplorerTool(kb_id=kb_namespace))
+                registry.register(
+                    GraphExplorerTool(kb_id=kb_namespace, tenant_id=tenant_id or "")
+                )
                 logger.info(
                     "Registered graph_explorer tool with kb_id %s", kb_namespace
                 )

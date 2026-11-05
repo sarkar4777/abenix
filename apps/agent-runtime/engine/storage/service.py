@@ -14,12 +14,23 @@ Configured via environment variables:
 
 from __future__ import annotations
 
+import asyncio
+import base64
 import logging
 import os
+import queue
+import shutil
+from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import Any
+from typing import Any, BinaryIO
 
 logger = logging.getLogger(__name__)
+
+COPY_BLOCK = 1024 * 1024
+MIN_DIRECT_PART = 64 * 1024 * 1024
+# a plan stays small enough to send back, S3 itself allows 10000 parts
+MAX_DIRECT_PARTS = 1000
+MAX_DIRECT_PART = 5 * 1024 * 1024 * 1024
 
 STORAGE_BACKEND = os.environ.get("STORAGE_BACKEND", "local")
 STORAGE_LOCAL_DIR = os.environ.get(
@@ -46,6 +57,46 @@ STORAGE_S3_SECRET_KEY = os.environ.get(
 # Azure Blob
 STORAGE_AZURE_CONN_STR = os.environ.get("STORAGE_AZURE_CONNECTION_STRING", "")
 STORAGE_AZURE_CONTAINER = os.environ.get("STORAGE_AZURE_CONTAINER", "abenix-files")
+
+
+def direct_part_size(size: int) -> int:
+    return min(MAX_DIRECT_PART, max(MIN_DIRECT_PART, -(-size // MAX_DIRECT_PARTS)))
+
+
+class _BoundedReader:
+    """File object fed from another thread, a full queue makes the producer wait."""
+
+    def __init__(self, depth: int = 8) -> None:
+        self._queue: queue.Queue[bytes | BaseException | None] = queue.Queue(depth)
+        self._buffer = b""
+        self._done = False
+
+    def feed(self, chunk: bytes | None) -> None:
+        self._queue.put(chunk)
+
+    def fail(self, exc: BaseException) -> None:
+        while True:
+            try:
+                self._queue.put_nowait(exc)
+                return
+            except queue.Full:
+                try:
+                    self._queue.get_nowait()
+                except queue.Empty:
+                    pass
+
+    def read(self, size: int = -1) -> bytes:
+        wanted = size if size and size > 0 else COPY_BLOCK
+        while len(self._buffer) < wanted and not self._done:
+            item = self._queue.get()
+            if item is None:
+                self._done = True
+            elif isinstance(item, BaseException):
+                raise IOError("upload stream stopped") from item
+            else:
+                self._buffer += item
+        out, self._buffer = self._buffer[:wanted], self._buffer[wanted:]
+        return out
 
 
 class StorageService:
@@ -139,6 +190,233 @@ class StorageService:
             return await self._azure_list(full_prefix)
         else:
             return await self._local_list(full_prefix)
+
+    async def upload_fileobj(
+        self,
+        tenant_id: str,
+        path: str,
+        fileobj: BinaryIO,
+        content_type: str = "application/octet-stream",
+    ) -> str:
+        """Store a file object without reading it into memory. Returns its URI."""
+        key = f"{tenant_id}/{path}"
+        if self.backend == "s3":
+            return await asyncio.to_thread(
+                self._s3_upload_fileobj, key, fileobj, content_type
+            )
+        if self.backend == "azure":
+            return await asyncio.to_thread(
+                self._azure_upload_fileobj, key, fileobj, content_type
+            )
+        return await asyncio.to_thread(self._local_upload_fileobj, key, fileobj)
+
+    async def upload_stream(
+        self,
+        tenant_id: str,
+        path: str,
+        chunks: AsyncIterator[bytes],
+        content_type: str = "application/octet-stream",
+    ) -> str:
+        """Store an async byte stream, holding only a few chunks in memory."""
+        reader = _BoundedReader()
+        store = asyncio.create_task(
+            self.upload_fileobj(tenant_id, path, reader, content_type)
+        )
+        try:
+            async for chunk in chunks:
+                if store.done():
+                    break
+                await asyncio.to_thread(reader.feed, chunk)
+            await asyncio.to_thread(reader.feed, None)
+        except BaseException as exc:
+            await asyncio.to_thread(reader.fail, exc)
+            await asyncio.gather(store, return_exceptions=True)
+            raise
+        return await store
+
+    async def download_to_file(self, uri: str, dest: str) -> None:
+        """Copy a stored file to a local path without holding it in memory."""
+        if uri.startswith("s3://"):
+            bucket, key = self._parse_s3_uri(uri)
+            client = self._get_s3_client()
+            await asyncio.to_thread(client.download_file, bucket, key, dest)
+            return
+        if uri.startswith("az://"):
+            await asyncio.to_thread(self._azure_download_to_file, uri, dest)
+            return
+        source = uri.replace("file://", "") if uri.startswith("file://") else uri
+        await asyncio.to_thread(shutil.copyfile, source, dest)
+
+    async def size_of(self, uri: str) -> int:
+        if uri.startswith("s3://"):
+            bucket, key = self._parse_s3_uri(uri)
+            head = await asyncio.to_thread(
+                self._get_s3_client().head_object, Bucket=bucket, Key=key
+            )
+            return int(head["ContentLength"])
+        if uri.startswith("az://"):
+            container, key = self._parse_azure_uri(uri)
+            blob = self._get_azure_client().get_blob_client(container, key)
+            props = await asyncio.to_thread(blob.get_blob_properties)
+            return int(props.size)
+        path = uri.replace("file://", "") if uri.startswith("file://") else uri
+        return Path(path).stat().st_size
+
+    def supports_direct_upload(self) -> bool:
+        return self.backend in ("s3", "azure")
+
+    async def start_direct_upload(
+        self,
+        tenant_id: str,
+        path: str,
+        size: int,
+        content_type: str = "application/octet-stream",
+        expires: int = 86400,
+    ) -> dict[str, Any]:
+        """A plan the client follows to send the bytes straight to object storage."""
+        key = f"{tenant_id}/{path}"
+        if self.backend == "s3":
+            return await asyncio.to_thread(
+                self._s3_start_direct, key, size, content_type, expires
+            )
+        if self.backend == "azure":
+            return await asyncio.to_thread(self._azure_start_direct, key, size, expires)
+        raise ValueError("direct upload needs S3 or Azure storage")
+
+    async def finish_direct_upload(
+        self, plan: dict[str, Any], parts: list[dict[str, Any]]
+    ) -> str:
+        uri = plan["uri"]
+        if plan["kind"] == "s3_multipart":
+            bucket, key = self._parse_s3_uri(uri)
+            await asyncio.to_thread(
+                self._get_s3_client().complete_multipart_upload,
+                Bucket=bucket,
+                Key=key,
+                UploadId=plan["upload_id"],
+                MultipartUpload={
+                    "Parts": sorted(
+                        (
+                            {"PartNumber": int(p["part_number"]), "ETag": p["etag"]}
+                            for p in parts
+                        ),
+                        key=lambda p: p["PartNumber"],
+                    )
+                },
+            )
+            return uri
+        container, key = self._parse_azure_uri(uri)
+        blob = self._get_azure_client().get_blob_client(container, key)
+        from azure.storage.blob import BlobBlock
+
+        # the wire carries base64 ids and the SDK encodes what it is given
+        blocks = [
+            BlobBlock(block_id=base64.b64decode(p["block_id"]).decode()) for p in parts
+        ]
+        await asyncio.to_thread(blob.commit_block_list, blocks)
+        return uri
+
+    async def abort_direct_upload(self, plan: dict[str, Any]) -> None:
+        if plan["kind"] == "s3_multipart":
+            bucket, key = self._parse_s3_uri(plan["uri"])
+            await asyncio.to_thread(
+                self._get_s3_client().abort_multipart_upload,
+                Bucket=bucket,
+                Key=key,
+                UploadId=plan["upload_id"],
+            )
+
+    def _local_upload_fileobj(self, key: str, fileobj: BinaryIO) -> str:
+        filepath = Path(STORAGE_LOCAL_DIR) / key
+        filepath.parent.mkdir(parents=True, exist_ok=True)
+        partial = filepath.with_name(filepath.name + ".part")
+        try:
+            with open(partial, "wb") as out:
+                shutil.copyfileobj(fileobj, out, COPY_BLOCK)
+            os.replace(partial, filepath)
+        finally:
+            partial.unlink(missing_ok=True)
+        return f"file://{filepath.resolve()}"
+
+    def _s3_upload_fileobj(self, key: str, fileobj: BinaryIO, content_type: str) -> str:
+        self._get_s3_client().upload_fileobj(
+            fileobj, STORAGE_S3_BUCKET, key, ExtraArgs={"ContentType": content_type}
+        )
+        return f"s3://{STORAGE_S3_BUCKET}/{key}"
+
+    def _azure_upload_fileobj(
+        self, key: str, fileobj: BinaryIO, content_type: str
+    ) -> str:
+        from azure.storage.blob import ContentSettings
+
+        blob = self._get_azure_client().get_blob_client(STORAGE_AZURE_CONTAINER, key)
+        blob.upload_blob(
+            fileobj,
+            overwrite=True,
+            content_settings=ContentSettings(content_type=content_type),
+            max_concurrency=2,
+        )
+        return f"az://{STORAGE_AZURE_CONTAINER}/{key}"
+
+    def _azure_download_to_file(self, uri: str, dest: str) -> None:
+        container, key = self._parse_azure_uri(uri)
+        blob = self._get_azure_client().get_blob_client(container, key)
+        with open(dest, "wb") as out:
+            blob.download_blob().readinto(out)
+
+    def _s3_start_direct(
+        self, key: str, size: int, content_type: str, expires: int
+    ) -> dict[str, Any]:
+        client = self._get_s3_client()
+        part_size = direct_part_size(size)
+        count = max(1, -(-size // part_size))
+        upload_id = client.create_multipart_upload(
+            Bucket=STORAGE_S3_BUCKET, Key=key, ContentType=content_type
+        )["UploadId"]
+        parts = [
+            {
+                "part_number": n,
+                "url": client.generate_presigned_url(
+                    "upload_part",
+                    Params={
+                        "Bucket": STORAGE_S3_BUCKET,
+                        "Key": key,
+                        "UploadId": upload_id,
+                        "PartNumber": n,
+                    },
+                    ExpiresIn=expires,
+                ),
+            }
+            for n in range(1, count + 1)
+        ]
+        return {
+            "kind": "s3_multipart",
+            "uri": f"s3://{STORAGE_S3_BUCKET}/{key}",
+            "upload_id": upload_id,
+            "part_size": part_size,
+            "parts": parts,
+        }
+
+    def _azure_start_direct(self, key: str, size: int, expires: int) -> dict[str, Any]:
+        from datetime import datetime, timedelta, timezone
+
+        from azure.storage.blob import BlobSasPermissions, generate_blob_sas
+
+        client = self._get_azure_client()
+        sas = generate_blob_sas(
+            account_name=client.account_name,
+            container_name=STORAGE_AZURE_CONTAINER,
+            blob_name=key,
+            account_key=client.credential.account_key,
+            permission=BlobSasPermissions(create=True, write=True),
+            expiry=datetime.now(timezone.utc) + timedelta(seconds=expires),
+        )
+        return {
+            "kind": "azure_blocks",
+            "uri": f"az://{STORAGE_AZURE_CONTAINER}/{key}",
+            "part_size": direct_part_size(size),
+            "url": f"{client.url}{STORAGE_AZURE_CONTAINER}/{key}?{sas}",
+        }
 
     async def _local_upload(self, key: str, data: bytes) -> str:
         base = Path(STORAGE_LOCAL_DIR)

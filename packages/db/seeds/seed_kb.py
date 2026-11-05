@@ -339,10 +339,6 @@ async def _upsert_documents(
                          metadata, embedding)
                     VALUES (:id, :cid, :did, :ix, :content,
                             CAST(:meta AS jsonb), CAST(:emb AS vector))
-                    ON CONFLICT (document_id, chunk_index) DO UPDATE
-                        SET content = EXCLUDED.content,
-                            metadata = EXCLUDED.metadata,
-                            embedding = EXCLUDED.embedding
                     """
                 ).bindparams(
                     id=uuid.uuid4(),

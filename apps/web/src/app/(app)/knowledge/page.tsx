@@ -29,6 +29,7 @@ import DeleteWithDependents from '@/components/ui/DeleteWithDependents';
 import { toastSuccess, toastError } from '@/stores/toastStore';
 import { useApi } from '@/hooks/useApi';
 import { apiFetch, API_URL } from '@/lib/api-client';
+import { ACCEPTED_EXTENSIONS, ACCEPTED_LABEL, LARGE_FILE_BYTES, uploadLargeFile } from '@/lib/kbUpload';
 import { usePageTitle } from '@/hooks/usePageTitle';
 import OwnerBadge from '@/components/OwnerBadge';
 
@@ -61,6 +62,7 @@ interface KBDetail {
   chunk_size: number;
   chunk_overlap: number;
   documents: DocumentInfo[];
+  documents_total?: number;
   created_at: string | null;
 }
 
@@ -245,6 +247,12 @@ function DropZone({
   // null when it worked, otherwise the reason
   const uploadOne = async (file: File): Promise<string | null> => {
     try {
+      if (file.size >= LARGE_FILE_BYTES) {
+        const large = await uploadLargeFile(kbId, file, getAuthHeadersRaw());
+        if (large.error) return large.error;
+        if (large.document) onUploaded(large.document as unknown as DocumentInfo);
+        return null;
+      }
       const form = new FormData();
       form.append('file', file);
       const res = await fetch(`${API_URL}/api/knowledge-bases/${kbId}/upload`, {
@@ -316,7 +324,7 @@ function DropZone({
       <input
         ref={inputRef}
         type="file"
-        accept=".pdf,.docx,.txt,.csv,.md,.json"
+        accept={ACCEPTED_EXTENSIONS}
         multiple
         onChange={handleFileChange}
         className="hidden"
@@ -346,7 +354,7 @@ function DropZone({
             Drop files (multiple OK) here or click to browse
           </p>
           <p className="text-[10px] text-slate-600">
-            PDF, DOCX, TXT, CSV, MD, JSON (max 50 MB each)
+            {ACCEPTED_LABEL}. A file already here is not added twice.
           </p>
         </div>
       )}
@@ -369,6 +377,8 @@ function KBDetailView({
   onDismissNext?: () => void;
 }) {
   const [docs, setDocs] = useState<DocumentInfo[]>(kb.documents || []);
+  const [docsTotal, setDocsTotal] = useState<number>(kb.documents_total ?? (kb.documents || []).length);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [deletingKB, setDeletingKB] = useState(false);
   const [confirmDeleteKB, setConfirmDeleteKB] = useState(false);
@@ -388,11 +398,12 @@ function KBDetailView({
 
     pollInterval.current = setInterval(async () => {
       try {
-        const res = await fetch(`${API_URL}/api/knowledge-bases/${kb.id}/documents`, {
+        const res = await fetch(`${API_URL}/api/knowledge-bases/${kb.id}/documents?limit=${Math.min(1000, Math.max(100, docs.length))}`, {
           headers: getAuthHeaders(),
         });
         const json = await res.json();
         if (json.data) setDocs(json.data);
+        if (json.meta?.total !== undefined) setDocsTotal(json.meta.total);
       } catch {
         // silent
       }
@@ -401,10 +412,27 @@ function KBDetailView({
     return () => {
       if (pollInterval.current) clearInterval(pollInterval.current);
     };
-  }, [hasProcessing, kb.id]);
+  }, [hasProcessing, kb.id, docs.length]);
+
+  const loadMoreDocs = async () => {
+    setLoadingMore(true);
+    try {
+      const res = await fetch(`${API_URL}/api/knowledge-bases/${kb.id}/documents?limit=100&offset=${docs.length}`, {
+        headers: getAuthHeaders(),
+      });
+      const json = await res.json();
+      if (json.data) setDocs((prev) => [...prev, ...json.data]);
+      if (json.meta?.total !== undefined) setDocsTotal(json.meta.total);
+    } catch {
+      toastError('Could not load more documents');
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   const handleUploaded = (doc: DocumentInfo) => {
-    setDocs((prev) => [doc, ...prev]);
+    setDocs((prev) => (prev.some((d) => d.id === doc.id) ? prev : [doc, ...prev]));
+    setDocsTotal((n) => n + 1);
   };
 
   const deleteDoc = async (docId: string) => {
@@ -418,6 +446,7 @@ function KBDetailView({
       });
       if (!res.ok) throw new Error(String(res.status));
       setDocs((prev) => prev.filter((d) => d.id !== docId));
+      setDocsTotal((n) => Math.max(0, n - 1));
       toastSuccess('Document deleted');
     } catch {
       toastError('Failed to delete document');
@@ -510,7 +539,7 @@ function KBDetailView({
         }
       >
         <div className="flex flex-wrap items-center gap-4 text-xs text-slate-500">
-          <span>{docs.length} document{docs.length === 1 ? '' : 's'}</span>
+          <span>{docsTotal} document{docsTotal === 1 ? '' : 's'}</span>
           <span>Chunk size: {kb.chunk_size}</span>
         </div>
       </PageHeader>
@@ -542,7 +571,7 @@ function KBDetailView({
 
       <div>
         <h3 className="text-sm font-medium text-slate-300 mb-3">
-          Documents ({docs.length})
+          Documents ({docsTotal})
         </h3>
         {docs.length === 0 && (
           <div className="text-center py-8">
@@ -606,6 +635,17 @@ function KBDetailView({
               </div>
             </div>
           ))}
+          {docs.length < docsTotal && (
+            <button
+              type="button"
+              onClick={loadMoreDocs}
+              disabled={loadingMore}
+              data-testid="kb-docs-load-more"
+              className="w-full py-2 text-xs text-slate-400 hover:text-white disabled:opacity-50"
+            >
+              {loadingMore ? 'Loading...' : `Show more (${docsTotal - docs.length} left)`}
+            </button>
+          )}
         </div>
       </div>
       <DeleteWithDependents

@@ -76,7 +76,7 @@ def test_hybrid_search_drops_superseded(monkeypatch):
 
 
 def test_pgvector_query_filters_superseded_rows():
-    src = inspect.getsource(hybrid_search._vector_search_pgvector)
+    src = inspect.getsource(hybrid_search._hidden_filter)
     assert "is_current IS FALSE" in src
 
 
@@ -87,8 +87,11 @@ def test_cognify_trigger_and_worker_use_current_only():
     assert "Document.is_current.is_(True)" in src
     from worker.tasks import cognify_task
 
+    assert "is_current IS NOT FALSE" in inspect.getsource(cognify_task._load_document)
+    from engine.knowledge import cognify_store
+
     assert "is_current IS NOT FALSE" in inspect.getsource(
-        cognify_task._fetch_document_chunks
+        cognify_store.enqueue_documents
     )
 
 
@@ -96,7 +99,9 @@ def test_document_list_hides_history_unless_asked():
     from app.routers import knowledge
 
     src = inspect.getsource(knowledge.list_documents)
-    assert "Document.is_current.is_(True)" in src
+    assert "Document.is_current.is_(True)" in inspect.getsource(
+        knowledge._visible_documents
+    )
     assert "include_history" in src
     assert "user_can_edit_collection" in src
 

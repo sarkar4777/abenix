@@ -119,7 +119,9 @@ also from a `.env` at the repo root when one exists.
 | `GRAFANA_URL` | empty | Grafana link the cluster page returns |
 
 Request bodies are capped at 10 MB and uploads at 50 MB in
-`app/core/middleware.py`. Those are constants, not variables.
+`app/core/middleware.py`. Those are constants, not variables. Knowledge base
+uploads have their own limit, `KB_MAX_UPLOAD_BYTES`. The knowledge settings are
+listed in [Knowledge at terabyte scale](../06-deployment/10-knowledge-at-scale.md).
 
 ### Sign-in
 
@@ -386,6 +388,19 @@ Also read by the API in embedded mode, since it imports the same engine.
 | `AZURE_OPENAI_ENDPOINT` | empty | Accepted beside `AZURE_OPENAI_API_BASE` for embeddings |
 | `PINECONE_API_KEY` / `PINECONE_INDEX_NAME` | empty / `agentforge-knowledge` | Also read by the API and worker. Chart sets the index from `pinecone.indexName` |
 | `NEO4J_URI` / `NEO4J_USER` / `NEO4J_PASSWORD` / `NEO4J_DATABASE` | `bolt://localhost:7687` / `neo4j` / `abenix` / `neo4j` | Also read by the API. Chart sets URI and database, password from `secrets.neo4jPassword` |
+| `NEO4J_QUERY_TIMEOUT_S` / `NEO4J_WRITE_TIMEOUT_S` | `15` / `120` | Server side limit on one read, and on one write transaction |
+| `GRAPH_SEARCH_DEADLINE_S` | `20` | A graph search stops here with partial results |
+| `COGNIFY_DEFAULT_MODEL` | `claude-haiku-4-5-20251001` | Extraction model when a run names none. Chart `cognifyWorker.defaultModel` |
+| `COGNIFY_JOB_BUDGET_USD` | `50` | The most one job may spend when the request does not say. Chart `cognifyWorker.jobBudgetUsd` |
+| `COGNIFY_MAX_PARALLEL_CHUNKS` | `4` | Model calls at once per document task |
+| `COGNIFY_REQUESTS_PER_MINUTE` / `COGNIFY_TOKENS_PER_MINUTE` | `300` / `400000` | Token bucket per worker process. The real rate is this times concurrency times replicas |
+| `COGNIFY_GRAPH_BATCH_CHUNKS` | `20` | Chunks between graph writes, budget checks and progress updates |
+| `COGNIFY_ENTITY_BATCH` / `COGNIFY_RELATIONSHIP_BATCH` | `200` / `500` | Rows per Neo4j transaction |
+| `COGNIFY_TASK_TIME_SLICE_S` | `1200` | A document task requeues itself after this. Keep it under `CELERY_TASK_SOFT_TIME_LIMIT` |
+| `COGNIFY_RESOLVE_PAGE` / `COGNIFY_MAX_MERGES_PER_JOB` | `5000` / `5000` | KB wide resolution, names per page from Neo4j and merges per job |
+| `KB_OCR_MODE` | `auto` | Scanned pages. `auto` prefers Tesseract then a vision model, also `tesseract`, `vision`, `off`. Chart `worker.ocrMode` |
+| `KB_OCR_MAX_PAGES` / `KB_OCR_LANGUAGES` | `2000` / `eng` | OCR page cap per document, and Tesseract languages. Other languages need their `tesseract-ocr-*` package in the image |
+| `ATLAS_SNAPSHOT_KEEP_AUTO` / `ATLAS_BASELINE_INLINE_NODES` | `50` / `2000` | Automatic snapshots kept per graph, and the node count above which the first snapshot runs in the background |
 
 ### Tool settings that are not credentials
 

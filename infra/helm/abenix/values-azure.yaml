@@ -169,7 +169,9 @@ postgresql:
     extendedConfiguration: |
       max_connections = 400
       shared_buffers = 256MB
+      effective_cache_size = 768MB
       work_mem = 8MB
+      maintenance_work_mem = 128MB
 
 # ── Redis (sub-chart) ──────────────────────────────────────────────────────
 redis:

@@ -16,6 +16,7 @@ import Link from 'next/link';
 import PageHeader from '@/components/layout/PageHeader';
 import { fetchAllAgents } from '@/lib/fetch-all-agents';
 import { EmbeddingModelPanel } from '@/components/knowledge/EmbeddingModelPanel';
+import { ConnectorsPanel } from '@/components/knowledge/ConnectorsPanel';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -48,6 +49,14 @@ interface GraphStats {
 }
 
 interface CognifyJob {
+  documents_total?: number;
+  chunks_total?: number;
+  chunks_processed?: number;
+  chunks_skipped?: number;
+  chunks_failed?: number;
+  budget_usd?: number | null;
+  stop_reason?: string | null;
+  stop_requested?: boolean;
   id: string;
   status: string;
   entities_extracted: number;
@@ -86,7 +95,7 @@ export default function KnowledgeEnginePage() {
   // We surface the running one as a sticky banner + disable the Run button
   // so users can see progress instead of wondering if anything is happening.
   const runningJob = jobs.find(
-    (j) => !['complete', 'completed', 'ready', 'failed', 'error'].includes(
+    (j) => !['complete', 'completed', 'ready', 'failed', 'error', 'stopped'].includes(
       (j.status || '').toLowerCase(),
     ),
   ) || null;
@@ -177,6 +186,11 @@ export default function KnowledgeEnginePage() {
       setCognifyError('Cognify did not start. Check your connection and try again.');
     }
     setCognifying(false);
+  };
+
+  const stopCognify = async (jobId: string) => {
+    await fetch(`${API_URL}/api/knowledge-engines/${kbId}/cognify/${jobId}/stop`, { method: 'POST', headers });
+    await loadData();
   };
 
   // Search
@@ -295,13 +309,26 @@ export default function KnowledgeEnginePage() {
             </div>
             <div className="text-xs text-slate-300 mt-1 flex flex-wrap gap-x-4 gap-y-1">
               <span>Status: <span className="text-emerald-300 font-mono">{runningJob.status}</span></span>
-              <span>Documents processed: <span className="text-white">{runningJob.documents_processed || 0}</span></span>
+              <span>Documents processed: <span className="text-white">{runningJob.documents_processed || 0}{runningJob.documents_total ? ` of ${runningJob.documents_total}` : ''}</span></span>
+              {!!runningJob.chunks_total && (
+                <span>Chunks: <span className="text-white" data-testid="cognify-running-chunks">{(runningJob.chunks_processed || 0).toLocaleString()} of {runningJob.chunks_total.toLocaleString()}</span></span>
+              )}
+              <span>Spent: <span className="text-white" data-testid="cognify-running-cost">${(runningJob.cost_usd || 0).toFixed(2)}{runningJob.budget_usd != null ? ` of $${runningJob.budget_usd.toFixed(2)}` : ''}</span></span>
               <span>Entities so far: <span className="text-white">{runningJob.entities_extracted || 0}</span></span>
               <span>Relationships so far: <span className="text-white">{runningJob.relationships_extracted || 0}</span></span>
               <span>Tokens: <span className="text-white">{(runningJob.tokens_used || 0).toLocaleString()}</span></span>
             </div>
             <div className="text-[11px] text-slate-500 mt-1">
               Live — this banner refreshes every few seconds and disappears when the run finishes.
+              <button
+                type="button"
+                onClick={() => void stopCognify(runningJob.id)}
+                disabled={!!runningJob.stop_requested}
+                className="ml-2 text-amber-300 hover:text-amber-200 underline disabled:opacity-50"
+                data-testid="cognify-stop"
+              >
+                {runningJob.stop_requested ? 'Stopping after this batch' : 'Stop it, finished work is kept'}
+              </button>
             </div>
           </div>
         </div>
@@ -400,6 +427,8 @@ export default function KnowledgeEnginePage() {
       </div>
 
       <EmbeddingModelPanel kbId={kbId} />
+
+      <ConnectorsPanel kbId={kbId} />
 
       {/* Entity Type Breakdown */}
       {Object.keys(entityTypes).length > 0 && (
@@ -552,6 +581,8 @@ export default function KnowledgeEnginePage() {
                   <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
                 ) : job.status === 'failed' ? (
                   <XCircle className="w-4 h-4 text-red-400 shrink-0" />
+                ) : job.status === 'stopped' ? (
+                  <XCircle className="w-4 h-4 text-amber-400 shrink-0" />
                 ) : (
                   <Loader2 className="w-4 h-4 text-cyan-400 animate-spin shrink-0" />
                 )}
@@ -568,6 +599,15 @@ export default function KnowledgeEnginePage() {
                 )}
                 <span className="text-slate-600">{new Date(job.created_at).toLocaleDateString()}</span>
               </div>
+              {!!(job.chunks_processed || job.chunks_skipped) && (
+                <p className="mt-1 text-[11px] text-slate-500" data-testid="cognify-job-chunks">
+                  {(job.chunks_processed || 0).toLocaleString()} chunks processed, {(job.chunks_skipped || 0).toLocaleString()} already done and skipped
+                  {job.chunks_failed ? `, ${job.chunks_failed.toLocaleString()} failed` : ''}
+                </p>
+              )}
+              {job.stop_reason === 'up_to_date' && (
+                <p className="mt-1 text-[11px] text-slate-400" data-testid="cognify-job-uptodate">Every document was already in the graph, so nothing was spent.</p>
+              )}
               {job.error_message && (
                 <p className="mt-1 text-[11px] text-red-300 break-words" data-testid="cognify-job-error">{job.error_message}</p>
               )}

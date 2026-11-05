@@ -113,6 +113,10 @@ class KnowledgeStoreTool(BaseTool):
             chunks = self._chunk_text(content)
             results["chunks"] = len(chunks)
 
+            refused = await self._quota_refusal(kb_id, chunks, len(content))
+            if refused:
+                return ToolResult(content=refused, is_error=True)
+
             embeddings, note, backend = await self._embed_for_collection(kb_id, chunks)
             if note:
                 results["warnings"] = [note]
@@ -159,7 +163,7 @@ class KnowledgeStoreTool(BaseTool):
                         tenant_id=self.tenant_id,
                         job_id=str(uuid.uuid4()),
                         documents=[cognify_doc],
-                        config={"model": "claude-sonnet-4-5-20250929"},
+                        config={},
                         db_url=os.environ.get("DATABASE_URL", ""),
                     )
 
@@ -273,6 +277,79 @@ class KnowledgeStoreTool(BaseTool):
         )
 
     @staticmethod
+    async def _quota_refusal(kb_id: str, chunks: list[str], size: int) -> str | None:
+        """The tenant's knowledge limits apply to what an agent stores too."""
+        from sqlalchemy import text
+        from sqlalchemy.ext.asyncio import AsyncSession
+
+        from engine.db_pool import shared_engine
+        from engine.knowledge.hybrid_search import _async_db_url
+
+        try:
+            import embedding_models as em
+            import knowledge_quota as kq
+        except ImportError:
+            return None
+        url = _async_db_url()
+        if not url:
+            return None
+        try:
+            async with AsyncSession(shared_engine(url)) as session:
+                row = (
+                    await session.execute(
+                        text(
+                            "SELECT tenant_id, embedding_model FROM knowledge_collections "
+                            "WHERE id = CAST(:k AS uuid)"
+                        ),
+                        {"k": kb_id},
+                    )
+                ).first()
+                if row is None:
+                    return None
+                tenant = {"t": str(row[0])}
+                limits = (
+                    await session.execute(
+                        text(kq.LIMITS_SQL.format(t="CAST(:t AS uuid)")), tenant
+                    )
+                ).first()
+                if limits is None:
+                    return None
+                docs, count, stored = (
+                    await session.execute(
+                        text(kq.USAGE_SQL.format(t="CAST(:t AS uuid)")), tenant
+                    )
+                ).one()
+                emb, cog, tokens = (
+                    await session.execute(
+                        text(kq.SPEND_SQL.format(t="CAST(:t AS uuid)", p=":p")),
+                        {**tenant, "p": kq.period_start()},
+                    )
+                ).one()
+        except Exception as exc:
+            logger.warning("knowledge_store quota check failed: %s", exc)
+            return None
+        _tokens, usd = em.estimated_cost(row[1], chunks)
+        try:
+            kq.check(
+                dict(zip(kq.LIMIT_KEYS, limits)),
+                kq.Usage(
+                    documents=int(docs),
+                    chunks=int(count),
+                    storage_bytes=int(stored),
+                    embedding_usd=float(emb),
+                    cognify_usd=float(cog),
+                    embedding_tokens=int(tokens),
+                ),
+                add_documents=1,
+                add_chunks=len(chunks),
+                add_bytes=size,
+                add_embedding_usd=usd,
+            )
+        except kq.KnowledgeQuotaExceeded as e:
+            return e.message
+        return None
+
+    @staticmethod
     async def _move_empty_to_local(kb_id: str, model: str) -> bool:
         """True when the collection held no vectors and now records the local embedder."""
         from sqlalchemy import text
@@ -319,8 +396,8 @@ class KnowledgeStoreTool(BaseTool):
             await conn.execute(
                 text(
                     "INSERT INTO documents (id, kb_id, filename, file_type, "
-                    "file_size, chunk_count, status, storage_url) VALUES "
-                    "(:id, :kb, :name, 'text', :size, :count, 'READY', :url)"
+                    "file_size, chunk_count, status, storage_url, version_number, is_current) VALUES "
+                    "(:id, :kb, :name, 'text', :size, :count, 'READY', :url, 1, true)"
                 ),
                 {
                     "id": doc_id,
@@ -335,9 +412,13 @@ class KnowledgeStoreTool(BaseTool):
                 await conn.execute(
                     text(
                         "INSERT INTO chunks (id, collection_id, document_id, "
-                        "chunk_index, content, metadata, embedding) VALUES (:id, "
+                        "chunk_index, content, metadata, embedding, "
+                        "embedding_generation, dedicated_index) VALUES (:id, "
                         ":kb, :doc, :i, :content, CAST(:meta AS jsonb), "
-                        "CAST(:emb AS vector))"
+                        "CAST(:emb AS vector), (SELECT embedding_generation "
+                        "FROM knowledge_collections WHERE id = CAST(:kb AS uuid)), "
+                        "(SELECT index_mode <> 'shared' FROM knowledge_collections "
+                        "WHERE id = CAST(:kb AS uuid)))"
                     ),
                     {
                         "id": str(uuid.uuid4()),
@@ -394,8 +475,12 @@ class KnowledgeStoreTool(BaseTool):
                 }
             )
 
+        from engine.knowledge.kb_state import live_generations, pinecone_namespace
+
+        generations = await live_generations([kb_id])
+        namespace = pinecone_namespace(kb_id, (generations or {}).get(kb_id, 0))
         # Upsert in batches of 100
         for i in range(0, len(vectors), 100):
-            index.upsert(vectors=vectors[i : i + 100], namespace=kb_id)
+            index.upsert(vectors=vectors[i : i + 100], namespace=namespace)
 
         return len(vectors)

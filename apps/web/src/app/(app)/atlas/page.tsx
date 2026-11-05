@@ -22,6 +22,11 @@ import { apiFetch } from '@/lib/api-client';
 import ModelPicker from '@/components/ModelPicker';
 import { useModels } from '@/lib/models';
 import { pickRunnableModel } from '@/components/atlas/runnableModel';
+import {
+  FULL_GRAPH_NODES, NEIGHBOURS_PER_EXPAND, OVERVIEW_NODES, isLargeGraph, mergeWindow,
+  rectQuery, renderVisibleOnly, viewportRect, windowLabel,
+} from '@/components/atlas/graphWindow';
+import { ConceptEntities, ContextGraphSummary } from '@/components/atlas/ContextGraphPanel';
 import OwnerBadge from '@/components/OwnerBadge';
 import ResourceShareDialog, { type Shareable } from '@/components/share/ResourceShareDialog';
 import PageHeader from '@/components/layout/PageHeader';
@@ -295,26 +300,142 @@ export default function AtlasPage() {
   }, []);
 
   // ─── Load full graph when active changes ──────────────────────────
+  // Big graphs, the canvas holds a window and never the whole graph
+  const [explore, setExplore] = useState(false);
+  const [windowNote, setWindowNote] = useState<string | null>(null);
+  const [nodeSearch, setNodeSearch] = useState('');
+  const [nodeHits, setNodeHits] = useState<AtlasNodeRow[]>([]);
+  const canvasRef = useRef<HTMLDivElement>(null);
+  const moveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const edgesRef = useRef<AtlasEdgeRow[]>([]);
+  const nodesRef = useRef<AtlasNodeRow[]>([]);
+  const selectedRef = useRef<string | null>(null);
+  useEffect(() => { edgesRef.current = edgesData; }, [edgesData]);
+  useEffect(() => { nodesRef.current = nodesData; }, [nodesData]);
+  useEffect(() => { selectedRef.current = selectedNodeId; }, [selectedNodeId]);
+
   const reload = useCallback(async (gid: string) => {
-    const r = await apiFetch<any>(`/api/atlas/graphs/${gid}`);
+    const meta = await apiFetch<any>(`/api/atlas/graphs/${gid}?node_limit=0`);
+    if (!meta.data) return;
+    const large = isLargeGraph(meta.data.graph?.node_count);
+    setExplore(large);
+    const path = large
+      ? `/api/atlas/graphs/${gid}/overview?limit=${OVERVIEW_NODES}`
+      : `/api/atlas/graphs/${gid}?node_limit=${FULL_GRAPH_NODES}`;
+    const r = await apiFetch<any>(path);
     if (r.data) {
       setGraph(r.data.graph);
-      setNodesData(r.data.nodes || []);
-      setEdgesData(r.data.edges || []);
+      let nodes: AtlasNodeRow[] = r.data.nodes || [];
+      let edges: AtlasEdgeRow[] = r.data.edges || [];
+      if (large) {
+        // start on the busiest node with its neighbours, zoomed so they can be read
+        const hub = nodes.find(n => n.id === r.data.center) || nodes[0];
+        if (hub) {
+          const around = await apiFetch<any>(
+            `/api/atlas/graphs/${gid}/neighbourhood?node_id=${hub.id}&limit=${NEIGHBOURS_PER_EXPAND}`,
+            { throwOnError: false },
+          );
+          if (around.data) {
+            const merged = mergeWindow(nodes, edges, around.data.nodes || [], around.data.edges || []);
+            nodes = merged.nodes;
+            edges = merged.edges;
+          }
+          if (hub.position) {
+            const { x, y } = hub.position;
+            setTimeout(() => rfRef.current?.setCenter(x, y, { zoom: 0.6, duration: 300 }), 80);
+          }
+        }
+      }
+      setNodesData(nodes);
+      setEdgesData(edges);
     }
   }, []);
 
   useEffect(() => {
-    if (!activeId) { setGraph(null); setNodesData([]); setEdgesData([]); return; }
+    setWindowNote(null);
+    setNodeSearch('');
+    if (!activeId) { setGraph(null); setNodesData([]); setEdgesData([]); setExplore(false); return; }
     void reload(activeId);
   }, [activeId, reload]);
 
   useEffect(() => {
     if (!graph || graph.id !== activeId) return;
     setGraphs(prev => prev.map(g => g.id === graph.id
-      ? { ...g, name: graph.name, version: graph.version, updated_at: graph.updated_at ?? g.updated_at, kb_id: graph.kb_id, node_count: nodesData.length, edge_count: edgesData.length }
+      ? {
+          ...g, name: graph.name, version: graph.version, updated_at: graph.updated_at ?? g.updated_at, kb_id: graph.kb_id,
+          node_count: explore ? graph.node_count : nodesData.length,
+          edge_count: explore ? graph.edge_count : edgesData.length,
+        }
       : g));
-  }, [graph, activeId, nodesData.length, edgesData.length]);
+  }, [graph, activeId, explore, nodesData.length, edgesData.length]);
+
+  // Loaded rows are a window on a big graph, this brings more of it in.
+  const addToWindow = useCallback((nodes: AtlasNodeRow[], edges: AtlasEdgeRow[]) => {
+    const keep = selectedRef.current ? [selectedRef.current] : [];
+    const merged = mergeWindow(nodesRef.current, edgesRef.current, nodes, edges, keep);
+    nodesRef.current = merged.nodes;
+    edgesRef.current = merged.edges;
+    setNodesData(merged.nodes);
+    setEdgesData(merged.edges);
+  }, []);
+
+  const expandNode = useCallback(async (nodeId: string) => {
+    if (!activeId) return;
+    const r = await apiFetch<any>(
+      `/api/atlas/graphs/${activeId}/neighbourhood?node_id=${nodeId}&limit=${NEIGHBOURS_PER_EXPAND}`,
+      { throwOnError: false },
+    );
+    if (r.data) {
+      addToWindow(r.data.nodes || [], r.data.edges || []);
+      if (r.data.truncated) {
+        setWindowNote(`This node has ${(r.data.degree || 0).toLocaleString()} relationships. Showing the first ${(r.data.nodes || []).length}.`);
+      }
+    } else {
+      setWindowNote(r.error || 'Could not load the neighbours of this node.');
+    }
+  }, [activeId, addToWindow]);
+
+  const onCanvasMoved = useCallback(() => {
+    if (!explore || !activeId || !rfRef.current || !canvasRef.current) return;
+    if (moveTimer.current) clearTimeout(moveTimer.current);
+    moveTimer.current = setTimeout(() => {
+      const inst = rfRef.current;
+      const box = canvasRef.current;
+      if (!inst || !box) return;
+      const rect = viewportRect(inst.getViewport(), box.clientWidth, box.clientHeight);
+      void (async () => {
+        const r = await apiFetch<any>(`/api/atlas/graphs/${activeId}/viewport?${rectQuery(rect)}`, { throwOnError: false });
+        if (r.data) {
+          addToWindow(r.data.nodes || [], r.data.edges || []);
+          setWindowNote(r.data.truncated ? `About ${Number(r.data.in_view || 0).toLocaleString()}${r.data.in_view_capped ? '+' : ''} nodes are in this area. Zoom in to see more of them.` : null);
+        }
+      })();
+    }, 250);
+  }, [explore, activeId, addToWindow]);
+
+  useEffect(() => {
+    if (!nodeSearch.trim() || !activeId) { setNodeHits([]); return; }
+    const timer = setTimeout(() => {
+      void (async () => {
+        const r = await apiFetch<any>(
+          `/api/atlas/graphs/${activeId}/search?q=${encodeURIComponent(nodeSearch.trim())}&limit=20`,
+          { throwOnError: false },
+        );
+        setNodeHits(r.data?.nodes || []);
+      })();
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [nodeSearch, activeId]);
+
+  const openHit = useCallback(async (hit: AtlasNodeRow) => {
+    setNodeSearch('');
+    setNodeHits([]);
+    addToWindow([hit], []);
+    setSelectedNodeId(hit.id);
+    setSelectedEdgeId(null);
+    await expandNode(hit.id);
+    if (hit.position) rfRef.current?.setCenter(hit.position.x, hit.position.y, { zoom: 0.9, duration: 400 });
+  }, [addToWindow, expandNode]);
 
   const fitSoon = useCallback(() => {
     setTimeout(() => rfRef.current?.fitView({ padding: 0.2, duration: 600 }), 80);
@@ -344,7 +465,7 @@ export default function AtlasPage() {
     target: e.to_node_id,
     label: e.label + (e.cardinality_to ? ` (${e.cardinality_to})` : ''),
     type: 'smoothstep',
-    animated: e.source !== 'user',
+    animated: !explore && e.source !== 'user',
     style: {
       stroke: e.source !== 'user' ? '#a78bfa' : '#475569',
       strokeWidth: 1.5,
@@ -355,7 +476,7 @@ export default function AtlasPage() {
     labelBgPadding: [6, 3],
     labelBgBorderRadius: 4,
     selected: e.id === selectedEdgeId,
-  })), [edgesData, selectedEdgeId]);
+  })), [edgesData, selectedEdgeId, explore]);
 
   // ─── Mutations ────────────────────────────────────────────────────
   const createGraph = async () => {
@@ -669,7 +790,10 @@ export default function AtlasPage() {
     if (!activeId) return;
     if (!graph?.kb_id) { toast('info', 'Bind to a knowledge collection first.'); return; }
     const r = await apiFetch<any>(`/api/atlas/graphs/${activeId}/sync-kb`, { method: 'POST', throwOnError: false });
-    if (r.data) {
+    if (r.data?.queued) {
+      setGraph(r.data.graph);
+      toast('info', 'This collection has many documents, they are being added in the background.');
+    } else if (r.data) {
       setNodesData(prev => [...prev, ...(r.data.created_nodes || [])]);
       setGraph(r.data.graph);
       const n = r.data.imported || 0;
@@ -688,7 +812,10 @@ export default function AtlasPage() {
       method: 'POST', body: JSON.stringify({ mode }),
     });
     setLayoutBusy(null);
-    if (r.data?.nodes) {
+    if (r.data?.reload) {
+      setGraph(r.data.graph);
+      await reload(activeId);
+    } else if (r.data?.nodes) {
       setNodesData(r.data.nodes);
       setGraph(r.data.graph);
       setTimeout(() => rfRef.current?.fitView({ padding: 0.2, duration: 600 }), 50);
@@ -776,8 +903,8 @@ export default function AtlasPage() {
 
   const selectedNode = useMemo(() => nodesData.find(n => n.id === selectedNodeId) || null, [nodesData, selectedNodeId]);
   const selectedEdge = useMemo(() => edgesData.find(e => e.id === selectedEdgeId) || null, [edgesData, selectedEdgeId]);
-  const nodeCount = nodesData.length;
-  const edgeCount = edgesData.length;
+  const nodeCount = explore ? (graph?.node_count ?? nodesData.length) : nodesData.length;
+  const edgeCount = explore ? (graph?.edge_count ?? edgesData.length) : edgesData.length;
 
   // ─── Render ──────────────────────────────────────────────────────
   return (
@@ -951,6 +1078,30 @@ export default function AtlasPage() {
                 )}
               </ToolbarGroup>
               </>)}
+              <ToolbarGroup label="Find">
+                <div className="relative">
+                  <div className="inline-flex items-center gap-1.5 bg-slate-800/60 border border-slate-700 rounded-lg px-2 py-1">
+                    <Search className="w-3 h-3 text-slate-500" />
+                    <input
+                      value={nodeSearch}
+                      onChange={e => setNodeSearch(e.target.value)}
+                      placeholder="Find a node"
+                      aria-label="Find a node by label"
+                      data-testid="atlas-node-search"
+                      className="bg-transparent text-xs text-slate-200 outline-none w-28"
+                    />
+                  </div>
+                  {nodeHits.length > 0 && (
+                    <div className="absolute z-30 mt-1 w-64 max-h-64 overflow-y-auto rounded-lg border border-slate-700 bg-slate-900 shadow-xl" data-testid="atlas-node-hits">
+                      {nodeHits.map(hit => (
+                        <button key={hit.id} onClick={() => void openHit(hit)} className="block w-full text-left px-2 py-1.5 text-xs text-slate-200 hover:bg-violet-500/10 truncate">
+                          {hit.label} <span className="text-[9px] text-slate-500 font-mono">{hit.kind}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </ToolbarGroup>
               <ToolbarGroup label="Explore">
                 <ToolbarBtn onClick={() => setShowQuery(s => !s)} icon={Search} accent="violet" active={showQuery}>Query</ToolbarBtn>
                 {canEdit && <div className="inline-flex items-center bg-slate-800/60 border border-slate-700 rounded-lg overflow-hidden">
@@ -1002,7 +1153,14 @@ export default function AtlasPage() {
 
         {activeId && (
           <>
+            {explore && (
+              <div className="shrink-0 flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-amber-500/20 bg-amber-500/5 px-3 py-1.5 text-[11px] text-amber-100" data-testid="atlas-window-banner">
+                <span data-testid="atlas-window-count">{windowLabel(nodesData.length, graph?.node_count || 0)}</span>
+                {windowNote && <span className="text-amber-300/80" data-testid="atlas-window-note">{windowNote}</span>}
+              </div>
+            )}
             <div
+              ref={canvasRef}
               className="flex-1 min-h-0 relative"
               onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop}
               onKeyDown={(e) => { if (canEdit && (e.key === 'Backspace' || e.key === 'Delete') && (selectedNodeId || selectedEdgeId)) deleteSelected(); }}
@@ -1021,6 +1179,10 @@ export default function AtlasPage() {
                 onEdgeClick={(_, e) => { setSelectedEdgeId(e.id); setSelectedNodeId(null); }}
                 onPaneClick={() => { setSelectedNodeId(null); setSelectedEdgeId(null); }}
                 onInit={(inst) => { rfRef.current = inst; setTimeout(() => inst.fitView({ padding: 0.2, duration: 400 }), 50); }}
+                onNodeDoubleClick={(_, n) => { void expandNode(n.id); }}
+                onMoveEnd={onCanvasMoved}
+                onlyRenderVisibleElements={renderVisibleOnly(explore, nodesData.length)}
+                minZoom={explore ? 0.02 : 0.5}
                 fitView
                 deleteKeyCode={null}
                 proOptions={{ hideAttribution: true }}
@@ -1487,9 +1649,12 @@ export default function AtlasPage() {
           </div>
           <div className="flex-1 min-h-0 overflow-y-auto p-4">
             {!selectedNode && !selectedEdge && (
-              <div className="text-center py-8 text-[11px] text-slate-500">
-                <Layers className="w-6 h-6 mx-auto mb-2 text-slate-700" />
-                Click a node or a relationship on the canvas to see and edit its details here.
+              <div className="space-y-4">
+                <div className="text-center py-8 text-[11px] text-slate-500">
+                  <Layers className="w-6 h-6 mx-auto mb-2 text-slate-700" />
+                  Click a node or a relationship on the canvas to see and edit its details here.
+                </div>
+                {activeId && <ContextGraphSummary graphId={activeId} canEdit={canEdit} version={graph?.version} />}
               </div>
             )}
             {selectedEdge && !selectedNode && (
@@ -1499,6 +1664,12 @@ export default function AtlasPage() {
                 onDelete={deleteSelected}
                 readOnly={!canEdit}
               />
+            )}
+            {selectedNode && activeId && graph?.kb_id && selectedNode.kind === 'concept' && (
+              <details className="mb-3 rounded-lg border border-violet-500/30 p-2" data-testid="atlas-concept-entities" open>
+                <summary className="text-[11px] font-semibold text-slate-200 cursor-pointer">Real entities of this concept</summary>
+                <div className="mt-2"><ConceptEntities graphId={activeId} conceptId={selectedNode.id} /></div>
+              </details>
             )}
             {selectedNode && <NodeInspector
               node={selectedNode}

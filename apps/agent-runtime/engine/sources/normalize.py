@@ -402,8 +402,13 @@ def _col_index(ref: str) -> int:
 
 def xlsx_rows(body: bytes, selector: str = "") -> Normalized:
     """Read cell values straight from the workbook XML, so the result never depends on an optional library."""
+    from engine.archive_guard import UnsafeArchive, check_zip
+
     try:
+        check_zip(io.BytesIO(body), "This workbook")
         z = zipfile.ZipFile(io.BytesIO(body))
+    except UnsafeArchive as e:
+        raise NormalizeError(str(e)) from e
     except zipfile.BadZipFile as e:
         raise NormalizeError("This is not an xlsx workbook.") from e
     names = set(z.namelist())

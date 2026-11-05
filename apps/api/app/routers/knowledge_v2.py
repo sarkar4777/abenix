@@ -15,6 +15,7 @@ Admin verbs for the enterprise ingest workflow:
 from __future__ import annotations
 
 import logging
+import os
 import sys
 import uuid
 from datetime import datetime, timezone
@@ -23,7 +24,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import log_action
@@ -62,6 +63,26 @@ def _owned_storage_url(url: str, tenant_id: Any, kb_id: Any) -> bool:
         f"/{tenant_id}/kb/{kb_id}/" in f"/{norm}"
         or f"/{tenant_id}/{kb_id}/" in f"/{norm}"
     )
+
+
+def _stamp_superseded(kb: KnowledgeBase, old: Document) -> None:
+    try:
+        from celery import Celery
+
+        broker = os.environ.get("CELERY_BROKER_URL", "redis://localhost:6379/1")
+        Celery(broker=broker).send_task(
+            "worker.tasks.pinecone_vacuum.stamp_superseded",
+            args=[
+                str(kb.id),
+                str(old.id),
+                old.chunk_count,
+                kb.embedding_generation or 0,
+            ],
+            queue="documents",
+        )
+    except Exception as exc:
+        # search still checks each hit against Postgres, this only keeps the filter short
+        logger.warning("could not stamp superseded document %s: %s", old.id, exc)
 
 
 @router.post("/{kb_id}/documents/{doc_id}/replace")
@@ -118,6 +139,7 @@ async def replace_document(
         parent_document_id=old.parent_document_id or old.id,
         version_number=(old.version_number or 1) + 1,
         is_current=True,
+        uploaded_by=user.id,
     )
     db.add(new)
     old.is_current = False
@@ -145,6 +167,8 @@ async def replace_document(
         chunk_size=kb.chunk_size,
         chunk_overlap=kb.chunk_overlap,
     )
+    if kb.vector_backend == "pinecone" and old.chunk_count:
+        _stamp_superseded(kb, old)
     return success(
         {
             "id": str(new.id),
@@ -213,21 +237,6 @@ class ReembedRequest(BaseModel):
     dry_run: bool = Field(default=False)
 
 
-def _job_is_live(state: dict | None) -> bool:
-    """A queued or running job that has not outlived the worker's time limit."""
-    from app.workers.kb_reembed import ACTIVE
-
-    if not state or state.get("status") not in ACTIVE:
-        return False
-    stamp = state.get("started_at") or state.get("queued_at")
-    try:
-        age = datetime.now(timezone.utc) - datetime.fromisoformat(stamp)
-    except (TypeError, ValueError):
-        return False
-    limit = 6 * 3600 if state.get("status") == "running" else 3600
-    return age.total_seconds() < limit
-
-
 async def _reembed_kb_or_error(
     db: AsyncSession, kb_id: uuid.UUID, user: User
 ) -> KnowledgeBase | None:
@@ -247,17 +256,18 @@ async def reembed_status(
     db: AsyncSession = Depends(get_db),
 ) -> Any:
     from app.services.kb_access import user_can_access_collection
-    from app.workers.kb_reembed import get_status
+    from app.services.kb_lifecycle import latest_reembed, serialize_reembed_job
 
     kb = await _reembed_kb_or_error(db, kb_id, user)
     if kb is None or not await user_can_access_collection(db, user=user, kb=kb):
         return error("Knowledge base not found", 404)
+    job = await latest_reembed(db, kb_id)
     return success(
         {
             "kb_id": str(kb_id),
             "embedding_model": kb.embedding_model,
             "supported_models": list(embedding_models.SUPPORTED),
-            "job": await get_status(kb_id),
+            "job": serialize_reembed_job(job) if job else None,
         }
     )
 
@@ -283,10 +293,13 @@ async def reembed_kb(
         )
 
     old_model = kb.embedding_model
-    chunks = await db.execute(
-        select(Document.chunk_count).where(Document.kb_id == kb_id)
-    )
-    total = sum(c or 0 for (c,) in chunks.all())
+    total = (
+        await db.execute(
+            select(func.coalesce(func.sum(Document.chunk_count), 0)).where(
+                Document.kb_id == kb_id
+            )
+        )
+    ).scalar() or 0
     if body.dry_run:
         # rough, about 250 tokens a chunk at the small-model rate
         local = embedding_models.is_local(body.embedding_model)
@@ -303,19 +316,21 @@ async def reembed_kb(
             }
         )
 
-    from app.workers.kb_reembed import enqueue_reembed, get_status
+    from app.services.kb_lifecycle import live_reembed, start_reembed
+    from app.services.kb_quota import quota_error
 
-    current = await get_status(kb_id)
-    if _job_is_live(current):
+    current = await live_reembed(db, kb_id)
+    if current is not None:
         return error(
-            f"A re-embed of this collection is already {current['status']}", 409
+            f"A re-embed of this collection is already {current.status}. "
+            "Resume or cancel it first.",
+            409,
         )
-    try:
-        job_id = await enqueue_reembed(
-            kb_id=kb_id, new_model=body.embedding_model, from_model=old_model
-        )
-    except Exception as e:
-        return error(f"Could not queue the re-embed job: {e}", 503)
+    refused = await quota_error(db, kb.tenant_id, add_embedding_usd=0.000001)
+    if refused is not None:
+        return refused
+    job = await start_reembed(db, kb, body.embedding_model, user.id)
+    job_id = job.id
 
     await log_action(
         db,
@@ -341,6 +356,63 @@ async def reembed_kb(
             "status": "queued",
         },
         status_code=202,
+    )
+
+
+async def _reembed_action(
+    db: AsyncSession, kb_id: uuid.UUID, user: User, allowed: tuple[str, ...], act: Any
+) -> Any:
+    from app.services.kb_lifecycle import latest_reembed, serialize_reembed_job
+
+    if not _is_admin(user):
+        return error("Only admins can change a re-embed", 403)
+    kb = await _reembed_kb_or_error(db, kb_id, user)
+    if kb is None:
+        return error("Knowledge base not found", 404)
+    job = await latest_reembed(db, kb_id)
+    if job is None:
+        return error("This collection has no re-embed job", 404)
+    if job.status not in allowed:
+        return error(f"The re-embed is {job.status}, so this does not apply", 409)
+    return success(serialize_reembed_job(await act(db, job)))
+
+
+@router.post("/{kb_id}/reembed/pause")
+async def pause_reembed(
+    kb_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Any:
+    from app.services.kb_lifecycle import request_pause
+
+    return await _reembed_action(db, kb_id, user, ("queued", "running"), request_pause)
+
+
+@router.post("/{kb_id}/reembed/resume")
+async def resume_reembed(
+    kb_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Any:
+    from app.services.kb_lifecycle import request_resume
+
+    return await _reembed_action(db, kb_id, user, ("paused", "failed"), request_resume)
+
+
+@router.post("/{kb_id}/reembed/cancel")
+async def cancel_reembed(
+    kb_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Any:
+    from app.services.kb_lifecycle import request_cancel
+
+    return await _reembed_action(
+        db,
+        kb_id,
+        user,
+        ("queued", "running", "pausing", "paused", "failed"),
+        request_cancel,
     )
 
 

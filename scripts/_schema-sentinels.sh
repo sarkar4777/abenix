@@ -93,6 +93,21 @@ SCHEMA_CANONICAL_COLUMNS=(
   "agent_revisions.source"
   "agent_revisions.proposal_id"
   "decision_tests.match_mode"
+  "knowledge_collections.deleted_at"
+  "knowledge_collections.embedding_generation"
+  "documents.uploaded_by"
+  "kb_reembed_jobs.target_generation"
+  "kb_delete_jobs.phase"
+  "tenant_knowledge_quotas.max_chunks"
+  "knowledge_spend.embedding_usd"
+  "kb_connector_sources.sync_cursor"
+  "kb_connector_items.external_id"
+  "documents.content_sha256"
+  "documents.ingest_checkpoint"
+  "documents.ingest_attempts"
+  "knowledge_collections.index_mode"
+  "knowledge_collections.search_language"
+  "knowledge_collections.rerank_mode"
 )
 
 SCHEMA_USE_CASE_COLUMNS=(
@@ -111,4 +126,9 @@ SCHEMA_USE_CASE_COLUMNS=(
   "resolveai_action_audit.case_id"
   "resolveai_csat_scores.case_id"
   "resolveai_sla_breaches.case_id"
+  "cognify_chunks.chunk_hash"
+  "cognify_job_documents.status"
+  "cognify_jobs.stop_reason"
+  "graph_entities.atlas_concept_id"
+  "atlas_snapshot_rows.row_id"
 )

@@ -833,6 +833,16 @@ def start_scheduler() -> None:
     )
 
     scheduler.add_job(
+        _tracked("knowledge_ops", _knowledge_ops),
+        trigger="interval",
+        seconds=60,
+        id="knowledge_ops",
+        name="Start due knowledge connectors and resume stuck jobs",
+        replace_existing=True,
+        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=75),
+    )
+
+    scheduler.add_job(
         _tracked("watch_sources", _watch_sources),
         trigger="interval",
         seconds=30,
@@ -1027,6 +1037,16 @@ async def _watch_sources() -> dict[str, int] | None:
         return {"checked": int(await run_due() or 0)}
     except Exception:
         logger.exception("source watch failed")
+        return None
+
+
+async def _knowledge_ops() -> dict[str, int] | None:
+    from app.services.kb_connectors import knowledge_ops_tick
+
+    try:
+        return await knowledge_ops_tick()
+    except Exception:
+        logger.exception("knowledge operations tick failed")
         return None
 
 

@@ -381,7 +381,13 @@ app.include_router(llm_models.provider_router)
 app.include_router(use_cases.router)
 app.include_router(mcp.router)
 app.include_router(knowledge.router)
+from app.routers import admin_knowledge_quota, knowledge_connectors
+
+app.include_router(knowledge_connectors.kinds_router)
+app.include_router(knowledge_connectors.router)
+app.include_router(admin_knowledge_quota.router)
 from app.routers import (
+    knowledge_ingest,
     knowledge_engine,
     files,
     knowledge_projects,
@@ -397,6 +403,7 @@ app.include_router(project_members.router)
 app.include_router(knowledge_projects.router)
 app.include_router(collection_grants.router)
 app.include_router(knowledge_engine.router)
+app.include_router(knowledge_ingest.router)
 app.include_router(files.router)
 app.include_router(marketplace.router)
 app.include_router(reviews.router)
@@ -668,47 +675,32 @@ async def on_startup():
 
         async with db_engine.begin() as vconn:
             await vconn.execute(_vt("CREATE EXTENSION IF NOT EXISTS vector"))
-            await vconn.execute(
-                _vt(
-                    """
-                    CREATE TABLE IF NOT EXISTS chunks (
-                        id UUID PRIMARY KEY,
-                        collection_id UUID NOT NULL
-                            REFERENCES knowledge_collections(id) ON DELETE CASCADE,
-                        document_id UUID NOT NULL
-                            REFERENCES documents(id) ON DELETE CASCADE,
-                        chunk_index INTEGER NOT NULL,
-                        content TEXT NOT NULL,
-                        metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
-                        embedding vector(1536),
-                        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-                        UNIQUE (document_id, chunk_index)
-                    )
-                    """
+            from chunks_store import STATE_SQL, hnsw_plan, startup_plan
+
+            # replicas start together and partitions are several statements
+            await vconn.execute(_vt("SELECT pg_advisory_xact_lock(776602)"))
+            _state = (await vconn.execute(_vt(STATE_SQL))).first()
+            _version = (
+                await vconn.execute(
+                    _vt("SELECT extversion FROM pg_extension WHERE extname = 'vector'")
                 )
-            )
-            await vconn.execute(
-                _vt(
-                    "CREATE INDEX IF NOT EXISTS ix_chunks_collection "
-                    "ON chunks (collection_id)"
-                )
-            )
-            await vconn.execute(
-                _vt(
-                    "CREATE INDEX IF NOT EXISTS ix_chunks_document "
-                    "ON chunks (document_id)"
-                )
+            ).scalar()
+            for _stmt in startup_plan(_state[0] if _state else None, _version):
+                await vconn.execute(_vt(_stmt))
+            _state = (await vconn.execute(_vt(STATE_SQL))).first()
+        # a newer image leaves the old version in place, and search reads this version
+        try:
+            async with db_engine.begin() as uconn:
+                await uconn.execute(_vt("ALTER EXTENSION vector UPDATE"))
+        except Exception as _e:
+            logging.getLogger("startup").warning(
+                "pgvector stays on its installed version: %s", _e
             )
         # HNSW wants pgvector 0.5+. Separate transaction so an older build
         # loses the speed-up and keeps the table.
         try:
             async with db_engine.begin() as iconn:
-                await iconn.execute(
-                    _vt(
-                        "CREATE INDEX IF NOT EXISTS ix_chunks_embedding_hnsw "
-                        "ON chunks USING hnsw (embedding vector_cosine_ops)"
-                    )
-                )
+                await iconn.execute(_vt(hnsw_plan(_state[0], _state[1])))
         except Exception as _e:
             logging.getLogger("startup").info("chunks hnsw index skipped: %s", _e)
     except Exception as _e:
@@ -718,6 +710,18 @@ async def on_startup():
             "CREATE EXTENSION vector",
             _e,
         )
+
+    # Atlas label search. Needs pg_trgm, without it search still works and scans.
+    try:
+        from sqlalchemy import text as _at
+
+        from app.services.atlas_snapshots import LABEL_SEARCH_STATEMENTS
+
+        async with db_engine.begin() as aconn:
+            for _stmt in LABEL_SEARCH_STATEMENTS:
+                await aconn.execute(_at(_stmt))
+    except Exception as _e:
+        logging.getLogger("startup").info("atlas label index skipped: %s", _e)
 
     # Seed system tool presets for every tenant. Idempotent; preserves
     # user edits to existing rows (only flips is_system back on).

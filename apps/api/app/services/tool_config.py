@@ -41,6 +41,7 @@ _LAZY_MODULES = [
             "AtlasQueryTool",
             "AtlasTraverseTool",
             "AtlasSearchGroundedTool",
+            "AtlasInstancesTool",
         ],
     ),
     ("engine.tools.schema_portfolio_tool", ["SchemaPortfolioTool"]),

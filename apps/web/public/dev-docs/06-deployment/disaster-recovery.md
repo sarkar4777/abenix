@@ -154,6 +154,55 @@ marked failed by the stale sweeper after `STALE_EXECUTION_MAX_MINUTES` (10).
 
 ## Backups
 
+Pick a Postgres strategy with `backup.postgres.strategy`.
+
+| Strategy | What it does | Use it when |
+|---|---|---|
+| `dump` | Nightly `pg_dump`, the section below | A small install. The whole dump has to fit `backup.activeDeadlineSeconds` and `backup.scratchSize` |
+| `physical` | Streamed base backup plus a continuous WAL archive, point in time restore | A large corpus, the production values default to it |
+| `external` | The chart renders no Postgres backup | CloudNativePG or a managed Postgres owns it, see below |
+
+Run a restore drill before you need one, see [the drill](#restore-drill).
+
+### Physical backups
+
+`<release>-pg-basebackup` streams `pg_basebackup` through a pipe into the uploader, so neither side holds the backup on disk and its size is only limited by `backup.postgres.physical.activeDeadlineSeconds`. `<release>-pg-wal-archiver` runs `pg_receivewal` through the replication slot `abenix_wal` and ships each finished segment, plus a copy of the open one every `shipIntervalSeconds`, so at most that much is lost.
+
+Targets are S3 compatible storage, Azure Blob with `backup.target.type: azure` and `STORAGE_AZURE_CONNECTION_STRING` in `abenix-secrets`, or the backup PVC when `objectStorage.type` is local. Everything sits under `backups/pg/`. Only a backup with a `COMPLETE` marker is ever restored. `keep` base backups stay, and WAL older than the oldest of them is pruned.
+
+The primary needs a `host replication` line. Replicated installs have it. For a standalone install layer `values-backup-physical.yaml`, which also bounds the slot.
+
+Keep `max_slot_wal_keep_size` set. A stopped archiver makes the primary retain WAL through its slot, and without that bound it fills the disk. With it the archive gets a gap once the limit passes, so take a new base backup after a long archiver outage. `walVolumeSize` only has to hold WAL until it ships. Nothing alerts on archiver lag yet, watch the shipper's log or the volume.
+
+Restore a real outage the same way the drill does, into a new data directory, then point the release at it.
+
+```bash
+# on a pod with the backup scripts mounted and the store variables set
+python3 /scripts/backup_store.py fetch-physical backups/pg/base backups/pg/wal /restore
+sh /scripts/restore-postgres.sh /restore /restore/data "2026-11-05 09:00:00+00"
+postgres -D /restore/data
+```
+
+The third argument is the moment to stop at, leave it out to replay everything. The script refuses a data directory that is not empty.
+
+### CloudNativePG or a managed Postgres
+
+Set `backup.postgres.strategy: external` and point `DATABASE_URL` at your cluster. The chart still installs its own Postgres subchart, so scale that StatefulSet to zero. Configure base backups and WAL archiving there, with CloudNativePG's `backup.barmanObjectStore` and a `ScheduledBackup`, or your provider's point in time recovery. Abenix needs the `vector` extension and a role that can create it. The drill's row count check still applies, restore into a scratch database and run `scripts/backup/row-counts.sql` on both sides, then compare with `scripts/backup/compare-counts.py`. The chart path has not been run against CloudNativePG.
+
+### Restore drill
+
+```bash
+scripts/backup/restore-drill.sh docker        # throwaway containers, needs only Docker
+scripts/backup/restore-drill.sh neo4j-docker  # the same for the Neo4j export
+scripts/backup/restore-drill.sh minikube      # with the chart installed, strategy physical
+```
+
+The Docker drill seeds a source with a partitioned `chunks` table and an HNSW index, takes a base backup with the chart's scripts, writes more with no segment switch, stops the source, restores into a new container, then compares exact row counts for every table and runs a vector query. It fails on any difference.
+
+The minikube drill runs the CronJob once, reads counts from the live primary, starts a throwaway pod from the ConfigMap `<release>-backup-drill` that restores the newest backup, compares, and deletes the pod. A live source moves, so `--drift 1` allows that percent per table. Set `DRILL_DB` if your database is not `abenix`.
+
+### Dump backups
+
 Backups need both `backup.enabled` and `backup.persistentVolume.enabled`. With
 the volume on, the chart creates the PVC `<release>-backup` and keeps it on
 `helm uninstall`. Without it the jobs write to an `emptyDir` that is gone when
@@ -172,9 +221,9 @@ the pod ends. Both jobs share the claim and run an hour apart, so
 
 ### Postgres
 
-With `backup.enabled` (on in the Azure values) the chart adds the CronJob
+With `backup.enabled` and the `dump` strategy the chart adds the CronJob
 `abenix-pg-backup`, daily at 02:00 by default. It runs `pg_dump` as `postgres`
-in custom format (`--format=custom --compress=9`) into
+in custom format (`--format=custom`, `--compress` from `backup.compress`) into
 `/backup/abenix-pg-<timestamp>.dump` and keeps the newest 7 there. Without S3,
 Sunday dumps are also copied to `/backup/weekly`, which keeps 4.
 
@@ -221,6 +270,7 @@ With `backup.neo4j.enabled` the CronJob `abenix-neo4j-backup` runs daily at
 streams an APOC Cypher export (`apoc.export.cypher.all`) over Bolt into
 `/backup/neo4j/abenix-neo4j-<timestamp>.cypher.gz`. It needs no access to the
 Neo4j data volume and no downtime. It keeps the newest `backup.neo4j.keep` (7).
+With an S3 or Azure target each export is also uploaded to `backups/neo4j/`. `backup.neo4j.activeDeadlineSeconds`, `scratchSize` and `resources` size it. Restore with `files/restore-neo4j.sh`, it refuses a database that already has nodes.
 
 Restore by piping the file into `cypher-shell` against an empty database:
 

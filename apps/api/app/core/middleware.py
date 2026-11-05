@@ -1,4 +1,6 @@
 import hashlib
+import os
+import re
 import time
 import uuid
 
@@ -11,6 +13,10 @@ from app.core.security import verify_token
 
 MAX_REQUEST_BODY_BYTES = 10 * 1024 * 1024  # 10 MB
 MAX_UPLOAD_BODY_BYTES = 50 * 1024 * 1024  # 50 MB
+MAX_KB_UPLOAD_BODY_BYTES = int(os.environ.get("KB_MAX_UPLOAD_BYTES", str(20 * 1024**3)))
+# a multipart body carries a little framing on top of the file itself
+KB_UPLOAD_FRAMING_BYTES = 1024 * 1024
+_KB_UPLOAD_PATH = re.compile(r"^/api/knowledge-bases/[^/]+/upload(s(/.*)?|-bulk)?$")
 
 API_KEY_CACHE_TTL_SECONDS = 30.0
 API_KEY_CACHE_MAX_ENTRIES = 4096
@@ -199,11 +205,16 @@ class BodySizeLimitMiddleware:
         headers = Headers(scope=scope)
         content_length = headers.get("content-length")
         if content_length:
-            length = int(content_length)
+            try:
+                length = int(content_length)
+            except ValueError:
+                length = 0
             is_upload = "upload" in scope["path"] or "multipart" in headers.get(
                 "content-type", ""
             )
             limit = MAX_UPLOAD_BODY_BYTES if is_upload else MAX_REQUEST_BODY_BYTES
+            if _KB_UPLOAD_PATH.match(scope["path"]):
+                limit = MAX_KB_UPLOAD_BODY_BYTES + KB_UPLOAD_FRAMING_BYTES
             if length > limit:
                 response = JSONResponse(
                     status_code=413,

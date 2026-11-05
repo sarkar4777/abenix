@@ -1,0 +1,243 @@
+{{- if and .Values.backup.enabled (eq (dig "postgres" "strategy" "dump" (.Values.backup | toYaml | fromYaml)) "physical") }}
+{{- $p := .Values.backup.postgres.physical }}
+{{- if and (not (or (eq (include "abenix.backup.target" .) "s3") (eq (include "abenix.backup.target" .) "azure"))) (not .Values.backup.persistentVolume.enabled) }}
+{{- fail "backup.postgres.strategy physical needs objectStorage s3 or azure, or backup.persistentVolume.enabled for a local target" }}
+{{- end }}
+{{- $rt := index .Values "agent-runtime" "image" }}
+{{- $uploader := .Values.backup.uploaderImage | default (printf "%s:%s" $rt.repository ($rt.tag | toString)) }}
+{{- $host := printf "%s-postgresql%s" .Release.Name (ternary "-primary" "" (eq (.Values.postgresql.architecture | default "standalone") "replication")) }}
+# A base backup streams through a pipe into the uploader, so nothing is held on disk.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "abenix.fullname" . }}-pg-basebackup
+  labels:
+    {{- include "abenix.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backup
+spec:
+  schedule: {{ $p.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 4
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: {{ $p.activeDeadlineSeconds }}
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: {{ include "abenix.name" . }}
+            app.kubernetes.io/instance: {{ .Release.Name }}
+            app.kubernetes.io/component: backup
+        spec:
+          restartPolicy: Never
+          securityContext:
+            runAsUser: 1001
+            runAsGroup: 1001
+            fsGroup: 1001
+          initContainers:
+            - name: make-pipe
+              image: {{ $p.image }}
+              command: ["sh", "-c", "mkfifo /work/base.fifo && chmod 666 /work/base.fifo"]
+              volumeMounts:
+                - name: work
+                  mountPath: /work
+          containers:
+            - name: pg-basebackup
+              image: {{ $p.image }}
+              command: ["sh", "/scripts/pg-basebackup.sh"]
+              env:
+                - name: WORK
+                  value: /work
+                - name: BASE_COMPRESS
+                  value: {{ $p.compress | default 1 | quote }}
+                - name: PGHOST
+                  value: {{ $host }}
+                - name: PGUSER
+                  value: postgres
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: abenix-secrets
+                      key: postgres-password
+              volumeMounts:
+                - name: work
+                  mountPath: /work
+                - name: backup-scripts
+                  mountPath: /scripts
+                  readOnly: true
+              resources:
+                {{- toYaml $p.resources | nindent 16 }}
+            - name: uploader
+              image: {{ $uploader | quote }}
+              imagePullPolicy: {{ $rt.pullPolicy | default "IfNotPresent" }}
+              command:
+                - python3
+                - /scripts/backup_store.py
+                - stream-base
+                - /work/base.fifo
+                - backups/pg/base
+                - backups/pg/wal
+                - --status
+                - /work/status
+                - --keep
+                - {{ $p.keep | default 4 | quote }}
+              env:
+                {{- include "abenix.backup.storeEnv" . | nindent 16 }}
+              volumeMounts:
+                - name: work
+                  mountPath: /work
+                - name: backup-scripts
+                  mountPath: /scripts
+                  readOnly: true
+                {{- include "abenix.backup.targetMount" . | nindent 16 }}
+              resources:
+                {{- toYaml $p.shipperResources | nindent 16 }}
+          volumes:
+            - name: work
+              emptyDir:
+                sizeLimit: 16Mi
+            - name: backup-scripts
+              configMap:
+                name: {{ include "abenix.fullname" . }}-backup-scripts
+            {{- include "abenix.backup.targetVolume" . | nindent 12 }}
+---
+# Streams WAL through a replication slot and ships each segment as it fills.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "abenix.fullname" . }}-pg-wal-archiver
+  labels:
+    {{- include "abenix.labels" . | nindent 4 }}
+    app.kubernetes.io/component: wal-archiver
+spec:
+  serviceName: {{ include "abenix.fullname" . }}-pg-wal-archiver
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "abenix.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: wal-archiver
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "abenix.name" . }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: wal-archiver
+    spec:
+      securityContext:
+        runAsUser: 1001
+        runAsGroup: 1001
+        fsGroup: 1001
+      containers:
+        - name: receiver
+          image: {{ $p.image }}
+          command: ["sh", "/scripts/pg-wal-receive.sh"]
+          env:
+            - name: WAL_DIR
+              value: /wal
+            - name: WAL_SLOT
+              value: {{ $p.slot | default "abenix_wal" | quote }}
+            - name: PGHOST
+              value: {{ $host }}
+            - name: PGUSER
+              value: postgres
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: abenix-secrets
+                  key: postgres-password
+          volumeMounts:
+            - name: wal
+              mountPath: /wal
+            - name: backup-scripts
+              mountPath: /scripts
+              readOnly: true
+          resources:
+            {{- toYaml $p.receiverResources | nindent 12 }}
+        - name: shipper
+          image: {{ $uploader | quote }}
+          imagePullPolicy: {{ $rt.pullPolicy | default "IfNotPresent" }}
+          command:
+            - python3
+            - /scripts/backup_store.py
+            - ship-wal
+            - /wal
+            - backups/pg/wal
+            - --interval
+            - {{ $p.shipIntervalSeconds | default 15 | quote }}
+          env:
+            {{- include "abenix.backup.storeEnv" . | nindent 12 }}
+          volumeMounts:
+            - name: wal
+              mountPath: /wal
+            - name: backup-scripts
+              mountPath: /scripts
+              readOnly: true
+            {{- include "abenix.backup.targetMount" . | nindent 12 }}
+          resources:
+            {{- toYaml $p.shipperResources | nindent 12 }}
+      volumes:
+        - name: backup-scripts
+          configMap:
+            name: {{ include "abenix.fullname" . }}-backup-scripts
+        {{- include "abenix.backup.targetVolume" . | nindent 8 }}
+  volumeClaimTemplates:
+    - metadata:
+        name: wal
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- with $p.storageClass }}
+        storageClassName: {{ . | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ $p.walVolumeSize }}
+---
+# The pod scripts/backup/restore-drill.sh minikube starts, nothing runs it otherwise.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "abenix.fullname" . }}-backup-drill
+  labels:
+    {{- include "abenix.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backup
+data:
+  {{- $pg := .Values.postgresql.image }}
+  {{- $restore := $p.restoreImage | default (printf "%s/%s:%s" $pg.registry $pg.repository ($pg.tag | toString)) }}
+  {{- $spec := dict "apiVersion" "v1" "kind" "Pod" "metadata" (dict "name" "__POD__" "labels" (dict "app.kubernetes.io/name" (include "abenix.name" .) "app.kubernetes.io/instance" .Release.Name "app.kubernetes.io/component" "backup-drill")) }}
+  pod.json: |-
+    {{- $envYaml := include "abenix.backup.storeEnv" . | fromYamlArray }}
+    {{- $fetch := dict "name" "fetch" "image" $uploader "command" (list "python3" "/scripts/backup_store.py" "fetch-physical" "backups/pg/base" "backups/pg/wal" "/restore") "env" $envYaml "volumeMounts" (concat (list (dict "name" "restore" "mountPath" "/restore") (dict "name" "backup-scripts" "mountPath" "/scripts" "readOnly" true)) (include "abenix.backup.targetMount" . | fromYamlArray)) }}
+    {{- $prepare := dict "name" "prepare" "image" $restore "command" (list "sh" "/scripts/restore-postgres.sh" "/restore" "/restore/data") "volumeMounts" (list (dict "name" "restore" "mountPath" "/restore") (dict "name" "backup-scripts" "mountPath" "/scripts" "readOnly" true)) }}
+    {{- $server := dict "name" "postgres" "image" $restore "command" (list "postgres" "-D" "/restore/data") "ports" (list (dict "containerPort" 5432)) "readinessProbe" (dict "exec" (dict "command" (list "pg_isready" "-U" "postgres")) "periodSeconds" 5) "volumeMounts" (list (dict "name" "restore" "mountPath" "/restore")) }}
+    {{- $volumes := concat (list (dict "name" "restore" "emptyDir" (dict)) (dict "name" "backup-scripts" "configMap" (dict "name" (printf "%s-backup-scripts" (include "abenix.fullname" .))))) (include "abenix.backup.targetVolume" . | fromYamlArray) }}
+    {{- $body := dict "restartPolicy" "Never" "securityContext" (dict "runAsUser" 1001 "runAsGroup" 1001 "fsGroup" 1001) "initContainers" (list $fetch $prepare) "containers" (list $server) "volumes" $volumes }}
+    {{- set $spec "spec" $body | toJson | nindent 4 }}
+{{- end }}
+{{- if .Values.backup.enabled }}
+{{- $needs := or (eq (dig "postgres" "strategy" "dump" (.Values.backup | toYaml | fromYaml)) "physical") .Values.backup.neo4j.enabled (eq (include "abenix.backup.target" .) "azure") }}
+{{- if $needs }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "abenix.fullname" . }}-backup-scripts
+  labels:
+    {{- include "abenix.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backup
+data:
+  backup_store.py: |-
+    {{- .Files.Get "files/backup_store.py" | nindent 4 }}
+  neo4j_backup.py: |-
+    {{- .Files.Get "files/neo4j_backup.py" | nindent 4 }}
+  pg-basebackup.sh: |-
+    {{- .Files.Get "files/pg-basebackup.sh" | nindent 4 }}
+  pg-wal-receive.sh: |-
+    {{- .Files.Get "files/pg-wal-receive.sh" | nindent 4 }}
+  restore-postgres.sh: |-
+    {{- .Files.Get "files/restore-postgres.sh" | nindent 4 }}
+  restore-neo4j.sh: |-
+    {{- .Files.Get "files/restore-neo4j.sh" | nindent 4 }}
+{{- end }}
+{{- end }}

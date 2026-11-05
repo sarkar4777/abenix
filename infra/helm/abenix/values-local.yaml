@@ -208,6 +208,13 @@ postgresql:
     persistence:
       size: 5Gi
       storageClass: ""
+    # the image defaults of 128MB and 64MB make a vector index build swap to disk
+    extendedConfiguration: |
+      shared_buffers = 512MB
+      effective_cache_size = 1GB
+      work_mem = 8MB
+      maintenance_work_mem = 256MB
+      max_parallel_maintenance_workers = 2
   pgpool:
     enabled: false
 

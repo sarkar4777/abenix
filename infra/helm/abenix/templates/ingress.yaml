@@ -6,8 +6,8 @@ metadata:
   labels:
     {{- include "abenix.labels" . | nindent 4 }}
   annotations:
-    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
-    nginx.ingress.kubernetes.io/proxy-read-timeout: "120"
+    {{- $defaults := dict "nginx.ingress.kubernetes.io/proxy-body-size" (.Values.ingress.maxBodySize | default "21g") "nginx.ingress.kubernetes.io/proxy-read-timeout" "3600" "nginx.ingress.kubernetes.io/proxy-send-timeout" "3600" "nginx.ingress.kubernetes.io/proxy-request-buffering" "off" }}
+    {{- toYaml (merge (dict) (.Values.ingress.annotations | default dict) $defaults) | nindent 4 }}
 spec:
   ingressClassName: {{ .Values.ingress.className }}
   {{- if .Values.ingress.tls.enabled }}

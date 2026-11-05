@@ -65,6 +65,10 @@ engine = create_async_engine(
 )
 async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
+from app.core import kb_tombstone  # noqa: E402
+
+kb_tombstone.install()
+
 
 def _side_connect_args(statement_timeout_ms: str) -> dict:
     args = dict(_connect_args)

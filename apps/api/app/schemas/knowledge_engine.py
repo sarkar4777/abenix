@@ -1,13 +1,26 @@
 """Pydantic schemas for Knowledge Engine API endpoints."""
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
 class CognifyRequest(BaseModel):
     doc_ids: list[str] | None = None
-    model: str = "claude-sonnet-4-5-20250929"
+    # empty picks the platform's cheap default, COGNIFY_DEFAULT_MODEL
+    model: str = ""
     chunk_size: int = Field(default=1000, ge=200, le=4000)
     chunk_overlap: int = Field(default=200, ge=0, le=1000)
+    force: bool = False
+    dry_run: bool = False
+    max_cost_usd: float | None = Field(default=None, ge=0)
+    selection: Literal["all", "sample", "salient"] = "all"
+    sample_rate: float = Field(default=1.0, gt=0, le=1)
+    max_chunks_per_doc: int | None = Field(default=None, ge=1)
+    max_parallel_chunks: int | None = Field(default=None, ge=1, le=64)
+    requests_per_minute: float | None = Field(default=None, gt=0)
+    tokens_per_minute: float | None = Field(default=None, gt=0)
+    llm_resolution: bool = True
 
 
 class SearchRequest(BaseModel):

@@ -3,6 +3,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     DateTime,
     Enum,
@@ -13,6 +14,7 @@ from sqlalchemy import (
     String,
     Text,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -109,6 +111,26 @@ class KnowledgeBase(UUIDMixin, TenantMixin, TimestampMixin, Base):
     last_cognified_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # set the moment a delete is asked for, search and every read stop here
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # the chunk rows and Pinecone namespace that queries read, a re-embed flips this
+    embedding_generation: Mapped[int] = mapped_column(
+        Integer, default=0, server_default="0"
+    )
+    # shared, or deferred then building then dedicated for a bulk load
+    index_mode: Mapped[str] = mapped_column(
+        String(20), default="shared", server_default=text("'shared'")
+    )
+    # a Postgres text search configuration, simple works for every language
+    search_language: Mapped[str] = mapped_column(
+        String(32), default="simple", server_default=text("'simple'")
+    )
+    # off keeps every search of this collection away from the reranker
+    rerank_mode: Mapped[str] = mapped_column(
+        String(10), default="auto", server_default=text("'auto'")
+    )
 
     agent: Mapped["Agent | None"] = relationship(back_populates="knowledge_bases")
     documents: Mapped[list["Document"]] = relationship(back_populates="knowledge_base")
@@ -120,6 +142,19 @@ class Document(UUIDMixin, Base):
         Index("ix_documents_kb_status", "kb_id", "status"),
         Index("ix_documents_is_current", "is_current"),
         Index("ix_documents_kb_cognified", "kb_id", "cognified_at"),
+        Index("ix_documents_kb_created", "kb_id", "created_at"),
+        Index(
+            "ix_documents_kb_superseded",
+            "kb_id",
+            postgresql_where=text("is_current IS FALSE"),
+        ),
+        Index(
+            "ux_documents_kb_sha256",
+            "kb_id",
+            "content_sha256",
+            unique=True,
+            postgresql_where=text("content_sha256 IS NOT NULL AND is_current IS TRUE"),
+        ),
     )
 
     kb_id: Mapped[uuid.UUID] = mapped_column(
@@ -127,7 +162,7 @@ class Document(UUIDMixin, Base):
     )
     filename: Mapped[str] = mapped_column(String(500))
     file_type: Mapped[str] = mapped_column(String(50))
-    file_size: Mapped[int] = mapped_column(Integer)
+    file_size: Mapped[int] = mapped_column(BigInteger)
     chunk_count: Mapped[int] = mapped_column(Integer, default=0)
     status: Mapped[DocumentStatus] = mapped_column(
         Enum(DocumentStatus, name="document_status"), default=DocumentStatus.PROCESSING
@@ -157,6 +192,18 @@ class Document(UUIDMixin, Base):
     )
     extraction_method: Mapped[str | None] = mapped_column(String(32), nullable=True)
     extraction_quality: Mapped[float | None] = mapped_column(Float, nullable=True)
+    uploaded_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True, index=True
+    )
+    content_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # chunks stored so far, a rerun starts here and pays for nothing twice
+    ingest_checkpoint: Mapped[int] = mapped_column(
+        Integer, default=0, server_default="0"
+    )
+    # starts since the last progress, a worker killed each time ends up FAILED
+    ingest_attempts: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    # generation, model and chunk settings the checkpoint belongs to
+    ingest_fingerprint: Mapped[str | None] = mapped_column(String(200), nullable=True)
 
     knowledge_base: Mapped["KnowledgeBase"] = relationship(back_populates="documents")
 

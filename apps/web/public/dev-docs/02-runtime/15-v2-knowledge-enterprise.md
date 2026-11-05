@@ -95,7 +95,7 @@ Every collection has a stored `embedding_model`. Ingest and search both embed wi
 2. `POST /api/knowledge/{kb}/reembed` with `{"embedding_model": "...", "dry_run": true}` returns the chunk count, a cost estimate and an ETA. Admins only.
 3. The same call without `dry_run` queues the worker and answers 202 with a `job_id`. An unknown model is 400. A job already queued or running is 409.
 
-The worker re-reads every document from storage and re-chunks it with the collection's chunk settings, falling back to the indexed chunk text when the file is gone. It embeds with the new model and stages the result. Nothing live changes until every document is staged. Then the collection switches in one step and flips `embedding_model`. If anything fails before that, the collection keeps its old vectors and model. Progress is kept in Redis under `kb_reembed:<kb_id>`.
+The worker re-reads every document from storage and re-chunks it with the collection's chunk settings, falling back to the indexed chunk text when the file is gone. It embeds with the new model and stages the result in rows nothing queries, in slices that resume after a crash. Then one row update flips the model and generation, and old vectors are removed in batches. State is in `kb_reembed_jobs`. See [knowledge operations](../06-deployment/11-knowledge-operations.md).
 
 The KB engine page (`/knowledge/{id}/engine`) has an **Embedding model** panel showing the current model and job progress. Admins pick a model, see the estimate and start the swap there.
 

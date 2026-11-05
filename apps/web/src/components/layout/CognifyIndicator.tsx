@@ -44,6 +44,7 @@ const STATUS_LABEL: Record<string, string> = {
   embedding: 'embedding',
   complete: 'complete',
   failed: 'failed',
+  stopped: 'stopped',
 };
 
 function fmtDuration(seconds: number | null): string {
@@ -123,7 +124,7 @@ export default function CognifyIndicator() {
   const running = state.running.length;
   const recent = state.recent.filter(j => !dismissed.includes(j.id));
   const failedRecently = recent.filter(j => j.status === 'failed').length;
-  const completedRecently = recent.filter(j => j.status === 'complete').length;
+  const completedRecently = recent.filter(j => j.status === 'complete' || j.status === 'stopped').length;
 
   if (running === 0 && failedRecently === 0 && completedRecently === 0) return null;
 

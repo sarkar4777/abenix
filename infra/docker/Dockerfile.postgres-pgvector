@@ -12,7 +12,8 @@
 #     -f infra/docker/Dockerfile.postgres-pgvector \
 #     -t your-acr.azurecr.io/postgresql-pgvector:16 .
 #   docker push your-acr.azurecr.io/postgresql-pgvector:16
-FROM pgvector/pgvector:pg16 AS pgvector-src
+# search uses iterative HNSW scans, which need 0.8, so this stays pinned
+FROM pgvector/pgvector:0.8.7-pg16 AS pgvector-src
 
 FROM bitnamilegacy/postgresql:16.4.0-debian-12-r14
 USER 0

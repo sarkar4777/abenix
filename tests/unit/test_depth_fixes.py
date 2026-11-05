@@ -219,7 +219,7 @@ def test_stalled_cognify_jobs_are_closed(monkeypatch):
     assert n == 2 and _Db.committed
     assert all("UPDATE cognify_jobs SET status=" in q for q in seen)
     assert all(
-        "coalesce(cognify_jobs.started_at, cognify_jobs.created_at) <" in q
+        "coalesce(cognify_jobs.heartbeat_at, cognify_jobs.started_at, cognify_jobs.created_at) <" in q
         for q in seen
     )
 

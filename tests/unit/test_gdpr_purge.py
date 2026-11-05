@@ -158,6 +158,7 @@ async def test_purge_user_logs_the_count_each_store_reported():
         "neo4j": neo,
         "blob": zero,
         "trajectory": zero,
+        "knowledge": zero,
     }
     with patch.object(gdpr_purge, "_PURGERS", purgers), patch.object(
         gdpr_purge, "load_subject", AsyncMock(return_value=_subject())

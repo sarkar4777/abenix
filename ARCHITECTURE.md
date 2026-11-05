@@ -141,7 +141,7 @@ flowchart LR
   C --> EM["embedder<br/>kb.embedding_model"]
   EM --> P["Pinecone / pgvector"]
   EM --> CG["cognify queue"]
-  CG --> AT["Atlas graph"]
+  CG --> N4["Neo4j entities, typed by the bound Atlas ontology"]
 ```
 
 Key columns on `documents` (v2.0):
@@ -157,7 +157,7 @@ Key columns on `documents` (v2.0):
 | `extraction_method` | `text_pdf` / `vision_pdf` / `office` / `text_plain` / `vision_image` |
 | `extraction_quality` | 0.0-1.0 inferred from chars-per-page, flag low-quality docs |
 
-Ingest records `extraction_method` and `extraction_quality`, and each chunk keeps its page number. Vision OCR needs PyMuPDF and `ANTHROPIC_API_KEY` on the worker.
+Ingest records `extraction_method` and `extraction_quality`, and each chunk keeps its page number. Scanned pages go to OCR, chosen by `KB_OCR_MODE`. The worker image ships PyMuPDF and Tesseract, so `auto` reads scans with no key and no per page cost. Only the pages with no real text are sent to OCR.
 
 Document-level ACL (`document_grants`) is checked before similarity scoring. A document with no grants is visible to everyone who can read the collection. The first grant restricts it to its grantees (users or agents), tenant admins, the collection creator and holders of WRITE or ADMIN on the collection. The document list hides restricted documents too. Only collection editors add or remove grants.
 
@@ -165,11 +165,18 @@ Hybrid retrieval, vector similarity plus graph traversal plus reranker, lives in
 
 Each collection embeds with its own `embedding_model`, one of `text-embedding-3-small`, `text-embedding-3-large` (at 1536 dimensions), `text-embedding-ada-002` or `local-hashing-v1`. `POST /api/knowledge/{kb}/reembed` re-reads and re-chunks every document with the new model, then switches the collection in one step. `GET` on the same path reports progress.
 
-### Atlas — the typed knowledge graph
+### The enterprise context graph
 
-Atlas lives in **Neo4j** (graph structure) with mirror rows in Postgres (`atlas_graphs`, `atlas_nodes`, `atlas_edges`) for ACL and audit. Five starter ontologies ship in `ATLAS_STARTERS` in `apps/api/app/routers/atlas.py`: FIBO Core, FIX Protocol, EMIR, ISDA, ETRM EOD. A new starter is one more entry in that dict.
+The enterprise context graph is the pair of an Atlas graph and the Neo4j entities of the knowledge collection bound to it. Atlas holds the governed schema, what kinds of things exist and how they may relate. Neo4j holds the instances that Cognify found in documents. The link is `atlas_graphs.kb_id`, and every entity written while an ontology governs the collection records the concept it belongs to.
 
-**Five agent tools** access Atlas:
+- **Atlas** lives in Postgres (`atlas_graphs`, `atlas_nodes`, `atlas_edges`, `atlas_snapshots`, `atlas_snapshot_rows`). Concept nodes are entity types, and edges between concepts are relationship types with a domain and a range.
+- **Cognify** reads the bound Atlas graph before it extracts. The concepts and relationships go into the prompt, each proposal is checked against them, and what does not fit is dropped and counted on the job. A graph opts out with `settings.governs_extraction = false`, and `settings.ontology_mode = guided` keeps proposals that fit no concept instead of dropping them.
+- **Neo4j** holds `(:Entity {kb_id, tenant_id, canonical_name, entity_type, atlas_concept_id, atlas_graph_id})`, and relationships carry `atlas_edge_id`. `graph_entities` and `graph_relationships` mirror them in Postgres.
+- **Reading it.** `GET /api/atlas/graphs/{id}/context` gives entity counts per concept. `/entities`, `/entities/neighbourhood` and `/entities/query` browse and query the real instances in Neo4j, with the caller's document ACL applied. The `atlas_instances` tool gives agents the same.
+
+Five starter ontologies ship in `ATLAS_STARTERS` in `apps/api/app/routers/atlas.py`, namely FIBO Core, FIX Protocol, EMIR, ISDA and ETRM EOD. A new starter is one more entry in that dict.
+
+**Six agent tools** access Atlas.
 
 | Tool | What it does | When agents pick it |
 |---|---|---|
@@ -177,6 +184,7 @@ Atlas lives in **Neo4j** (graph structure) with mirror rows in Postgres (`atlas_
 | `atlas_query` | typed pattern query against the graph | "find contracts where notional > $50M with >3 unconfirmed trades" |
 | `atlas_traverse` | walk N hops along typed edges | "trace the supply chain from raw material to finished product" |
 | `atlas_search_grounded` | hybrid keyword + embedding search over node properties | "find the clause about late delivery" |
+| `atlas_instances` | the real entities behind a concept, from Neo4j. By concept, by name, a neighbourhood, or a relationship between two concepts | "which counterparties do we actually have, and what are they linked to" |
 | `atlas_as_of` *(v2.0)* | the graph as it stood at a past moment, from the newest snapshot at or before it, or the live graph when nothing changed since. Inputs `graph_id`, `as_of`, `label_like`, `kind`, `limit` | "what did the ontology say about counterparties on 2025-01-15?" |
 
 **Bi-temporal columns** (v2.0) on `atlas_nodes` and `atlas_edges`:
@@ -188,15 +196,22 @@ Atlas lives in **Neo4j** (graph structure) with mirror rows in Postgres (`atlas_
 
 `atlas_as_of` keeps live rows inside their `valid_from` and `valid_to`.
 
-### Cognify — the document → graph pipeline
+### Cognify, the document to graph pipeline
 
-Stages:
-1. **Extractor pool** — text + vision + office adapters (see KB section).
-2. **Entity proposer** — LLM-driven against the active ontology, with per-tenant `auto_accept_threshold`.
-3. **Relationship proposer** — types edges between proposed entities.
-4. **Schema validator** — proposal must conform to the active ontology, else rejected.
-5. **Threshold and conflicts** — proposals below `auto_accept_threshold` are left out of the graph and counted in the job report. When sources disagree on an entity's type, `conflict_action` decides, and with `flag` an open row lands in `cognify_conflicts` for `/settings/cognify`. Resolving it writes the chosen type to the graph.
-6. **Graph writer** — MERGE-by-canonical-name with the v2 bi-temporal columns set.
+A job is one Celery task per document, so nothing long runs in one task and a large corpus cannot hit the time limit as a whole. Progress lives in Postgres.
+
+1. **Plan.** `run_cognify_job` checks the daily budget and Neo4j, then records the documents in `cognify_job_documents`. Documents with `cognified_at` set are left out unless the run asks for `force` or names `doc_ids`.
+2. **Window.** At most `max_parallel_docs` documents of a job are queued at once, each finished document starts the next. One tenant's big job cannot fill the queue.
+3. **Select.** `selection` picks `all`, a stable `sample` or the most `salient` chunks, `max_chunks_per_doc` caps a document. The default is everything.
+4. **Skip.** Each chunk has a SHA-256 in `cognify_chunks`. A rerun pays only for chunks with no row there.
+5. **Extract.** Up to `max_parallel_chunks` model calls at once behind a token bucket, with backoff on rate limits and server errors. The default model is `COGNIFY_DEFAULT_MODEL`, a cheap one. What the model returned is saved before anything else can fail.
+6. **Check.** Before each batch the job compares its spend with `budget_usd` and the tenant's daily budget, using what it has really paid per chunk. Over budget it stops with status `stopped` and a message, and finished work stays.
+7. **Write.** Each batch is resolved against the stored graph by normalized name and alias, written to Neo4j in bounded `UNWIND` batches with retries, then mirrored to Postgres in the transaction that marks its chunks done. Failed rows are counted on the job and do not fail the batch.
+8. **Finish.** When no document is open, `finalize_cognify_job` runs KB wide resolution, updates the counters, writes the report and sets the status.
+
+A task that nears its time slice hands the document back to the queue and carries on from the ledger. A worker that dies mid document loses nothing that was paid for.
+
+KB wide resolution streams names from Neo4j page by page into a temporary SQLite file, off the event loop. It blocks on each name's sorted tokens and rarest character trigrams, compares inside a fixed window, and uses memory that does not grow with the KB. Names that normalize the same merge on the spot. Close names go to the model within what is left of the budget.
 
 **Per-tenant `cognify_configs`**:
 
@@ -207,7 +222,9 @@ Stages:
 | `max_parallel_docs` | 8 | documents processed at once in a job |
 | `daily_budget_usd` | unset | once the tenant's Cognify spend for the UTC day reaches it, jobs stop taking documents |
 
-**Incremental cognify** (v2.0) only fetches `documents` where `cognified_at IS NULL OR updated_at > cognified_at`. Adding 100 new docs to a 10k-doc KB no longer re-processes the entire corpus.
+Per job, `max_cost_usd` on the request or `COGNIFY_JOB_BUDGET_USD` (default 50) caps the spend. `dry_run` returns the chunk count and an estimate and spends nothing.
+
+**Incremental cognify** only takes documents where `cognified_at` is null. A new version of a document is a new row, so it counts as new. Adding 100 documents to a KB of 10,000 processes those 100.
 
 ### PersonaKB — per-user memory
 

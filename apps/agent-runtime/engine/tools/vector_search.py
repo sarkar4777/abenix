@@ -82,10 +82,16 @@ class VectorSearchTool(BaseTool):
         except Exception as e:
             return ToolResult(content=f"Embedding failed: {str(e)}", is_error=True)
 
+        from engine.knowledge.kb_state import live_generations, pinecone_namespace
+
+        generations = await live_generations(self.kb_ids)
         all_results: list[dict[str, Any]] = []
         for kb_id in self.kb_ids:
+            if generations is not None and kb_id not in generations:
+                continue
+            namespace = pinecone_namespace(kb_id, (generations or {}).get(kb_id, 0))
             try:
-                results = self._search_pinecone(query_embedding, kb_id, top_k)
+                results = self._search_pinecone(query_embedding, namespace, top_k)
                 all_results.extend(results)
             except Exception:
                 continue

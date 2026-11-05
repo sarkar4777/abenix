@@ -2,15 +2,31 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextvars
 import hashlib
 import json
 import logging
+import os
 import re
+import time
+import uuid as _uuid_mod
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
-from engine.knowledge.neo4j_client import get_neo4j_driver, is_neo4j_available
+from engine.knowledge.neo4j_client import (
+    FULLTEXT_INDEX,
+    _NEO4J_DATABASE,
+    cypher,
+    ensure_kb_keys,
+    ensure_schema,
+    entity_scope,
+    fulltext_query,
+    get_neo4j_driver,
+    is_neo4j_available,
+    visible,
+)
 from engine.knowledge.prompts import SEARCH_ENTITY_EXTRACTION
 
 logger = logging.getLogger(__name__)
@@ -158,22 +174,57 @@ class HybridSearchResponse:
 
 
 def _acl_scope(hidden: set[str]) -> str:
+    digest = getattr(hidden, "digest", "")
+    if digest:
+        return digest
     if not hidden:
         return ""
     return hashlib.sha256(",".join(sorted(hidden)).encode()).hexdigest()[:16]
 
 
+def _rerank_candidates() -> int:
+    return max(
+        1, int(os.environ.get("KB_RERANK_MAX_CANDIDATES", str(RERANK_CANDIDATES)))
+    )
+
+
+def _rerank_allowed(settings: dict[str, dict[str, str]], tenant_id: str) -> bool:
+    """Off on any searched collection wins, and each tenant has a call budget per minute."""
+    from engine.knowledge import reranker
+    from engine.knowledge.embed_gate import rerank_gate
+
+    if reranker.provider() == "none":
+        return False
+    if any(v.get("rerank_mode") == "off" for v in settings.values()):
+        return False
+    if not rerank_gate(tenant_id).try_acquire():
+        logger.info(
+            "rerank budget spent for tenant %s, keeping retrieval order", tenant_id
+        )
+        return False
+    return True
+
+
+def _rerank_language(settings: dict[str, dict[str, str]]) -> str:
+    languages = {v.get("search_language", "simple") for v in settings.values()}
+    return languages.pop() if len(languages) == 1 else "simple"
+
+
 async def _rerank(
-    query: str, results: list[SearchResult], top_k: int
+    query: str, results: list[SearchResult], top_k: int, language: str = "simple"
 ) -> list[SearchResult]:
     from engine.knowledge import reranker
 
     if reranker.provider() == "none" or len(results) <= 1:
         return results[:top_k]
-    pool = results[:RERANK_CANDIDATES]
+    pool = results[: _rerank_candidates()]
     items = [{"content": r.content, "_i": i} for i, r in enumerate(pool)]
     try:
-        ranked = await reranker.rerank(query, items, top_k=top_k)
+        kwargs = {"language": language} if language != "simple" else {}
+        ranked = await asyncio.wait_for(
+            reranker.rerank(query, items, top_k=top_k, **kwargs),
+            float(os.environ.get("KB_RERANK_TIMEOUT_SECONDS", "8")),
+        )
     except Exception as e:
         logger.warning("rerank failed, keeping retrieval order: %s", e)
         return results[:top_k]
@@ -221,15 +272,18 @@ async def hybrid_search(
     restricted by document_grants are dropped before ranking."""
     import time
 
-    from engine.knowledge.document_acl import hidden_for_search, superseded_for_search
+    from engine.knowledge import document_acl
 
     start = time.monotonic()
 
-    restricted = await hidden_for_search(
+    restricted = await document_acl.hidden_for_search(
         kb_ids, user_id=user_id, user_role=user_role, agent_id=agent_id
     )
     # superseded versions are dropped the same way, only the current version is searched
-    hidden = restricted | await superseded_for_search(kb_ids)
+    hidden = document_acl.merge_hidden(
+        restricted, await document_acl.superseded_for_search(kb_ids)
+    )
+    restricted_total = getattr(restricted, "total", len(restricted))
 
     # KB v2 query cache (5-min TTL). Best-effort: redis miss/failure
     # falls through to live search.
@@ -256,7 +310,7 @@ async def hybrid_search(
                     entities_found=cached.get("entities_found", []),
                     graph_hops=cached.get("graph_hops", 0),
                     latency_ms=int((time.monotonic() - start) * 1000),
-                    hidden_documents=len(restricted),
+                    hidden_documents=restricted_total,
                     degraded=cached.get("degraded", ""),
                 )
                 return resp
@@ -265,18 +319,20 @@ async def hybrid_search(
                 pass
 
     response = HybridSearchResponse(
-        results=[], mode_used=mode.value, hidden_documents=len(restricted)
+        results=[], mode_used=mode.value, hidden_documents=restricted_total
     )
 
-    from engine.knowledge import reranker
-
+    settings = await _kb_search_settings(kb_ids)
+    use_reranker = _rerank_allowed(settings, tenant_id)
     fetch = top_k * 2
-    if reranker.provider() != "none":
-        fetch = max(fetch, RERANK_CANDIDATES)
+    if use_reranker:
+        fetch = max(fetch, _rerank_candidates())
     vector_results: list[SearchResult] = []
     outage = False
+    notes: list[str] = []
     if mode in (SearchMode.VECTOR, SearchMode.HYBRID):
         response.degraded = await _lexical_index_note(kb_ids)
+        notes_token = _SEARCH_NOTES.set(notes)
         try:
             vector_results = await _vector_search(
                 query, kb_ids, top_k=fetch, hidden=hidden
@@ -292,22 +348,48 @@ async def hybrid_search(
                 f"{str(e)[:200]}"
             )
             response.mode_used = "keyword"
+        finally:
+            _SEARCH_NOTES.reset(notes_token)
+        if notes:
+            response.degraded = " ".join([response.degraded, *notes]).strip()
         response.vector_results_count = len(vector_results)
 
     graph_results: list[SearchResult] = []
 
-    if mode in (SearchMode.GRAPH, SearchMode.HYBRID) and await is_neo4j_available():
+    graph_blocked = bool(getattr(hidden, "overflow", False))
+    if graph_blocked and mode in (SearchMode.GRAPH, SearchMode.HYBRID):
+        # graph facts filter on a list of ids, past the cap that list would leak
+        note = (
+            "Graph results were left out because too many documents are hidden "
+            "from this caller to filter them safely."
+        )
+        response.degraded = f"{response.degraded} {note}".strip()
+    if (
+        mode in (SearchMode.GRAPH, SearchMode.HYBRID)
+        and not graph_blocked
+        and await is_neo4j_available()
+    ):
         # Extract entity mentions from the query
         query_entities = await _extract_query_entities(query)
         response.entities_found = query_entities
 
         if query_entities:
-            graph_results, _found = await _graph_search(
-                query_entities,
-                kb_ids,
-                depth=graph_depth,
-                hidden=hidden,
-            )
+            notes: list[str] = []
+            try:
+                graph_results, _found = await _graph_search(
+                    query_entities,
+                    kb_ids,
+                    depth=graph_depth,
+                    hidden=hidden,
+                    tenant_id=tenant_id,
+                    notes=notes,
+                )
+            except Exception as e:
+                # a slow or failed graph leaves the vector answer standing
+                logger.warning("graph search failed: %s", e)
+                notes.append(f"Graph search failed: {str(e)[:200]}")
+            if notes:
+                response.degraded = " ".join(filter(None, [response.degraded, *notes]))
             response.graph_results_count = len(graph_results)
             response.graph_hops = graph_depth
 
@@ -317,14 +399,19 @@ async def hybrid_search(
         ranked = graph_results
     else:
         ranked = _merge_results(vector_results, graph_results, graph_weight)
-    response.results = await _rerank(query, ranked, top_k)
+    if use_reranker:
+        language = _rerank_language(settings)
+        extra = {"language": language} if language != "simple" else {}
+        response.results = await _rerank(query, ranked, top_k, **extra)
+    else:
+        response.results = ranked[:top_k]
     _attach_citations(response.results)
 
     response.latency_ms = int((time.monotonic() - start) * 1000)
 
     # Stash in cache (best-effort). Only cache hits with results to
     # avoid burning Redis on empty-corpus misses.
-    if cache_k and response.results and not outage:
+    if cache_k and response.results and not outage and not notes:
         try:
             await search_cache.set(
                 cache_k,
@@ -398,7 +485,8 @@ async def _kb_index_settings(kb_ids: list[str]) -> dict[str, tuple[str, str | No
                 await session.execute(
                     _t(
                         "SELECT id::text, vector_backend, embedding_model "
-                        "FROM knowledge_collections WHERE id = ANY(:ids)"
+                        "FROM knowledge_collections "
+                        "WHERE id = ANY(:ids) AND deleted_at IS NULL"
                     ).bindparams(ids=uuid_inputs)
                 )
             ).all()
@@ -407,6 +495,56 @@ async def _kb_index_settings(kb_ids: list[str]) -> dict[str, tuple[str, str | No
         return result
     except Exception:
         return fallback
+
+
+_SEARCH_DEFAULTS = {
+    "search_language": "simple",
+    "rerank_mode": "auto",
+    "index_mode": "shared",
+}
+
+
+async def _kb_search_settings(kb_ids: list[str]) -> dict[str, dict[str, str]]:
+    """Language, rerank and index mode per collection, defaults when it cannot be read."""
+    out = {str(k): dict(_SEARCH_DEFAULTS) for k in kb_ids}
+    ids = _uuid_list(kb_ids)
+    db_url = _async_db_url()
+    if not ids or not db_url:
+        return out
+    try:
+        from sqlalchemy import text as _t
+        from sqlalchemy.ext.asyncio import AsyncSession
+
+        from engine.db_pool import shared_engine
+
+        async with AsyncSession(shared_engine(db_url)) as session:
+            rows = (
+                await session.execute(
+                    _t(
+                        "SELECT id::text, search_language, rerank_mode, index_mode "
+                        "FROM knowledge_collections WHERE id = ANY(:ids)"
+                    ).bindparams(ids=ids)
+                )
+            ).all()
+        for r in rows:
+            out[r[0]] = {
+                "search_language": r[1] or "simple",
+                "rerank_mode": r[2] or "auto",
+                "index_mode": r[3] or "shared",
+            }
+    except Exception as e:
+        logger.warning("collection search settings unavailable: %s", e)
+    return out
+
+
+def _uuid_list(values: Any) -> list[_uuid_mod.UUID]:
+    out = []
+    for v in values:
+        try:
+            out.append(_uuid_mod.UUID(str(v)))
+        except (ValueError, AttributeError):
+            continue
+    return out
 
 
 async def _lexical_index_note(kb_ids: list[str]) -> str:
@@ -441,7 +579,6 @@ async def _vector_search_pgvector(
         import httpx
         import openai
         from sqlalchemy.ext.asyncio import AsyncSession
-        from sqlalchemy import text as _t
 
         try:
             emb = await _embed_query(query, model)
@@ -453,48 +590,30 @@ async def _vector_search_pgvector(
         emb_str = "[" + ",".join(f"{x:.7f}" for x in emb) + "]"
 
         db_url = _async_db_url()
-        # text() will not bind `:emb::vector` — its parameter regex refuses a
-        # name followed by a colon, so the cast swallowed the placeholder and
-        # every search died on "no bound parameter named 'emb'". CAST() reads
-        # the same to Postgres and leaves the name alone.
-        import uuid as _uuid
-
-        id_params: list[_uuid.UUID] = []
-        for s in kb_ids:
-            try:
-                id_params.append(_uuid.UUID(str(s)))
-            except (ValueError, AttributeError):
-                continue
+        id_params = _uuid_list(kb_ids)
         if not id_params:
             return []
-        hidden_params = [_uuid.UUID(h) for h in hidden]
 
         from engine.db_pool import shared_engine
 
         engine = shared_engine(db_url)
         results: list[SearchResult] = []
+        modes = await _kb_search_settings([str(i) for i in id_params])
+        rows = []
         async with AsyncSession(engine) as session:
-            rows = (
-                await session.execute(
-                    _t(
-                        """
-                SELECT id::text, collection_id::text, document_id::text,
-                       chunk_index, content, metadata,
-                       1 - (embedding <=> CAST(:emb AS vector)) AS score
-                FROM chunks
-                WHERE collection_id = ANY(:ids)
-                  AND NOT (document_id = ANY(:hidden))
-                  AND NOT EXISTS (
-                      SELECT 1 FROM documents d
-                      WHERE d.id = chunks.document_id AND d.is_current IS FALSE)
-                ORDER BY embedding <=> CAST(:emb AS vector)
-                LIMIT :k
-                """
-                    ).bindparams(
-                        emb=emb_str, ids=id_params, hidden=hidden_params, k=top_k
+            store = await _chunk_store_facts(session, db_url)
+            for kb in id_params:
+                rows.extend(
+                    await _search_collection(
+                        session,
+                        kb,
+                        emb_str,
+                        top_k,
+                        hidden,
+                        store,
+                        modes.get(str(kb), _SEARCH_DEFAULTS)["index_mode"],
                     )
                 )
-            ).all()
         for r in rows:
             meta = r[5] or {}
             if not isinstance(meta, dict):
@@ -522,15 +641,268 @@ async def _vector_search_pgvector(
                     metadata=carried,
                 )
             )
-        return results
+        results.sort(key=lambda r: r.score, reverse=True)
+        return results[:top_k]
     except EmbeddingProviderError:
         raise
     except Exception as e:
         logger.error("pgvector search failed: %s", e)
+        _search_note(f"Vector search failed and returned nothing: {str(e)[:200]}")
         return []
 
 
-_WORD = re.compile(r"[A-Za-z0-9]{3,}")
+_SEARCH_NOTES: contextvars.ContextVar[list[str] | None] = contextvars.ContextVar(
+    "kb_search_notes", default=None
+)
+
+
+def _search_note(note: str) -> None:
+    notes = _SEARCH_NOTES.get()
+    if notes is not None and note not in notes:
+        notes.append(note)
+
+
+_STORE_FACTS: dict[str, tuple[float, dict[str, Any]]] = {}
+
+
+async def _chunk_store_facts(session: Any, db_url: str) -> dict[str, Any]:
+    """pgvector version and the embedding column type, read rarely."""
+    import time
+
+    from sqlalchemy import text as _t
+
+    hit = _STORE_FACTS.get(db_url)
+    if hit and hit[0] > time.monotonic():
+        return hit[1]
+    row = (
+        await session.execute(
+            _t(
+                "SELECT (SELECT extversion FROM pg_extension WHERE extname = 'vector'), "
+                "(SELECT format_type(a.atttypid, a.atttypmod) FROM pg_attribute a "
+                "WHERE a.attrelid = to_regclass('chunks') AND a.attname = 'embedding')"
+            )
+        )
+    ).first()
+    version = tuple(
+        int(p) for p in re.findall(r"\d+", (row[0] if row else "") or "0")[:3]
+    )
+    facts = {
+        "version": version,
+        "cast": (
+            "halfvec"
+            if ((row[1] if row else "") or "").startswith("halfvec")
+            else "vector"
+        ),
+    }
+    _STORE_FACTS[db_url] = (time.monotonic() + 600, facts)
+    return facts
+
+
+def _exact_scan_max() -> int:
+    return int(os.environ.get("KB_EXACT_SCAN_MAX_CHUNKS", "20000"))
+
+
+def _hidden_filter(
+    hidden: Any, chunk_alias: str = "chunks"
+) -> tuple[str, dict[str, Any]]:
+    """Ids while they fit in a bind, otherwise the rule itself runs in SQL."""
+    from engine.knowledge import document_acl
+
+    extra = ""
+    params: dict[str, Any] = {}
+    if getattr(hidden, "restricted_overflow", False):
+        extra = f" OR {document_acl.RESTRICTED_PREDICATE.format(doc='d')}"
+        params.update(
+            uid=getattr(hidden, "uid", None), aid=getattr(hidden, "aid", None)
+        )
+    sql = f"""
+                  AND NOT ({chunk_alias}.document_id = ANY(:hidden))
+                  AND NOT EXISTS (
+                      SELECT 1 FROM documents d
+                      WHERE d.id = {chunk_alias}.document_id
+                        AND (d.is_current IS FALSE{extra}))
+                  AND EXISTS (
+                      SELECT 1 FROM knowledge_collections kc
+                      WHERE kc.id = {chunk_alias}.collection_id
+                        AND kc.deleted_at IS NULL
+                        AND kc.embedding_generation = {chunk_alias}.embedding_generation)
+    """
+    params["hidden"] = _uuid_list(hidden)
+    return sql, params
+
+
+async def _search_collection(
+    session: Any,
+    kb: _uuid_mod.UUID,
+    emb_str: str,
+    top_k: int,
+    hidden: Any,
+    store: dict[str, Any],
+    index_mode: str,
+) -> list[Any]:
+    """Exact while small or unindexed. Above that HNSW, then deeper, then exact, never a silent short page."""
+    from sqlalchemy import text as _t
+
+    limit = _exact_scan_max()
+    size = (
+        await session.execute(
+            _t(
+                "SELECT count(*) FROM (SELECT 1 FROM chunks "
+                "WHERE collection_id = :kb LIMIT :n) x"
+            ).bindparams(kb=kb, n=limit + 1)
+        )
+    ).scalar() or 0
+    await session.commit()
+    if not size:
+        return []
+    if size <= limit or index_mode in ("deferred", "building"):
+        return await _exact_scan(session, kb, emb_str, top_k, hidden, store)
+    want = min(top_k, size)
+    rows = await _hnsw_scan(session, kb, emb_str, top_k, hidden, store, index_mode)
+    # a shared index walks closer vectors of other collections first
+    if len(rows) < want and store["version"] >= (0, 8):
+        deeper = await _hnsw_scan(
+            session, kb, emb_str, top_k, hidden, store, index_mode, deep=True
+        )
+        if len(deeper) > len(rows):
+            rows = deeper
+    if len(rows) >= want:
+        return rows
+    exact = await _exact_scan(session, kb, emb_str, top_k, hidden, store, timeout=True)
+    if exact is not None:
+        # finished, so what it found is everything this caller may see
+        return exact
+    _search_note(
+        f"Only {len(rows)} of {top_k} results came back from a collection this large "
+        "because the full scan ran out of time, so results are incomplete. Run "
+        "scripts/kb-chunks-partition.py or give this collection its own index."
+    )
+    return rows
+
+
+async def _exact_scan(
+    session: Any,
+    kb: _uuid_mod.UUID,
+    emb_str: str,
+    top_k: int,
+    hidden: Any,
+    store: dict[str, Any],
+    timeout: bool = False,
+) -> list[Any] | None:
+    """The rows, or None when the time limit stopped it and they would be a guess."""
+    from sqlalchemy import text as _t
+
+    where, params = _hidden_filter(hidden)
+    cast = store["cast"]
+    try:
+        if timeout:
+            await session.execute(
+                _t("SELECT set_config('statement_timeout', :v, true)").bindparams(
+                    v=os.environ.get("KB_EXACT_FALLBACK_TIMEOUT_MS", "30000")
+                )
+            )
+        # the materialized scan can not touch HNSW, so nothing is lost to post filtering
+        rows = (
+            await session.execute(
+                _t(
+                    f"""
+                WITH c AS MATERIALIZED (
+                    SELECT id, collection_id, document_id, chunk_index, content,
+                           metadata, embedding
+                    FROM chunks
+                    WHERE collection_id = :kb
+                    {where}
+                )
+                SELECT id::text, collection_id::text, document_id::text,
+                       chunk_index, content, metadata,
+                       1 - (embedding <=> CAST(:emb AS {cast})) AS score
+                FROM c
+                ORDER BY embedding <=> CAST(:emb AS {cast})
+                LIMIT :k
+                """
+                ).bindparams(kb=kb, emb=emb_str, k=top_k, **params)
+            )
+        ).all()
+        await session.commit()
+        return list(rows)
+    except Exception as e:
+        await session.rollback()
+        if not timeout:
+            raise
+        logger.warning("exact fallback for collection %s stopped: %s", kb, e)
+        return None
+
+
+async def _hnsw_scan(
+    session: Any,
+    kb: _uuid_mod.UUID,
+    emb_str: str,
+    top_k: int,
+    hidden: Any,
+    store: dict[str, Any],
+    index_mode: str,
+    deep: bool = False,
+) -> list[Any]:
+    from sqlalchemy import text as _t
+
+    where, params = _hidden_filter(hidden)
+    cast = store["cast"]
+    # post filtering eats candidates, so ask for more than the caller wants
+    ef = min(1000, max(int(os.environ.get("KB_HNSW_EF_SEARCH", "100")), top_k * 4))
+    await session.execute(
+        _t("SELECT set_config('hnsw.ef_search', :v, true)").bindparams(v=str(ef))
+    )
+    if store["version"] >= (0, 8):
+        await session.execute(
+            _t("SELECT set_config('hnsw.iterative_scan', 'relaxed_order', true)")
+        )
+        await session.execute(
+            _t("SELECT set_config('hnsw.max_scan_tuples', :v, true)").bindparams(
+                v=(
+                    os.environ.get("KB_HNSW_DEEP_SCAN_TUPLES", "2000000")
+                    if deep
+                    else os.environ.get("KB_HNSW_MAX_SCAN_TUPLES", "50000")
+                )
+            )
+        )
+        if deep:
+            # the scan stops at work_mem times this, a low limit would end it early
+            await session.execute(
+                _t("SELECT set_config('hnsw.scan_mem_multiplier', '8', true)")
+            )
+    # a literal id lets the planner prune partitions and prove a partial index applies
+    scope = "dedicated_index" if index_mode == "dedicated" else "NOT dedicated_index"
+    rows = (
+        await session.execute(
+            _t(
+                f"""
+                SELECT id::text, collection_id::text, document_id::text,
+                       chunk_index, content, metadata,
+                       1 - (embedding <=> CAST(:emb AS {cast})) AS score
+                FROM chunks
+                WHERE collection_id = '{kb}'
+                  AND {scope}
+                  {where}
+                ORDER BY embedding <=> CAST(:emb AS {cast})
+                LIMIT :k
+                """
+            ).bindparams(emb=emb_str, k=top_k, **params)
+        )
+    ).all()
+    await session.commit()
+    return list(rows)
+
+
+_WORD = re.compile(r"\w{2,}")
+
+
+def _ts_config(language: str | None) -> str:
+    try:
+        from chunks_store import validate_language
+
+        return validate_language(language)
+    except ImportError:
+        return "simple"
 
 
 async def _keyword_search_pg(
@@ -544,47 +916,55 @@ async def _keyword_search_pg(
     if not words:
         return []
     try:
-        import uuid as _uuid
-
         from sqlalchemy import text as _t
         from sqlalchemy.ext.asyncio import AsyncSession
 
         from engine.db_pool import shared_engine
 
-        ids = []
-        for k in kb_ids:
-            try:
-                ids.append(_uuid.UUID(str(k)))
-            except (ValueError, AttributeError):
-                continue
+        ids = _uuid_list(kb_ids)
         if not ids:
             return []
+        settings = await _kb_search_settings([str(i) for i in ids])
+        groups: dict[str, list[Any]] = {}
+        for i in ids:
+            groups.setdefault(
+                _ts_config(settings.get(str(i), _SEARCH_DEFAULTS)["search_language"]),
+                [],
+            ).append(i)
+        rows: list[Any] = []
+        where, params = _hidden_filter(hidden)
         async with AsyncSession(shared_engine(_async_db_url())) as session:
-            rows = (
+            for config, group in groups.items():
+                # a keyword scan has no vector index, this keeps it from running on
                 await session.execute(
-                    _t(
-                        """
+                    _t("SELECT set_config('statement_timeout', :v, true)").bindparams(
+                        v=os.environ.get("KB_KEYWORD_TIMEOUT_MS", "15000")
+                    )
+                )
+                rows.extend(
+                    (
+                        await session.execute(
+                            _t(
+                                f"""
                 SELECT id::text, collection_id::text, document_id::text,
                        chunk_index, content, metadata,
-                       ts_rank_cd(to_tsvector('english', content), q) AS score
-                FROM chunks, to_tsquery('english', :q) q
+                       ts_rank_cd(to_tsvector('{config}', content), q) AS score
+                FROM chunks, to_tsquery('{config}', :q) q
                 WHERE collection_id = ANY(:ids)
-                  AND NOT (document_id = ANY(:hidden))
-                  AND NOT EXISTS (
-                      SELECT 1 FROM documents d
-                      WHERE d.id = chunks.document_id AND d.is_current IS FALSE)
-                  AND to_tsvector('english', content) @@ q
+                  {where}
+                  AND to_tsvector('{config}', content) @@ q
                 ORDER BY score DESC
                 LIMIT :k
                 """
-                    ).bindparams(
-                        q=" | ".join(words),
-                        ids=ids,
-                        hidden=[_uuid.UUID(h) for h in hidden],
-                        k=top_k,
-                    )
+                            ).bindparams(
+                                q=" | ".join(words), ids=group, k=top_k, **params
+                            )
+                        )
+                    ).all()
                 )
-            ).all()
+                await session.commit()
+        rows.sort(key=lambda r: float(r[6]), reverse=True)
+        rows = rows[:top_k]
     except Exception as e:
         logger.error("keyword search failed: %s", e)
         return []
@@ -667,8 +1047,10 @@ async def _kbs_with_pg_chunks(kb_ids: list[str]) -> list[str]:
             rows = (
                 await session.execute(
                     _t(
-                        "SELECT DISTINCT collection_id::text FROM chunks"
-                        " WHERE collection_id = ANY(:ids)"
+                        "SELECT k.id::text FROM knowledge_collections k "
+                        "WHERE k.id = ANY(:ids) AND k.deleted_at IS NULL AND EXISTS ("
+                        "SELECT 1 FROM chunks c WHERE c.collection_id = k.id "
+                        "AND c.embedding_generation = k.embedding_generation)"
                     ).bindparams(ids=ids)
                 )
             ).all()
@@ -676,6 +1058,10 @@ async def _kbs_with_pg_chunks(kb_ids: list[str]) -> list[str]:
     except Exception as e:
         logger.warning("pgvector fallback lookup failed: %s", e)
         return []
+
+
+def _pinecone_nin_max() -> int:
+    return int(os.environ.get("KB_PINECONE_NIN_MAX", "1000"))
 
 
 async def _vector_search_pinecone(
@@ -721,16 +1107,31 @@ async def _vector_search_pinecone(
         pc = Pinecone(api_key=pinecone_key)
         index = pc.Index(index_name)
 
+        from engine.knowledge.kb_state import live_generations, pinecone_namespace
+
+        generations = await live_generations(kb_ids)
         results: list[SearchResult] = []
+        # past the cap nothing is sent, more is fetched and each result is checked
+        unlisted = bool(getattr(hidden, "overflow", False)) or (
+            len(hidden) > _pinecone_nin_max()
+        )
+        fetch_k = min(1000, top_k * 3) if unlisted else top_k
         for kb_id in kb_ids:
-            _filter: dict[str, Any] = {"persona_scope": {"$ne": "_persona_"}}
-            if hidden:
+            if generations is not None and kb_id not in generations:
+                continue
+            namespace = pinecone_namespace(kb_id, (generations or {}).get(kb_id, 0))
+            _filter: dict[str, Any] = {
+                "persona_scope": {"$ne": "_persona_"},
+                # stamped on a replaced version, so the list below stays short
+                "superseded": {"$ne": True},
+            }
+            if hidden and not unlisted:
                 _filter["doc_id"] = {"$nin": sorted(hidden)}
             try:
                 response = index.query(
-                    namespace=kb_id,
+                    namespace=namespace,
                     vector=query_vector,
-                    top_k=top_k,
+                    top_k=fetch_k,
                     include_metadata=True,
                     filter=_filter,
                 )
@@ -738,9 +1139,9 @@ async def _vector_search_pinecone(
                 # Some Pinecone index versions reject the filter silently;
                 # retry once unfiltered, then re-filter in memory.
                 response = index.query(
-                    namespace=kb_id,
+                    namespace=namespace,
                     vector=query_vector,
-                    top_k=top_k,
+                    top_k=fetch_k,
                     include_metadata=True,
                 )
             # Pinecone v7 returns QueryResponse with .matches attribute
@@ -790,6 +1191,13 @@ async def _vector_search_pinecone(
                         metadata=carried,
                     )
                 )
+        if unlisted and results:
+            from engine.knowledge.document_acl import hidden_among
+
+            gone = await hidden_among(
+                {r.metadata.get("doc_id", "") for r in results}, hidden, kb_ids
+            )
+            results = [r for r in results if r.metadata.get("doc_id") not in gone]
         return results
 
     except EmbeddingProviderError:
@@ -828,10 +1236,96 @@ async def _extract_query_entities(query: str) -> list[str]:
 
 
 # a graph fact stays visible while at least one of its source documents is
-_VISIBLE = (
-    "(size(coalesce({v}.source_doc_ids, [])) = 0 "
-    "OR any(d IN {v}.source_doc_ids WHERE NOT d IN $hidden))"
-)
+_VISIBLE = visible("{v}")
+
+
+# limits per query so one hub entity cannot run the database out of memory
+GRAPH_NAME_MATCHES = 25
+GRAPH_FANOUT = 25
+GRAPH_SCAN_CAP = 1000
+GRAPH_FRONTIER_CAP = 50
+GRAPH_RESULT_CAP = 30
+GRAPH_RELATIONSHIP_CAP = 20
+GRAPH_MAX_HOPS = 4
+GRAPH_SEARCH_DEADLINE_S = float(os.environ.get("GRAPH_SEARCH_DEADLINE_S", "20"))
+
+
+def _graph_scoped_params(kb_id: str, tenant_id: str, hidden_list: list[str]) -> dict:
+    return {"kb_id": kb_id, "tenant_id": tenant_id or "", "hidden": hidden_list}
+
+
+def _match_names_cypher() -> str:
+    """Exact names through the unique index, each a single index seek."""
+    return f"""
+    UNWIND $names AS wanted
+    MATCH (e:Entity {{kb_id: $kb_id, canonical_name: wanted}})
+    WHERE {entity_scope("e")} AND {_VISIBLE.format(v="e")}
+    RETURN e.canonical_name AS name, e.entity_type AS type,
+           e.description AS description, e.mention_count AS mentions,
+           e.pg_id AS pg_id
+    """
+
+
+def _match_aliases_cypher() -> str:
+    """Aliases and partial names through the fulltext index, the KB filter is in the query."""
+    return f"""
+    UNWIND $queries AS q
+    CALL db.index.fulltext.queryNodes($index, q, {{limit: $limit}})
+    YIELD node AS e
+    WITH DISTINCT e
+    WHERE {entity_scope("e")} AND {_VISIBLE.format(v="e")}
+    RETURN e.canonical_name AS name, e.entity_type AS type,
+           e.description AS description, e.mention_count AS mentions,
+           e.pg_id AS pg_id
+    LIMIT $limit
+    """
+
+
+def _hop_cypher() -> str:
+    """One hop from the frontier, capped per node before it sorts."""
+    return f"""
+    UNWIND $frontier AS origin
+    MATCH (s:Entity {{kb_id: $kb_id, canonical_name: origin}})
+    WHERE {entity_scope("s")}
+    CALL {{
+        WITH s
+        MATCH (s)-[r]->(c:Entity {{kb_id: $kb_id}})
+        WITH r, c LIMIT $scan
+        WITH r, c
+        WHERE {_VISIBLE.format(v="c")} AND {_VISIBLE.format(v="r")}
+        RETURN r, c
+        ORDER BY coalesce(r.weight, 0) DESC, coalesce(c.mention_count, 0) DESC
+        LIMIT $fanout
+    }}
+    RETURN s.canonical_name AS origin, type(r) AS rel_type,
+           c.canonical_name AS name, c.entity_type AS type,
+           c.description AS description, c.mention_count AS mention_count
+    """
+
+
+def _direct_relationships_cypher() -> str:
+    """Relationships touching the matches, walked from each match rather than OR over both ends."""
+    return f"""
+    UNWIND $names AS matched
+    MATCH (m:Entity {{kb_id: $kb_id, canonical_name: matched}})
+    WHERE {entity_scope("m")}
+    CALL {{
+        WITH m
+        MATCH (m)-[r]-(o:Entity {{kb_id: $kb_id}})
+        WITH m, r, o LIMIT $scan
+        WITH m, r, o
+        WHERE {_VISIBLE.format(v="r")} AND {_VISIBLE.format(v="o")} AND {_VISIBLE.format(v="m")}
+        RETURN r, startNode(r) AS a, endNode(r) AS b
+        ORDER BY coalesce(r.weight, 0) DESC
+        LIMIT $fanout
+    }}
+    WITH DISTINCT r, a, b
+    RETURN a.canonical_name AS source, type(r) AS rel_type,
+           b.canonical_name AS target, r.description AS description,
+           r.weight AS weight
+    ORDER BY weight DESC
+    LIMIT $limit
+    """
 
 
 async def _graph_search(
@@ -839,38 +1333,62 @@ async def _graph_search(
     kb_ids: list[str],
     depth: int = 2,
     hidden: set[str] | frozenset[str] = frozenset(),
+    tenant_id: str = "",
+    notes: list[str] | None = None,
 ) -> tuple[list[SearchResult], list[str]]:
     """Search the knowledge graph for entities and their relationships.
 
     Returns: (search_results, found_entity_names)
     """
-    driver = await get_neo4j_driver()
     results: list[SearchResult] = []
     found_entities: list[str] = []
     hidden_list = sorted(hidden)
+    deadline = time.monotonic() + GRAPH_SEARCH_DEADLINE_S
+    try:
+        await ensure_schema()
+    except Exception as e:
+        logger.debug("graph schema check failed: %s", e)
+    driver = await get_neo4j_driver()
 
-    async with driver.session() as session:
+    def out_of_time() -> bool:
+        if time.monotonic() < deadline:
+            return False
+        if notes is not None:
+            notes.append("Graph results are partial, the traversal hit its time limit.")
+        return True
+
+    async with driver.session(database=_NEO4J_DATABASE) as session:
         for kb_id in kb_ids:
-            # Find matching entities (exact or alias match)
-            entity_match = await session.run(
-                f"""
-                MATCH (e:Entity {{kb_id: $kb_id}})
-                WHERE (e.canonical_name IN $names
-                   OR any(a IN e.aliases WHERE a IN $names))
-                  AND {_VISIBLE.format(v="e")}
-                RETURN e.canonical_name AS name, e.entity_type AS type,
-                       e.description AS description, e.mention_count AS mentions,
-                       e.pg_id AS pg_id
-                """,
-                kb_id=kb_id,
-                names=entity_names,
-                hidden=hidden_list,
-            )
+            if out_of_time():
+                break
+            params = _graph_scoped_params(kb_id, tenant_id, hidden_list)
+            matched: dict[str, Any] = {}
 
-            matched_names = []
-            async for record in entity_match:
-                matched_names.append(record["name"])
-                found_entities.append(record["name"])
+            exact = await session.run(
+                cypher(_match_names_cypher()), names=entity_names, **params
+            )
+            async for record in exact:
+                matched[record["name"]] = record
+
+            if len(matched) < len(entity_names):
+                try:
+                    await ensure_kb_keys(kb_id, tenant_id)
+                    fuzzy = await session.run(
+                        cypher(_match_aliases_cypher()),
+                        index=FULLTEXT_INDEX,
+                        queries=[fulltext_query(kb_id, n) for n in entity_names],
+                        limit=GRAPH_NAME_MATCHES,
+                        **params,
+                    )
+                    async for record in fuzzy:
+                        matched.setdefault(record["name"], record)
+                except Exception as e:
+                    logger.warning("graph name search failed for kb %s: %s", kb_id, e)
+
+            matched_names = list(matched)[:GRAPH_NAME_MATCHES]
+            for name in matched_names:
+                record = matched[name]
+                found_entities.append(name)
                 results.append(
                     SearchResult(
                         content=f"{record['name']} ({record['type']}): {record['description'] or 'No description'}",
@@ -888,71 +1406,59 @@ async def _graph_search(
             if not matched_names:
                 continue
 
-            # Traverse graph N hops from matched entities
-            # Depth is validated to 1-4 range — safe to interpolate as integer
-            safe_depth = max(1, min(4, int(depth)))
-            traversal = await session.run(
-                f"""
-                MATCH (start:Entity {{kb_id: $kb_id}})
-                WHERE start.canonical_name IN $names
-                MATCH path = (start)-[r*1..{safe_depth}]->(connected:Entity {{kb_id: $kb_id}})
-                WITH start, connected, relationships(path) AS r, length(path) AS hops
-                WHERE connected.canonical_name <> start.canonical_name
-                  AND {_VISIBLE.format(v="connected")}
-                  AND all(rel IN r WHERE {_VISIBLE.format(v="rel")})
-                RETURN DISTINCT
-                    connected.canonical_name AS name,
-                    connected.entity_type AS type,
-                    connected.description AS description,
-                    hops,
-                    [rel IN r | type(rel)] AS rel_types,
-                    connected.mention_count AS mention_count
-                ORDER BY hops ASC, mention_count DESC
-                LIMIT 30
-                """,
-                kb_id=kb_id,
-                names=matched_names,
-                hidden=hidden_list,
-            )
-
-            async for record in traversal:
-                # Score decreases with hops
-                hop_penalty = 1.0 / (1 + record["hops"] * 0.3)
-                rel_chain = (
-                    " → ".join(record["rel_types"]) if record["rel_types"] else ""
+            # Walk one hop at a time so a limit bounds the work, not only the answer
+            safe_depth = max(1, min(GRAPH_MAX_HOPS, int(depth)))
+            chains: dict[str, list[str]] = {n: [] for n in matched_names}
+            frontier = matched_names[:GRAPH_FRONTIER_CAP]
+            reached = 0
+            for hop in range(1, safe_depth + 1):
+                if not frontier or reached >= GRAPH_RESULT_CAP or out_of_time():
+                    break
+                step = await session.run(
+                    cypher(_hop_cypher()),
+                    frontier=frontier,
+                    scan=GRAPH_SCAN_CAP,
+                    fanout=GRAPH_FANOUT,
+                    **params,
                 )
-
-                results.append(
-                    SearchResult(
-                        content=f"{record['name']} ({record['type']}): {record['description'] or 'No description'} [via: {rel_chain}]",
-                        score=0.7 * hop_penalty,
-                        source=record["name"],
-                        source_type="graph_context",
-                        metadata={
-                            "kb_id": kb_id,
-                            "hops": record["hops"],
-                            "relationship_chain": rel_chain,
-                        },
+                rows = [dict(r) async for r in step]
+                rows.sort(key=lambda r: -(r["mention_count"] or 0))
+                next_frontier: list[str] = []
+                for record in rows:
+                    name = record["name"]
+                    if name in chains or reached >= GRAPH_RESULT_CAP:
+                        continue
+                    chain = chains[record["origin"]] + [record["rel_type"]]
+                    chains[name] = chain
+                    next_frontier.append(name)
+                    reached += 1
+                    # Score decreases with hops
+                    hop_penalty = 1.0 / (1 + hop * 0.3)
+                    rel_chain = " → ".join(chain)
+                    results.append(
+                        SearchResult(
+                            content=f"{name} ({record['type']}): {record['description'] or 'No description'} [via: {rel_chain}]",
+                            score=0.7 * hop_penalty,
+                            source=name,
+                            source_type="graph_context",
+                            metadata={
+                                "kb_id": kb_id,
+                                "hops": hop,
+                                "relationship_chain": rel_chain,
+                            },
+                        )
                     )
-                )
+                frontier = next_frontier[:GRAPH_FRONTIER_CAP]
 
-            # Get direct relationships between matched entities
+            if out_of_time():
+                break
             rel_query = await session.run(
-                f"""
-                MATCH (a:Entity {{kb_id: $kb_id}})-[r]->(b:Entity {{kb_id: $kb_id}})
-                WHERE (a.canonical_name IN $names OR b.canonical_name IN $names)
-                  AND {_VISIBLE.format(v="r")}
-                  AND {_VISIBLE.format(v="a")}
-                  AND {_VISIBLE.format(v="b")}
-                RETURN a.canonical_name AS source, type(r) AS rel_type,
-                       b.canonical_name AS target, r.description AS description,
-                       r.weight AS weight
-                ORDER BY r.weight DESC
-                LIMIT 20
-                """,
-                kb_id=kb_id,
+                cypher(_direct_relationships_cypher()),
                 names=matched_names,
-                hidden=hidden_list,
+                scan=GRAPH_SCAN_CAP,
+                fanout=GRAPH_FANOUT,
+                limit=GRAPH_RELATIONSHIP_CAP,
+                **params,
             )
 
             async for record in rel_query:

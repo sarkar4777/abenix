@@ -600,12 +600,33 @@ Subscriptions to platform events. Signing, retries and the event catalogue are i
 |---|---|---|---|
 | `GET` | `/api/knowledge-bases` | signed in | List |
 | `POST` | `/api/knowledge-bases` | signed in | Create |
-| `GET` | `/api/knowledge-bases/{kb_id}` | signed in | Detail with documents |
+| `GET` | `/api/knowledge-bases/{kb_id}` | signed in | Detail with one page of documents, `doc_limit` and `doc_offset`, and `documents_total` |
 | `PUT` | `/api/knowledge-bases/{kb_id}` | signed in | Update |
 | `GET` | `/api/knowledge-bases/{kb_id}/dependents` | signed in | Agents granted it and Atlas graphs bound to it |
-| `DELETE` | `/api/knowledge-bases/{kb_id}` | signed in | Delete. Without `?force=true`, 409 `IN_USE` when agents or Atlas graphs use it. A confirmed delete unbinds graphs and removes agent grants |
-| `POST` | `/api/knowledge-bases/{kb_id}/upload` | signed in | Upload a document |
-| `GET` | `/api/knowledge-bases/{kb_id}/documents` | signed in | List documents. Documents restricted by grants the caller cannot see are left out, `meta.hidden` counts them |
+| `DELETE` | `/api/knowledge-bases/{kb_id}` | signed in | Delete. Without `?force=true`, 409 `IN_USE` when agents or Atlas graphs use it. A confirmed delete unbinds graphs and removes agent grants. Search stops at once and a worker removes the data, the answer carries `job_id` |
+| `GET` | `/api/knowledge-bases/{kb_id}/delete-status` | signed in, same tenant | Progress and receipt of a delete, readable after the collection is gone |
+| `GET` | `/api/knowledge-connector-kinds` | signed in | Connector kinds with their fields and whether each has run against the real service |
+| `GET` | `/api/knowledge-bases/{kb_id}/connectors` | can read the collection | Connectors with status and last pass counts |
+| `POST` | `/api/knowledge-bases/{kb_id}/connectors` | can edit, admin for filesystem and SQL | Body `{name, kind, values, cadence_minutes}`. Secret fields are stored encrypted and never returned. Starts the first sync |
+| `POST` | `/api/knowledge-bases/{kb_id}/connectors/test` | can edit | Body `{kind, values}`. Lists one page, stores nothing |
+| `GET` | `/api/knowledge-bases/{kb_id}/connectors/{id}` | can read | One connector |
+| `GET` | `/api/knowledge-bases/{kb_id}/connectors/{id}/items` | can read | Items, `status` filter, `limit` and `offset` |
+| `PUT` | `/api/knowledge-bases/{kb_id}/connectors/{id}` | can edit | Change name, cadence or values. Omitted secrets stay |
+| `DELETE` | `/api/knowledge-bases/{kb_id}/connectors/{id}` | can edit | Remove it and its credentials, its documents stay |
+| `POST` | `/api/knowledge-bases/{kb_id}/connectors/{id}/sync` | can edit | Sync now, 202. `?confirm_deletes=true` allows a pass that removes most of the source |
+| `POST` | `/api/knowledge-bases/{kb_id}/connectors/{id}/pause` | can edit | Stop at the next page and stop scheduling |
+| `POST` | `/api/knowledge-bases/{kb_id}/connectors/{id}/resume` | can edit | Carry on from the saved position |
+| `GET` | `/api/knowledge-quotas` | signed in | The tenant's knowledge limits and usage |
+| `PUT` | `/api/admin/knowledge-quotas` | admin role | Set the limits, empty means none |
+| `POST` | `/api/knowledge-bases/{kb_id}/upload` | signed in | Upload a document up to `KB_MAX_UPLOAD_BYTES`, 20 GiB by default. The same file again answers 200 with `duplicate: true`. A file that failed before answers `resumed: true` and goes on from its checkpoint |
+| `POST` | `/api/knowledge-bases/{kb_id}/upload-bulk` | signed in | Many files in one multipart request, up to `KB_BULK_MAX_FILES`. Each file gets its own status in `data`, `meta` counts created, duplicates and failed |
+| `POST` | `/api/knowledge-bases/{kb_id}/uploads` | signed in | Plan up to 500 files from `filename`, `size` and optional `sha256`. Each answer has `mode` of `direct`, `stream`, `duplicate`, `resumed` or `rejected` |
+| `PUT` | `/api/knowledge-bases/{kb_id}/uploads/{token}/content` | signed in | Send the raw bytes of a `stream` plan. Nothing stays in memory or on the API disk |
+| `POST` | `/api/knowledge-bases/{kb_id}/uploads/{token}/complete` | signed in | Finish a `direct` plan with `parts`, each `part_number` and `etag` for S3 or `block_id` for Azure |
+| `DELETE` | `/api/knowledge-bases/{kb_id}/uploads/{token}` | signed in | Abandon a `direct` plan |
+| `POST` | `/api/knowledge-bases/{kb_id}/index/build` | signed in | Build the vector index of a collection created with `index_mode: deferred`. 202, search stays exact until it finishes |
+| `GET` | `/api/knowledge-bases/{kb_id}/index` | signed in | Index mode, whether this database can defer, whether `chunks` is partitioned, the storage type and the pgvector version |
+| `GET` | `/api/knowledge-bases/{kb_id}/documents` | signed in | One page of documents, `limit` up to 1000, 100 by default, and `offset`. Documents restricted by grants the caller cannot see are left out, `meta.hidden` counts them and `meta.total` counts what the caller can see |
 | `DELETE` | `/api/knowledge-bases/{kb_id}/documents/{doc_id}` | signed in | Delete a document |
 
 ---
@@ -621,7 +642,10 @@ See [02-runtime/15-v2-knowledge-enterprise](../02-runtime/15-v2-knowledge-enterp
 | `DELETE` | `/api/knowledge/{kb_id}/documents/{doc_id}/grants/{grant_id}` | collection editor | Remove a document grant |
 | `POST` | `/api/knowledge/{kb_id}/documents/{doc_id}/replace` | edit rights on the collection | Make an already uploaded file the next version. The old row gets `is_current=false, superseded_by=<new_id>` and the new one is queued for processing. Search and Cognify use current versions only |
 | `GET` | `/api/knowledge/{kb_id}/reembed` | can read the collection | Current `embedding_model`, `supported_models` and the latest job's progress |
-| `POST` | `/api/knowledge/{kb_id}/reembed` | admin role | Body `{embedding_model, dry_run}`. With `dry_run` returns chunk count, cost estimate and ETA. Otherwise queues the job and answers 202 with `job_id`. 400 for an unknown model, 409 while a job is queued or running |
+| `POST` | `/api/knowledge/{kb_id}/reembed` | admin role | Body `{embedding_model, dry_run}`. With `dry_run` returns chunk count, cost estimate and ETA. Otherwise queues the job and answers 202 with `job_id`. 400 for an unknown model, 409 while a job is live |
+| `POST` | `/api/knowledge/{kb_id}/reembed/pause` | admin role | Stop after the document in hand |
+| `POST` | `/api/knowledge/{kb_id}/reembed/resume` | admin role | Carry on a paused or failed job from its last finished document |
+| `POST` | `/api/knowledge/{kb_id}/reembed/cancel` | admin role | Remove what was staged, the collection never moved |
 | `GET` | `/api/knowledge/cognify-config` | signed in | Tenant `auto_accept_threshold`, `conflict_action`, `max_parallel_docs`, `daily_budget_usd` |
 | `PUT` | `/api/knowledge/cognify-config` | admin role | Set the cognify config |
 | `GET` | `/api/knowledge/cognify-conflicts` | signed in | Open conflicts where two sources disagree on an entity's type |
@@ -634,12 +658,14 @@ See [02-runtime/15-v2-knowledge-enterprise](../02-runtime/15-v2-knowledge-enterp
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
 | `GET` | `/api/knowledge-engines/cognify/active` | signed in | Cognify jobs running or finished in the last hour |
-| `POST` | `/api/knowledge-engines/{kb_id}/cognify` | signed in | Build the knowledge graph from the documents |
+| `POST` | `/api/knowledge-engines/{kb_id}/cognify` | signed in | Build the knowledge graph from the documents, one task per document. Body fields `doc_ids`, `model`, `force`, `dry_run`, `max_cost_usd`, `selection`, `sample_rate`, `max_chunks_per_doc`, `max_parallel_chunks`, `requests_per_minute`, `tokens_per_minute`, `llm_resolution`. 409 when a job is live on the collection, 503 when the queue is unreachable |
+| `POST` | `/api/knowledge-engines/{kb_id}/cognify/{job_id}/stop` | signed in | Stop a job after its current batches, its work is kept |
+| `DELETE` | `/api/knowledge-engines/{kb_id}/graph` | collection editor | Delete the collection's graph, its mirror and the chunk ledger |
 | `GET` | `/api/knowledge-engines/{kb_id}/graph-stats` | signed in | Graph statistics |
 | `GET` | `/api/knowledge-engines/{kb_id}/graph` | signed in | Subgraph for visualization |
 | `POST` | `/api/knowledge-engines/{kb_id}/search` | signed in | Hybrid search across graph and vectors. Restricted documents the caller cannot read are dropped before ranking, `hidden_documents` counts them. Chunk hits carry `metadata.citation`. `degraded` holds the reason when results came from keywords or the local embedder, else null |
 | `POST` | `/api/knowledge-engines/{kb_id}/feedback` | signed in | Feedback on search results |
-| `GET` | `/api/knowledge-engines/{kb_id}/cognify-jobs` | signed in | Cognify job history, with `entities_held_back`, `relationships_held_back` and `conflicts_recorded` per job |
+| `GET` | `/api/knowledge-engines/{kb_id}/cognify-jobs` | signed in | Cognify job history with chunk, entity and relationship counts, written and failed, spend, `budget_usd`, `stop_reason`, `entities_held_back`, `relationships_held_back` and `conflicts_recorded` |
 
 ---
 
@@ -684,13 +710,21 @@ See [02-runtime/15-v2-knowledge-enterprise](../02-runtime/15-v2-knowledge-enterp
 
 ## Atlas (knowledge graph)
 
-Agent-facing tools (`atlas_describe`, `atlas_query`, `atlas_traverse`, `atlas_search_grounded`, `atlas_as_of`) are in [02-runtime/02-tools](../02-runtime/02-tools.md#atlas-tool-cookbook).
+Agent-facing tools (`atlas_describe`, `atlas_query`, `atlas_traverse`, `atlas_search_grounded`, `atlas_instances`, `atlas_as_of`) are in [02-runtime/02-tools](../02-runtime/02-tools.md#atlas-tool-cookbook).
 
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
 | `GET` | `/api/atlas/graphs` | signed in | Own, shared and platform graphs, the whole tenant for admins |
 | `POST` | `/api/atlas/graphs` | signed in | Create. Body `{name, description, kb_id}` |
-| `GET` | `/api/atlas/graphs/{graph_id}` | signed in | Full graph, meta plus every node and edge |
+| `GET` | `/api/atlas/graphs/{graph_id}` | signed in | Meta plus one page of nodes and the edges among them. `node_limit` up to 5000, `after` to page, `node_limit=0` for meta only |
+| `GET` | `/api/atlas/graphs/{graph_id}/overview` | signed in | The most connected nodes and the edges among them |
+| `GET` | `/api/atlas/graphs/{graph_id}/viewport` | signed in | Nodes inside `min_x`, `min_y`, `max_x`, `max_y`, with `in_view` and `truncated` |
+| `GET` | `/api/atlas/graphs/{graph_id}/neighbourhood` | signed in | A node and its neighbours. `node_id`, `hops` up to 3, `limit`, `fanout` |
+| `GET` | `/api/atlas/graphs/{graph_id}/search` | signed in | Nodes whose label contains `q`, keyset paged with `after` |
+| `GET` | `/api/atlas/graphs/{graph_id}/context` | signed in | The enterprise context graph summary, entity counts per concept and the binding |
+| `GET` | `/api/atlas/graphs/{graph_id}/entities` | signed in | Real entities from Neo4j by `concept_id`, `entity_type` or `q`, keyset paged with `after`, document ACL applied |
+| `GET` | `/api/atlas/graphs/{graph_id}/entities/neighbourhood` | signed in | One hop around the entity `name` |
+| `POST` | `/api/atlas/graphs/{graph_id}/entities/query` | signed in | Typed relationship rows. Body `{from, relationship, to, name, limit}` |
 | `PATCH` | `/api/atlas/graphs/{graph_id}` | signed in | Update graph meta |
 | `DELETE` | `/api/atlas/graphs/{graph_id}` | signed in | Delete a graph |
 | `POST` | `/api/atlas/graphs/{graph_id}/nodes` | signed in | Add a node |
@@ -707,8 +741,9 @@ Agent-facing tools (`atlas_describe`, `atlas_query`, `atlas_traverse`, `atlas_se
 | `POST` | `/api/atlas/graphs/{graph_id}/snapshots` | signed in | Take a labelled snapshot |
 | `POST` | `/api/atlas/graphs/{graph_id}/snapshots/{snapshot_id}/restore` | signed in | Replace live nodes and edges with a snapshot |
 | `GET` | `/api/atlas/graphs/{graph_id}/export` | signed in | Export as JSON-LD or plain JSON |
-| `POST` | `/api/atlas/graphs/{graph_id}/bind-kb` | signed in | Bind or unbind a knowledge collection |
-| `POST` | `/api/atlas/graphs/{graph_id}/sync-kb` | signed in | Add the bound collection's documents to the canvas |
+| `POST` | `/api/atlas/graphs/{graph_id}/bind-kb` | signed in | Bind or unbind a knowledge collection. Optional `governs_extraction` and `ontology_mode` |
+| `POST` | `/api/atlas/graphs/{graph_id}/sync-kb` | signed in | Add the bound collection's documents to the canvas, in the background with `queued: true` when more than 500 are missing |
+| `GET` | `/api/atlas/graphs/{graph_id}/sync-kb` | signed in | Progress of a background sync |
 | `POST` | `/api/atlas/graphs/{graph_id}/query` | signed in | Match a small graph pattern |
 | `PATCH` | `/api/atlas/graphs/{graph_id}/nodes/{node_id}/binding` | signed in | Bind a node to a live data source |
 | `GET` | `/api/atlas/graphs/{graph_id}/nodes/{node_id}/instances` | signed in | Live instances of a bound node |

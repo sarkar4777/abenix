@@ -5,6 +5,7 @@ from __future__ import annotations
 import sys
 import uuid
 from pathlib import Path
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
@@ -14,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.deps import get_current_user, get_db
 from app.core.responses import error, success
 from app.schemas.knowledge_engine import CognifyRequest, FeedbackRequest, SearchRequest
-from app.services.kb_access import user_can_access_collection
+from app.services.kb_access import user_can_access_collection, user_can_edit_collection
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "apps" / "agent-runtime"))
 
@@ -60,7 +61,12 @@ async def fail_stalled_cognify_jobs(db: AsyncSession, tenant_id: uuid.UUID) -> i
             .where(
                 CognifyJob.tenant_id == tenant_id,
                 CognifyJob.status.in_(statuses),
-                func.coalesce(CognifyJob.started_at, CognifyJob.created_at) < since,
+                func.coalesce(
+                    CognifyJob.heartbeat_at,
+                    CognifyJob.started_at,
+                    CognifyJob.created_at,
+                )
+                < since,
             )
             .values(status=CognifyStatus.FAILED, error_message=why, completed_at=now)
         )
@@ -85,7 +91,11 @@ async def list_active_cognify_jobs(
         return error(f"Failed to load cognify models: {e}", 500)
 
     await fail_stalled_cognify_jobs(db, user.tenant_id)
-    terminal = {CognifyStatus.COMPLETE.value, CognifyStatus.FAILED.value}
+    terminal = {
+        CognifyStatus.COMPLETE.value,
+        CognifyStatus.FAILED.value,
+        CognifyStatus.STOPPED.value,
+    }
     running_statuses = [s.value for s in CognifyStatus if s.value not in terminal]
 
     running_q = (
@@ -115,23 +125,10 @@ async def list_active_cognify_jobs(
     recent_rows = (await db.execute(recent_q)).all()
 
     def _serialize(job: "CognifyJob", kb_name: str | None) -> dict:
-        status = job.status if isinstance(job.status, str) else job.status.value
         return {
-            "id": str(job.id),
+            **_job_summary(job),
             "kb_id": str(job.kb_id),
             "kb_name": kb_name or "Unknown KB",
-            "status": status,
-            "documents_processed": job.documents_processed or 0,
-            "entities_extracted": job.entities_extracted or 0,
-            "relationships_extracted": job.relationships_extracted or 0,
-            "tokens_used": job.tokens_used or 0,
-            "cost_usd": float(job.cost_usd) if job.cost_usd else 0.0,
-            "duration_seconds": (
-                float(job.duration_seconds) if job.duration_seconds else None
-            ),
-            "created_at": job.created_at.isoformat() if job.created_at else None,
-            "completed_at": job.completed_at.isoformat() if job.completed_at else None,
-            "error_message": job.error_message,
         }
 
     return success(
@@ -142,17 +139,67 @@ async def list_active_cognify_jobs(
     )
 
 
-@router.post("/{kb_id}/cognify")
-async def trigger_cognify(
-    kb_id: uuid.UUID,
-    body: CognifyRequest | None = None,
-    user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-) -> JSONResponse:
-    """Trigger cognify — build knowledge graph from documents."""
-    from models.knowledge_base import KnowledgeBase, Document, DocumentStatus
+def _job_summary(job: Any) -> dict:
+    status = job.status if isinstance(job.status, str) else job.status.value
+    details = job.details or {}
+    return {
+        "id": str(job.id),
+        "status": status,
+        "documents_total": job.documents_total or 0,
+        "documents_processed": job.documents_processed or 0,
+        "chunks_total": job.chunks_total or 0,
+        "chunks_processed": job.chunks_processed or 0,
+        "chunks_skipped": job.chunks_skipped or 0,
+        "chunks_failed": job.chunks_failed or 0,
+        "entities_extracted": job.entities_extracted or 0,
+        "entities_written": job.entities_written or 0,
+        "entities_failed": job.entities_failed or 0,
+        "relationships_extracted": job.relationships_extracted or 0,
+        "relationships_written": job.relationships_written or 0,
+        "relationships_failed": job.relationships_failed or 0,
+        "off_ontology_dropped": job.off_ontology_dropped or 0,
+        "tokens_used": job.tokens_used or 0,
+        "cost_usd": float(job.cost_usd) if job.cost_usd else 0.0,
+        "budget_usd": float(job.budget_usd) if job.budget_usd is not None else None,
+        "stop_reason": job.stop_reason,
+        "stop_requested": bool(job.stop_requested),
+        "duration_seconds": (
+            float(job.duration_seconds) if job.duration_seconds else None
+        ),
+        "created_at": job.created_at.isoformat() if job.created_at else None,
+        "completed_at": job.completed_at.isoformat() if job.completed_at else None,
+        "error_message": job.error_message,
+        "entities_held_back": details.get("entities_held_back"),
+        "relationships_held_back": details.get("relationships_held_back"),
+        "conflicts_recorded": details.get("conflicts_recorded"),
+    }
 
-    # Verify KB exists, belongs to tenant, and the user can access it.
+
+def _cognify_defaults() -> tuple[str, float]:
+    from engine.knowledge.cognify_pipeline import (
+        DEFAULT_COGNIFY_MODEL,
+        DEFAULT_JOB_BUDGET_USD,
+    )
+
+    return DEFAULT_COGNIFY_MODEL, DEFAULT_JOB_BUDGET_USD
+
+
+def _dispatcher() -> Any:
+    import os
+
+    from celery import Celery
+
+    # same defaults as the worker's celery_app, or a bare install never meets its queue
+    broker = os.environ.get("CELERY_BROKER_URL", "redis://localhost:6379/1")
+    backend = os.environ.get("CELERY_RESULT_BACKEND", "redis://localhost:6379/2")
+    return Celery("api_dispatcher", broker=broker, backend=backend)
+
+
+async def _load_visible_kb(
+    db: AsyncSession, kb_id: uuid.UUID, user: User
+) -> Any | None:
+    from models.knowledge_base import KnowledgeBase
+
     result = await db.execute(
         select(KnowledgeBase).where(
             KnowledgeBase.id == kb_id,
@@ -161,38 +208,130 @@ async def trigger_cognify(
     )
     kb = result.scalar_one_or_none()
     if not kb or not await user_can_access_collection(db, user=user, kb=kb):
+        return None
+    return kb
+
+
+@router.post("/{kb_id}/cognify")
+async def trigger_cognify(
+    kb_id: uuid.UUID,
+    body: CognifyRequest | None = None,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """Trigger cognify, or with dry_run report what it would cost."""
+    from models.knowledge_base import Document, DocumentStatus
+    from models.knowledge_engine import CognifyJob, CognifyStatus
+
+    body = body or CognifyRequest()
+    kb = await _load_visible_kb(db, kb_id, user)
+    if not kb:
         return error("Knowledge base not found", 404)
 
-    # Get documents to process
-    doc_query = select(Document).where(
+    default_model, default_budget = _cognify_defaults()
+    model = body.model or default_model
+
+    doc_ids = [uuid.UUID(d) for d in body.doc_ids] if body.doc_ids else None
+    scope = [
         Document.kb_id == kb_id,
         Document.status == DocumentStatus.READY,
         Document.is_current.is_(True),
-    )
-    if body and body.doc_ids:
-        doc_query = doc_query.where(
-            Document.id.in_([uuid.UUID(d) for d in body.doc_ids])
-        )
-
-    doc_result = await db.execute(doc_query)
-    documents = doc_result.scalars().all()
-
-    if not documents:
+    ]
+    if doc_ids:
+        scope.append(Document.id.in_(doc_ids))
+    ready = (
+        await db.execute(select(func.count()).select_from(Document).where(*scope))
+    ).scalar() or 0
+    if not ready:
         return error("No ready documents to cognify", 400)
 
-    # Create cognify job
-    try:
-        from models.knowledge_engine import CognifyJob
+    wanted = list(scope)
+    if not doc_ids and not body.force:
+        wanted.append(Document.cognified_at.is_(None))
+    documents, chunks = (
+        await db.execute(
+            select(
+                func.count(), func.coalesce(func.sum(Document.chunk_count), 0)
+            ).where(*wanted)
+        )
+    ).one()
 
+    if body.dry_run:
+        from engine.knowledge.cognify_pipeline import estimate_cost
+
+        share = body.sample_rate if body.selection != "all" else 1.0
+        planned = int(chunks * share)
+        if body.max_chunks_per_doc:
+            planned = min(planned, documents * body.max_chunks_per_doc)
+        return success(
+            {
+                "documents": documents,
+                "chunks": planned,
+                "chunks_total": int(chunks),
+                "model": model,
+                "estimated_usd": round(estimate_cost(planned, model), 4),
+                "max_cost_usd": (
+                    body.max_cost_usd
+                    if body.max_cost_usd is not None
+                    else default_budget
+                ),
+                "note": "Chunks already in the ledger are skipped, so a rerun costs less than this.",
+            }
+        )
+
+    active = (
+        await db.execute(
+            select(CognifyJob.id).where(
+                CognifyJob.kb_id == kb_id,
+                CognifyJob.status.in_(
+                    [
+                        CognifyStatus.PENDING,
+                        CognifyStatus.EXTRACTING,
+                        CognifyStatus.RESOLVING,
+                        CognifyStatus.GRAPHING,
+                        CognifyStatus.EMBEDDING,
+                    ]
+                ),
+            )
+        )
+    ).first()
+    if active:
+        await fail_stalled_cognify_jobs(db, user.tenant_id)
+        still = (
+            await db.execute(
+                select(CognifyJob.status).where(CognifyJob.id == active[0])
+            )
+        ).scalar_one()
+        if still not in (CognifyStatus.COMPLETE, CognifyStatus.FAILED):
+            return error(
+                "Cognify is already running on this collection. "
+                "Stop it or wait for it to finish.",
+                409,
+            )
+
+    config = {
+        "model": model,
+        "chunk_size": body.chunk_size,
+        "chunk_overlap": body.chunk_overlap,
+        "force": body.force,
+        "selection": body.selection,
+        "sample_rate": body.sample_rate,
+        "max_chunks_per_doc": body.max_chunks_per_doc,
+        "max_cost_usd": body.max_cost_usd,
+        "max_parallel_chunks": body.max_parallel_chunks,
+        "requests_per_minute": body.requests_per_minute,
+        "tokens_per_minute": body.tokens_per_minute,
+        "llm_resolution": body.llm_resolution,
+    }
+    try:
         job = CognifyJob(
             tenant_id=user.tenant_id,
             kb_id=kb_id,
-            status="pending",
-            config={
-                "model": body.model if body else "claude-sonnet-4-5-20250929",
-                "chunk_size": body.chunk_size if body else 1000,
-                "chunk_overlap": body.chunk_overlap if body else 200,
-            },
+            status=CognifyStatus.PENDING,
+            config=config,
+            budget_usd=(
+                body.max_cost_usd if body.max_cost_usd is not None else default_budget
+            ),
         )
         db.add(job)
         await db.commit()
@@ -204,41 +343,122 @@ async def trigger_cognify(
 
     _logger = _log.getLogger(__name__)
     try:
-        import os
-        from celery import Celery
-
-        broker = os.environ.get(
-            "CELERY_BROKER_URL",
-            "redis://localhost:6379/0",
-        )
-        backend = os.environ.get(
-            "CELERY_RESULT_BACKEND",
-            "redis://localhost:6379/1",
-        )
-        client = Celery("api_dispatcher", broker=broker, backend=backend)
-        client.send_task(
+        _dispatcher().send_task(
             "worker.tasks.cognify_task.run_cognify_job",
             kwargs={
                 "job_id": str(job.id),
                 "kb_id": str(kb_id),
                 "tenant_id": str(user.tenant_id),
-                "doc_ids": [str(d.id) for d in documents],
-                "config": job.config,
+                "doc_ids": [str(d) for d in doc_ids] if doc_ids else None,
+                "config": config,
             },
             queue="cognify",
         )
         _logger.info("Dispatched cognify job %s to queue 'cognify'", job.id)
     except Exception as e:
-        # Hard-log the failure so this never silently regresses again.
         _logger.error("Failed to dispatch cognify job %s: %s", job.id, e)
+        job.status = CognifyStatus.FAILED
+        job.error_message = "The Cognify queue is not reachable. Check the worker and Redis, then run it again."
+        await db.commit()
+        return error(job.error_message, 503)
 
     return success(
         {
             "job_id": str(job.id),
             "status": "pending",
-            "documents": len(documents),
-            "message": f"Cognify job created. Processing {len(documents)} documents.",
+            "documents": documents,
+            "chunks_estimated": int(chunks),
+            "model": model,
+            "max_cost_usd": float(job.budget_usd),
+            "message": (
+                f"Cognify job created. Processing {documents} documents."
+                if documents
+                else "Cognify job created. Every document is already in the graph."
+            ),
         }
+    )
+
+
+@router.post("/{kb_id}/cognify/{job_id}/stop")
+async def stop_cognify(
+    kb_id: uuid.UUID,
+    job_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """Ask a running job to stop after its current batch. Its work so far is kept."""
+    from models.knowledge_engine import CognifyJob
+
+    if not await _load_visible_kb(db, kb_id, user):
+        return error("Knowledge base not found", 404)
+    job = (
+        await db.execute(
+            select(CognifyJob).where(
+                CognifyJob.id == job_id,
+                CognifyJob.kb_id == kb_id,
+                CognifyJob.tenant_id == user.tenant_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if not job:
+        return error("Job not found", 404)
+    job.stop_requested = True
+    job.stop_reason = job.stop_reason or "user_requested"
+    await db.commit()
+    return success({"id": str(job.id), "stop_requested": True})
+
+
+@router.delete("/{kb_id}/graph")
+async def delete_graph(
+    kb_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """Remove this KB's graph from Neo4j, its Postgres mirror and the chunk ledger."""
+    from sqlalchemy import delete as sa_delete, update
+
+    from models.knowledge_base import Document, KnowledgeBase
+    from models.knowledge_engine import CognifyChunk, GraphEntity, GraphRelationship
+
+    kb = await _load_visible_kb(db, kb_id, user)
+    if not kb:
+        return error("Knowledge base not found", 404)
+    if not await user_can_edit_collection(db, user=user, kb=kb):
+        return error("You don't have permission to change this collection", 403)
+    try:
+        await enqueue_graph_delete(str(kb_id))
+    except Exception as e:
+        return error(f"Could not delete the graph: {e}", 503)
+    await db.execute(
+        sa_delete(GraphRelationship).where(GraphRelationship.kb_id == kb_id)
+    )
+    await db.execute(sa_delete(GraphEntity).where(GraphEntity.kb_id == kb_id))
+    await db.execute(sa_delete(CognifyChunk).where(CognifyChunk.kb_id == kb_id))
+    await db.execute(
+        update(Document)
+        .where(Document.kb_id == kb_id)
+        .values(cognified_at=None, last_cognify_job_id=None)
+    )
+    await db.execute(
+        update(KnowledgeBase)
+        .where(KnowledgeBase.id == kb_id)
+        .values(
+            entity_count=0,
+            relationship_count=0,
+            graph_enabled=False,
+            last_cognified_at=None,
+        )
+    )
+    await db.commit()
+    return success({"kb_id": str(kb_id), "deleted": True})
+
+
+async def enqueue_graph_delete(kb_id: str) -> None:
+    """Queue the Neo4j delete. A KB's graph can be millions of nodes, so never in a request."""
+    _dispatcher().send_task(
+        "worker.tasks.cognify_task.delete_kb_graph",
+        kwargs={"kb_id": kb_id},
+        queue="cognify",
     )
 
 
@@ -365,7 +585,9 @@ async def get_graph_visualization(
     try:
         from engine.knowledge.neo4j_client import get_subgraph
 
-        subgraph = await get_subgraph(str(kb_id), limit=limit)
+        subgraph = await get_subgraph(
+            str(kb_id), limit=limit, tenant_id=str(user.tenant_id)
+        )
         return success(subgraph)
     except Exception as e:
         return error(f"Could not retrieve graph: {e}", 500)
@@ -557,36 +779,18 @@ async def list_cognify_jobs(
                 )
             )
             details = {jid: d or {} for jid, d in reports.all()}
-        return success(
-            [
-                {
-                    "id": str(j.id),
-                    "status": j.status if isinstance(j.status, str) else j.status.value,
-                    "entities_extracted": j.entities_extracted,
-                    "relationships_extracted": j.relationships_extracted,
-                    "documents_processed": j.documents_processed,
-                    "tokens_used": j.tokens_used,
-                    "cost_usd": float(j.cost_usd) if j.cost_usd else 0,
-                    "duration_seconds": (
-                        float(j.duration_seconds) if j.duration_seconds else None
-                    ),
-                    "created_at": j.created_at.isoformat() if j.created_at else None,
-                    "completed_at": (
-                        j.completed_at.isoformat() if j.completed_at else None
-                    ),
-                    "error_message": j.error_message,
-                    "entities_held_back": details.get(j.id, {}).get(
-                        "entities_held_back"
-                    ),
-                    "relationships_held_back": details.get(j.id, {}).get(
-                        "relationships_held_back"
-                    ),
-                    "conflicts_recorded": details.get(j.id, {}).get(
-                        "conflicts_recorded"
-                    ),
-                }
-                for j in jobs
-            ]
-        )
+        rows = []
+        for j in jobs:
+            row = _job_summary(j)
+            d = details.get(j.id, {})
+            for key in (
+                "entities_held_back",
+                "relationships_held_back",
+                "conflicts_recorded",
+            ):
+                if d.get(key) is not None:
+                    row[key] = d.get(key)
+            rows.append(row)
+        return success(rows)
     except Exception as e:
         return error(f"Failed to list jobs: {e}", 500)

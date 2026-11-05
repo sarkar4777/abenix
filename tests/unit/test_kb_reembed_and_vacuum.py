@@ -5,13 +5,13 @@ from __future__ import annotations
 import json
 import re
 import uuid
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from worker.celery_app import celery_app
 from worker.tasks import document_processor as dp
-from worker.tasks import kb_reembed, pinecone_vacuum
+from worker.tasks import pinecone_vacuum
 
 KB = str(uuid.uuid4())
 D1, D2 = str(uuid.uuid4()), str(uuid.uuid4())
@@ -31,186 +31,7 @@ def test_both_tasks_are_included_and_routed_to_a_consumed_queue():
     assert "worker.tasks.pinecone_vacuum.run" in celery_app.tasks
 
 
-# re-embed
-
-
-class _Cursor:
-    def __init__(self, db):
-        self.db = db
-        self._rows = []
-
-    def execute(self, sql, params=None):
-        self.db.log.append((" ".join(sql.split()), params))
-        s = sql.lower()
-        if "pg_try_advisory_lock" in s:
-            self._rows = [(self.db.lock_free,)]
-        elif "from knowledge_collections where id" in s and "vector_backend" in s:
-            self._rows = [("pgvector", "text-embedding-3-small", 500, 50, "READY")]
-        elif "from documents where kb_id" in s:
-            self._rows = self.db.docs
-        elif "select content, metadata from chunks" in s:
-            self._rows = [("indexed text", {"page": 2})]
-        else:
-            self._rows = []
-
-    def fetchone(self):
-        return self._rows[0] if self._rows else None
-
-    def fetchall(self):
-        return list(self._rows)
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *a):
-        return False
-
-
-class _Conn:
-    def __init__(self, db):
-        self.db = db
-        self.autocommit = False
-
-    def cursor(self):
-        return _Cursor(self.db)
-
-    def commit(self):
-        self.db.commits += 1
-
-    def rollback(self):
-        self.db.rollbacks += 1
-
-    def close(self):
-        pass
-
-
-class _DB:
-    def __init__(self, docs, lock_free=True):
-        self.docs = docs
-        self.lock_free = lock_free
-        self.log: list = []
-        self.commits = 0
-        self.rollbacks = 0
-
-    def sql(self):
-        return [s for s, _p in self.log]
-
-
-class _Progress:
-    def __init__(self):
-        self.state = {}
-
-    def update(self, **kw):
-        self.state.update(kw)
-
-
-def _docs():
-    return [
-        (D1, "a.pdf", "pdf", "/data/a.pdf", 3),
-        (D2, "b.md", "md", "/data/missing.md", 1),
-    ]
-
-
-def _run(monkeypatch, db, embed=None, blocks=None):
-    import psycopg2
-
-    monkeypatch.setattr(psycopg2, "connect", lambda url: _Conn(db))
-    monkeypatch.setattr(dp, "_local_path", lambda p, t: (p, None))
-
-    def extract(path, ftype):
-        if blocks is not None:
-            return blocks(path)
-        if "missing" in path:
-            raise FileNotFoundError(path)
-        return [("page one text", 1), ("page two text", 2)], "text_pdf", 1.0
-
-    monkeypatch.setattr(dp, "_extract_blocks", extract)
-    monkeypatch.setattr(
-        dp,
-        "_embed_chunks",
-        embed
-        or (
-            lambda chunks, model=None, strict=False: ([[0.5] * 4 for _ in chunks], True)
-        ),
-    )
-    monkeypatch.setattr(kb_reembed, "_invalidate_search_cache", lambda kb: None)
-    progress = _Progress()
-    out = kb_reembed.reembed_collection(
-        kb_id=KB, new_model="text-embedding-3-large", job_id="j1", progress=progress
-    )
-    return out, progress
-
-
-def test_reembed_stages_everything_then_swaps_in_one_go(monkeypatch):
-    db = _DB(_docs())
-    out, progress = _run(monkeypatch, db)
-    assert out["status"] == "completed", out
-    assert out["documents"] == 2
-    assert (out["from_file"], out["from_indexed_text"]) == (1, 1)
-    sql = db.sql()
-    stage_inserts = [s for s in sql if s.startswith("INSERT INTO reembed_stage")]
-    assert len(stage_inserts) == 3
-    swap = next(i for i, s in enumerate(sql) if s.startswith("DELETE FROM chunks"))
-    last_stage = max(
-        i for i, s in enumerate(sql) if s.startswith("INSERT INTO reembed_stage")
-    )
-    assert swap > last_stage
-    flip = next(
-        (s, p)
-        for s, p in db.log
-        if s.startswith("UPDATE knowledge_collections SET embedding_model")
-    )
-    assert flip[1][0] == "text-embedding-3-large"
-    deleted = next(p for s, p in db.log if s.startswith("DELETE FROM chunks"))
-    assert set(deleted[1]) == {D1, D2}
-    assert progress.state["status"] == "completed"
-    assert progress.state["documents_done"] == 2
-
-
-def test_a_failed_embedding_swaps_nothing_and_restores_the_status(monkeypatch):
-    db = _DB(_docs())
-
-    def boom(chunks, model=None, strict=False):
-        assert strict is True
-        raise dp.EmbeddingProviderError("quota")
-
-    out, progress = _run(monkeypatch, db, embed=boom)
-    assert out["status"] == "failed"
-    sql = db.sql()
-    assert not any(s.startswith("DELETE FROM chunks") for s in sql)
-    assert not any("SET embedding_model" in s for s in sql)
-    restore = [
-        p
-        for s, p in db.log
-        if s.startswith("UPDATE knowledge_collections SET status = %s")
-    ]
-    assert restore and restore[-1][0] == "READY"
-    assert progress.state["status"] == "failed"
-    assert "quota" in progress.state["error"]
-
-
-def test_concurrent_reembed_is_skipped(monkeypatch):
-    db = _DB(_docs(), lock_free=False)
-    out, progress = _run(monkeypatch, db)
-    assert out["status"] == "skipped"
-    assert progress.state["status"] == "skipped"
-
-
-def test_unsupported_model_is_refused(monkeypatch):
-    progress = _Progress()
-    out = kb_reembed.reembed_collection(
-        kb_id=KB, new_model="voyage-3", job_id="j", progress=progress
-    )
-    assert out["status"] == "failed"
-    assert "not a supported" in out["error"]
-
-
-def test_vector_packing_round_trips():
-    vec = [0.25, -1.5, 3.0]
-    assert kb_reembed._unpack(kb_reembed._pack(vec)) == vec
-
-
-# ingestion
+# re-embed runs on real Postgres in test_kb_reembed_resumable.py
 
 
 def test_page_aware_chunking():
@@ -289,7 +110,7 @@ def test_vacuum_end_to_end_with_fakes():
 
     cur = MagicMock()
     cur.fetchall.side_effect = [
-        [(KB,)],
+        [(KB, 0, False)],
         [(KB, D1, 1, "READY")],
         [],
     ]
@@ -306,25 +127,34 @@ def test_vacuum_end_to_end_with_fakes():
 # API side
 
 
-@pytest.mark.asyncio
-async def test_enqueue_sends_to_the_documents_queue(monkeypatch):
-    from app.workers import kb_reembed as api
+def test_vacuum_drops_old_generations_and_leaves_a_running_reembed_alone():
+    busy = str(uuid.uuid4())
 
-    sent = {}
+    class _Index:
+        def __init__(self):
+            self.deleted = []
 
-    def fake_send(name, kwargs=None, task_id=None):
-        sent.update(name=name, kwargs=kwargs, task_id=task_id)
+        def describe_index_stats(self):
+            return {"namespaces": {KB: {}, f"{KB}.g2": {}, f"{busy}.g1": {}}}
 
-    redis = MagicMock()
-    redis.set = AsyncMock()
-    monkeypatch.setattr(api, "_send", fake_send)
-    monkeypatch.setattr(api, "_redis", AsyncMock(return_value=redis))
-    job = await api.enqueue_reembed(kb_id=uuid.UUID(KB), new_model="local-hashing-v1")
-    assert sent["name"] == "worker.tasks.kb_reembed.run"
-    assert sent["task_id"] == str(job)
-    assert api.QUEUE == "documents"
-    key, raw = redis.set.call_args.args
-    assert key == f"kb_reembed:{KB}" and json.loads(raw)["status"] == "queued"
+        def list(self, namespace):
+            yield [f"{D1}_0", f"{D1}_5"]
+
+        def delete(self, **kw):
+            self.deleted.append(kw)
+
+    cur = MagicMock()
+    cur.fetchall.side_effect = [
+        [(KB, 2, False), (busy, 0, True)],
+        [(KB, D1, 1, "READY"), (busy, D2, 1, "READY")],
+        [],
+    ]
+    index = _Index()
+    out = pinecone_vacuum.vacuum(index, cur)
+    assert {"delete_all": True, "namespace": KB} in index.deleted
+    assert {"ids": [f"{D1}_5"], "namespace": f"{KB}.g2"} in index.deleted
+    assert not any(d.get("namespace") == f"{busy}.g1" for d in index.deleted)
+    assert out["namespaces_dropped"] == 1
 
 
 @pytest.mark.asyncio
@@ -382,55 +212,6 @@ async def test_reembed_endpoint_rejects_unknown_models():
     resp = await reembed_kb(uuid.UUID(KB), _body("voyage-3"), MagicMock(), _user(), db)
     assert resp.status_code == 400
     assert "local-hashing-v1" in _json(resp)["error"]["message"]
-
-
-@pytest.mark.asyncio
-async def test_reembed_endpoint_queues_and_leaves_the_model_to_the_worker():
-    from app.routers.knowledge_v2 import reembed_kb
-
-    db, kb = _db_with_kb()
-    job = uuid.uuid4()
-    with patch(
-        "app.workers.kb_reembed.get_status", AsyncMock(return_value=None)
-    ), patch(
-        "app.workers.kb_reembed.enqueue_reembed", AsyncMock(return_value=job)
-    ) as enq, patch(
-        "app.routers.knowledge_v2.log_action", AsyncMock()
-    ):
-        resp = await reembed_kb(
-            uuid.UUID(KB), _body("text-embedding-3-large"), MagicMock(), _user(), db
-        )
-    assert resp.status_code == 202
-    data = _json(resp)["data"]
-    assert data["job_id"] == str(job) and data["chunks_to_reembed"] == 10
-    assert kb.embedding_model == "text-embedding-3-small"
-    assert enq.await_args.kwargs["new_model"] == "text-embedding-3-large"
-
-
-@pytest.mark.asyncio
-async def test_reembed_endpoint_refuses_a_second_live_job():
-    from datetime import datetime, timezone
-
-    from app.routers.knowledge_v2 import reembed_kb
-
-    db, _kb = _db_with_kb()
-    live = {"status": "running", "started_at": datetime.now(timezone.utc).isoformat()}
-    with patch("app.workers.kb_reembed.get_status", AsyncMock(return_value=live)):
-        resp = await reembed_kb(
-            uuid.UUID(KB), _body("text-embedding-3-large"), MagicMock(), _user(), db
-        )
-    assert resp.status_code == 409
-
-
-def test_stale_jobs_do_not_block():
-    from datetime import datetime, timedelta, timezone
-
-    from app.routers.knowledge_v2 import _job_is_live
-
-    old = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
-    assert _job_is_live({"status": "queued", "queued_at": old}) is False
-    assert _job_is_live({"status": "running", "started_at": old}) is True
-    assert _job_is_live({"status": "completed"}) is False
 
 
 def test_supported_models_all_fit_the_index():

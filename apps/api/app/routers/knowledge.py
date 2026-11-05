@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import logging
 import os
 import sys
 import uuid
@@ -10,14 +12,14 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, File, Query, UploadFile
 from fastapi.responses import JSONResponse
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 from app.core.deps import get_current_user, get_db
 from app.core.responses import error, success
 from app.core.sanitize import sanitize_input
 from app.schemas.knowledge import CreateKnowledgeBaseRequest, UpdateKnowledgeBaseRequest
+from app.services import kb_ingest
 from app.services.collection_access import grant_agent_collection
 from app.services.kb_access import (
     _is_tenant_admin,
@@ -40,15 +42,8 @@ from models.user import User
 router = APIRouter(prefix="/api/knowledge-bases", tags=["knowledge"])
 
 UPLOAD_DIR = os.environ.get("UPLOAD_DIR", "./data/uploads")
-MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB
-ALLOWED_TYPES = {
-    "application/pdf": "pdf",
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
-    "text/plain": "txt",
-    "text/csv": "csv",
-    "text/markdown": "md",
-    "application/json": "json",
-}
+DOCUMENT_PAGE_DEFAULT = 100
+DOCUMENT_PAGE_MAX = 1000
 
 
 def _kb_rollups(kb: KnowledgeBase) -> tuple[int, int, int]:
@@ -73,6 +68,66 @@ def _kb_rollups(kb: KnowledgeBase) -> tuple[int, int, int]:
     except Exception:
         pass
     return chunks, size, degraded
+
+
+async def _rollups_sql(db: AsyncSession, kb_id: uuid.UUID) -> tuple[int, int, int]:
+    row = (
+        await db.execute(
+            select(
+                func.coalesce(func.sum(Document.chunk_count), 0),
+                func.coalesce(func.sum(Document.file_size), 0),
+                func.count().filter(Document.status == DocumentStatus.DEGRADED),
+            ).where(Document.kb_id == kb_id)
+        )
+    ).one()
+    return int(row[0]), int(row[1]), int(row[2])
+
+
+def _visible_documents(user: User, kb_id: uuid.UUID, include_history: bool) -> list:
+    """Filters for the documents this user may list, the rule runs in the database."""
+    from engine.knowledge.document_acl import RESTRICTED_PREDICATE, is_admin
+
+    clauses: list = [Document.kb_id == kb_id]
+    if not include_history:
+        clauses.append(Document.is_current.is_(True))
+    if not is_admin(user.role):
+        clauses.append(
+            text("NOT " + RESTRICTED_PREDICATE.format(doc="documents")).bindparams(
+                uid=user.id, aid=None
+            )
+        )
+    return clauses
+
+
+async def _document_page(
+    db: AsyncSession,
+    user: User,
+    kb_id: uuid.UUID,
+    limit: int,
+    offset: int,
+    include_history: bool = False,
+) -> tuple[list[Document], int, int]:
+    """(page, how many this user can see, how many of them are hidden)."""
+    clauses = _visible_documents(user, kb_id, include_history)
+    total = await db.scalar(select(func.count()).select_from(Document).where(*clauses))
+    everything = [Document.kb_id == kb_id]
+    if not include_history:
+        everything.append(Document.is_current.is_(True))
+    existing = await db.scalar(
+        select(func.count()).select_from(Document).where(*everything)
+    )
+    rows = await db.execute(
+        select(Document)
+        .where(*clauses)
+        .order_by(Document.created_at.desc(), Document.id)
+        .limit(limit)
+        .offset(offset)
+    )
+    return (
+        list(rows.scalars().all()),
+        int(total or 0),
+        int(existing or 0) - int(total or 0),
+    )
 
 
 async def _owner_names(db: AsyncSession, ids: set[Any]) -> dict[uuid.UUID, str]:
@@ -130,10 +185,14 @@ def _serialize_kb(
     names: dict[uuid.UUID, str] | None = None,
     can_edit: bool | None = None,
     hidden_doc_ids: set[uuid.UUID] | None = None,
+    rollups: tuple[int, int, int] | None = None,
+    page: list[Document] | None = None,
 ) -> dict[str, Any]:
-    chunk_count, total_size, degraded_doc_count = _kb_rollups(kb)
+    chunk_count, total_size, degraded_doc_count = rollups or _kb_rollups(kb)
     docs: list[dict[str, Any]] = []
-    if include_docs:
+    if page is not None:
+        docs = [_serialize_doc(d) for d in page]
+    elif include_docs:
         hidden = hidden_doc_ids or set()
         try:
             docs = [
@@ -169,11 +228,20 @@ def _serialize_kb(
             else kb.default_visibility
         ),
         "vector_backend": kb.vector_backend,
+        **_scale_settings(kb),
         "created_by": str(kb.created_by) if kb.created_by else None,
         **_owner_fields(kb, user, names, can_edit),
         "documents": docs,
         "created_at": kb.created_at.isoformat() if kb.created_at else None,
         "updated_at": kb.updated_at.isoformat() if kb.updated_at else None,
+    }
+
+
+def _scale_settings(kb: KnowledgeBase) -> dict[str, Any]:
+    return {
+        "search_language": getattr(kb, "search_language", None) or "simple",
+        "rerank_mode": getattr(kb, "rerank_mode", None) or "auto",
+        "index_mode": getattr(kb, "index_mode", None) or "shared",
     }
 
 
@@ -210,6 +278,7 @@ def _serialize_kb_summary_lite(
             else kb.default_visibility
         ),
         "vector_backend": kb.vector_backend,
+        **_scale_settings(kb),
         "created_by": str(kb.created_by) if kb.created_by else None,
         **_owner_fields(kb, user, names, can_edit),
         "created_at": kb.created_at.isoformat() if kb.created_at else None,
@@ -228,6 +297,8 @@ def _serialize_doc(d: Document) -> dict[str, Any]:
         # Populated for FAILED + DEGRADED — UI tooltip on the yellow/red
         # icon. None for healthy docs.
         "error_message": getattr(d, "error_message", None),
+        "content_sha256": getattr(d, "content_sha256", None),
+        "ingest_checkpoint": getattr(d, "ingest_checkpoint", None) or 0,
         "version_number": getattr(d, "version_number", None) or 1,
         "is_current": getattr(d, "is_current", True) is not False,
         "parent_document_id": (
@@ -263,11 +334,7 @@ async def list_knowledge_bases(
         tenant_id=user.tenant_id,
     )
 
-    query = (
-        select(KnowledgeBase)
-        .options(selectinload(KnowledgeBase.documents))
-        .where(KnowledgeBase.tenant_id == user.tenant_id)
-    )
+    query = select(KnowledgeBase).where(KnowledgeBase.tenant_id == user.tenant_id)
     if allowed_ids is not None:
         if not allowed_ids:
             return success([], meta={"total": 0, "limit": limit, "offset": offset})
@@ -385,6 +452,28 @@ async def list_knowledge_bases(
     return success(data, meta={"total": total, "limit": limit, "offset": offset})
 
 
+async def _deferred_refusal(db: AsyncSession, kb: KnowledgeBase) -> str | None:
+    """Why this collection can not bulk load with its index deferred, if it can not."""
+    from chunks_store import STATE_SQL
+
+    if (kb.vector_backend or "pgvector") != "pgvector":
+        return "Deferring the index needs vector_backend pgvector."
+    row = (await db.execute(text(STATE_SQL))).first()
+    if row is None or not row[3]:
+        return (
+            "Rows here would still go through the shared index, so deferring saves "
+            "nothing. Run scripts/kb-chunks-partition.py first."
+        )
+    if kb.id is not None:
+        has_rows = await db.scalar(
+            text("SELECT EXISTS (SELECT 1 FROM chunks WHERE collection_id = :id)"),
+            {"id": kb.id},
+        )
+        if has_rows:
+            return "The index can only be deferred while a collection is empty."
+    return None
+
+
 async def _ensure_default_project(
     db: AsyncSession,
     *,
@@ -477,7 +566,14 @@ async def create_knowledge_base(
         vector_backend=body.vector_backend or "pgvector",
         status=KBStatus.READY,
         doc_count=0,
+        search_language=body.search_language or "simple",
+        rerank_mode=body.rerank_mode or "auto",
     )
+    if body.index_mode == "deferred":
+        refused = await _deferred_refusal(db, kb)
+        if refused:
+            return error(refused, 409)
+        kb.index_mode = "deferred"
     db.add(kb)
     await db.flush()
 
@@ -512,13 +608,13 @@ async def create_knowledge_base(
 @router.get("/{kb_id}")
 async def get_knowledge_base(
     kb_id: uuid.UUID,
+    doc_limit: int = Query(DOCUMENT_PAGE_DEFAULT, ge=0, le=DOCUMENT_PAGE_MAX),
+    doc_offset: int = Query(0, ge=0),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
     result = await db.execute(
-        select(KnowledgeBase)
-        .options(selectinload(KnowledgeBase.documents))
-        .where(
+        select(KnowledgeBase).where(
             KnowledgeBase.id == kb_id,
             KnowledgeBase.tenant_id == user.tenant_id,
         )
@@ -526,17 +622,16 @@ async def get_knowledge_base(
     kb = result.scalar_one_or_none()
     if not kb or not await user_can_access_collection(db, user=user, kb=kb):
         return error("Knowledge base not found", 404)
-    from app.services.document_access import hidden_document_ids
-
-    hidden = await hidden_document_ids(db, user, [kb_id])
-    return success(
-        _serialize_kb(
-            kb,
-            include_docs=True,
-            hidden_doc_ids=hidden,
-            **(await _owner_context(db, kb, user)),
-        )
+    page, total, hidden = await _document_page(db, user, kb_id, doc_limit, doc_offset)
+    data = _serialize_kb(
+        kb,
+        rollups=await _rollups_sql(db, kb_id),
+        page=page,
+        **(await _owner_context(db, kb, user)),
     )
+    data["documents_total"] = total
+    data["documents_hidden"] = hidden
+    return success(data)
 
 
 @router.put("/{kb_id}")
@@ -583,9 +678,25 @@ async def update_knowledge_base(
             granted_by=user.id,
         )
 
+    if body.search_language is not None:
+        kb.search_language = body.search_language
+    if body.rerank_mode is not None:
+        kb.rerank_mode = body.rerank_mode
+    if body.index_mode is not None and body.index_mode != kb.index_mode:
+        refused = await _deferred_refusal(db, kb)
+        if refused:
+            return error(refused, 409)
+        kb.index_mode = "deferred"
+
     await db.commit()
     await db.refresh(kb)
-    return success(_serialize_kb(kb, **(await _owner_context(db, kb, user))))
+    return success(
+        _serialize_kb(
+            kb,
+            rollups=await _rollups_sql(db, kb_id),
+            **(await _owner_context(db, kb, user)),
+        )
+    )
 
 
 @router.get("/{kb_id}/dependents")
@@ -617,9 +728,7 @@ async def delete_knowledge_base(
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
     result = await db.execute(
-        select(KnowledgeBase)
-        .options(selectinload(KnowledgeBase.documents))
-        .where(
+        select(KnowledgeBase).where(
             KnowledgeBase.id == kb_id,
             KnowledgeBase.tenant_id == user.tenant_id,
         )
@@ -631,6 +740,7 @@ async def delete_knowledge_base(
         return error("You don't have permission to delete this collection", 403)
 
     from app.services.dependents import count, kb_dependents, release_kb
+    from app.services.kb_lifecycle import tombstone_collection
 
     deps = await kb_dependents(db, user.tenant_id, kb_id)
     if count(deps) and not force:
@@ -641,15 +751,41 @@ async def delete_knowledge_base(
             details={"dependents": deps},
         )
     await release_kb(db, user.tenant_id, kb_id)
-    for doc in kb.documents:
-        _delete_file(doc.storage_url)
-        await db.delete(doc)
+    job = await tombstone_collection(db, kb, user.id)
+    return success(
+        {
+            "id": str(kb_id),
+            "deleted": True,
+            "status": "deleting",
+            "job_id": str(job.id),
+        }
+    )
 
-    _delete_pinecone_namespace(str(kb_id))
 
-    await db.delete(kb)
-    await db.commit()
-    return success({"id": str(kb_id), "deleted": True})
+@router.get("/{kb_id}/delete-status")
+async def delete_status(
+    kb_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """The receipt of a delete, readable after the collection itself is gone."""
+    from app.services.kb_lifecycle import serialize_delete_job
+    from models.knowledge_ops import KBDeleteJob
+
+    job = (
+        await db.execute(
+            select(KBDeleteJob)
+            .where(
+                KBDeleteJob.kb_id == kb_id,
+                KBDeleteJob.tenant_id == user.tenant_id,
+            )
+            .order_by(KBDeleteJob.created_at.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if job is None:
+        return error("No delete was asked for on this collection", 404)
+    return success(serialize_delete_job(job))
 
 
 @router.post("/{kb_id}/upload")
@@ -671,96 +807,123 @@ async def upload_document(
     if not await user_can_edit_collection(db, user=user, kb=kb):
         return error("You don't have permission to upload to this collection", 403)
 
-    content_type = file.content_type or ""
-    file_ext = ALLOWED_TYPES.get(content_type)
-    if not file_ext:
-        filename = file.filename or ""
-        ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
-        if ext in ("pdf", "docx", "txt", "csv", "md", "json"):
-            file_ext = ext
-        else:
-            return error(
-                f"Unsupported file type: {content_type}. Allowed: PDF, DOCX, TXT, CSV, MD, JSON",
-                400,
-            )
-
-    content = await file.read()
-    file_size = len(content)
-
-    if file_size > MAX_FILE_SIZE:
+    outcome, status_code = await ingest_upload(db, kb, user, file)
+    if "error" in outcome:
         return error(
-            f"File too large. Max size: {MAX_FILE_SIZE // (1024*1024)} MB", 400
+            outcome["error"],
+            status_code,
+            error_code=outcome.get("code"),
+            details=outcome.get("details"),
         )
+    return success(outcome["document"], status_code=status_code)
 
-    if file_size == 0:
-        return error("Empty file", 400)
+
+async def ingest_upload(
+    db: AsyncSession, kb: KnowledgeBase, user: User, file: UploadFile
+) -> tuple[dict[str, Any], int]:
+    """One file of a request, already spooled to disk by the parser, into the collection."""
+    file_type = kb_ingest.file_type_for(file.content_type, file.filename)
+    if not file_type:
+        return {
+            "error": f"Files of type {file.content_type} are not accepted. "
+            f"Accepted types are {kb_ingest.ALLOWED_LABEL}"
+        }, 400
+    sha256, file_size = await kb_ingest.hash_spooled(file.file)
+    problem = kb_ingest.size_error(file_size)
+    if problem:
+        return {"error": problem}, 400 if file_size == 0 else 413
+
+    twin = await kb_ingest.existing_document(db, kb.id, sha256)
+    if twin is not None:
+        return await _answer_duplicate(db, kb, twin), 200
+
+    from app.services.kb_quota import quota_error
+
+    refused = await quota_error(
+        db, user.tenant_id, add_documents=1, add_bytes=file_size
+    )
+    if refused is not None:
+        body = json.loads(refused.body).get("error") or {}
+        return {
+            "error": body.get("message", "Quota exceeded"),
+            "code": body.get("error_code"),
+            "details": body.get("details"),
+        }, refused.status_code
 
     doc_id = uuid.uuid4()
-    safe_filename = f"{doc_id}.{file_ext}"
-
-    # Store via StorageService (S3 in K8s, local filesystem in dev)
-    storage_url = ""
-    try:
-        from engine.storage import get_storage
-
-        storage = get_storage()
-        storage_url = await storage.upload(
-            tenant_id=str(user.tenant_id),
-            path=f"kb/{kb_id}/{safe_filename}",
-            data=content,
-            content_type=file.content_type or "application/octet-stream",
-        )
-    except ImportError:
-        # Fallback to direct filesystem if storage module not available
-        upload_dir = Path(UPLOAD_DIR) / str(user.tenant_id) / str(kb_id)
-        upload_dir.mkdir(parents=True, exist_ok=True)
-        file_path = upload_dir / safe_filename
-        file_path.write_bytes(content)
-        storage_url = str(file_path)
-
-    doc = Document(
-        id=doc_id,
-        kb_id=kb_id,
-        filename=file.filename or safe_filename,
-        file_type=file_ext,
-        file_size=file_size,
-        chunk_count=0,
-        status=DocumentStatus.PROCESSING,
-        storage_url=storage_url,
+    storage_url = await kb_ingest.store_fileobj(
+        user.tenant_id, kb.id, f"{doc_id}.{file_type}", file.file, file.content_type
     )
-    db.add(doc)
+    doc, created = await kb_ingest.register_document(
+        db,
+        kb,
+        doc_id=doc_id,
+        filename=file.filename or f"{doc_id}.{file_type}",
+        file_type=file_type,
+        file_size=file_size,
+        storage_url=storage_url,
+        sha256=sha256,
+        uploaded_by=user.id,
+    )
+    if not created:
+        await _delete_file(storage_url)
+        return await _answer_duplicate(db, kb, doc), 200
+    await queue_document(db, kb, doc)
+    await invalidate_search_cache(user.tenant_id)
+    return {"document": {**_serialize_doc(doc), "duplicate": False}}, 201
 
-    kb.status = KBStatus.PROCESSING
-    await db.commit()
-    await db.refresh(doc)
 
-    _dispatch_processing(
-        doc_id=str(doc_id),
-        kb_id=str(kb_id),
-        file_path=storage_url,
-        filename=file.filename or safe_filename,
-        file_type=file_ext,
+async def _answer_duplicate(
+    db: AsyncSession, kb: KnowledgeBase, doc: Document
+) -> dict[str, Any]:
+    if kb_ingest.can_resume(doc):
+        await kb_ingest.resume_failed(db, kb, doc)
+        await queue_document(db, kb, doc)
+        return {
+            "document": {**_serialize_doc(doc), "duplicate": False, "resumed": True}
+        }
+    return {"document": {**_serialize_doc(doc), "duplicate": True}}
+
+
+async def queue_document(
+    db: AsyncSession, kb: KnowledgeBase, doc: Document, verify_content: bool = False
+) -> None:
+    """A document nothing will ever process must not sit in PROCESSING forever."""
+    queued = _dispatch_processing(
+        doc_id=str(doc.id),
+        kb_id=str(kb.id),
+        file_path=doc.storage_url,
+        filename=doc.filename,
+        file_type=doc.file_type,
         chunk_size=kb.chunk_size,
         chunk_overlap=kb.chunk_overlap,
+        verify_content=verify_content,
     )
+    if queued is False:
+        doc.status = DocumentStatus.FAILED
+        doc.error_message = (
+            "The ingest queue could not be reached. Upload the file again to retry."
+        )
+        await db.commit()
+        await db.refresh(doc)
 
-    # KB v2: invalidate the search cache for this tenant â€” a new doc
-    # could change top results within the 5-min cache window. Cheap
-    # SCAN + DEL; failure is silent (cache layer is best-effort).
+
+async def invalidate_search_cache(tenant_id: uuid.UUID) -> None:
+    # a new doc could change top results within the 5 minute cache window
     try:
         from app.services.kb_cache import invalidate_tenant_search_cache
 
-        await invalidate_tenant_search_cache(str(user.tenant_id))
+        await invalidate_tenant_search_cache(str(tenant_id))
     except Exception:
         pass
-
-    return success(_serialize_doc(doc), status_code=201)
 
 
 @router.get("/{kb_id}/documents")
 async def list_documents(
     kb_id: uuid.UUID,
     include_history: bool = False,
+    limit: int = Query(DOCUMENT_PAGE_DEFAULT, ge=1, le=DOCUMENT_PAGE_MAX),
+    offset: int = Query(0, ge=0),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
@@ -774,19 +937,23 @@ async def list_documents(
     if not kb or not await user_can_access_collection(db, user=user, kb=kb):
         return error("Knowledge base not found", 404)
 
-    from app.services.document_access import hidden_document_ids
-
     # superseded versions stay out of the list, editors can ask for history
     if include_history and not await user_can_edit_collection(db, user=user, kb=kb):
         return error("Only people who can edit this collection can view history", 403)
-    hidden = await hidden_document_ids(db, user, [kb_id])
-    q = select(Document).where(Document.kb_id == kb_id)
-    if not include_history:
-        q = q.where(Document.is_current.is_(True))
-    result = await db.execute(q.order_by(Document.created_at.desc()))
-    docs = [d for d in result.scalars().all() if d.id not in hidden]
-    data = [_serialize_doc(d) for d in docs]
-    return success(data, meta={"count": len(data), "hidden": len(hidden)})
+    page, total, hidden = await _document_page(
+        db, user, kb_id, limit, offset, include_history
+    )
+    data = [_serialize_doc(d) for d in page]
+    return success(
+        data,
+        meta={
+            "count": len(data),
+            "total": total,
+            "hidden": hidden,
+            "limit": limit,
+            "offset": offset,
+        },
+    )
 
 
 @router.delete("/{kb_id}/documents/{doc_id}")
@@ -817,16 +984,36 @@ async def delete_document(
     if not doc:
         return error("Document not found", 404)
 
-    _delete_file(doc.storage_url)
-    _delete_pinecone_vectors(str(kb_id), str(doc_id), doc.chunk_count or 0)
+    await _delete_file(doc.storage_url)
+    from models.knowledge_ops import KBReembedJob
+
+    targets = (
+        (
+            await db.execute(
+                select(KBReembedJob.target_generation).where(
+                    KBReembedJob.kb_id == kb_id, KBReembedJob.finished_at.is_(None)
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    # a running re-embed staged it too, and that namespace is about to go live
+    for generation in {kb.embedding_generation or 0, *targets}:
+        _delete_pinecone_vectors(
+            str(kb_id), str(doc_id), doc.chunk_count or 0, generation=generation
+        )
 
     await db.delete(doc)
 
-    remaining = await db.execute(
-        select(Document).where(Document.kb_id == kb_id, Document.id != doc_id)
+    kb.doc_count = (
+        await db.scalar(
+            select(func.count())
+            .select_from(Document)
+            .where(Document.kb_id == kb_id, Document.id != doc_id)
+        )
+        or 0
     )
-    remaining_count = len(remaining.scalars().all())
-    kb.doc_count = remaining_count
 
     await db.commit()
 
@@ -841,7 +1028,8 @@ def _dispatch_processing(
     file_type: str,
     chunk_size: int,
     chunk_overlap: int,
-) -> None:
+    verify_content: bool = False,
+) -> bool:
     try:
         from celery import Celery
 
@@ -858,26 +1046,39 @@ def _dispatch_processing(
                 chunk_size,
                 chunk_overlap,
             ],
+            kwargs={"verify_content": True} if verify_content else {},
             queue="documents",
         )
+        return True
     except Exception:
         import logging
 
         logging.getLogger(__name__).warning(
             "Celery not available, document %s will need manual processing", doc_id
         )
+        return False
 
 
-def _delete_file(storage_url: str) -> None:
+async def _delete_file(storage_url: str) -> None:
+    """Handles plain paths and file://, s3:// and az:// URIs, a failure leaves the row to go."""
+    if not storage_url or storage_url.startswith("agent://"):
+        return
     try:
-        path = Path(storage_url)
-        if path.exists():
-            path.unlink()
+        from engine.storage import get_storage
+
+        await get_storage().delete(storage_url)
     except Exception:
-        pass
+        logging.getLogger(__name__).warning(
+            "could not delete stored file %s", storage_url, exc_info=True
+        )
 
 
-def _delete_pinecone_vectors(kb_id: str, doc_id: str, chunk_count: int = 0) -> None:
+def _delete_pinecone_vectors(
+    kb_id: str, doc_id: str, chunk_count: int = 0, generation: int = 0
+) -> None:
+    from engine.knowledge.kb_state import pinecone_namespace
+
+    namespace = pinecone_namespace(kb_id, generation)
     api_key = os.environ.get("PINECONE_API_KEY", "")
     index_name = os.environ.get("PINECONE_INDEX_NAME", "agentforge-knowledge")
     if not api_key:
@@ -892,30 +1093,15 @@ def _delete_pinecone_vectors(kb_id: str, doc_id: str, chunk_count: int = 0) -> N
     # serverless indexes refuse delete-by-filter, ids work everywhere
     ids = [f"{doc_id}_{i}" for i in range(chunk_count)]
     try:
-        for page in index.list(prefix=f"{doc_id}_", namespace=kb_id):
+        for page in index.list(prefix=f"{doc_id}_", namespace=namespace):
             ids.extend(page if isinstance(page, (list, tuple)) else [page])
     except Exception:
         pass
     ids = sorted(set(ids))
     try:
         for i in range(0, len(ids), 1000):
-            index.delete(ids=ids[i : i + 1000], namespace=kb_id)
+            index.delete(ids=ids[i : i + 1000], namespace=namespace)
         if not ids:
-            index.delete(filter={"doc_id": {"$eq": doc_id}}, namespace=kb_id)
-    except Exception:
-        pass
-
-
-def _delete_pinecone_namespace(kb_id: str) -> None:
-    api_key = os.environ.get("PINECONE_API_KEY", "")
-    index_name = os.environ.get("PINECONE_INDEX_NAME", "agentforge-knowledge")
-    if not api_key:
-        return
-    try:
-        from pinecone import Pinecone
-
-        pc = Pinecone(api_key=api_key)
-        index = pc.Index(index_name)
-        index.delete(delete_all=True, namespace=kb_id)
+            index.delete(filter={"doc_id": {"$eq": doc_id}}, namespace=namespace)
     except Exception:
         pass

@@ -293,6 +293,14 @@
           "title": "Sizing a local cluster"
         },
         {
+          "slug": "06-deployment/10-knowledge-at-scale",
+          "title": "Knowledge at terabyte scale"
+        },
+        {
+          "slug": "06-deployment/11-knowledge-operations",
+          "title": "Knowledge operations"
+        },
+        {
           "slug": "06-deployment/deploy-only-trap",
           "title": "The --only deploy trap"
         },

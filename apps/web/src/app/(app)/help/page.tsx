@@ -883,6 +883,7 @@ bash scripts/deploy-azure.sh all       # AKS + ACR + helm`}</pre>
             <ol className="list-decimal pl-5 space-y-1 text-[13px]">
               <li>Open the collection&apos;s engine page. The <strong>Embedding model</strong> panel shows the current model and any job in progress (<code>GET /api/knowledge/{`{kb}`}/reembed</code>).</li>
               <li>An admin picks a model and sees the chunk count, cost estimate and ETA (<code>POST .../reembed</code> with <code>dry_run</code>).</li>
+              <li>A large job can be paused, resumed or cancelled there. Search keeps the old vectors until the job switches over in one step.</li>
               <li>Starting the swap queues the worker. It re-reads and re-chunks every document with the new model, then switches the collection in one step. If anything fails first, nothing changes.</li>
             </ol>
 
@@ -1008,6 +1009,7 @@ bash scripts/deploy-azure.sh all       # AKS + ACR + helm`}</pre>
         body: (
           <div className="space-y-3 text-[13.5px] text-slate-300 leading-relaxed">
             <p><strong className="text-white">Atlas</strong> is the unified ontology + knowledge-base canvas. Documents are nodes. Concepts are nodes. Edges are first-class. Agents read the graph, not raw chunks.</p>
+            <p>Together with Cognify, Atlas makes the <strong className="text-white">enterprise context graph</strong>. Bind a knowledge collection and your concepts decide what Cognify extracts from it. Each entity then records its concept, and selecting a concept shows the real entities behind it. A graph over 1,000 nodes opens on its busiest node and loads the rest as you pan, search or double-click.</p>
             <Hero src={SS('05-atlas-empty-state.png')} alt="Atlas onboarding" caption="A brand-new atlas — pick any of four ways to begin" />
 
             <h4 className="text-white font-semibold pt-3">Five ways to fill an atlas</h4>

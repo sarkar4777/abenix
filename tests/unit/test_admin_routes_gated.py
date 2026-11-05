@@ -19,6 +19,7 @@ ADMIN_ROUTER_MODULES = [
     "admin_api_key_report",
     "admin_cluster",
     "admin_dlq",
+    "admin_knowledge_quota",
     "admin_model_availability",
     "admin_pricing",
     "admin_scaling",

@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
+import tempfile
+import time
 import uuid
 from unittest.mock import AsyncMock, MagicMock
 
@@ -27,8 +30,15 @@ RATE_LIMITED = ApiError(429, "Rate limit reached, try again in 20s")
 OUTAGE = ApiError(503, "upstream unavailable")
 
 
-def _ingest(monkeypatch, failure, other_docs=False, retries=2, kb_model=OPENAI_MODEL):
-    state = {"model": kb_model, "status": None}
+def _ingest(
+    monkeypatch,
+    failure,
+    other_docs=False,
+    kb_model=OPENAI_MODEL,
+    waiting_since=None,
+    tmp_path=None,
+):
+    state = {"model": kb_model, "status": None, "requeued": []}
 
     def embed(chunks, model=None, strict=False):
         if model == "local-hashing-v1":
@@ -45,26 +55,52 @@ def _ingest(monkeypatch, failure, other_docs=False, retries=2, kb_model=OPENAI_M
     def status(doc_id, kb_id, s, chunk_count=0, error_message=None, **_kw):
         state["status"], state["chunks"], state["error"] = s, chunk_count, error_message
 
-    def store(kb_id, doc_id, filename, chunks, embeddings, pages, backend):
+    def store(kb_id, doc_id, filename, chunks, embeddings, pages, backend, **_kw):
         state["stored"] = embeddings
         return len(embeddings)
 
-    monkeypatch.setattr(dp, "_local_path", lambda p, t: (p, None))
-    monkeypatch.setattr(
-        dp, "_extract_blocks", lambda p, t: ([("hello world", None)], "text", 1.0)
-    )
+    source = tempfile.NamedTemporaryFile("w", suffix=".md", delete=False)
+    source.write("hello world")
+    source.close()
+    monkeypatch.setattr(dp, "_local_path", lambda p, t: (source.name, None))
     monkeypatch.setattr(dp, "_kb_settings", lambda kb: ("pgvector", state["model"]))
+    monkeypatch.setattr(dp, "_kb_generation", lambda kb: 0)
+    monkeypatch.setattr(
+        dp,
+        "_begin_ingest",
+        lambda d: dp._IngestState("PROCESSING", 1, 0, None, None),
+    )
+    monkeypatch.setattr(
+        dp,
+        "_IngestLock",
+        lambda d: MagicMock(acquire=lambda: True, release=lambda: None),
+    )
+    monkeypatch.setattr(dp, "_prepare_resume", lambda *a: None)
+    monkeypatch.setattr(dp, "_mark_checkpoint", lambda *a: None)
+    monkeypatch.setattr(dp, "_forget_attempt", lambda *a: None)
+    monkeypatch.setattr(dp, "_doc_update", lambda *a: None)
+    monkeypatch.setattr(dp, "_after_store", lambda *a: None)
+    monkeypatch.setattr(dp, "_quota_refusal", lambda *a: None)
+    monkeypatch.setattr(dp, "_record_embedding_spend", lambda *a: None)
     monkeypatch.setattr(dp, "_embed_chunks", embed)
     monkeypatch.setattr(dp, "_set_collection_model", set_model)
     monkeypatch.setattr(dp, "_collection_has_vectors", lambda kb, doc: other_docs)
     monkeypatch.setattr(dp, "_update_document_status", status)
     monkeypatch.setattr(dp, "_store_vectors", store)
     monkeypatch.setattr(dp.process_document, "update_state", lambda **k: None)
-    dp.process_document.push_request(retries=retries)
+    monkeypatch.setattr(
+        dp.process_document,
+        "apply_async",
+        lambda **kw: state["requeued"].append(kw),
+    )
+    dp.process_document.push_request(retries=0)
     try:
-        out = dp.process_document.run(DOC, KB, "/tmp/x", "x.md", "md")
+        out = dp.process_document.run(
+            DOC, KB, "/tmp/x", "x.md", "md", waiting_since=waiting_since
+        )
     finally:
         dp.process_document.pop_request()
+        os.unlink(source.name)
     return out, state
 
 
@@ -73,7 +109,7 @@ def test_refused_key_on_an_empty_collection_moves_it_to_the_local_embedder(
     monkeypatch, failure
 ):
     monkeypatch.delenv("ABENIX_LOCAL_EMBEDDINGS", raising=False)
-    out, state = _ingest(monkeypatch, failure, retries=0)
+    out, state = _ingest(monkeypatch, failure)
     assert out["status"] == "degraded"
     assert state["status"] == "degraded"
     assert state["model"] == "local-hashing-v1"
@@ -84,7 +120,7 @@ def test_refused_key_on_an_empty_collection_moves_it_to_the_local_embedder(
 
 def test_refused_key_on_a_provider_collection_stores_nothing_and_says_so(monkeypatch):
     monkeypatch.delenv("ABENIX_LOCAL_EMBEDDINGS", raising=False)
-    out, state = _ingest(monkeypatch, DEAD_KEY, other_docs=True, retries=0)
+    out, state = _ingest(monkeypatch, DEAD_KEY, other_docs=True)
     assert state["status"] == "degraded" and state["chunks"] == 0
     assert state["model"] == OPENAI_MODEL
     assert "stored" not in state
@@ -95,7 +131,7 @@ def test_refused_key_on_a_provider_collection_stores_nothing_and_says_so(monkeyp
 def test_a_second_document_follows_a_collection_already_moved(monkeypatch):
     monkeypatch.delenv("ABENIX_LOCAL_EMBEDDINGS", raising=False)
     out, state = _ingest(
-        monkeypatch, DEAD_KEY, other_docs=True, retries=0, kb_model="local-hashing-v1"
+        monkeypatch, DEAD_KEY, other_docs=True, kb_model="local-hashing-v1"
     )
     assert state["model"] == "local-hashing-v1"
     assert state["chunks"] == 1
@@ -103,31 +139,28 @@ def test_a_second_document_follows_a_collection_already_moved(monkeypatch):
 
 def test_forced_off_local_embedder_fails_visibly(monkeypatch):
     monkeypatch.setenv("ABENIX_LOCAL_EMBEDDINGS", "0")
-    out, state = _ingest(monkeypatch, DEAD_KEY, retries=0)
+    out, state = _ingest(monkeypatch, DEAD_KEY)
     assert state["status"] == "degraded" and state["chunks"] == 0
     assert state["model"] == OPENAI_MODEL
 
 
 @pytest.mark.parametrize("failure", [OUTAGE, RATE_LIMITED])
-def test_a_passing_failure_retries_before_falling_back(monkeypatch, failure):
+def test_a_passing_failure_waits_and_never_moves_the_collection(monkeypatch, failure):
     monkeypatch.delenv("ABENIX_LOCAL_EMBEDDINGS", raising=False)
-    retried = []
-
-    def retry(exc=None, **_kw):
-        retried.append(exc)
-        return RuntimeError("retrying")
-
-    monkeypatch.setattr(dp.process_document, "retry", retry)
-    with pytest.raises(RuntimeError, match="retrying"):
-        _ingest(monkeypatch, failure, retries=0)
-    assert retried and isinstance(retried[0], dp.EmbeddingProviderCallFailed)
+    out, state = _ingest(monkeypatch, failure)
+    assert out["status"] == "waiting"
+    assert state["status"] is None and "stored" not in state
+    assert state["model"] == OPENAI_MODEL
+    assert state["requeued"][0]["kwargs"]["waiting_since"]
 
 
-def test_a_passing_failure_falls_back_once_retries_run_out(monkeypatch):
+def test_a_failure_that_never_passes_ends_failed_with_no_hash_vectors(monkeypatch):
     monkeypatch.delenv("ABENIX_LOCAL_EMBEDDINGS", raising=False)
-    _out, state = _ingest(monkeypatch, OUTAGE, retries=dp.process_document.max_retries)
-    assert state["model"] == "local-hashing-v1"
-    assert state["status"] == "degraded"
+    long_ago = time.time() - dp.MAX_WAIT_SECONDS - 60
+    _out, state = _ingest(monkeypatch, OUTAGE, waiting_since=long_ago)
+    assert state["model"] == OPENAI_MODEL
+    assert state["status"] == "failed" and "stored" not in state
+    assert "kept failing" in state["error"]
 
 
 def test_a_healthy_provider_stays_ready_and_unchanged(monkeypatch):

@@ -242,11 +242,13 @@ async def test_graph_search_hands_the_hidden_set_to_every_query(monkeypatch):
             calls.append((cypher, kw))
             return _Res()
 
-    driver = types.SimpleNamespace(session=lambda: _S())
+    driver = types.SimpleNamespace(session=lambda **_kw: _S())
     monkeypatch.setattr(hs, "get_neo4j_driver", AsyncMock(return_value=driver))
+    monkeypatch.setattr(hs, "ensure_schema", AsyncMock())
+    monkeypatch.setattr(hs, "ensure_kb_keys", AsyncMock())
     await hs._graph_search(["Acme"], [KB1], hidden={D1})
     assert calls and all(kw["hidden"] == [D1] for _c, kw in calls)
-    assert "NOT d IN $hidden" in calls[0][0]
+    assert "NOT d IN $hidden" in calls[0][0].text
 
 
 # Cognify confidence and conflicts

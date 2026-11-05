@@ -376,6 +376,10 @@ spec:
               app.kubernetes.io/instance: {{ $release }}
         - podSelector:
             matchLabels:
+              app.kubernetes.io/component: wal-archiver
+              app.kubernetes.io/instance: {{ $release }}
+        - podSelector:
+            matchLabels:
               app.kubernetes.io/component: pgpool
               app.kubernetes.io/instance: {{ $release }}
         # Read replicas stream from the primary

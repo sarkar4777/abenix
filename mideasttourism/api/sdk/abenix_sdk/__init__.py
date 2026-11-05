@@ -1616,9 +1616,20 @@ class KnowledgeClient:
             files={"file": (filename, raw, ctype)},
         )
 
-    async def documents(self, kb_id: str) -> list[dict[str, Any]]:
-        """Documents in a collection with their status: processing, ready, degraded or failed."""
-        return await _call(self._client, AbenixError, "GET", f"/api/knowledge-bases/{kb_id}/documents") or []
+    async def documents(
+        self, kb_id: str, *, limit: int = 100, offset: int = 0
+    ) -> list[dict[str, Any]]:
+        """One page of documents in a collection with their status: processing, ready, degraded or failed."""
+        return (
+            await _call(
+                self._client,
+                AbenixError,
+                "GET",
+                f"/api/knowledge-bases/{kb_id}/documents",
+                params={"limit": limit, "offset": offset},
+            )
+            or []
+        )
 
     async def graph_stats(self, kb_id: str) -> dict[str, Any]:
         """Get knowledge graph statistics for a knowledge base."""

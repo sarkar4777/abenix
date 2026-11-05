@@ -50,3 +50,21 @@ def azure_deployment(model: str | None) -> str:
 
 def request_kwargs(model: str | None) -> dict:
     return dict(_PROVIDER.get(provider_model(model), {}))
+
+
+# list price per million tokens, a tenant's spend limit works from these
+_USD_PER_MTOK = {
+    "text-embedding-3-small": 0.02,
+    "text-embedding-3-large": 0.13,
+    "text-embedding-ada-002": 0.10,
+    LOCAL: 0.0,
+}
+
+
+def estimated_cost(model: str | None, texts: list[str]) -> tuple[int, float]:
+    """(tokens, usd) at about four characters a token, providers bill close to this."""
+    tokens = sum(len(t) for t in texts) // 4
+    rate = _USD_PER_MTOK.get(provider_model(model), _USD_PER_MTOK[DEFAULT])
+    if is_local(model):
+        rate = 0.0
+    return tokens, tokens / 1_000_000 * rate

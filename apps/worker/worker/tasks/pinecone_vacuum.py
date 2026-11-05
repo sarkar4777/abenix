@@ -22,6 +22,8 @@ from typing import Any, Iterable
 from worker.celery_app import celery_app
 from worker.tasks import document_processor as dp
 
+from engine.knowledge.kb_state import parse_namespace
+
 logger = logging.getLogger(__name__)
 
 DELETE_BATCH = 1000
@@ -88,10 +90,19 @@ def persona_orphans(
 def _load_state(
     cur: Any,
 ) -> tuple[
-    set[str], dict[str, dict[str, tuple[int, str]]], dict[str, tuple[bool, set[str]]]
+    dict[str, tuple[int, bool]],
+    dict[str, dict[str, tuple[int, str]]],
+    dict[str, tuple[bool, set[str]]],
 ]:
-    cur.execute("SELECT id::text FROM knowledge_collections")
-    kbs = {r[0].lower() for r in cur.fetchall()}
+    # a re-embed writes past each document's count until its flip, leave those alone
+    cur.execute(
+        "SELECT k.id::text, k.embedding_generation, EXISTS (SELECT 1 FROM "
+        "kb_reembed_jobs j WHERE j.kb_id = k.id AND j.status NOT IN "
+        "('completed', 'cancelled', 'failed')) FROM knowledge_collections k"
+    )
+    kbs = {}
+    for kb_id, generation, busy in cur.fetchall():
+        kbs[kb_id.lower()] = (generation or 0, bool(busy))
     cur.execute(
         "SELECT kb_id::text, id::text, chunk_count, status::text FROM documents"
     )
@@ -127,14 +138,22 @@ def vacuum(index: Any, cur: Any) -> dict[str, Any]:
                 continue
             scanned += 1
             deleted += _delete(index, ns, orphans)
-        elif _is_uuid(ns):
+        elif _is_uuid(parse_namespace(ns)[0]):
             scanned += 1
-            if ns.lower() not in kbs:
+            kb_id, generation = parse_namespace(ns)
+            kb = kbs.get(kb_id.lower())
+            if kb is None:
+                index.delete(delete_all=True, namespace=ns)
+                dropped_namespaces += 1
+                continue
+            if kb[1]:
+                continue
+            if generation != kb[0]:
                 index.delete(delete_all=True, namespace=ns)
                 dropped_namespaces += 1
                 continue
             try:
-                orphans = doc_orphans(_list_ids(index, ns), docs.get(ns.lower(), {}))
+                orphans = doc_orphans(_list_ids(index, ns), docs.get(kb_id.lower(), {}))
             except Exception as e:
                 unlistable.append(ns)
                 logger.warning("vacuum: cannot list %s: %s", ns, e)
@@ -167,4 +186,23 @@ def run(self: Any) -> dict:
     return result
 
 
-__all__ = ["run", "vacuum", "doc_orphans", "persona_orphans"]
+@celery_app.task(name="worker.tasks.pinecone_vacuum.stamp_superseded", max_retries=0)
+def stamp_superseded(
+    kb_id: str, doc_id: str, chunk_count: int, generation: int = 0
+) -> dict:
+    """Search filters on this flag, so its $nin list does not grow with every replaced file."""
+    if not dp.PINECONE_API_KEY:
+        return {"status": "skipped", "reason": "PINECONE_API_KEY not set"}
+    from engine.knowledge.kb_state import pinecone_namespace
+    from pinecone import Pinecone
+
+    index = Pinecone(api_key=dp.PINECONE_API_KEY).Index(dp.PINECONE_INDEX_NAME)
+    namespace = pinecone_namespace(kb_id, generation)
+    for i in range(chunk_count):
+        index.update(
+            id=f"{doc_id}_{i}", set_metadata={"superseded": True}, namespace=namespace
+        )
+    return {"status": "ok", "stamped": chunk_count}
+
+
+__all__ = ["run", "stamp_superseded", "vacuum", "doc_orphans", "persona_orphans"]

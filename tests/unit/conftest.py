@@ -69,3 +69,17 @@ def _a_model_is_configured(monkeypatch):
 
     monkeypatch.setattr(lm, "_probe_providers", configured)
     yield
+
+
+# Fixtures for tests that run against throwaway Neo4j and Postgres.
+from atlas_live import atlas_world  # noqa: E402,F401
+from kg_stack import graph, kg_conn, kg_db_url, neo4j_uri  # noqa: E402,F401
+
+# containers start only for the tests that ask for them
+from kb_pg import (  # noqa: E402,F401
+    azurite_port,
+    kb_conn,
+    kb_db_url,
+    minio_endpoint,
+    neo4j_bolt,
+)

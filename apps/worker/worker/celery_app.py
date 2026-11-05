@@ -1,6 +1,10 @@
 import os
 
-from celery import Celery
+from worker import (
+    metrics,
+)  # noqa: I001  sets up multiprocess metrics before anything imports them
+
+from celery import Celery, signals
 from celery.signals import after_setup_logger
 
 broker_url = os.environ.get("CELERY_BROKER_URL", "redis://localhost:6379/1")
@@ -21,6 +25,8 @@ def _redact_llm_bodies(**_kwargs):
         return
     log_redaction.install()
 
+
+metrics.install(signals)
 
 celery_app.conf.update(
     task_serializer="json",
@@ -47,6 +53,9 @@ celery_app.conf.update(
         "worker.tasks.cognify_task.*": {"queue": "cognify"},
         "worker.tasks.kb_reembed.*": {"queue": "documents"},
         "worker.tasks.pinecone_vacuum.*": {"queue": "documents"},
+        "worker.tasks.kb_delete.*": {"queue": "documents"},
+        "worker.tasks.kb_index.*": {"queue": "documents"},
+        "worker.tasks.kb_connector_sync.*": {"queue": "documents"},
     },
 )
 
@@ -56,5 +65,8 @@ celery_app.conf.update(
         "worker.tasks.cognify_task",
         "worker.tasks.kb_reembed",
         "worker.tasks.pinecone_vacuum",
+        "worker.tasks.kb_delete",
+        "worker.tasks.kb_index",
+        "worker.tasks.kb_connector_sync",
     ],
 )

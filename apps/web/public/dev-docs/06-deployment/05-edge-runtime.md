@@ -144,9 +144,9 @@ The UI for all of this is `/edge`.
 
 `apps/api/app/services/edge_compiler.py` builds a tar with:
 
-- `agent.yaml` — name, slug, `tenant_id`, version, model, temperature, `max_iterations`, `max_tokens`, tools, `edge_constraints` (`max_payload_bytes` default 65536, `max_runtime_seconds` default 30, `mqtt_subscribe`, `mqtt_publish`), description
+- `agent.yaml`, with name, slug, `tenant_id`, version, model, temperature, `max_iterations`, `max_tokens`, tools, `edge_constraints` (`max_payload_bytes` default 65536, `max_runtime_seconds` default 30, `mqtt_subscribe`, `mqtt_publish`), description
 - `system_prompt.md`
-- `signature.sig` — RSA-PSS with SHA-256, salt length 32, over the tar without the signature
+- `signature.sig`, RSA-PSS with SHA-256, salt length 32, over the tar without the signature
 
 Allowed tools are `mqtt_publish`, `mqtt_subscribe`, `current_time`,
 `windowed_state`, `connector_call` and `code_executor`. Anything else fails
@@ -318,5 +318,5 @@ The model checks use `ANTHROPIC_API_KEY`, `anthropic-api-key` or `CLAUDE_SUBSCRI
 
 ## See also
 
-- [00-overview](00-overview.md) — the deploy flow
-- [09-reference/01-env-vars](../09-reference/01-env-vars.md) — gateway and API variables
+- [00-overview](00-overview.md), the deploy flow
+- [09-reference/01-env-vars](../09-reference/01-env-vars.md), gateway and API variables

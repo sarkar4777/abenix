@@ -1,0 +1,30 @@
+# Physical Postgres backups on a standalone install such as minikube, layered on
+# values-local.yaml. Backups land on a PVC here, set objectStorage or backup.target
+# to send them to S3 or Azure Blob instead.
+backup:
+  enabled: true
+  persistentVolume:
+    enabled: true
+    size: 20Gi
+  postgres:
+    strategy: physical
+    physical:
+      schedule: "0 1 * * *"
+      walVolumeSize: 5Gi
+postgresql:
+  primary:
+    # Standalone Bitnami has no replication line by default and the WAL stream needs one
+    pgHbaConfiguration: |-
+      local all all trust
+      host all all 127.0.0.1/32 md5
+      host all all ::1/128 md5
+      host all all 0.0.0.0/0 md5
+      host all all ::/0 md5
+      host replication all 0.0.0.0/0 md5
+      host replication all ::/0 md5
+    extendedConfiguration: |
+      wal_level = replica
+      max_wal_senders = 10
+      max_replication_slots = 10
+      # a stopped WAL archiver must not fill the disk
+      max_slot_wal_keep_size = 2GB

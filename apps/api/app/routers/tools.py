@@ -46,6 +46,7 @@ LAZY_TOOL_MODULES = [
             "AtlasQueryTool",
             "AtlasTraverseTool",
             "AtlasSearchGroundedTool",
+            "AtlasInstancesTool",
         ],
     ),
     ("engine.tools.schema_portfolio_tool", ["SchemaPortfolioTool"]),
@@ -922,6 +923,12 @@ TOOL_CATALOG = [
         "id": "atlas_search_grounded",
         "name": "Atlas — Grounded Search",
         "description": "Find KB documents bound to concepts near a target term in the ontology. Better than vector-only when chunks must be tied to a typed concept.",
+        "category": "enterprise",
+    },
+    {
+        "id": "atlas_instances",
+        "name": "Atlas — Instances",
+        "description": "Read the real entities behind an Atlas concept from the graph database. List them by concept, find one by name, or follow a relationship between concepts.",
         "category": "enterprise",
     },
     {

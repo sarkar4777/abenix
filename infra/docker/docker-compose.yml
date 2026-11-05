@@ -1,7 +1,7 @@
 # WARNING: Default credentials are for LOCAL DEVELOPMENT ONLY. Never use in production.
 services:
   postgres:
-    image: pgvector/pgvector:pg16
+    image: pgvector/pgvector:0.8.7-pg16
     container_name: abenix-postgres
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-abenix}

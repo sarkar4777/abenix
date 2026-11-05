@@ -2,16 +2,35 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import os
 from dataclasses import dataclass, field
 
+from engine.knowledge.ontology import BoundOntology
 from engine.knowledge.prompts import (
     ENTITY_EXTRACTION_SYSTEM,
     ENTITY_EXTRACTION_USER,
 )
+from engine.knowledge.rate_limit import CallLimiter, with_backoff
 
 logger = logging.getLogger(__name__)
+
+DEFAULT_COGNIFY_MODEL = os.environ.get(
+    "COGNIFY_DEFAULT_MODEL", "claude-haiku-4-5-20251001"
+)
+MAX_CHUNK_CHARS = 4000
+EXPECTED_OUTPUT_TOKENS = 400
+PROMPT_OVERHEAD_TOKENS = 450
+
+
+def estimate_chunk_tokens(chunk_text: str) -> int:
+    return (
+        min(len(chunk_text), MAX_CHUNK_CHARS) // 4
+        + PROMPT_OVERHEAD_TOKENS
+        + EXPECTED_OUTPUT_TOKENS
+    )
 
 
 @dataclass
@@ -22,6 +41,7 @@ class ExtractedEntity:
     source_chunk_index: int = 0
     source_doc_id: str = ""
     confidence: float = 1.0
+    atlas_concept_id: str | None = None
 
 
 @dataclass
@@ -33,6 +53,7 @@ class ExtractedRelationship:
     source_chunk_index: int = 0
     source_doc_id: str = ""
     confidence: float = 1.0
+    atlas_edge_id: str | None = None
 
 
 @dataclass
@@ -43,6 +64,7 @@ class ChunkExtractionResult:
     doc_id: str
     tokens_used: int = 0
     cost: float = 0.0
+    error: str | None = None
 
 
 @dataclass
@@ -56,6 +78,7 @@ class DocumentExtractionResult:
     relationships: list[ExtractedRelationship] = field(default_factory=list)
     total_tokens: int = 0
     total_cost: float = 0.0
+    chunks_failed: int = 0
 
 
 def _confidence(raw: object) -> float:
@@ -69,10 +92,12 @@ def _confidence(raw: object) -> float:
     return max(0.0, min(1.0, v))
 
 
-def _ontology_typing_prior(ontology: dict | None) -> str:
+def _ontology_typing_prior(ontology: dict | BoundOntology | None) -> str:
     """Format an ontology schema as a typing prior for the LLM."""
     if not ontology:
         return ""
+    if isinstance(ontology, BoundOntology):
+        ontology = ontology.prompt_view()
     et = ontology.get("entity_types") or []
     rt = ontology.get("relationship_types") or []
     if not et and not rt:
@@ -89,7 +114,10 @@ def _ontology_typing_prior(ontology: dict | None) -> str:
         for t in rt:
             name = t.get("name") if isinstance(t, dict) else str(t)
             desc = t.get("description") if isinstance(t, dict) else ""
-            lines.append(f"  - {name}: {desc}")
+            ends = ""
+            if isinstance(t, dict) and t.get("from") and t.get("to"):
+                ends = f" (from {t['from']} to {t['to']})"
+            lines.append(f"  - {name}{ends}: {desc}")
     lines.append(
         "If text contains entities or relationships that don't fit the ontology, "
         "skip them rather than inventing a new type."
@@ -102,10 +130,15 @@ async def extract_from_chunk(
     chunk_index: int,
     doc_id: str,
     existing_entities: list[str] | None = None,
-    model: str = "claude-sonnet-4-5-20250929",
-    ontology: dict | None = None,
+    model: str = DEFAULT_COGNIFY_MODEL,
+    ontology: dict | BoundOntology | None = None,
+    limiter: CallLimiter | None = None,
+    retries: int = 5,
 ) -> ChunkExtractionResult:
-    """Extract entities and relationships from a single text chunk."""
+    """Extract entities and relationships from a single text chunk.
+
+    A failed call comes back with error set and no cost lost, so the caller
+    does not mistake it for a chunk that had nothing in it."""
     from engine.llm_router import LLMRouter
 
     llm = LLMRouter()
@@ -120,7 +153,7 @@ async def extract_from_chunk(
 
     user_prompt = ENTITY_EXTRACTION_USER.format(
         existing_context=existing_context,
-        chunk_text=chunk_text[:4000],  # Limit chunk size for LLM context
+        chunk_text=chunk_text[:MAX_CHUNK_CHARS],
     )
 
     # Append ontology typing prior to the system prompt when one is
@@ -129,20 +162,23 @@ async def extract_from_chunk(
     # consistency) still apply.
     system_prompt = ENTITY_EXTRACTION_SYSTEM + _ontology_typing_prior(ontology)
 
-    try:
-        response = await llm.complete(
+    async def _call():
+        if limiter is not None:
+            await limiter.acquire(estimate_chunk_tokens(chunk_text))
+        return await llm.complete(
             messages=[{"role": "user", "content": user_prompt}],
             system=system_prompt,
             model=model,
             temperature=0.1,  # Low temperature for consistent extraction
         )
 
+    response = None
+    try:
+        response = await with_backoff(_call, retries=retries)
+
         text = response.content.strip()
         # Extract JSON from response
-        if "{" in text:
-            json_str = text[text.index("{") : text.rindex("}") + 1]
-            data = json.loads(json_str)
-        else:
+        if "{" not in text:
             logger.warning(
                 "Entity extraction returned no JSON for chunk %d of doc %s",
                 chunk_index,
@@ -155,7 +191,10 @@ async def extract_from_chunk(
                 doc_id=doc_id,
                 tokens_used=response.input_tokens + response.output_tokens,
                 cost=response.cost,
+                error="the model returned no JSON",
             )
+        json_str = text[text.index("{") : text.rindex("}") + 1]
+        data = json.loads(json_str)
 
         entities = []
         for e in data.get("entities", []):
@@ -216,43 +255,77 @@ async def extract_from_chunk(
             relationships=[],
             chunk_index=chunk_index,
             doc_id=doc_id,
+            tokens_used=(
+                response.input_tokens + response.output_tokens if response else 0
+            ),
+            cost=response.cost if response else 0.0,
+            error=str(e)[:500] or type(e).__name__,
         )
+
+
+async def extract_chunks(
+    items: list[tuple[int, str]],
+    doc_id: str,
+    known_entities: list[str] | None = None,
+    model: str = DEFAULT_COGNIFY_MODEL,
+    ontology: dict | BoundOntology | None = None,
+    limiter: CallLimiter | None = None,
+    max_parallel: int = 4,
+) -> list[ChunkExtractionResult]:
+    """A batch of (index, text) at bounded concurrency, sharing what earlier batches found."""
+    gate = asyncio.Semaphore(max(1, max_parallel))
+
+    async def one(index: int, text: str) -> ChunkExtractionResult:
+        async with gate:
+            return await extract_from_chunk(
+                chunk_text=text,
+                chunk_index=index,
+                doc_id=doc_id,
+                existing_entities=known_entities or None,
+                model=model,
+                ontology=ontology,
+                limiter=limiter,
+            )
+
+    return list(await asyncio.gather(*(one(i, t) for i, t in items)))
 
 
 async def extract_from_document(
     chunks: list[str],
     doc_id: str,
     filename: str,
-    model: str = "claude-sonnet-4-5-20250929",
-    ontology: dict | None = None,
+    model: str = DEFAULT_COGNIFY_MODEL,
+    ontology: dict | BoundOntology | None = None,
+    limiter: CallLimiter | None = None,
+    max_parallel: int = 4,
 ) -> DocumentExtractionResult:
     """Extract entities and relationships from all chunks of a document."""
     result = DocumentExtractionResult(doc_id=doc_id, filename=filename)
     known_entities: list[str] = []
+    items = [(i, c) for i, c in enumerate(chunks) if c.strip()]
+    step = max(1, max_parallel)
 
-    for i, chunk in enumerate(chunks):
-        if not chunk.strip():
-            continue
-
-        chunk_result = await extract_from_chunk(
-            chunk_text=chunk,
-            chunk_index=i,
-            doc_id=doc_id,
-            existing_entities=known_entities if known_entities else None,
+    for start in range(0, len(items), step):
+        for chunk_result in await extract_chunks(
+            items[start : start + step],
+            doc_id,
+            known_entities=known_entities,
             model=model,
             ontology=ontology,
-        )
+            limiter=limiter,
+            max_parallel=max_parallel,
+        ):
+            result.entities.extend(chunk_result.entities)
+            result.relationships.extend(chunk_result.relationships)
+            result.total_tokens += chunk_result.tokens_used
+            result.total_cost += chunk_result.cost
+            result.chunks_processed += 1
+            result.chunks_failed += 1 if chunk_result.error else 0
 
-        result.entities.extend(chunk_result.entities)
-        result.relationships.extend(chunk_result.relationships)
-        result.total_tokens += chunk_result.tokens_used
-        result.total_cost += chunk_result.cost
-        result.chunks_processed += 1
-
-        # Accumulate entity names for context in later chunks
-        for e in chunk_result.entities:
-            if e.name not in known_entities:
-                known_entities.append(e.name)
+            # Accumulate entity names for context in later chunks
+            for e in chunk_result.entities:
+                if e.name not in known_entities:
+                    known_entities.append(e.name)
 
     logger.info(
         "Document %s (%s): extracted %d entities, %d relationships from %d chunks",

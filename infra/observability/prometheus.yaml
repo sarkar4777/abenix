@@ -111,6 +111,25 @@ data:
           - target_label: app
             replacement: abenix-agent-runtime
 
+      # Knowledge workers have no Service, so pods are found by their metrics port.
+      - job_name: abenix-knowledge-workers
+        metrics_path: /metrics
+        kubernetes_sd_configs:
+          - role: pod
+            namespaces:
+              names: [abenix]
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_container_port_name]
+            action: keep
+            regex: metrics
+          - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_name, __meta_kubernetes_pod_label_app_kubernetes_io_component]
+            action: keep
+            regex: worker;.*|.*;cognify-worker
+          - source_labels: [__meta_kubernetes_pod_name]
+            target_label: pod
+          - target_label: app
+            replacement: abenix-knowledge-worker
+
       # Warm code runners, one Deployment per tenant and asset version.
       # KEDA reads abenix_coderunner_load from here to scale each one.
       - job_name: abenix-code-runners

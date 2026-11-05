@@ -359,7 +359,8 @@ See [00-agent-execution](00-agent-execution.md#tool-dispatch).
 | Tool | Does | Tier | Keys |
 |---|---|---|---|
 | `atlas_as_of` | The Atlas graph as it stood at a past moment, from the newest snapshot at or before it | | |
-| `atlas_describe` | Summary of an Atlas graph, counts per kind and the most connected concepts | | |
+| `atlas_describe` | Summary of an Atlas graph, counts per kind, the most connected concepts and entity counts from the bound collection | | |
+| `atlas_instances` | The real entities behind an Atlas concept, read from Neo4j | | |
 | `atlas_query` | Find Atlas nodes by label pattern and kind | | |
 | `atlas_search_grounded` | KB documents linked to concepts near a term | | |
 | `atlas_traverse` | One-hop neighbourhood of a node | | |
@@ -530,7 +531,7 @@ Read watched sources and their changes. See [17-source-watch](17-source-watch.md
 
 ## Atlas tool cookbook
 
-The five Atlas tools live in [`atlas_tools.py`](../../apps/agent-runtime/engine/tools/atlas_tools.py): `atlas_query`, `atlas_traverse`, `atlas_search_grounded`, `atlas_describe` and `atlas_as_of`. Each is tenant-scoped and, when `model_config.atlas_graphs` is set, limited to those graphs. Where `graph_id` is optional it defaults to the agent's primary atlas.
+The six Atlas tools live in [`atlas_tools.py`](../../apps/agent-runtime/engine/tools/atlas_tools.py), namely `atlas_query`, `atlas_traverse`, `atlas_search_grounded`, `atlas_describe`, `atlas_instances` and `atlas_as_of`. Each is tenant-scoped and, when `model_config.atlas_graphs` is set, limited to those graphs. Where `graph_id` is optional it defaults to the agent's primary atlas.
 
 ### `atlas_describe`, a map of the graph
 
@@ -565,6 +566,10 @@ Pass `label` (exact, case-insensitive) or `node_id`. Returns incoming and outgoi
 ```
 
 Finds KB documents linked as document-kind nodes to concepts near the label. Use it over `knowledge_search` when the answer must be bound to a typed concept rather than lexically similar.
+
+### `atlas_instances`, the entities behind a concept
+
+Reads Neo4j for the collection bound to the graph, with the agent's document ACL applied. Inputs `graph_id`, `concept`, `name`, `neighbours`, `relationship`, `to_concept` and `limit`. `concept` alone lists entities, `name` finds one, `name` with `neighbours` returns what it relates to, and `relationship` or `to_concept` returns typed rows. It fails with a clear message when the graph has no bound collection.
 
 ### `atlas_as_of`, the graph at a point in time
 

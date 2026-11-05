@@ -2,15 +2,24 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from dataclasses import dataclass, field
 from typing import Any
 
-from engine.knowledge.entity_extractor import ExtractedEntity, ExtractedRelationship
+from engine.knowledge.entity_blocking import candidate_groups, name_key
+from engine.knowledge.entity_extractor import (
+    DEFAULT_COGNIFY_MODEL,
+    ExtractedEntity,
+    ExtractedRelationship,
+)
 from engine.knowledge.prompts import ENTITY_RESOLUTION_SYSTEM, ENTITY_RESOLUTION_USER
 
 logger = logging.getLogger(__name__)
+
+AMBIGUOUS_RATIO = 0.7
+MAX_LLM_GROUPS = 40
 
 
 @dataclass
@@ -38,6 +47,7 @@ class ResolvedRelationship:
     source_doc_ids: list[str] = field(default_factory=list)
     weight: float = 1.0
     confidence: float = 1.0
+    atlas_edge_id: str | None = None
 
 
 @dataclass
@@ -101,12 +111,21 @@ def _pick_type(
     return primary
 
 
+def _atlas_properties(group: list[ExtractedEntity]) -> dict[str, Any]:
+    for e in group:
+        concept = getattr(e, "atlas_concept_id", None)
+        if concept:
+            return {"atlas_concept_id": concept}
+    return {}
+
+
 async def resolve_entities(
     raw_entities: list[ExtractedEntity],
     raw_relationships: list[ExtractedRelationship],
     existing_entities: list[dict[str, Any]] | None = None,
-    model: str = "claude-sonnet-4-5-20250929",
+    model: str = DEFAULT_COGNIFY_MODEL,
     conflict_action: str = "flag",
+    llm_resolve: bool = True,
 ) -> ResolutionResult:
     """Resolve (deduplicate) extracted entities and remap relationships.
 
@@ -122,7 +141,7 @@ async def resolve_entities(
 
     name_groups: dict[str, list[ExtractedEntity]] = {}
     for e in raw_entities:
-        key = e.name.strip().lower()
+        key = name_key(e.name) or e.name.strip().lower()
         if key not in name_groups:
             name_groups[key] = []
         name_groups[key].append(e)
@@ -131,12 +150,11 @@ async def resolve_entities(
     existing_map: dict[str, dict[str, Any]] = {}
     if existing_entities:
         for ex in existing_entities:
-            existing_map[ex["canonical_name"].lower()] = ex
+            existing_map[name_key(ex["canonical_name"])] = ex
             for alias in ex.get("aliases") or []:
-                existing_map[alias.lower()] = ex
+                existing_map[name_key(alias)] = ex
 
-    # Group entities whose names are very similar (within edit distance)
-    # For now, use exact-match groups + existing KB matching
+    # Names with the same normalized key are one group, stored entities join by key too
     merged: dict[str, ResolvedEntity] = {}
     name_to_canonical: dict[str, str] = {}
     merges = 0
@@ -203,6 +221,7 @@ async def resolve_entities(
                         ),
                         mention_count=len(members),
                         confidence=max(e.confidence for e in members),
+                        properties=_atlas_properties(members),
                     )
                     variant_links.append((vname, canonical))
                     group = [e for e in group if e.entity_type != other]
@@ -231,6 +250,7 @@ async def resolve_entities(
             if len(description) > len(existing.description):
                 existing.description = description
             existing.confidence = max(existing.confidence, confidence)
+            existing.properties = {**_atlas_properties(chosen), **existing.properties}
             merges += len(group) - 1
         else:
             merged[canonical] = ResolvedEntity(
@@ -241,6 +261,7 @@ async def resolve_entities(
                 source_doc_ids=doc_ids,
                 mention_count=len(group),
                 confidence=confidence,
+                properties=_atlas_properties(chosen),
             )
             if len(group) > 1:
                 merges += len(group) - 1
@@ -254,9 +275,11 @@ async def resolve_entities(
     cost = 0.0
 
     # Only do LLM resolution if there are enough entities to warrant it
-    if len(merged) > 10:
+    if llm_resolve and len(merged) > 10:
         try:
-            ambiguous = _find_ambiguous_groups(list(merged.values()))
+            ambiguous = await asyncio.to_thread(
+                _find_ambiguous_groups, list(merged.values())
+            )
             if ambiguous:
                 llm_result = await _llm_resolve(ambiguous, model)
                 tokens_used = llm_result.get("tokens", 0)
@@ -297,7 +320,10 @@ async def resolve_entities(
         if key in rel_key_map:
             rel_key_map[key].weight += 0.5  # Strengthen repeated relationships
             rel_key_map[key].source_doc_ids = list(
-                set(rel_key_map[key].source_doc_ids + [r.source_doc_id])
+                set(
+                    rel_key_map[key].source_doc_ids
+                    + ([r.source_doc_id] if r.source_doc_id else [])
+                )
             )
             rel_key_map[key].confidence = max(rel_key_map[key].confidence, r.confidence)
         else:
@@ -308,6 +334,7 @@ async def resolve_entities(
                 description=r.description,
                 source_doc_ids=[r.source_doc_id] if r.source_doc_id else [],
                 confidence=r.confidence,
+                atlas_edge_id=getattr(r, "atlas_edge_id", None),
             )
 
     for vname, canonical in variant_links:
@@ -342,32 +369,13 @@ async def resolve_entities(
 def _find_ambiguous_groups(
     entities: list[ResolvedEntity],
 ) -> list[list[ResolvedEntity]]:
-    """Find groups of entities that might be duplicates based on name similarity."""
-    from difflib import SequenceMatcher
-
-    groups: list[list[ResolvedEntity]] = []
-    used = set()
-
-    sorted_entities = sorted(entities, key=lambda e: e.canonical_name.lower())
-    for i, e1 in enumerate(sorted_entities):
-        if e1.canonical_name in used:
-            continue
-        group = [e1]
-        for j in range(i + 1, len(sorted_entities)):
-            e2 = sorted_entities[j]
-            if e2.canonical_name in used:
-                continue
-            ratio = SequenceMatcher(
-                None, e1.canonical_name.lower(), e2.canonical_name.lower()
-            ).ratio()
-            if ratio > 0.7 and e1.entity_type == e2.entity_type:
-                group.append(e2)
-                used.add(e2.canonical_name)
-        if len(group) > 1:
-            groups.append(group)
-            used.add(e1.canonical_name)
-
-    return groups
+    """Groups of same type entities with close names, found by blocking not by every pair."""
+    by_name = {e.canonical_name: e for e in entities}
+    groups = candidate_groups(
+        ((e.canonical_name, e.entity_type) for e in entities),
+        threshold=AMBIGUOUS_RATIO,
+    )
+    return [[by_name[n] for n in g.names if n in by_name] for g in groups]
 
 
 async def _llm_resolve(
@@ -381,7 +389,7 @@ async def _llm_resolve(
 
     entity_list = []
     descriptions = []
-    for group in ambiguous_groups:
+    for group in ambiguous_groups[:MAX_LLM_GROUPS]:
         for e in group:
             entity_list.append(f"- {e.canonical_name} ({e.entity_type})")
             if e.description:

@@ -96,6 +96,19 @@ CATALOGUE: dict[str, JobInfo] = {
             sharing="claim",
         ),
         JobInfo(
+            "knowledge_ops",
+            "Knowledge connectors and long jobs",
+            "Starts connector syncs that are due and picks up collection deletes, re-embeds and syncs whose worker went away.",
+            "Without it a connector never refreshes and a crashed delete never finishes.",
+            "Runs and schedules",
+            {
+                "synced": "connector sync started|connector syncs started",
+                "resumed": "stuck job resumed|stuck jobs resumed",
+            },
+            "No connector was due.",
+            sharing="claim",
+        ),
+        JobInfo(
             "announce_finished_runs",
             "Run notifications",
             "Tells people when a run they started on a runtime pool finished or failed, in the bell, Slack and email.",

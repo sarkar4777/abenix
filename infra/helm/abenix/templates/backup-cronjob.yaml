@@ -1,5 +1,9 @@
 {{- if .Values.backup.enabled | default false }}
-{{- $s3 := eq (.Values.objectStorage.type | default "local") "s3" }}
+{{- $s3 := eq (include "abenix.backup.target" .) "s3" }}
+{{- $azure := eq (include "abenix.backup.target" .) "azure" }}
+{{- $remote := or $s3 $azure }}
+{{- $strategy := (dig "postgres" "strategy" "dump" (.Values.backup | toYaml | fromYaml)) }}
+{{- if eq $strategy "dump" }}
 {{- $pvc := .Values.backup.persistentVolume.enabled | default false }}
 {{- $pgRtImg := index .Values "agent-runtime" "image" }}
 apiVersion: batch/v1
@@ -17,7 +21,7 @@ spec:
   jobTemplate:
     spec:
       backoffLimit: 2
-      activeDeadlineSeconds: 3600
+      activeDeadlineSeconds: {{ .Values.backup.activeDeadlineSeconds | default 3600 }}
       template:
         metadata:
           labels:
@@ -26,7 +30,7 @@ spec:
             app.kubernetes.io/component: backup
         spec:
           restartPolicy: OnFailure
-          {{- if $s3 }}
+          {{- if $remote }}
           # postgres:16-alpine has no aws cli, so the dump runs first and a
           # python image that already ships boto3 uploads it
           initContainers:
@@ -55,7 +59,7 @@ spec:
                     --no-owner \
                     --no-privileges \
                     --format=custom \
-                    --compress=9 \
+                    --compress={{ .Values.backup.compress | default 6 }} \
                     -f /backup/${BACKUP_FILE}.part
                   mv /backup/${BACKUP_FILE}.part /backup/${BACKUP_FILE}
                   chmod 644 /backup/${BACKUP_FILE}
@@ -64,7 +68,7 @@ spec:
 
                   # Keep 7 daily in the volume
                   ls -1t /backup/abenix-pg-*.dump 2>/dev/null | tail -n +8 | xargs rm -f 2>/dev/null || true
-                  {{- if $s3 }}
+                  {{- if $remote }}
                   echo "${BACKUP_FILE}" > /backup/.latest
                   chmod 644 /backup/.latest
                   {{- else }}
@@ -89,12 +93,36 @@ spec:
                 - name: backup-data
                   mountPath: /backup
               resources:
+                {{- toYaml .Values.backup.resources | nindent 16 }}
+          {{- if $azure }}
+          containers:
+            - name: azure-upload
+              image: "{{ .Values.backup.uploaderImage | default (printf "%s:%s" $pgRtImg.repository ($pgRtImg.tag | toString)) }}"
+              imagePullPolicy: {{ $pgRtImg.pullPolicy | default "IfNotPresent" }}
+              command: ["sh", "-c"]
+              args:
+                - |
+                  set -e
+                  NAME=$(cat /backup/.latest)
+                  python3 /scripts/backup_store.py put "/backup/$NAME" "backups/daily/$NAME"
+                  python3 /scripts/backup_store.py prune backups/daily 7
+              env:
+                {{- include "abenix.backup.storeEnv" . | nindent 16 }}
+              volumeMounts:
+                - name: backup-data
+                  mountPath: /backup
+                  readOnly: true
+                - name: backup-scripts
+                  mountPath: /scripts
+                  readOnly: true
+              resources:
                 requests:
                   cpu: 100m
-                  memory: 256Mi
+                  memory: 128Mi
                 limits:
                   cpu: 500m
                   memory: 512Mi
+          {{- end }}
           {{- if $s3 }}
           containers:
             - name: s3-upload
@@ -178,16 +206,22 @@ spec:
                 claimName: {{ include "abenix.fullname" . }}-backup
               {{- else }}
               emptyDir:
-                sizeLimit: 5Gi
+                sizeLimit: {{ .Values.backup.scratchSize | default "5Gi" }}
               {{- end }}
+            {{- if $azure }}
+            - name: backup-scripts
+              configMap:
+                name: {{ include "abenix.fullname" . }}-backup-scripts
+            {{- end }}
 ---
+{{- end }}
 {{- if .Values.backup.neo4j.enabled | default false }}
 {{- $rtImg := index .Values "agent-runtime" "image" }}
 {{- $db := .Values.neo4j.database | default "neo4j" }}
 # The chart runs Neo4j Community, which has no online backup and only dumps a
 # stopped database. This job streams an APOC Cypher export over Bolt instead,
 # so it needs no access to the Neo4j data volume and no downtime.
-# Restore: gunzip -c FILE | cypher-shell -u neo4j -p PASSWORD -d {{ $db }}
+# Restore: files/restore-neo4j.sh, proved by scripts/backup/restore-drill.sh neo4j-docker
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -203,7 +237,7 @@ spec:
   jobTemplate:
     spec:
       backoffLimit: 2
-      activeDeadlineSeconds: 3600
+      activeDeadlineSeconds: {{ .Values.backup.neo4j.activeDeadlineSeconds | default 3600 }}
       template:
         metadata:
           labels:
@@ -221,44 +255,7 @@ spec:
               # the runtime image already carries python and the neo4j driver
               image: "{{ .Values.backup.neo4j.image | default (printf "%s:%s" $rtImg.repository ($rtImg.tag | toString)) }}"
               imagePullPolicy: {{ $rtImg.pullPolicy | default "IfNotPresent" }}
-              command: ["python3", "-c"]
-              args:
-                - |
-                  import datetime, glob, gzip, os
-                  from neo4j import GraphDatabase
-
-                  keep = int(os.environ["KEEP"])
-                  out_dir = "/backup/neo4j"
-                  os.makedirs(out_dir, exist_ok=True)
-                  stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d-%H%M%S")
-                  path = f"{out_dir}/abenix-neo4j-{stamp}.cypher.gz"
-                  query = (
-                      "CALL apoc.export.cypher.all(null, {stream: true, format: 'cypher-shell', "
-                      "useOptimizations: {type: 'UNWIND_BATCH', unwindBatchSize: 500}, batchSize: 5000}) "
-                      "YIELD nodes, relationships, cypherStatements "
-                      "RETURN nodes, relationships, cypherStatements"
-                  )
-                  print(f"[backup] Neo4j export starting at {stamp}", flush=True)
-                  drv = GraphDatabase.driver(
-                      os.environ["NEO4J_URI"],
-                      auth=(os.environ["NEO4J_USER"], os.environ["NEO4J_PASSWORD"]),
-                  )
-                  nodes = rels = 0
-                  try:
-                      with drv.session(database=os.environ["NEO4J_DATABASE"]) as s, gzip.open(path + ".part", "wt", encoding="utf-8") as f:
-                          for rec in s.run(query):
-                              nodes = max(nodes, rec["nodes"] or 0)
-                              rels = max(rels, rec["relationships"] or 0)
-                              if rec["cypherStatements"]:
-                                  f.write(rec["cypherStatements"])
-                  finally:
-                      drv.close()
-                  os.replace(path + ".part", path)
-                  print(f"[backup] wrote {path}, {nodes} nodes, {rels} relationships, {os.path.getsize(path)} bytes", flush=True)
-                  for old in sorted(glob.glob(f"{out_dir}/abenix-neo4j-*.cypher.gz"))[:-keep]:
-                      os.remove(old)
-                  for part in glob.glob(f"{out_dir}/*.part"):
-                      os.remove(part)
+              command: ["python3", "/scripts/neo4j_backup.py"]
               env:
                 - name: NEO4J_URI
                   value: "bolt://{{ .Release.Name }}-neo4j:7687"
@@ -273,16 +270,17 @@ spec:
                       key: {{ .Values.neo4j.auth.existingSecretPasswordKey | default "neo4j-password" }}
                 - name: KEEP
                   value: {{ .Values.backup.neo4j.keep | default 7 | quote }}
+                {{- if $remote }}
+                {{- include "abenix.backup.storeEnv" . | nindent 16 }}
+                {{- end }}
               volumeMounts:
                 - name: backup-data
                   mountPath: /backup
+                - name: backup-scripts
+                  mountPath: /scripts
+                  readOnly: true
               resources:
-                requests:
-                  cpu: 100m
-                  memory: 256Mi
-                limits:
-                  cpu: 500m
-                  memory: 1Gi
+                {{- toYaml .Values.backup.neo4j.resources | nindent 16 }}
           volumes:
             - name: backup-data
               {{- if .Values.backup.persistentVolume.enabled | default false }}
@@ -290,7 +288,10 @@ spec:
                 claimName: {{ include "abenix.fullname" . }}-backup
               {{- else }}
               emptyDir:
-                sizeLimit: 5Gi
+                sizeLimit: {{ .Values.backup.neo4j.scratchSize | default "5Gi" }}
               {{- end }}
+            - name: backup-scripts
+              configMap:
+                name: {{ include "abenix.fullname" . }}-backup-scripts
 {{- end }}
 {{- end }}

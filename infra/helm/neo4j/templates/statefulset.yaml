@@ -1,3 +1,4 @@
+{{- include "neo4j.validate" . -}}
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -21,7 +22,7 @@ spec:
         fsGroup: 7474
       containers:
         - name: neo4j
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          image: "{{ include "neo4j.image" . }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:
             - name: bolt
@@ -50,6 +51,16 @@ spec:
               value: {{ .Values.jvm.heap.max | default "1g" | quote }}
             - name: NEO4J_server_memory_pagecache_size
               value: {{ .Values.jvm.pagecache | default "512m" | quote }}
+            - name: NEO4J_db_transaction_timeout
+              value: {{ (.Values.transaction | default dict).timeout | default "300s" | quote }}
+            {{- with (.Values.transaction | default dict).maxMemory }}
+            - name: NEO4J_db_memory_transaction_max
+              value: {{ . | quote }}
+            {{- end }}
+            {{- if eq (.Values.edition | default "community") "enterprise" }}
+            - name: NEO4J_ACCEPT_LICENSE_AGREEMENT
+              value: "yes"
+            {{- end }}
             - name: NEO4J_PLUGINS
               value: '["apoc"]'
             - name: NEO4J_dbms_security_procedures_unrestricted

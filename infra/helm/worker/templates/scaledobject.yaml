@@ -1,0 +1,37 @@
+{{- if and .Values.autoscaling.enabled (eq (.Values.autoscaling.kind | default "hpa") "keda") }}
+{{- $keda := .Values.autoscaling.keda | default dict }}
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: {{ include "worker.fullname" . }}-redis
+  labels:
+    {{- include "worker.labels" . | nindent 4 }}
+spec:
+  secretTargetRef:
+    - parameter: password
+      name: {{ $keda.passwordSecret | default "abenix-secrets" }}
+      key: {{ $keda.passwordKey | default "redis-password" }}
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: {{ include "worker.fullname" . }}
+  labels:
+    {{- include "worker.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    name: {{ include "worker.fullname" . }}
+  minReplicaCount: {{ .Values.autoscaling.minReplicas }}
+  maxReplicaCount: {{ .Values.autoscaling.maxReplicas }}
+  pollingInterval: {{ $keda.pollingInterval | default 15 }}
+  cooldownPeriod: {{ $keda.cooldownPeriod | default 300 }}
+  triggers:
+    - type: redis
+      metadata:
+        address: {{ .Release.Name }}-redis-master:6379
+        listName: documents
+        listLength: {{ $keda.listLength | default "10" | quote }}
+        databaseIndex: {{ $keda.databaseIndex | default "0" | quote }}
+      authenticationRef:
+        name: {{ include "worker.fullname" . }}-redis
+{{- end }}

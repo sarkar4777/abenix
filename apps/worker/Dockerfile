@@ -10,18 +10,21 @@ c=tomllib.load(open('/tmp/runtime.toml','rb'))['project']['dependencies']; \
 f=open('/tmp/req.txt','w'); \
 [f.write(d+chr(10)) for d in sorted(set(a+b+c))]" && \
     pip install --no-cache-dir --upgrade pip setuptools && \
-    pip install --no-cache-dir -r /tmp/req.txt
+    pip install --no-cache-dir -r /tmp/req.txt && \
+    mkdir -p /usr/local/share/nltk_data && NLTK_DATA=/usr/local/share/nltk_data python3 -c "from unstructured.partition.text import partition_text; print(partition_text(text=chr(72)+chr(105)+chr(46)+chr(32)+chr(72)+chr(105)+chr(46)))"
 
 FROM python:3.12-slim
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    NLTK_DATA=/usr/local/share/nltk_data
 # procps: pgrep for readiness probes. netcat-openbsd: `nc` for the
 # wait-for-postgres / wait-for-redis init containers. python:3.12-slim
 # has neither by default → without these the init loop errors
 # "nc: not found" and the pod stays in Init:0/N forever.
+# tesseract, libmagic and pandoc read scanned pages and office formats.
 # pip is upgraded in the deps stage, not here, because this stage's
 # site-packages is wiped and replaced by the deps stage's copy below.
-RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends procps netcat-openbsd && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends procps netcat-openbsd tesseract-ocr tesseract-ocr-eng libmagic1 pandoc && rm -rf /var/lib/apt/lists/*
 RUN adduser --system --uid 1001 appuser
 WORKDIR /app
 # COPY merges into the destination rather than replacing it, so the base
@@ -31,6 +34,7 @@ WORKDIR /app
 RUN rm -rf /usr/local/lib/python3.12/site-packages
 COPY --from=deps /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
 COPY --from=deps /usr/local/bin /usr/local/bin
+COPY --from=deps /usr/local/share/nltk_data /usr/local/share/nltk_data
 COPY apps/worker/ ./apps/worker/
 COPY packages/db/ ./packages/db/
 COPY apps/agent-runtime/ ./apps/agent-runtime/

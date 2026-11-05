@@ -135,7 +135,8 @@ class KnowledgeSearchTool(BaseTool):
                     await session.execute(
                         text(
                             "SELECT id FROM knowledge_collections "
-                            "WHERE id = ANY(:ids) AND tenant_id = :tid"
+                            "WHERE id = ANY(:ids) AND tenant_id = :tid "
+                            "AND deleted_at IS NULL"
                         ).bindparams(ids=uuid_inputs, tid=tenant_uuid)
                     )
                 ).all()

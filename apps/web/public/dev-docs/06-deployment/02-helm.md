@@ -110,8 +110,12 @@ Image repositories and tags are per subchart. The deploy scripts pass them with
 | `networkPolicy.kubeApiServer.cidrs` / `ports` | empty / `[443, 6443, 8443]` | Kubernetes API server addresses the api and runtime pods may reach. Empty adds no rule |
 | `backup.enabled` | `false` | Daily `pg_dump` CronJob, plus the Neo4j APOC export with `backup.neo4j.enabled` |
 | `backup.persistentVolume.enabled` / `storageClass` / `accessMode` / `size` | `false` / empty / `ReadWriteOnce` / `20Gi` | Creates the `<release>-backup` PVC, kept on uninstall. Without it backups land in an `emptyDir`. See [disaster-recovery](disaster-recovery.md#backups) |
+| `backup.postgres.strategy` | `dump` | `physical` adds a streamed base backup and WAL archive, `external` renders no Postgres backup. See [disaster-recovery](disaster-recovery.md#backups) |
+| `backup.target.type` / `azureContainer` | follows `objectStorage.type` / `abenix-backups` | Where backups go, `s3` or `azure` |
+| `backup.activeDeadlineSeconds` / `compress` / `scratchSize` / `resources` | `3600` / `6` / `5Gi` / 500m CPU | Sizing for the dump job |
 | `backup.s3Bucket` / `uploaderImage` | empty / agent-runtime image | With `objectStorage.type: s3`, the bucket the dump is uploaded to (empty uses `objectStorage.bucket`) and the `boto3` image that uploads it. Credentials come from `STORAGE_S3_ACCESS_KEY` / `STORAGE_S3_SECRET_KEY` in `abenix-secrets`, or the pod's cloud role when empty |
 | `backup.neo4j.keep` / `image` | `7` / agent-runtime image | Neo4j exports kept, and the image the export runs in |
+| `backup.neo4j.activeDeadlineSeconds` / `scratchSize` / `resources` | `3600` / `5Gi` / 500m CPU | Sizing for the export |
 | `monitoring.enabled` | `false` | ServiceMonitors for clusters running the Prometheus operator |
 | `alerting.*` | | Alertmanager and webhook settings, see [04-observability](04-observability.md) |
 
@@ -276,6 +280,66 @@ create each app's Secret separately so values are never committed.
 > **Why not Helm for the apps** — independent release cadences. An app fix should not require a platform Helm release.
 
 ---
+
+## Sizing Neo4j
+
+Set these under `neo4j` in your values file.
+
+| Key | Default | What it does |
+|---|---|---|
+| `jvm.heap.initial`, `jvm.heap.max` | `512m`, `1g` | JVM heap, query work and transaction state |
+| `jvm.pagecache` | `512m` | Store files held in memory. A read that misses it goes to disk |
+| `resources.limits.memory` | `2Gi` | Pod limit. Install fails when heap plus page cache plus 256Mi is above it |
+| `persistence.size` | `10Gi` | Volume for the store and transaction logs |
+| `transaction.timeout` | `300s` | Server side limit on any one transaction |
+| `transaction.maxMemory` | unset | Heap one transaction may use, for example `1g` |
+
+Measured with 1,000,000 entities and 200,000 relationships, 1.6 GB of store and index files and 1.1 GB of transaction logs. Plan on about 2 GB of store per million entities, and about 3 GB of volume with the logs.
+
+1. Set the page cache to the store size plus 20% if you can, so reads stay in memory.
+2. Set the heap by concurrent work. 1 to 2 GB for a few users, 4 to 8 GB for many agents at once. Keep initial and max equal in production.
+3. Add 256Mi for the JVM's own memory, and set `resources.limits.memory` to at least the sum.
+4. On a running store, ask Neo4j. It reads the real sizes and prints the three settings.
+
+```bash
+kubectl exec -it <release>-neo4j-0 -- neo4j-admin server memory-recommendation --memory=16g
+```
+
+| Entities | Store | `jvm.heap.max` | `jvm.pagecache` | `limits.memory` | `persistence.size` |
+|---|---|---|---|---|---|
+| 100,000 | about 200 MB | `1g` | `512m` | `2Gi` | `10Gi` |
+| 1,000,000 | about 2 GB | `4g` | `3g` | `8Gi` | `20Gi` |
+| 10,000,000 | about 20 GB | `8g` | `24g` | `40Gi` | `100Gi` |
+| 100,000,000 | about 200 GB | `31g` | `240g` | `300Gi` | `1Ti` |
+
+The 1,000,000 row is measured. The others scale it and have not been run. Keep the heap at or below 31g, the JVM loses compressed pointers above that.
+
+In docker compose set `NEO4J_HEAP_MAX` and `NEO4J_PAGECACHE`.
+
+### Community and Enterprise
+
+The chart runs Community unless told otherwise. What that means, checked against `neo4j:5-community`.
+
+| | Community | Enterprise |
+|---|---|---|
+| Instances | One. There is no clustering, so no failover and no read replicas | Clusters, but this chart does not set one up. Use Neo4j's own Helm charts for that |
+| Databases | One user database. `CREATE DATABASE` is refused, so tenants share a store and are kept apart only by the `kb_id` and `tenant_id` filters in every query | Many, though Abenix does not use more than one |
+| Access control | One administrator. `CREATE ROLE` is refused | Roles and property level security |
+| Backup | No online backup. The chart's export job writes Cypher through the driver, see [disaster-recovery](disaster-recovery.md) | `neo4j-admin database backup` online |
+| Constraints | Uniqueness only, node key constraints are refused. Abenix needs only uniqueness | Node key and existence constraints |
+| License | GPLv3 | Commercial, needs your own license |
+
+A single Community instance is a real limit for an enterprise. If it goes down, graph reads degrade to vector results, Cognify jobs stop and resume, and nothing is lost that the volume keeps. It is not a highly available store.
+
+To run Enterprise on one instance set this, once you hold a license. The chart adds the `-enterprise` image suffix and accepts the license for you.
+
+```yaml
+neo4j:
+  edition: enterprise
+  acceptLicenseAgreement: true
+```
+
+`replicaCount` above 1 fails at install on either edition, because this chart has no cluster discovery.
 
 ## See also
 

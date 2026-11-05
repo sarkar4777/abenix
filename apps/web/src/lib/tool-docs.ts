@@ -165,6 +165,20 @@ export const TOOL_DOCS: Record<string, ToolDoc> = {
       { name: "top_n", type: "integer", required: false, description: "", default: 10, minimum: 1, maximum: 50 },
     ],
   },
+  atlas_instances: {
+    category: "Enterprise",
+    name: "Atlas \u2014 Instances",
+    description: "Read the real entities behind an atlas concept, the instances Cognify extracted from the bound knowledge collection into the graph database. List them by concept, find one by name, or follow a relationship from one concept to another. Use after atlas_describe when the question is about actual things and not the schema.",
+    parameters: [
+      { name: "graph_id", type: "string", required: false, description: "Optional. Defaults to the agent's primary atlas." },
+      { name: "concept", type: "string", required: false, description: "Concept label, for example Counterparty." },
+      { name: "name", type: "string", required: false, description: "Find entities by name or alias, or the start of a neighbourhood." },
+      { name: "neighbours", type: "boolean", required: false, description: "Return what the entity called name relates to.", default: false },
+      { name: "relationship", type: "string", required: false, description: "Only this relationship type, for example SETTLES_VIA." },
+      { name: "to_concept", type: "string", required: false, description: "Follow relationships from concept to this concept." },
+      { name: "limit", type: "integer", required: false, description: "", default: 25, minimum: 1, maximum: 100 },
+    ],
+  },
   atlas_query: {
     category: "Enterprise",
     name: "Atlas \u2014 Pattern Query",

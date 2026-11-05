@@ -13,7 +13,7 @@ import zipfile
 from pathlib import Path
 from typing import Any
 
-from fastapi import Request, APIRouter, Depends, File, Form, UploadFile
+from fastapi import HTTPException, Request, APIRouter, Depends, File, Form, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -134,6 +134,9 @@ def _tgz_to_zip(tgz_path: Path) -> Path:
             zipfile.ZIP_DEFLATED,
         ) as zf,
     ):
+        from engine.archive_guard import check_tar
+
+        check_tar(tar)
         for member in tar.getmembers():
             if not member.isfile():
                 continue
@@ -161,6 +164,9 @@ async def _extract_and_analyze(
     size = zip_path.stat().st_size if zip_path.exists() else 0
     tmp = Path(tempfile.mkdtemp(prefix=f"code-asset-{asset_id[:8]}-"))
     try:
+        from engine.archive_guard import check_zip
+
+        check_zip(str(zip_path))
         with zipfile.ZipFile(zip_path, "r") as z:
             members = z.namelist()
             # Detect whether `first` is genuinely a directory root: every
@@ -362,7 +368,13 @@ async def _save_upload(file: UploadFile) -> Path:
     if _looks_like_tgz(raw_path):
         tgz_path = raw_path.with_suffix(".tgz")
         raw_path.rename(tgz_path)
-        return _tgz_to_zip(tgz_path)
+        from engine.archive_guard import UnsafeArchive
+
+        try:
+            return _tgz_to_zip(tgz_path)
+        except UnsafeArchive as e:
+            tgz_path.unlink(missing_ok=True)
+            raise HTTPException(status_code=400, detail=str(e)) from e
     zip_path = raw_path.with_suffix(".zip")
     raw_path.rename(zip_path)
     return zip_path

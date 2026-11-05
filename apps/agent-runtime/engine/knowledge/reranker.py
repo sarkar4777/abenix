@@ -1,7 +1,7 @@
 """Rerank hybrid-search candidates by relevance to the query.
 
 Providers, picked by RERANKER_PROVIDER or the keys present:
-  - `cohere` (automatic when `COHERE_API_KEY` is set) - `rerank-english-v3.0`
+  - `cohere` (automatic when `COHERE_API_KEY` is set) - follows the collection language
   - `llm`    (only when RERANKER_PROVIDER=llm) - Claude Haiku scores each hit
   - `none`   - passthrough
 
@@ -90,8 +90,14 @@ def provider() -> str:
     return "none"
 
 
+def cohere_model(language: str | None) -> str:
+    return (
+        "rerank-english-v3.0" if language == "english" else "rerank-multilingual-v3.0"
+    )
+
+
 async def _rerank_cohere(
-    query: str, documents: list[str], top_k: int
+    query: str, documents: list[str], top_k: int, language: str | None = None
 ) -> list[tuple[int, float]] | None:
     try:
         import httpx
@@ -105,7 +111,7 @@ async def _rerank_cohere(
             "https://api.cohere.com/v1/rerank",
             headers={"Authorization": f"Bearer {api_key}"},
             json={
-                "model": "rerank-english-v3.0",
+                "model": cohere_model(language),
                 "query": query,
                 "documents": documents,
                 "top_n": min(top_k, len(documents)),
@@ -173,6 +179,7 @@ async def rerank(
     *,
     text_key: str = "content",
     top_k: int = 10,
+    language: str | None = None,
 ) -> list[dict[str, Any]]:
     """Rerank `items` by relevance to `query`. Each item is a dict that
     contains text under `text_key` (and any other fields). Returns the
@@ -185,7 +192,8 @@ async def rerank(
     documents = [str(it.get(text_key, "")) for it in items]
     ranked: list[tuple[int, float]] | None = None
     if chosen == "cohere":
-        ranked = await _rerank_cohere(query, documents, top_k)
+        kwargs = {"language": language} if language else {}
+        ranked = await _rerank_cohere(query, documents, top_k, **kwargs)
     if ranked is None and chosen == "llm":
         ranked = await _rerank_llm(query, documents, top_k)
     if ranked is None:

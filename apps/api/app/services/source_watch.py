@@ -926,6 +926,9 @@ async def ingest_snapshot(
         if kb is None or kb.tenant_id != src.tenant_id:
             return None
         data = kb_text(src, snap).encode("utf-8")
+        from app.services.kb_quota import enforce
+
+        await enforce(db, kb.tenant_id, add_documents=1, add_bytes=len(data))
         doc_id = uuid.uuid4()
         safe = f"{doc_id}.txt"
         try:

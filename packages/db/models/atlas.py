@@ -87,6 +87,10 @@ class AtlasNode(UUIDMixin, TimestampMixin, Base):
     __table_args__ = (
         Index("ix_atlas_nodes_graph_label", "graph_id", "label"),
         Index("ix_atlas_nodes_graph_kind", "graph_id", "kind"),
+        Index("ix_atlas_nodes_graph_position", "graph_id", "position_x", "position_y"),
+        Index("ix_atlas_nodes_graph_updated", "graph_id", "updated_at"),
+        Index("ix_atlas_nodes_graph_document", "graph_id", "document_id"),
+        Index("ix_atlas_nodes_graph_created", "graph_id", "created_at", "id"),
     )
 
     graph_id: Mapped[uuid.UUID] = mapped_column(
@@ -146,6 +150,7 @@ class AtlasEdge(UUIDMixin, TimestampMixin, Base):
         Index("ix_atlas_edges_graph_label", "graph_id", "label"),
         Index("ix_atlas_edges_from", "from_node_id"),
         Index("ix_atlas_edges_to", "to_node_id"),
+        Index("ix_atlas_edges_graph_updated", "graph_id", "updated_at"),
     )
 
     graph_id: Mapped[uuid.UUID] = mapped_column(
@@ -220,3 +225,23 @@ class AtlasSnapshot(UUIDMixin, TimestampMixin, Base):
     auto: Mapped[bool] = mapped_column(Boolean, default=True)
 
     graph: Mapped[AtlasGraph] = relationship(back_populates="snapshots")
+
+
+class AtlasSnapshotRow(Base):
+    """A row as it stood at a graph version. A snapshot only adds the rows that changed."""
+
+    __tablename__ = "atlas_snapshot_rows"
+
+    graph_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("atlas_graphs.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    # n for a node, e for an edge
+    kind: Mapped[str] = mapped_column(String(1), primary_key=True)
+    row_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    version: Mapped[int] = mapped_column(Integer, primary_key=True)
+    deleted: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false", nullable=False
+    )
+    payload: Mapped[dict | None] = mapped_column(JSONB, nullable=True)

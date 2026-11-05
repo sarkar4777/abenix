@@ -7,7 +7,18 @@ import { useAuth } from '@/contexts/AuthContext';
 
 interface ReembedJob {
   job_id?: string;
-  status: 'queued' | 'running' | 'completed' | 'failed' | 'skipped';
+  status:
+    | 'queued'
+    | 'running'
+    | 'pausing'
+    | 'paused'
+    | 'flipping'
+    | 'cleaning'
+    | 'cancelling'
+    | 'cancelled'
+    | 'completed'
+    | 'failed'
+    | 'skipped';
   from_model?: string | null;
   to_model?: string | null;
   documents_total?: number;
@@ -63,7 +74,15 @@ export function EmbeddingModelPanel({ kbId }: { kbId: string }) {
 
   useEffect(() => { load(); }, [load]);
 
-  const active = state?.job?.status === 'queued' || state?.job?.status === 'running';
+  const status = state?.job?.status;
+  const active =
+    status === 'queued' ||
+    status === 'running' ||
+    status === 'pausing' ||
+    status === 'flipping' ||
+    status === 'cleaning' ||
+    status === 'cancelling';
+  const live = active || status === 'paused';
   useEffect(() => {
     if (!active) return;
     const t = setInterval(load, 3000);
@@ -86,6 +105,19 @@ export function EmbeddingModelPanel({ kbId }: { kbId: string }) {
         body: JSON.stringify({ embedding_model: target, dry_run: true }),
       });
       setEstimate(r.data);
+    } catch (e) {
+      setActionError(errorText(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const control = async (action: 'pause' | 'resume' | 'cancel') => {
+    setBusy(true);
+    setActionError(null);
+    try {
+      await apiFetch(`/api/knowledge/${kbId}/reembed/${action}`, { method: 'POST' });
+      await load();
     } catch (e) {
       setActionError(errorText(e));
     } finally {
@@ -149,16 +181,37 @@ export function EmbeddingModelPanel({ kbId }: { kbId: string }) {
             <>
               <p className="text-slate-300 flex items-center gap-2">
                 <Loader2 className="w-3.5 h-3.5 animate-spin text-cyan-400" />
-                Re-embedding to <span className="font-mono">{job.to_model}</span>
-                {job.status === 'queued' ? ', waiting for a worker' : `, ${done} of ${total} documents`}
+                {job.status === 'cleaning'
+                  ? `Switched to ${job.to_model}, removing the old vectors`
+                  : job.status === 'cancelling'
+                    ? 'Cancelling, removing what was staged'
+                    : job.status === 'pausing'
+                      ? 'Pausing after the document in hand'
+                      : job.status === 'queued'
+                        ? `Re-embedding to ${job.to_model}, waiting for a worker`
+                        : `Re-embedding to ${job.to_model}, ${done} of ${total} documents, ${(job.chunks ?? 0).toLocaleString()} chunks`}
               </p>
               {job.status === 'running' && (
                 <div className="h-1.5 bg-slate-800 rounded">
                   <div className="h-1.5 bg-cyan-500 rounded" style={{ width: `${pct}%` }} />
                 </div>
               )}
-              <p className="text-slate-500">Search keeps using the current vectors until every document is done.</p>
+              {job.status !== 'cleaning' && job.status !== 'cancelling' && (
+                <p className="text-slate-500">Search keeps using the current vectors until every document is done, then switches in one step.</p>
+              )}
             </>
+          )}
+          {job.status === 'paused' && (
+            <p className="text-amber-300 flex items-start gap-2" data-testid="reembed-paused">
+              <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+              <span>
+                Paused at {done} of {total} documents. Search still uses the current vectors.
+                {job.error ? ` ${job.error}` : ''}
+              </span>
+            </p>
+          )}
+          {job.status === 'cancelled' && (
+            <p className="text-slate-400">Re-embed to {job.to_model} was cancelled. Nothing changed.</p>
           )}
           {job.status === 'completed' && (
             <p className="text-emerald-300 flex items-center gap-2">
@@ -169,8 +222,30 @@ export function EmbeddingModelPanel({ kbId }: { kbId: string }) {
           {(job.status === 'failed' || job.status === 'skipped') && (
             <p className="text-red-400 flex items-start gap-2">
               <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
-              <span>Re-embed to {job.to_model} did not run to the end: {job.error || job.status}. Nothing was changed.</span>
+              <span>
+                Re-embed to {job.to_model} stopped at {done} of {total} documents. {job.error || job.status}.
+                Search still uses the current vectors. Resume carries on from there.
+              </span>
             </p>
+          )}
+          {isAdmin && (live || job.status === 'failed') && (
+            <div className="flex gap-2">
+              {(job.status === 'queued' || job.status === 'running') && (
+                <button onClick={() => control('pause')} disabled={busy} className="rounded-md bg-slate-700 hover:bg-slate-600 px-3 py-1 text-xs text-white disabled:opacity-50">
+                  Pause
+                </button>
+              )}
+              {(job.status === 'paused' || job.status === 'failed') && (
+                <button onClick={() => control('resume')} disabled={busy} className="rounded-md bg-cyan-600 hover:bg-cyan-500 px-3 py-1 text-xs text-white disabled:opacity-50">
+                  Resume
+                </button>
+              )}
+              {job.status !== 'cleaning' && job.status !== 'cancelling' && (
+                <button onClick={() => control('cancel')} disabled={busy} className="rounded-md bg-slate-800 hover:bg-slate-700 px-3 py-1 text-xs text-slate-300 disabled:opacity-50">
+                  Cancel re-embed
+                </button>
+              )}
+            </div>
           )}
           {job.warning && <p className="text-amber-300">{job.warning}</p>}
         </div>
@@ -183,7 +258,7 @@ export function EmbeddingModelPanel({ kbId }: { kbId: string }) {
             <select
               value={target}
               onChange={(e) => choose(e.target.value)}
-              disabled={busy || active}
+              disabled={busy || live}
               className="mt-1 block w-full max-w-md rounded-md bg-slate-800 border border-slate-700 px-3 py-1.5 text-white text-sm"
             >
               <option value="">Choose a model…</option>

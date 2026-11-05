@@ -3,6 +3,11 @@ image:
   tag: "5.20.0"
   pullPolicy: IfNotPresent
 
+# community or enterprise. Enterprise needs a license and acceptLicenseAgreement.
+# This chart runs one instance either way, clustering needs Neo4j's own chart.
+edition: community
+acceptLicenseAgreement: false
+
 database: neo4j
 
 auth:
@@ -26,12 +31,20 @@ persistence:
   size: 10Gi
   storageClass: ""
 
+# How to size these is in docs/06-deployment/02-helm.md, Sizing Neo4j.
+# heap plus pagecache plus 256Mi must fit inside resources.limits.memory.
 jvm:
   heap:
     initial: 512m
     max: 1g
   pagecache: 512m
 
+# Server side limits on any one transaction. Cognify's own batches stay far below them.
+transaction:
+  timeout: 300s
+  maxMemory: ""
+
+# Community has only one, the template refuses more.
 replicaCount: 1
 
 service:

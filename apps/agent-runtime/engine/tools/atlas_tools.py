@@ -559,6 +559,143 @@ class AtlasSearchGroundedTool(BaseTool):
             )
 
 
+async def _entity_counts(
+    conn: asyncpg.Connection, graph_id: _uuid.UUID
+) -> dict[str, Any] | None:
+    """How many real entities Cognify has found per concept, when a collection is bound."""
+    kb = await conn.fetchval("SELECT kb_id FROM atlas_graphs WHERE id = $1", graph_id)
+    if not kb or not isinstance(kb, _uuid.UUID):
+        return None
+    rows = await conn.fetch(
+        "SELECT coalesce(n.label, e.entity_type) AS concept, count(*) AS c "
+        "FROM graph_entities e LEFT JOIN atlas_nodes n ON n.id = e.atlas_concept_id "
+        "WHERE e.kb_id = $1 GROUP BY 1 ORDER BY c DESC LIMIT 50",
+        kb,
+    )
+    return {
+        "kb_id": str(kb),
+        "entities_by_concept": {r["concept"]: int(r["c"]) for r in rows},
+    }
+
+
+class AtlasInstancesTool(BaseTool):
+    name = "atlas_instances"
+    risk_tier = "low"
+    description = (
+        "Read the real entities behind an atlas concept, the instances Cognify "
+        "extracted from the bound knowledge collection into the graph database. "
+        "List them by concept, find one by name, or follow a relationship from "
+        "one concept to another. Use after atlas_describe when the question is "
+        "about actual things and not the schema."
+    )
+    input_schema: dict[str, Any] = {
+        "type": "object",
+        "properties": {
+            "graph_id": {
+                "type": "string",
+                "description": "Optional. Defaults to the agent's primary atlas.",
+            },
+            "concept": {
+                "type": "string",
+                "description": "Concept label, for example Counterparty.",
+            },
+            "name": {
+                "type": "string",
+                "description": "Find entities by name or alias, or the start of a neighbourhood.",
+            },
+            "neighbours": {
+                "type": "boolean",
+                "description": "Return what the entity called name relates to.",
+                "default": False,
+            },
+            "relationship": {
+                "type": "string",
+                "description": "Only this relationship type, for example SETTLES_VIA.",
+            },
+            "to_concept": {
+                "type": "string",
+                "description": "Follow relationships from concept to this concept.",
+            },
+            "limit": {"type": "integer", "default": 25, "minimum": 1, "maximum": 100},
+        },
+    }
+
+    def __init__(
+        self,
+        tenant_id: str,
+        agent_id: str = "",
+        allowed_graph_ids: list[str] | None = None,
+    ) -> None:
+        self.tenant_id = tenant_id
+        self.agent_id = agent_id
+        self.allowed_graph_ids = allowed_graph_ids or []
+
+    async def execute(self, arguments: dict[str, Any]) -> ToolResult:
+        from engine.knowledge.document_acl import hidden_for_search
+        from engine.knowledge.neo4j_client import (
+            browse_entities,
+            entity_neighbourhood,
+            query_entities,
+        )
+
+        limit = max(1, min(int(arguments.get("limit") or 25), 100))
+        concept = (arguments.get("concept") or "").strip() or None
+        name = (arguments.get("name") or "").strip() or None
+        relationship = (arguments.get("relationship") or "").strip() or None
+        to_concept = (arguments.get("to_concept") or "").strip() or None
+        try:
+            pool = await _pool()
+            async with pool.acquire() as conn:
+                gid = await _resolve_graph_id(
+                    conn,
+                    self.tenant_id,
+                    self.allowed_graph_ids,
+                    arguments.get("graph_id"),
+                )
+                if not gid:
+                    return ToolResult(
+                        content="No accessible atlas graph found.", is_error=True
+                    )
+                kb = await conn.fetchval(
+                    "SELECT kb_id FROM atlas_graphs WHERE id = $1", _uuid.UUID(gid)
+                )
+            if not kb:
+                return ToolResult(
+                    content="This atlas is not bound to a knowledge collection.",
+                    is_error=True,
+                )
+            kb_id = str(kb)
+            hidden = sorted(await hidden_for_search([kb_id], agent_id=self.agent_id))
+            scope = {"tenant_id": self.tenant_id, "limit": limit, "hidden": hidden}
+            if arguments.get("neighbours") and name:
+                out = await entity_neighbourhood(
+                    kb_id, name, relationship=relationship, **scope
+                )
+            elif relationship or to_concept:
+                out = {
+                    "matches": await query_entities(
+                        kb_id,
+                        from_type=concept,
+                        relationship=relationship,
+                        to_type=to_concept,
+                        name=name,
+                        **scope,
+                    )
+                }
+            else:
+                out = await browse_entities(
+                    kb_id, entity_type=concept, query=name, **scope
+                )
+            return ToolResult(
+                content=json.dumps(
+                    {"graph_id": gid, "kb_id": kb_id, **out}, indent=2, default=str
+                )
+            )
+        except Exception as e:
+            logger.warning("atlas_instances failed: %s", e)
+            return ToolResult(content=f"atlas_instances failed: {e}", is_error=True)
+
+
 class AtlasDescribeTool(BaseTool):
     name = "atlas_describe"
     risk_tier = "low"
@@ -622,13 +759,15 @@ class AtlasDescribeTool(BaseTool):
                     top_n,
                 )
                 top_concepts = await conn.fetch(
-                    "SELECT n.label, COUNT(e.id) AS c FROM atlas_nodes n "
-                    "LEFT JOIN atlas_edges e ON (e.from_node_id = n.id OR e.to_node_id = n.id) "
-                    "WHERE n.graph_id = $1 AND n.kind::text = 'concept' "
-                    "GROUP BY n.label ORDER BY c DESC LIMIT $2",
+                    "SELECT n.label, d.c FROM (SELECT id, count(*) AS c FROM ("
+                    "SELECT from_node_id AS id FROM atlas_edges WHERE graph_id = $1 "
+                    "UNION ALL SELECT to_node_id FROM atlas_edges WHERE graph_id = $1"
+                    ") ends GROUP BY id) d JOIN atlas_nodes n ON n.id = d.id "
+                    "WHERE n.kind::text = 'concept' ORDER BY d.c DESC LIMIT $2",
                     gid_uuid,
                     top_n,
                 )
+                entity_counts = await _entity_counts(conn, gid_uuid)
                 return ToolResult(
                     content=json.dumps(
                         {
@@ -650,6 +789,7 @@ class AtlasDescribeTool(BaseTool):
                                 {"label": r["label"], "edges": int(r["c"])}
                                 for r in top_concepts
                             ],
+                            "context_graph": entity_counts,
                         },
                         indent=2,
                     )
@@ -752,6 +892,51 @@ def _shape_as_of(
     }
 
 
+AS_OF_SCAN = 5000
+
+
+async def _snapshot_state(
+    conn: asyncpg.Connection,
+    graph_id: _uuid.UUID,
+    version: int,
+    label_like: str,
+    kind: str,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """The graph at a version, each row's newest change at or before it."""
+    state = (
+        "SELECT DISTINCT ON (row_id) row_id, deleted, payload FROM atlas_snapshot_rows "
+        "WHERE graph_id = $1 AND kind = '{kind}' AND version <= $2 "
+        "ORDER BY row_id, version DESC"
+    )
+    node_rows = await conn.fetch(
+        f"SELECT payload FROM ({state.format(kind='n')}) s WHERE NOT deleted "
+        "AND ($3 = '' OR lower(payload->>'label') LIKE $4) "
+        "AND ($5 = '' OR payload->>'kind' = $5) LIMIT $6",
+        graph_id,
+        version,
+        label_like,
+        f"%{label_like}%",
+        kind,
+        AS_OF_SCAN,
+    )
+    nodes = [_payload(r["payload"]) for r in node_rows]
+    ids = [str(n["id"]) for n in nodes]
+    edge_rows = await conn.fetch(
+        f"SELECT payload FROM ({state.format(kind='e')}) s WHERE NOT deleted "
+        "AND payload->>'from_node_id' = ANY($3) AND payload->>'to_node_id' = ANY($3) "
+        "LIMIT $4",
+        graph_id,
+        version,
+        ids,
+        AS_OF_SCAN,
+    )
+    return nodes, [_payload(r["payload"]) for r in edge_rows]
+
+
+def _payload(value: Any) -> dict[str, Any]:
+    return json.loads(value) if isinstance(value, str) else dict(value or {})
+
+
 class AtlasAsOfTool(BaseTool):
     name = "atlas_as_of"
     risk_tier = "low"
@@ -842,13 +1027,22 @@ class AtlasAsOfTool(BaseTool):
                     node_rows = await conn.fetch(
                         "SELECT id, label, kind::text AS kind, description, "
                         "created_at, valid_from, valid_to FROM atlas_nodes "
-                        "WHERE graph_id = $1",
+                        "WHERE graph_id = $1 AND ($3 = '' OR lower(label) LIKE $4) "
+                        "AND ($5 = '' OR kind::text = $5) LIMIT $2",
                         gid_uuid,
+                        AS_OF_SCAN,
+                        label_like,
+                        f"%{label_like}%",
+                        kind,
                     )
                     edge_rows = await conn.fetch(
                         "SELECT id, from_node_id, to_node_id, label, created_at, "
-                        "valid_from, valid_to FROM atlas_edges WHERE graph_id = $1",
+                        "valid_from, valid_to FROM atlas_edges "
+                        "WHERE graph_id = $1 AND from_node_id = ANY($2) "
+                        "AND to_node_id = ANY($2) LIMIT $3",
                         gid_uuid,
+                        [r["id"] for r in node_rows],
+                        AS_OF_SCAN,
                     )
                     nodes = [dict(r) for r in node_rows if _in_window(dict(r), as_of)]
                     edges = [dict(r) for r in edge_rows if _in_window(dict(r), as_of)]
@@ -879,8 +1073,13 @@ class AtlasAsOfTool(BaseTool):
                     if isinstance(payload, str):
                         payload = json.loads(payload)
                     payload = payload or {}
-                    nodes = list(payload.get("nodes") or [])
-                    edges = list(payload.get("edges") or [])
+                    if payload.get("format") == "diff":
+                        nodes, edges = await _snapshot_state(
+                            conn, gid_uuid, snap["version"], label_like, kind
+                        )
+                    else:
+                        nodes = list(payload.get("nodes") or [])
+                        edges = list(payload.get("edges") or [])
                     out.update(
                         found=True,
                         source="snapshot",
@@ -909,4 +1108,5 @@ ATLAS_TOOL_NAMES = {
     "atlas_search_grounded": AtlasSearchGroundedTool,
     "atlas_describe": AtlasDescribeTool,
     "atlas_as_of": AtlasAsOfTool,
+    "atlas_instances": AtlasInstancesTool,
 }
