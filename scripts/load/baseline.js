@@ -6,6 +6,7 @@
 // Optional env:
 //   EMAIL    (default admin@abenix.dev)
 //   PASSWORD (default Admin123456)
+//   LOGIN_RPS (default 4, a bcrypt check costs about a quarter of a CPU second, so size this to the API)
 
 import http from 'k6/http';
 import { check, sleep } from 'k6';
@@ -24,7 +25,7 @@ export const options = {
     },
     auth_login: {
       executor: 'constant-arrival-rate',
-      rate: 20, timeUnit: '1s', duration: '30s',
+      rate: Number(__ENV.LOGIN_RPS || 4), timeUnit: '1s', duration: '30s',
       preAllocatedVUs: 10, maxVUs: 20,
       startTime: '70s',
       exec: 'authLogin',
@@ -45,15 +46,13 @@ export const options = {
   },
 };
 
-let cachedToken = null;
-function token() {
-  if (cachedToken) return cachedToken;
+// signs in once, a login per VU would land in the list_agents numbers
+export function setup() {
   const r = http.post(`${BASE}/api/auth/login`,
     JSON.stringify({ email: EMAIL, password: PASSWORD }),
     { headers: { 'Content-Type': 'application/json' } },
   );
-  cachedToken = r.json('data.access_token');
-  return cachedToken;
+  return { token: r.json('data.access_token') };
 }
 
 export function healthReady() {
@@ -72,8 +71,8 @@ export function authLogin() {
   });
 }
 
-export function listAgents() {
-  const t = token();
+export function listAgents(data) {
+  const t = data.token;
   const r = http.get(`${BASE}/api/agents`,
     { headers: { Authorization: `Bearer ${t}` } },
   );

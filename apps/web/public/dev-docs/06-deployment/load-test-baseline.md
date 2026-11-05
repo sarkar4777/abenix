@@ -10,7 +10,7 @@ three minutes in all:
 | Surface | Workload | Threshold in the script |
 |---|---|---|
 | `GET /api/health/ready` | 100 req/s for 60s | p99 < 100ms |
-| `POST /api/auth/login` | 20 req/s for 30s, starting at 70s | p95 < 400ms |
+| `POST /api/auth/login` | 4 req/s for 30s, starting at 70s, set by `LOGIN_RPS` | p95 < 400ms |
 | `GET /api/agents` (authed) | 50 req/s for 60s, starting at 110s | p99 < 400ms |
 
 Across all of them `http_req_failed` must stay under 1%. Agent execution is not
@@ -34,13 +34,17 @@ default. Run against a deploy with `IS_LOCAL_DEV=1`, or raise
 
 k6 prints `iteration_duration` percentiles and `http_req_duration` percentiles. If any threshold listed in the script fails, k6 exits non-zero. CI / on-demand operators can pipe this through their alerting.
 
-## Last recorded numbers (single-node minikube, 8 vCPU, 16GB RAM)
+## Last recorded numbers (minikube on one Mac, 14 vCPU, 26GB RAM, one API pod with a 2 CPU limit)
+
+Measured on 5 November 2026 through `kubectl port-forward`, at 4 logins a second.
 
 | Surface | p50 | p95 | p99 | err |
 |---|---|---|---|---|
-| `/health/ready` | 4ms | 12ms | 28ms | 0% |
-| `/auth/login` | 87ms | 142ms | 198ms | 0% |
-| `/agents` | 32ms | 88ms | 134ms | 0% |
+| `/health/ready` | 2ms | 3ms | 32ms | 0% |
+| `/auth/login` | 214ms | 219ms | 226ms | 0% |
+| `/agents` | 5ms | 6ms | 11ms | 0% |
+
+A bcrypt check at cost 12 takes about 170 ms of CPU, so one CPU serves about 6 logins a second. Size `LOGIN_RPS` to the API under test, since a higher rate measures queueing and nothing else. `/health/ready` runs its checks at most once every 2 seconds per process.
 
 These are baseline numbers, not SLAs. They exist so the next person who runs the test can spot "x feature got 3x slower" without having to know the absolute target.
 

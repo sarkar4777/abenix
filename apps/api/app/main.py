@@ -1,5 +1,7 @@
+import asyncio
 import json
 import logging
+import time
 from pathlib import Path as _Path
 from typing import Any
 
@@ -852,8 +854,26 @@ async def _any_llm_provider() -> bool:
     return any((p or {}).get("configured") for p in providers.values())
 
 
+READY_CACHE_SECONDS = 2.0
+_ready_lock = asyncio.Lock()
+_ready_cached: tuple[float, Any] | None = None
+
+
 @app.get("/api/health/ready")
-async def readiness_check() -> dict[str, Any]:
+async def readiness_check() -> Any:
+    # anonymous and each check opens connections, so traffic must not multiply them
+    global _ready_cached
+    if _ready_cached and time.monotonic() - _ready_cached[0] < READY_CACHE_SECONDS:
+        return _ready_cached[1]
+    async with _ready_lock:
+        if _ready_cached and time.monotonic() - _ready_cached[0] < READY_CACHE_SECONDS:
+            return _ready_cached[1]
+        result = await _run_readiness_checks()
+        _ready_cached = (time.monotonic(), result)
+        return result
+
+
+async def _run_readiness_checks() -> Any:
     from app.core.deps import priority_engine as db_engine
 
     checks: dict[str, str] = {}

@@ -795,3 +795,24 @@ def test_only_a_runtime_token_may_raise_an_action_approval():
     assert approvals._refused_gate_kind("action:refund", runtime) is False
     # the runtime gets no other reserved kind
     assert approvals._refused_gate_kind("autonomy.promote", runtime) is True
+
+
+@pytest.mark.asyncio
+async def test_readiness_runs_one_check_for_a_burst_of_callers(monkeypatch):
+    import asyncio
+
+    from app import main
+
+    calls = 0
+
+    async def checks():
+        nonlocal calls
+        calls += 1
+        await asyncio.sleep(0)
+        return {"status": "ok"}
+
+    monkeypatch.setattr(main, "_run_readiness_checks", checks)
+    monkeypatch.setattr(main, "_ready_cached", None)
+    results = await asyncio.gather(*(main.readiness_check() for _ in range(50)))
+    assert calls == 1
+    assert all(r == {"status": "ok"} for r in results)
