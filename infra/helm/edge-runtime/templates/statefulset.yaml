@@ -1,3 +1,4 @@
+{{- include "edge-runtime.validate" . -}}
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -14,12 +15,17 @@ spec:
     metadata:
       labels:
         {{- include "edge-runtime.selectorLabels" . | nindent 8 }}
+      annotations:
+        # the pod reads these at start, a changed token or key rolls it
+        checksum/config: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
     spec:
       terminationGracePeriodSeconds: 30
       securityContext:
         runAsNonRoot: true
         runAsUser: 1001
         fsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
@@ -36,14 +42,37 @@ spec:
         - name: edge-runtime
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
           ports:
             - containerPort: {{ .Values.service.port }}
               protocol: TCP
           env:
             - name: GATEWAY_ID
               value: {{ .Values.gateway_id | quote }}
-            - name: GATEWAY_NAME
+            - name: GATEWAY_edge-runtime
               value: {{ .Values.gateway_name | quote }}
+            - name: EDGE_MODE
+              value: {{ .Values.mode | quote }}
+            {{- if eq .Values.mode "gateway" }}
+            - name: ABENIX_URL
+              value: {{ .Values.platform_url | quote }}
+            - name: ABENIX_ENROLL_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "edge-runtime.fullname" . }}-secret
+                  key: enroll_token
+                  optional: true
+            - name: ABENIX_EDGE_DATA
+              value: /var/lib/abenix-edge
+            {{- if .Values.collectors }}
+            - name: ABENIX_EDGE_COLLECTORS_FILE
+              value: /etc/abenix-edge/collectors.json
+            {{- end }}
+            {{- else }}
             - name: PLATFORM_URL
               value: {{ .Values.platform_url | quote }}
             - name: PLATFORM_TOKEN
@@ -52,6 +81,7 @@ spec:
                   name: {{ include "edge-runtime.fullname" . }}-secret
                   key: platform_token
                   optional: true
+            {{- end }}
             - name: MQTT_URL
               value: {{ .Values.mqtt_url | quote }}
             - name: ENDPOINT_URL
@@ -59,19 +89,52 @@ spec:
             - name: SIGNING_PUBKEY_PATH
               value: /etc/edge/signing_pub.pem
             - name: EDGE_ALLOW_UNSIGNED
-              value: {{ .Values.allow_unsigned | default false | toString | quote }}
+              value: {{ include "edge-runtime.literalTrue" .Values.allow_unsigned | quote }}
+            - name: EDGE_ALLOW_NO_AUTH
+              value: {{ include "edge-runtime.literalTrue" .Values.allow_no_auth | quote }}
+            - name: EDGE_ENABLE_CODE_EXECUTOR
+              value: {{ include "edge-runtime.literalTrue" .Values.code_executor_enabled | quote }}
             - name: TENANT_ID
               value: {{ .Values.tenant_id | default "" | quote }}
-            - name: BUNDLE_DIR
-              value: /var/edge/agents
-            - name: ANTHROPIC_API_KEY
+            - name: EDGE_AUTH_TOKEN
               valueFrom:
                 secretKeyRef:
                   name: {{ include "edge-runtime.fullname" . }}-secret
+                  key: auth_token
+            - name: BUNDLE_DIR
+              value: {{ if eq .Values.mode "gateway" }}/var/lib/abenix-edge/agents{{ else }}/var/edge/agents{{ end }}
+            {{- $llm := .Values.existing_llm_secret }}
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  {{- if and $llm.name $llm.api_key_key }}
+                  name: {{ $llm.name }}
+                  key: {{ $llm.api_key_key }}
+                  {{- else }}
+                  name: {{ include "edge-runtime.fullname" . }}-secret
                   key: anthropic_api_key
+                  {{- end }}
                   optional: true
+            - name: ANTHROPIC_AUTH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  {{- if and $llm.name $llm.auth_token_key }}
+                  name: {{ $llm.name }}
+                  key: {{ $llm.auth_token_key }}
+                  {{- else }}
+                  name: {{ include "edge-runtime.fullname" . }}-secret
+                  key: anthropic_auth_token
+                  {{- end }}
+                  optional: true
+            {{- with .Values.anthropic_base_url }}
+            - name: ANTHROPIC_BASE_URL
+              value: {{ . | quote }}
+            {{- end }}
             - name: PORT
               value: "{{ .Values.service.port }}"
+            {{- with .Values.extra_env }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
           startupProbe:
             httpGet:
               path: /health
@@ -94,11 +157,29 @@ spec:
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           volumeMounts:
+            {{- if eq .Values.mode "gateway" }}
+            - name: data
+              mountPath: /var/lib/abenix-edge
+            {{- else }}
             - name: bundles
               mountPath: /var/edge/agents
+            {{- end }}
             - name: signing
               mountPath: /etc/edge
               readOnly: true
+            - name: tmp
+              mountPath: /tmp
+            {{- if and (eq .Values.mode "gateway") .Values.collectors }}
+            - name: local-collectors
+              mountPath: /etc/abenix-edge
+              readOnly: true
+            {{- end }}
+            {{- with .Values.extra_volume_mounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+        {{- with .Values.extra_containers }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
       volumes:
         - name: signing
           secret:
@@ -107,10 +188,27 @@ spec:
               - key: signing_pubkey
                 path: signing_pub.pem
             optional: true
+        - name: tmp
+          emptyDir: {}
+        {{- if and (eq .Values.mode "gateway") .Values.collectors }}
+        - name: local-collectors
+          secret:
+            secretName: {{ include "edge-runtime.fullname" . }}-secret
+            items:
+              - key: collectors.json
+                path: collectors.json
+        {{- end }}
+        {{- if not .Values.persistence.enabled }}
+        - name: {{ if eq .Values.mode "gateway" }}data{{ else }}bundles{{ end }}
+          emptyDir: {}
+        {{- end }}
+        {{- with .Values.extra_volumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
   {{- if .Values.persistence.enabled }}
   volumeClaimTemplates:
     - metadata:
-        name: bundles
+        name: {{ if eq .Values.mode "gateway" }}data{{ else }}bundles{{ end }}
       spec:
         accessModes: [ "{{ .Values.persistence.accessMode }}" ]
         {{- if .Values.persistence.storageClass }}
@@ -119,7 +217,4 @@ spec:
         resources:
           requests:
             storage: {{ .Values.persistence.size }}
-  {{- else }}
-      - name: bundles
-        emptyDir: {}
   {{- end }}

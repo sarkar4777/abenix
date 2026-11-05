@@ -7,6 +7,7 @@ import gzip
 import json
 import os
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -145,17 +146,19 @@ def test_enrol_collect_cut_and_backfill(
     fake = FakeAbenix(_config(tmp_path))
     gw = _gateway(tmp_path, fake, monkeypatch)
     log = tmp_path / "plc.csv"
+    # fresh stamps, a fixed date falls past the buffer's 72 h age limit and gets dropped
+    t0 = int(time.time() * 1000)
 
     async def scenario() -> int:
         run = asyncio.create_task(gw.run())
         for i in range(6):
             with log.open("a") as f:
-                f.write(f"{1791720000000 + i * 1000},{20 + i}\n")
+                f.write(f"{t0 + i * 1000},{20 + i}\n")
             await asyncio.sleep(0.25)
         fake.down = True
         for i in range(6, 14):
             with log.open("a") as f:
-                f.write(f"{1791720000000 + i * 1000},{20 + i}\n")
+                f.write(f"{t0 + i * 1000},{20 + i}\n")
             await asyncio.sleep(0.25)
         backlog = gw.buffer.stats()["depth"]
         fake.down = False

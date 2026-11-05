@@ -1,10 +1,14 @@
 # edge-runtime-rust
 
-Rust port of `apps/edge-runtime/runtime.py`. Behaviour-identical to the Python
-runtime: registers with the platform every 60s, subscribes to
-`edge.{gateway_id}.deploy` over MQTT, verifies RSA-PSS signatures over `.agent`
-bundles, extracts to `/var/edge/agents/{slug}/`, and serves `/health`,
-`/agents`, `/agents/{slug}/bundle`, `/agents/{slug}/execute` on port 8080.
+Rust port of `apps/edge-runtime/runtime.py`. It registers with the platform every
+60 s, subscribes to `edge/{gateway_id}/deploy/+` over MQTT at QoS 1, verifies
+RSA-PSS signatures over `.agent` bundles, swaps them into
+`/var/edge/agents/{slug}/`, and serves `/health`, `/agents`,
+`/agents/{slug}/bundle` and `/agents/{slug}/execute` on port 8080, the last two
+behind `EDGE_AUTH_TOKEN`. An agent makes one model call and returns the text,
+there is no tool loop. It has no gateway mode. It refuses to start without a
+signing key and a token, see
+[the deployment guide](../../docs/06-deployment/05-edge-runtime.md).
 
 ## Why a Rust port
 
@@ -36,20 +40,17 @@ cd apps/edge-runtime-rust
 cargo test
 ```
 
-Two integration tests cover the main paths:
-- `boots_loads_executes` — boots the HTTP server, signs and pushes a bundle,
-  asserts `/agents/{slug}/execute` returns the expected echo response (no
-  Anthropic key in the test env, runtime stubs the call).
-- `invalid_signature_rejected` — signs a bundle with a key that does not
-  match the configured pubkey and asserts `install_bundle` errors.
+`tests/smoke.rs` covers the HTTP server and its token, signatures, tenant pinning,
+unsafe slugs and tar entries, the saved bundle on restart, `params.code` and
+`max_runtime_seconds`. The image is 83 MB and the binary 3.2 MB on arm64.
 
 ## Docker
 
 ```
-docker build -t agentforge/edge-runtime-rust:1.1.0 apps/edge-runtime-rust
+docker build -t localhost:5000/abenix/edge-runtime-rust:latest apps/edge-runtime-rust
 ```
 
-The Dockerfile is a two-stage build: `rust:1.83-alpine` builder, `alpine:3.20`
+The Dockerfile is a two-stage build: `rust:1.90-alpine` builder, `alpine:3.20`
 runtime with `python3` (for the `code_executor` tool) and `ca-certificates`
 only.
 
@@ -68,8 +69,8 @@ the toolchain with `rustup target add <triple>`.
 
 The matching chart lives at `infra/helm/edge-runtime-rust/`. Same value shape
 as the Python chart (`gateway_id`, `platform_url`, `platform_token`, `mqtt_url`,
-`signing_pubkey`, `anthropic_api_key`, `endpoint_url`); image repository
-defaults to `agentforge/edge-runtime-rust:1.1.0`.
+`signing_pubkey`, `auth_token`, `anthropic_api_key`, `endpoint_url`). It has no gateway mode. Image repository
+defaults to `localhost:5000/abenix/edge-runtime-rust:latest`.
 
 To deploy the Rust variant via the existing scripts:
 
@@ -85,16 +86,6 @@ EDGE_RUNTIME_ALL_VARIANTS=true ./scripts/deploy.sh local
 
 ## Binary size
 
-In release mode with strip + LTO:
-
-| target | typical size |
-|---|---|
-| musl x86_64 | ~7-9 MiB |
-| musl aarch64 | ~7-9 MiB |
-| docker image (alpine + python3) | ~25 MiB total |
-
-Actual measurements depend on the rust toolchain version and dependency tree.
-Run `scripts/build-edge-rust.sh` to print the exact bytes for the local
-toolchain. Cargo + Docker are not available in the dev sandbox where this
-port was written, so the binary size above is the design target — recorded
-on first plant build.
+Measured on a local arm64 build, the binary is 3.2 MB and the image with `python3` is
+83 MB. Idle with no agent it holds 1.5 MiB. Run `scripts/build-edge-rust.sh` to print
+the bytes for your own toolchain.

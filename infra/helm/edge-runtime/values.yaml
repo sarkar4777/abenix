@@ -1,38 +1,65 @@
-# Identity — one StatefulSet per gateway.
+# legacy runs agent bundles only. gateway runs Abenix Edge with enrolment, collectors and store and forward.
+mode: legacy
+
+# Identity, one StatefulSet per gateway. Gateway mode takes its id from the enrolment.
 gateway_id: edge-local
 gateway_name: edge-local
 
 # Where this pod calls home.
-platform_url: "http://api.abenix.svc.cluster.local:8000"
+platform_url: "http://abenix-api.abenix.svc.cluster.local:8000"
+# Legacy mode, an API key from POST /api/edge/tokens/mint. Without it the gateway does not register.
 platform_token: ""
 
-# Optional MQTT broker. Empty disables the subscriber and falls back to
-# HTTP push from the platform.
+# Gateway mode, the one-time etk_ token from the install step on the Edge page, only needed for the first start.
+enroll_token: ""
+# Gateway mode, collectors set on this box as a list of specs, added to those from the platform.
+# They sit in the chart's Secret because a spec can hold a password.
+collectors: []
+
+# MQTT broker for over the air bundles, mqtt://user:password@host:1883. Empty turns the subscriber off.
 mqtt_url: ""
 
-# RSA-PSS public key (PEM) the gateway uses to verify `.agent` signatures.
-# Required unless allow_unsigned is true, the pod refuses to start without it.
-# Fetch it from GET /api/edge/signing-key on the platform.
+# RSA-PSS public key (PEM) that verifies bundle signatures. Fetch it from GET /api/edge/signing-key.
+# Required unless allow_unsigned is true, the chart and the pod refuse to run without it.
+# Gateway mode gets it from the enrolment, so it is optional there.
 signing_pubkey: ""
 
 # Only the literal true opens the unsigned path. Local development only.
 allow_unsigned: false
 
-# Pin this gateway to one platform tenant. Bundles whose manifest tenant_id
-# differs are refused and logged. Empty accepts any tenant.
+# Pin this gateway to one platform tenant. Bundles for another tenant are refused. Empty accepts any tenant.
 tenant_id: ""
 
-# Inference fall-back — Anthropic API key used when the bundle has no
-# local model_weights/. Phase-2 will plumb a distilled local model.
-anthropic_api_key: ""
+# Bearer token for bundle install and execute, /health stays open.
+# Empty makes one on first install and keeps it across upgrades. Change it here to rotate, the pod restarts.
+auth_token: ""
+# Only the literal true turns the token check off. Local development only.
+allow_no_auth: false
 
-# Optional ingress endpoint exposed back to the platform so the platform
-# can proxy /agents calls (deploy + observe). Leave empty for offline.
+# Lets params.code run for agents that list code_executor, with a scrubbed environment and a 5 s limit.
+code_executor_enabled: false
+
+# The model call. An API key, or a Claude subscription token, or a Secret that already holds them.
+anthropic_api_key: ""
+anthropic_auth_token: ""
+existing_llm_secret:
+  name: ""
+  api_key_key: ""
+  auth_token_key: ""
+# Point this at an Anthropic compatible server on the site network to run without the internet.
+anthropic_base_url: ""
+
+# The address the platform can reach this gateway on, for HTTP push and the agents list. Empty means MQTT only.
 endpoint_url: ""
 
+extra_env: []
+extra_volumes: []
+extra_volume_mounts: []
+extra_containers: []
+
 image:
-  repository: agentforge/edge-runtime
-  tag: "1.1.0"
+  repository: localhost:5000/abenix/edge-runtime
+  tag: "latest"
   pullPolicy: IfNotPresent
 
 service:

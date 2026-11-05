@@ -13,13 +13,15 @@ void registry_init(edge_registry_t *r)
     pthread_mutex_init(&r->mu, NULL);
 }
 
-edge_agent_t *registry_get(edge_registry_t *r, const char *slug)
+/* copies under the lock, an install can overwrite the slot while a request runs */
+int registry_get(edge_registry_t *r, const char *slug, edge_agent_t *out)
 {
-    edge_agent_t *found = NULL;
+    int found = 0;
     pthread_mutex_lock(&r->mu);
     for (int i = 0; i < r->count; i++) {
         if (strcmp(r->agents[i].slug, slug) == 0) {
-            found = &r->agents[i];
+            if (out) *out = r->agents[i];
+            found = 1;
             break;
         }
     }
@@ -54,48 +56,33 @@ int registry_count(edge_registry_t *r)
     return n;
 }
 
+/* the saved bundle goes through the full install, so a tampered volume stays out */
 void registry_reload_from_disk(edge_registry_t *r, const edge_config_t *cfg)
 {
     DIR *d = opendir(cfg->bundle_dir);
     if (!d) return;
     struct dirent *de;
     while ((de = readdir(d)) != NULL) {
-        if (de->d_name[0] == '.') continue;
-        char manifest_path[EDGE_MAX_PATH * 2];
-        snprintf(manifest_path, sizeof(manifest_path),
-                 "%s/%s/agent.yaml", cfg->bundle_dir, de->d_name);
-        FILE *fp = fopen(manifest_path, "rb");
-        if (!fp) continue;
-        if (fseek(fp, 0, SEEK_END) != 0) { fclose(fp); continue; }
-        long sz = ftell(fp);
-        if (sz <= 0) { fclose(fp); continue; }
-        fseek(fp, 0, SEEK_SET);
-        char *yaml = (char *)malloc((size_t)sz);
-        if (!yaml) { fclose(fp); continue; }
-        size_t rd = fread(yaml, 1, (size_t)sz, fp);
-        fclose(fp);
-        edge_agent_t agent;
-        memset(&agent, 0, sizeof(agent));
-        if (manifest_parse_yaml(yaml, rd, &agent) == 0 && agent.slug[0]) {
-            snprintf(agent.dir, sizeof(agent.dir), "%s/%s",
-                     cfg->bundle_dir, de->d_name);
-            char prompt_path[EDGE_MAX_PATH * 2];
-            snprintf(prompt_path, sizeof(prompt_path),
-                     "%s/system_prompt.md", agent.dir);
-            FILE *pp = fopen(prompt_path, "rb");
-            if (pp) {
-                size_t pr = fread(agent.system_prompt, 1,
-                                  sizeof(agent.system_prompt) - 1, pp);
-                agent.system_prompt[pr] = '\0';
-                fclose(pp);
-            }
-            /* fake digest for reload (matches Python). */
-            snprintf(agent.digest_hex, sizeof(agent.digest_hex),
-                     "reload-%s", agent.slug);
-            registry_install(r, &agent);
-            edge_log("INFO", "agent_reloaded_from_disk slug=%s", agent.slug);
+        if (strcmp(de->d_name, ".") == 0 || strcmp(de->d_name, "..") == 0) continue;
+        char path[EDGE_MAX_PATH * 2];
+        if (de->d_name[0] == '.') {
+            snprintf(path, sizeof(path), "%s/%s", cfg->bundle_dir, de->d_name);
+            edge_rm_rf(path);
+            continue;
         }
-        free(yaml);
+        snprintf(path, sizeof(path), "%s/%s/" EDGE_SAVED_BUNDLE, cfg->bundle_dir, de->d_name);
+        struct stat st;
+        if (stat(path, &st) != 0) {
+            edge_log("WARN", "agent_reload_failed dir=%s no saved bundle, push the agent again", de->d_name);
+            continue;
+        }
+        edge_agent_t agent;
+        char err[256] = "";
+        if (bundle_install_from_file(r, cfg, path, de->d_name, &agent, err, sizeof(err)) == 0) {
+            edge_log("INFO", "agent_reloaded_from_disk slug=%s", agent.slug);
+        } else {
+            edge_log("WARN", "agent_reload_failed dir=%s err=%s", de->d_name, err);
+        }
     }
     closedir(d);
 }

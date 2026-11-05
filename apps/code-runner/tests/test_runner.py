@@ -7,6 +7,7 @@ import io
 import json
 import os
 import sys
+import tempfile
 import zipfile
 from pathlib import Path
 from types import SimpleNamespace
@@ -142,12 +143,18 @@ async def test_env_is_only_the_request_env(tmp_path, monkeypatch):
         "SHLVL",
         "_",
         "LC_CTYPE",
+        # macOS adds this to every process, it holds no secret
+        "__CF_USER_TEXT_ENCODING",
     }
     assert set(env) <= allowed, set(env) - allowed
     assert env["HOME"].startswith(str(tmp_path / "scratch"))
 
 
 @posix
+@pytest.mark.skipif(
+    not sys.platform.startswith("linux"),
+    reason="Linux only by design, macOS cannot lower RLIMIT_AS and the runner only ships on Linux",
+)
 async def test_rlimits_are_applied(tmp_path, monkeypatch):
     monkeypatch.setenv("CODERUN_MAX_PROCS", "300")
     monkeypatch.setenv("CODERUN_MAX_FILE_MB", "8")
@@ -302,7 +309,8 @@ async def test_socket_round_trip(tmp_path):
     ex = _executor(
         tmp_path, {"main.py": "import sys;print(sys.stdin.read())"}, f"{PY} main.py"
     )
-    sock = str(tmp_path / "s" / "exec.sock")
+    # a pytest temp path can pass the 104 byte limit macOS puts on a socket path
+    sock = str(Path(tempfile.mkdtemp(dir="/tmp")) / "exec.sock")
     stop = asyncio.Event()
     server = asyncio.ensure_future(runner.serve_exec(ex, sock, stop))
     for _ in range(50):
@@ -311,7 +319,8 @@ async def test_socket_round_trip(tmp_path):
         await asyncio.sleep(0.02)
     call = runner.socket_exec_call(sock)
     res = await call({"input": {"k": "v"}, "env": {}, "timeout_s": 10, "revision": "x"})
-    assert res["ok"] and json.loads(res["stdout"]) == {"k": "v"}
+    assert res["ok"], res
+    assert json.loads(res["stdout"]) == {"k": "v"}
     stop.set()
     await asyncio.wait_for(server, 10)
     gone = await runner.socket_exec_call(str(tmp_path / "nope.sock"))({"input": {}})

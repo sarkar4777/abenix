@@ -1,28 +1,59 @@
-# Identity — one StatefulSet per gateway.
+# legacy runs agent bundles only. gateway runs Abenix Edge with enrolment, collectors and store and forward.
+# This runtime has no gateway mode, use infra/helm/edge-runtime for that.
+mode: legacy
+
+# Identity, one StatefulSet per gateway. Gateway mode takes its id from the enrolment.
 gateway_id: edge-local
 gateway_name: edge-local
 
 # Where this pod calls home.
-platform_url: "http://api.abenix.svc.cluster.local:8000"
+platform_url: "http://abenix-api.abenix.svc.cluster.local:8000"
+# Legacy mode, an API key from POST /api/edge/tokens/mint. Without it the gateway does not register.
 platform_token: ""
 
-# Optional MQTT broker. Empty disables the subscriber and falls back to
-# HTTP push from the platform.
+# MQTT broker for over the air bundles, mqtt://user:password@host:1883. Empty turns the subscriber off.
 mqtt_url: ""
 
-# RSA-PSS public key (PEM) the gateway uses to verify `.agent` signatures.
+# RSA-PSS public key (PEM) that verifies bundle signatures. Fetch it from GET /api/edge/signing-key.
+# Required unless allow_unsigned is true, the chart and the pod refuse to run without it.
 signing_pubkey: ""
 
-# Inference fall-back — Anthropic API key used when the bundle has no
-# local model_weights/.
-anthropic_api_key: ""
+# Only the literal true opens the unsigned path. Local development only.
+allow_unsigned: false
 
-# Optional ingress endpoint exposed back to the platform.
+# Pin this gateway to one platform tenant. Bundles for another tenant are refused. Empty accepts any tenant.
+tenant_id: ""
+
+# Bearer token for bundle install and execute, /health stays open.
+# Empty makes one on first install and keeps it across upgrades. Change it here to rotate, the pod restarts.
+auth_token: ""
+# Only the literal true turns the token check off. Local development only.
+allow_no_auth: false
+
+# Lets params.code run for agents that list code_executor, with a scrubbed environment and a 5 s limit.
+code_executor_enabled: false
+
+# The model call. An API key, or a Claude subscription token, or a Secret that already holds them.
+anthropic_api_key: ""
+anthropic_auth_token: ""
+existing_llm_secret:
+  name: ""
+  api_key_key: ""
+  auth_token_key: ""
+# Point this at an Anthropic compatible server on the site network to run without the internet.
+anthropic_base_url: ""
+
+# The address the platform can reach this gateway on, for HTTP push and the agents list. Empty means MQTT only.
 endpoint_url: ""
 
+extra_env: []
+extra_volumes: []
+extra_volume_mounts: []
+extra_containers: []
+
 image:
-  repository: agentforge/edge-runtime-c
-  tag: "1.1.0"
+  repository: localhost:5000/abenix/edge-runtime-c
+  tag: "latest"
   pullPolicy: IfNotPresent
 
 service:
@@ -41,7 +72,6 @@ persistence:
   size: 1Gi
   accessMode: ReadWriteOnce
 
-# C binary footprint is ~10x smaller than the Python pod; tighten defaults.
 resources:
   requests:
     cpu: 25m

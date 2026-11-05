@@ -31,10 +31,14 @@ static void register_once(const edge_config_t *cfg)
     char url[1024];
     snprintf(url, sizeof(url), "%s/api/edge/gateways/register", base);
 
-    char body[1024];
+    char *id = edge_json_escape(cfg->gateway_id);
+    char *name = edge_json_escape(cfg->gateway_name);
+    char *endpoint = edge_json_escape(cfg->endpoint_url);
+    char body[2048];
     snprintf(body, sizeof(body),
              "{\"gateway_id\":\"%s\",\"name\":\"%s\",\"endpoint_url\":\"%s\"}",
-             cfg->gateway_id, cfg->gateway_name, cfg->endpoint_url);
+             id, name, endpoint);
+    free(id); free(name); free(endpoint);
 
     char auth[600];
     snprintf(auth, sizeof(auth), "Authorization: Bearer %s", cfg->platform_token);

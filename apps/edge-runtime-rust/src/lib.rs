@@ -1,20 +1,19 @@
-// AgentForge edge runtime — Rust port of apps/edge-runtime/runtime.py.
-// Single static binary that serves :8080, subscribes to MQTT for OTA bundles,
-// verifies RSA-PSS signatures, extracts agent bundles, and proxies execute
-// calls to Anthropic.
+// Abenix edge runtime in Rust, one binary that serves :8080, takes bundles over HTTP and MQTT,
+// checks their signatures and calls the model on request.
 
 use std::collections::{BTreeMap, HashSet};
 use std::io::{Cursor, Read};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, Context, Result};
 use axum::{
-    extract::{Path as AxPath, State},
-    http::StatusCode,
-    response::IntoResponse,
+    extract::{DefaultBodyLimit, Path as AxPath, Request, State},
+    http::{header, HeaderMap, StatusCode},
+    middleware::{self, Next},
+    response::{IntoResponse, Response},
     routing::{get, post},
     Json, Router,
 };
@@ -28,7 +27,6 @@ use rumqttc::{AsyncClient, Event, Incoming, MqttOptions, QoS};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use tokio::io::AsyncWriteExt;
 use tokio::sync::RwLock;
 use tracing::{error, info, warn};
 
@@ -45,6 +43,21 @@ pub static EDGE_SAFE_TOOLS: Lazy<HashSet<&'static str>> = Lazy::new(|| {
     .collect()
 });
 
+pub const MAX_BUNDLE_BYTES: usize = 16 * 1024 * 1024;
+pub const MAX_BUNDLE_MEMBERS: usize = 256;
+pub const CODE_TIMEOUT_SECONDS: u64 = 5;
+pub const CODE_OUTPUT_BYTES: usize = 64 * 1024;
+pub const SAVED_BUNDLE: &str = "bundle.agent";
+const OAUTH_BETA: &str = "oauth-2025-04-20";
+
+pub fn deploy_topic(gateway_id: &str, slug: &str) -> String {
+    format!("edge/{gateway_id}/deploy/{slug}")
+}
+
+pub fn ack_topic(gateway_id: &str, slug: &str) -> String {
+    format!("edge/{gateway_id}/ack/{slug}")
+}
+
 #[derive(Clone, Debug)]
 pub struct Config {
     pub gateway_id: String,
@@ -57,12 +70,22 @@ pub struct Config {
     pub bundle_dir: PathBuf,
     pub endpoint_url: String,
     pub anthropic_api_key: String,
+    pub anthropic_auth_token: String,
     pub anthropic_base_url: String,
     pub port: u16,
+    pub auth_token: String,
+    pub allow_unsigned: bool,
+    pub allow_no_auth: bool,
+    pub code_enabled: bool,
+    pub tenant_id: String,
+}
+
+fn env_is_true(key: &str) -> bool {
+    std::env::var(key).map(|v| v.trim() == "true").unwrap_or(false)
 }
 
 impl Config {
-    // explicit constructor for tests — sidesteps process-global env vars.
+    // for tests, leaves the process environment alone
     pub fn for_test(bundle_dir: PathBuf, signing_pubkey_path: PathBuf, gateway_id: String) -> Self {
         let _ = std::fs::create_dir_all(&bundle_dir);
         Self {
@@ -76,8 +99,14 @@ impl Config {
             bundle_dir,
             endpoint_url: String::new(),
             anthropic_api_key: String::new(),
+            anthropic_auth_token: String::new(),
             anthropic_base_url: "https://api.anthropic.com".into(),
             port: 0,
+            auth_token: "test-token".into(),
+            allow_unsigned: false,
+            allow_no_auth: false,
+            code_enabled: false,
+            tenant_id: String::new(),
         }
     }
 
@@ -101,18 +130,37 @@ impl Config {
             ),
             bundle_dir,
             endpoint_url: std::env::var("ENDPOINT_URL").unwrap_or_default(),
-            anthropic_api_key: std::env::var("ANTHROPIC_API_KEY").unwrap_or_default(),
+            anthropic_api_key: std::env::var("ANTHROPIC_API_KEY")
+                .unwrap_or_default()
+                .trim()
+                .to_string(),
+            anthropic_auth_token: std::env::var("ANTHROPIC_AUTH_TOKEN")
+                .ok()
+                .filter(|v| !v.trim().is_empty())
+                .or_else(|| std::env::var("CLAUDE_SUBSCRIPTION_TOKEN").ok())
+                .unwrap_or_default()
+                .trim()
+                .to_string(),
             anthropic_base_url: std::env::var("ANTHROPIC_BASE_URL")
                 .unwrap_or_else(|_| "https://api.anthropic.com".into()),
             port: std::env::var("PORT")
                 .ok()
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(8080),
+            auth_token: std::env::var("EDGE_AUTH_TOKEN")
+                .unwrap_or_default()
+                .trim()
+                .to_string(),
+            allow_unsigned: env_is_true("EDGE_ALLOW_UNSIGNED"),
+            allow_no_auth: env_is_true("EDGE_ALLOW_NO_AUTH"),
+            code_enabled: env_is_true("EDGE_ENABLE_CODE_EXECUTOR"),
+            tenant_id: std::env::var("TENANT_ID")
+                .unwrap_or_default()
+                .trim()
+                .to_string(),
         }
     }
 }
-
-// ─── bundle handling ──────────────────────────────────────────────────────
 
 #[derive(Debug, thiserror::Error)]
 pub enum BundleError {
@@ -142,15 +190,86 @@ pub fn load_pubkey(cfg: &Config) -> Result<Option<RsaPublicKey>> {
     Ok(Some(key))
 }
 
+// the same refusals as the Python runtime, a gateway that cannot verify or authenticate does not start
+pub fn check_startup(cfg: &Config) -> Result<()> {
+    let pubkey = load_pubkey(cfg)?;
+    if cfg.allow_unsigned {
+        warn!("EDGE_ALLOW_UNSIGNED=true, unsigned bundles will be accepted, development only");
+    } else if pubkey.is_none() {
+        return Err(anyhow!(
+            "edge-runtime refused to start, no signing public key. Set SIGNING_PUBKEY_PEM or mount it at SIGNING_PUBKEY_PATH ({}). Fetch it from GET /api/edge/signing-key on the platform. EDGE_ALLOW_UNSIGNED=true bypasses this for local development only.",
+            cfg.signing_pubkey_path.display()
+        ));
+    }
+    if cfg.allow_no_auth {
+        warn!("EDGE_ALLOW_NO_AUTH=true, anyone who can reach this port can install and run agents, development only");
+    } else if cfg.auth_token.is_empty() {
+        return Err(anyhow!(
+            "edge-runtime refused to start, no EDGE_AUTH_TOKEN. Set it so bundle install and execute need a bearer token. EDGE_ALLOW_NO_AUTH=true bypasses this for local development only."
+        ));
+    }
+    if cfg.code_enabled {
+        warn!("EDGE_ENABLE_CODE_EXECUTOR=true, params.code runs for agents that list code_executor");
+    }
+    if !cfg.tenant_id.is_empty() {
+        info!(tenant_id = %cfg.tenant_id, "tenant_binding");
+    }
+    Ok(())
+}
+
+pub fn valid_slug(slug: &str) -> bool {
+    let mut chars = slug.chars();
+    let first_ok = chars.next().map(|c| c.is_ascii_alphanumeric()).unwrap_or(false);
+    first_ok
+        && slug.len() <= 95
+        && !slug.contains("..")
+        && slug
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+}
+
+fn safe_member_path(path: &str) -> bool {
+    !path.is_empty()
+        && !path.starts_with('/')
+        && !path.contains('\\')
+        && !path.split('/').any(|seg| seg == "..")
+}
+
+// plain files and folders under safe relative names only, anything else refuses the bundle
 pub fn read_tar_members(
     bundle: &[u8],
 ) -> Result<(Vec<(String, Vec<u8>, u64, u32)>, Option<Vec<u8>>)> {
+    if bundle.len() > MAX_BUNDLE_BYTES {
+        return Err(anyhow!(BundleError::new(format!(
+            "bundle is over {MAX_BUNDLE_BYTES} bytes"
+        ))));
+    }
     let mut archive = tar::Archive::new(Cursor::new(bundle));
     let mut members: Vec<(String, Vec<u8>, u64, u32)> = Vec::new();
     let mut sig: Option<Vec<u8>> = None;
+    let mut seen: HashSet<String> = HashSet::new();
     for entry in archive.entries()? {
         let mut e = entry?;
         let path = e.path()?.to_string_lossy().into_owned();
+        let kind = e.header().entry_type();
+        if !kind.is_file() && !kind.is_dir() {
+            return Err(anyhow!(BundleError::new(format!(
+                "bundle entry {path} is a link or device, refused"
+            ))));
+        }
+        if !safe_member_path(&path) {
+            return Err(anyhow!(BundleError::new(format!(
+                "unsafe path in bundle {path}"
+            ))));
+        }
+        if !seen.insert(path.clone()) {
+            return Err(anyhow!(BundleError::new(format!(
+                "duplicate entry in bundle {path}"
+            ))));
+        }
+        if seen.len() > MAX_BUNDLE_MEMBERS {
+            return Err(anyhow!(BundleError::new("bundle has too many entries")));
+        }
         let mtime = e.header().mtime().unwrap_or(0);
         let mode = e.header().mode().unwrap_or(0o644);
         let mut buf = Vec::new();
@@ -216,6 +335,8 @@ pub struct Manifest {
     pub edge_constraints: EdgeConstraints,
     #[serde(default)]
     pub description: Option<String>,
+    #[serde(default)]
+    pub tenant_id: Option<String>,
 }
 
 pub fn parse_manifest(yaml: &[u8]) -> Result<Manifest> {
@@ -225,12 +346,15 @@ pub fn parse_manifest(yaml: &[u8]) -> Result<Manifest> {
 }
 
 pub fn validate_manifest(m: &Manifest) -> Result<()> {
+    if !valid_slug(&m.slug) {
+        return Err(anyhow!(BundleError::new(format!(
+            "manifest slug is not a safe name {}",
+            m.slug
+        ))));
+    }
     for t in &m.tools {
-        if t.starts_with("atlas_") || t.starts_with("mcp_") {
-            return Err(anyhow!(BundleError::new(format!("tool not edge-safe: {t}"))));
-        }
         if !EDGE_SAFE_TOOLS.contains(t.as_str()) {
-            return Err(anyhow!(BundleError::new(format!("tool not edge-safe: {t}"))));
+            return Err(anyhow!(BundleError::new(format!("tool not edge-safe {t}"))));
         }
     }
     Ok(())
@@ -264,22 +388,36 @@ pub fn strip_signature(bundle: &[u8]) -> Vec<u8> {
     bundle.to_vec()
 }
 
-pub fn verify_signature(bundle: &[u8], pubkey: Option<&RsaPublicKey>) -> Result<(Vec<u8>, Manifest)> {
+pub fn verify_signature(
+    bundle: &[u8],
+    pubkey: Option<&RsaPublicKey>,
+    allow_unsigned: bool,
+) -> Result<(Vec<u8>, Manifest)> {
     let (members, sig) = read_tar_members(bundle)?;
-    let sig = sig.ok_or_else(|| anyhow!(BundleError::new("bundle missing signature.sig")))?;
     let raw_tar = rebuild_tar(&members)?;
-    if let Some(pk) = pubkey {
-        let verifying = VerifyingKey::<Sha256>::new(pk.clone());
-        let signature = Signature::try_from(sig.as_slice())
-            .map_err(|e| anyhow!(BundleError::new(format!("bundle_signature_invalid: {e}"))))?;
-        // platform bundles sign the stripped bytes, older ones a rebuilt tar
-        let stripped = strip_signature(bundle);
-        verifying
-            .verify(&stripped, &signature)
-            .or_else(|_| verifying.verify(&raw_tar, &signature))
-            .map_err(|e| anyhow!(BundleError::new(format!("bundle_signature_invalid: {e}"))))?;
-    } else {
-        warn!("no signing pubkey configured — accepting bundle UNVERIFIED");
+    match (&sig, pubkey) {
+        (None, _) if !allow_unsigned => {
+            return Err(anyhow!(BundleError::new(
+                "bundle is unsigned, no signature.sig. Refusing to load, set EDGE_ALLOW_UNSIGNED=true only for local development"
+            )));
+        }
+        (Some(_), None) if !allow_unsigned => {
+            return Err(anyhow!(BundleError::new(
+                "no signing public key configured, cannot verify bundle. Set SIGNING_PUBKEY_PEM or SIGNING_PUBKEY_PATH"
+            )));
+        }
+        (Some(sig), Some(pk)) => {
+            let verifying = VerifyingKey::<Sha256>::new(pk.clone());
+            let signature = Signature::try_from(sig.as_slice())
+                .map_err(|_| anyhow!(BundleError::new("bundle_signature_invalid")))?;
+            // platform bundles sign the stripped bytes, older ones a rebuilt tar
+            let stripped = strip_signature(bundle);
+            verifying
+                .verify(&stripped, &signature)
+                .or_else(|_| verifying.verify(&raw_tar, &signature))
+                .map_err(|_| anyhow!(BundleError::new("bundle_signature_invalid")))?;
+        }
+        _ => warn!("accepting UNVERIFIED bundle because EDGE_ALLOW_UNSIGNED=true, development only"),
     }
     let manifest_bytes = members
         .iter()
@@ -290,24 +428,61 @@ pub fn verify_signature(bundle: &[u8], pubkey: Option<&RsaPublicKey>) -> Result<
     Ok((raw_tar, manifest))
 }
 
+fn unique_suffix() -> String {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    format!("{}-{nanos}", std::process::id())
+}
+
+// writes beside the live folder and swaps, so a failed install leaves the old agent serving
 pub fn untar_to_dir(bundle: &[u8], dest: &Path) -> Result<()> {
-    if dest.exists() {
-        std::fs::remove_dir_all(dest)?;
-    }
-    std::fs::create_dir_all(dest)?;
-    let mut archive = tar::Archive::new(Cursor::new(bundle));
-    for entry in archive.entries()? {
-        let mut e = entry?;
-        let path = e.path()?.to_string_lossy().into_owned();
-        if path.contains("..") || path.starts_with('/') {
-            return Err(anyhow!(BundleError::new(format!("unsafe path in bundle: {path}"))));
+    let (members, _) = read_tar_members(bundle)?;
+    let name = dest
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let parent = dest.parent().unwrap_or(Path::new("."));
+    std::fs::create_dir_all(parent)?;
+    let staging = parent.join(format!(".staging-{name}-{}", unique_suffix()));
+    let write_all = || -> Result<()> {
+        std::fs::create_dir_all(&staging)?;
+        for (member, data, _, _) in &members {
+            let target = staging.join(member);
+            if member.ends_with('/') {
+                std::fs::create_dir_all(&target)?;
+                continue;
+            }
+            if let Some(p) = target.parent() {
+                std::fs::create_dir_all(p)?;
+            }
+            std::fs::write(&target, data)?;
         }
-        e.unpack_in(dest)?;
+        std::fs::write(staging.join(SAVED_BUNDLE), bundle)?;
+        Ok(())
+    };
+    if let Err(e) = write_all() {
+        let _ = std::fs::remove_dir_all(&staging);
+        return Err(e);
+    }
+    let old = parent.join(format!(".old-{name}-{}", unique_suffix()));
+    let had_old = dest.exists();
+    if had_old {
+        std::fs::rename(dest, &old)?;
+    }
+    if let Err(e) = std::fs::rename(&staging, dest) {
+        if had_old {
+            let _ = std::fs::rename(&old, dest);
+        }
+        let _ = std::fs::remove_dir_all(&staging);
+        return Err(e.into());
+    }
+    if had_old {
+        let _ = std::fs::remove_dir_all(&old);
     }
     Ok(())
 }
-
-// ─── registry + executor ──────────────────────────────────────────────────
 
 #[derive(Clone)]
 pub struct LoadedAgent {
@@ -350,13 +525,44 @@ impl Registry {
         }
     }
 
-    pub async fn install_bundle(&self, bundle: &[u8]) -> Result<LoadedAgent> {
-        let pubkey = load_pubkey(&self.cfg)?;
-        let (_, manifest) = verify_signature(bundle, pubkey.as_ref())?;
+    pub async fn install_bundle(
+        &self,
+        bundle: &[u8],
+        expected_slug: Option<&str>,
+    ) -> Result<LoadedAgent> {
+        let checked = (|| -> Result<Manifest> {
+            let pubkey = load_pubkey(&self.cfg)?;
+            let (_, manifest) =
+                verify_signature(bundle, pubkey.as_ref(), self.cfg.allow_unsigned)?;
+            self.check_tenant(&manifest)?;
+            if let Some(want) = expected_slug {
+                if want != manifest.slug {
+                    return Err(anyhow!(BundleError::new(format!(
+                        "bundle is for agent {}, it was sent to {want}",
+                        manifest.slug
+                    ))));
+                }
+            }
+            Ok(manifest)
+        })();
+        let manifest = match checked {
+            Ok(m) => m,
+            Err(e) => {
+                // nothing was touched, whatever is loaded keeps serving
+                error!(reason = %e, "bundle_rejected");
+                return Err(e);
+            }
+        };
         let slug = manifest.slug.clone();
+        let digest = hex::encode(Sha256::digest(bundle));
+        let mut agents = self.agents.write().await;
+        if let Some(current) = agents.get(&slug) {
+            if current.digest == digest {
+                return Ok(current.clone());
+            }
+        }
         let dest = self.cfg.bundle_dir.join(&slug);
         untar_to_dir(bundle, &dest)?;
-        let digest = hex::encode(Sha256::digest(bundle));
         let system_prompt = std::fs::read_to_string(dest.join("system_prompt.md"))
             .unwrap_or_default();
         let agent = LoadedAgent {
@@ -366,9 +572,25 @@ impl Registry {
             digest: digest.clone(),
             system_prompt,
         };
-        self.agents.write().await.insert(slug.clone(), agent.clone());
+        agents.insert(slug.clone(), agent.clone());
         info!(slug = %slug, digest = %digest, "agent_loaded");
         Ok(agent)
+    }
+
+    fn check_tenant(&self, manifest: &Manifest) -> Result<()> {
+        if self.cfg.tenant_id.is_empty() {
+            return Ok(());
+        }
+        let bundle_tenant = manifest.tenant_id.clone().unwrap_or_default();
+        if bundle_tenant != self.cfg.tenant_id {
+            error!(slug = %manifest.slug, bundle_tenant = %bundle_tenant, runtime_tenant = %self.cfg.tenant_id, "bundle_tenant_mismatch");
+            return Err(anyhow!(BundleError::new(format!(
+                "bundle tenant_id {} does not match runtime TENANT_ID {}",
+                if bundle_tenant.is_empty() { "<none>" } else { &bundle_tenant },
+                self.cfg.tenant_id
+            ))));
+        }
+        Ok(())
     }
 
     pub async fn get(&self, slug: &str) -> Option<LoadedAgent> {
@@ -391,79 +613,99 @@ impl Registry {
             Ok(e) => e,
             Err(_) => return,
         };
+        // the saved bundle goes through the full install, so a tampered volume stays out
         for entry in entries.flatten() {
             let dir = entry.path();
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if name.starts_with('.') {
+                let _ = std::fs::remove_dir_all(&dir);
+                continue;
+            }
             if !dir.is_dir() {
                 continue;
             }
-            let mp = dir.join("agent.yaml");
-            if !mp.exists() {
-                continue;
-            }
-            match (|| -> Result<LoadedAgent> {
-                let bytes = std::fs::read(&mp)?;
-                let manifest = parse_manifest(&bytes)?;
-                let slug = manifest.slug.clone();
-                let fake_digest = hex::encode(Sha256::digest(slug.as_bytes()));
-                let system_prompt = std::fs::read_to_string(dir.join("system_prompt.md"))
-                    .unwrap_or_default();
-                Ok(LoadedAgent {
-                    slug,
-                    dir: dir.clone(),
-                    manifest,
-                    digest: fake_digest,
-                    system_prompt,
-                })
-            })() {
-                Ok(a) => {
-                    info!(slug = %a.slug, "agent_reloaded_from_disk");
-                    self.agents.write().await.insert(a.slug.clone(), a);
+            let saved = match std::fs::read(dir.join(SAVED_BUNDLE)) {
+                Ok(b) => b,
+                Err(_) => {
+                    warn!(dir = ?dir, "agent_reload_failed no saved bundle, push the agent again");
+                    continue;
                 }
+            };
+            match self.install_bundle(&saved, Some(&name)).await {
+                Ok(a) => info!(slug = %a.slug, "agent_reloaded_from_disk"),
                 Err(e) => warn!(dir = ?dir, err = %e, "agent_reload_failed"),
             }
         }
     }
 }
 
-// ─── code_executor subprocess ─────────────────────────────────────────────
-
-pub async fn run_code_executor(code: &str) -> Value {
+// python3 with no shell, no inherited environment and its own process group
+pub async fn run_code_executor(code: &str, timeout_secs: u64) -> Value {
+    let scratch = std::env::temp_dir().join(format!("edge-code-{}", unique_suffix()));
+    if let Err(e) = std::fs::create_dir_all(&scratch) {
+        return json!({"ok": false, "error": format!("scratch_failed {e}")});
+    }
     let mut cmd = tokio::process::Command::new("python3");
-    cmd.arg("-c")
+    cmd.arg("-I")
+        .arg("-c")
         .arg(code)
+        .env_clear()
+        .env("PATH", "/usr/local/bin:/usr/bin:/bin")
+        .env("HOME", &scratch)
+        .current_dir(&scratch)
+        .process_group(0)
         .kill_on_drop(true)
-        .stdin(Stdio::piped())
+        .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    let mut child = match cmd.spawn() {
+    let child = match cmd.spawn() {
         Ok(c) => c,
-        Err(e) => return json!({"ok": false, "error": format!("spawn_failed: {e}")}),
+        Err(e) => {
+            let _ = std::fs::remove_dir_all(&scratch);
+            return json!({"ok": false, "error": format!("spawn_failed {e}")});
+        }
     };
-    if let Some(mut stdin) = child.stdin.take() {
-        let _ = stdin.shutdown().await;
-    }
-    let fut = child.wait_with_output();
-    match tokio::time::timeout(Duration::from_secs(5), fut).await {
-        Ok(Ok(out)) => json!({
-            "ok": out.status.success(),
-            "stdout": String::from_utf8_lossy(&out.stdout),
-            "stderr": String::from_utf8_lossy(&out.stderr),
-            "exit_code": out.status.code().unwrap_or(-1),
-        }),
-        Ok(Err(e)) => json!({"ok": false, "error": format!("wait_failed: {e}")}),
-        Err(_) => json!({"ok": false, "error": "code_executor_timeout"}),
-    }
+    let pid = child.id();
+    let result = match tokio::time::timeout(
+        Duration::from_secs(timeout_secs),
+        child.wait_with_output(),
+    )
+    .await
+    {
+        Ok(Ok(out)) => {
+            let cut = |b: &[u8]| {
+                String::from_utf8_lossy(&b[..b.len().min(CODE_OUTPUT_BYTES)]).into_owned()
+            };
+            json!({
+                "ok": out.status.success(),
+                "stdout": cut(&out.stdout),
+                "stderr": cut(&out.stderr),
+                "exit_code": out.status.code().unwrap_or(-1),
+            })
+        }
+        Ok(Err(e)) => json!({"ok": false, "error": format!("wait_failed {e}")}),
+        Err(_) => {
+            if let Some(pid) = pid {
+                // the whole group, a forked child must not outlive the limit
+                unsafe {
+                    libc::killpg(pid as i32, libc::SIGKILL);
+                }
+            }
+            json!({"ok": false, "error": "code_executor_timeout"})
+        }
+    };
+    let _ = std::fs::remove_dir_all(&scratch);
+    result
 }
-
-// ─── anthropic call ───────────────────────────────────────────────────────
 
 pub async fn call_anthropic(
     cfg: &Config,
     manifest: &Manifest,
     system_prompt: &str,
     user_message: &str,
+    timeout_secs: u64,
 ) -> Value {
-    if cfg.anthropic_api_key.is_empty() {
+    if cfg.anthropic_api_key.is_empty() && cfg.anthropic_auth_token.is_empty() {
         return json!({
             "ok": false,
             "error": "ANTHROPIC_API_KEY not configured on edge runtime",
@@ -480,15 +722,21 @@ pub async fn call_anthropic(
     });
     let url = format!("{}/v1/messages", cfg.anthropic_base_url.trim_end_matches('/'));
     let client = match reqwest::Client::builder()
-        .timeout(Duration::from_secs(30))
+        .timeout(Duration::from_secs(timeout_secs))
         .build()
     {
         Ok(c) => c,
-        Err(e) => return json!({"ok": false, "error": format!("client_build: {e}")}),
+        Err(e) => return json!({"ok": false, "error": format!("client_build {e}")}),
     };
-    match client
-        .post(&url)
-        .header("x-api-key", &cfg.anthropic_api_key)
+    let request = client.post(&url);
+    let request = if cfg.anthropic_api_key.is_empty() {
+        request
+            .header("authorization", format!("Bearer {}", cfg.anthropic_auth_token))
+            .header("anthropic-beta", OAUTH_BETA)
+    } else {
+        request.header("x-api-key", &cfg.anthropic_api_key)
+    };
+    match request
         .header("anthropic-version", "2023-06-01")
         .header("content-type", "application/json")
         .json(&body)
@@ -499,7 +747,7 @@ pub async fn call_anthropic(
             if !r.status().is_success() {
                 let status = r.status();
                 let txt = r.text().await.unwrap_or_default();
-                return json!({"ok": false, "error": format!("http {}: {}", status, txt)});
+                return json!({"ok": false, "error": format!("model call answered {} {}", status.as_u16(), txt.chars().take(300).collect::<String>())});
             }
             match r.json::<Value>().await {
                 Ok(data) => {
@@ -515,10 +763,10 @@ pub async fn call_anthropic(
                     }
                     json!({"ok": true, "text": text, "usage": data.get("usage").cloned().unwrap_or(json!({}))})
                 }
-                Err(e) => json!({"ok": false, "error": format!("decode: {e}")}),
+                Err(e) => json!({"ok": false, "error": format!("decode {e}")}),
             }
         }
-        Err(e) => json!({"ok": false, "error": e.to_string()}),
+        Err(e) => json!({"ok": false, "error": format!("model call failed {e}")}),
     }
 }
 
@@ -544,17 +792,38 @@ pub async fn execute_agent(
             }
         }
     }
+    let max_runtime = match agent.manifest.edge_constraints.max_runtime_seconds {
+        0 => default_runtime_seconds(),
+        n => n,
+    };
     let started = std::time::Instant::now();
-    // same contract as the C runtime: params.code runs locally when code_executor is allowed
+    // same contract as the other runtimes, params.code needs the gateway flag and the tool
     let code = params.get("code").and_then(|v| v.as_str()).unwrap_or("");
-    let result = if !code.is_empty() {
-        if agent.manifest.tools.iter().any(|t| t == "code_executor") {
-            run_code_executor(code).await
-        } else {
+    let work = async {
+        if code.is_empty() {
+            call_anthropic(
+                cfg,
+                &agent.manifest,
+                &agent.system_prompt,
+                user_message,
+                max_runtime,
+            )
+            .await
+        } else if !cfg.code_enabled {
+            json!({"ok": false, "error": "code_executor is off on this gateway, set EDGE_ENABLE_CODE_EXECUTOR=true to allow it"})
+        } else if !agent.manifest.tools.iter().any(|t| t == "code_executor") {
             json!({"ok": false, "error": "code_executor not in tool whitelist"})
+        } else {
+            run_code_executor(code, CODE_TIMEOUT_SECONDS.min(max_runtime)).await
         }
-    } else {
-        call_anthropic(cfg, &agent.manifest, &agent.system_prompt, user_message).await
+    };
+    let result = match tokio::time::timeout(Duration::from_secs(max_runtime), work).await {
+        Ok(r) => r,
+        Err(_) => json!({
+            "ok": false,
+            "error": format!("max_runtime_seconds exceeded after {max_runtime} s"),
+            "error_code": "max_runtime_exceeded",
+        }),
     };
     let duration_ms = started.elapsed().as_millis() as u64;
     json!({
@@ -566,12 +835,48 @@ pub async fn execute_agent(
     })
 }
 
-// ─── HTTP layer ───────────────────────────────────────────────────────────
-
 #[derive(Clone)]
 pub struct AppState {
     pub cfg: Arc<Config>,
     pub registry: Arc<Registry>,
+}
+
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+}
+
+pub fn authorized(cfg: &Config, headers: &HeaderMap) -> bool {
+    if cfg.allow_no_auth {
+        return true;
+    }
+    if cfg.auth_token.is_empty() {
+        return false;
+    }
+    let value = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    match value.trim().split_once(' ') {
+        Some((scheme, token)) if scheme.eq_ignore_ascii_case("bearer") => {
+            constant_time_eq(token.trim().as_bytes(), cfg.auth_token.as_bytes())
+        }
+        _ => false,
+    }
+}
+
+async fn require_token(State(state): State<AppState>, req: Request, next: Next) -> Response {
+    if authorized(&state.cfg, req.headers()) {
+        return next.run(req).await;
+    }
+    (
+        StatusCode::UNAUTHORIZED,
+        [(header::WWW_AUTHENTICATE, "Bearer")],
+        Json(json!({
+            "error": "unauthorized",
+            "message": "Send Authorization: Bearer with this gateway's EDGE_AUTH_TOKEN",
+        })),
+    )
+        .into_response()
 }
 
 pub async fn health(State(state): State<AppState>) -> impl IntoResponse {
@@ -599,7 +904,14 @@ pub async fn install_bundle_handler(
     State(state): State<AppState>,
     body: Bytes,
 ) -> impl IntoResponse {
-    match state.registry.install_bundle(&body).await {
+    if !valid_slug(&slug) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "unsafe agent slug"})),
+        )
+            .into_response();
+    }
+    match state.registry.install_bundle(&body, Some(&slug)).await {
         Ok(a) => (StatusCode::OK, Json(json!({"loaded": a.to_json()}))).into_response(),
         Err(e) => (
             StatusCode::BAD_REQUEST,
@@ -627,7 +939,16 @@ pub async fn execute_handler(
     let payload: Value = if body.is_empty() {
         json!({})
     } else {
-        serde_json::from_slice(&body).unwrap_or(json!({}))
+        match serde_json::from_slice(&body) {
+            Ok(v) => v,
+            Err(_) => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({"error": "body is not valid JSON"})),
+                )
+                    .into_response()
+            }
+        }
     };
     let user_message = payload
         .get("message")
@@ -640,11 +961,15 @@ pub async fn execute_handler(
 }
 
 pub fn build_router(state: AppState) -> Router {
+    let protected = Router::new()
+        .route("/agents/:slug/bundle", post(install_bundle_handler))
+        .route("/agents/:slug/execute", post(execute_handler))
+        .route_layer(middleware::from_fn_with_state(state.clone(), require_token));
     Router::new()
         .route("/health", get(health))
         .route("/agents", get(list_agents))
-        .route("/agents/:slug/bundle", post(install_bundle_handler))
-        .route("/agents/:slug/execute", post(execute_handler))
+        .merge(protected)
+        .layer(DefaultBodyLimit::max(MAX_BUNDLE_BYTES))
         .with_state(state)
 }
 
@@ -656,8 +981,6 @@ pub async fn run_http(state: AppState, port: u16) -> Result<()> {
     axum::serve(listener, app).await?;
     Ok(())
 }
-
-// ─── platform registration ────────────────────────────────────────────────
 
 pub async fn register_with_platform(cfg: &Config) -> bool {
     if cfg.platform_url.is_empty() || cfg.platform_token.is_empty() {
@@ -715,8 +1038,6 @@ pub async fn register_loop(cfg: Arc<Config>) {
     }
 }
 
-// ─── MQTT subscriber ──────────────────────────────────────────────────────
-
 // a bundle is a tar padded to 10240 bytes, past rumqttc's 10 KiB default, so every OTA push was dropped
 pub const MQTT_MAX_PACKET_BYTES: usize = 8 * 1024 * 1024;
 
@@ -727,36 +1048,73 @@ pub fn mqtt_options(gateway_id: &str, host: String, port: u16) -> MqttOptions {
     opts
 }
 
+// mqtt://user:pass@host:port, anything missing falls back to no login and 1883
+pub fn parse_mqtt_url(url: &str) -> (String, u16, Option<(String, String)>) {
+    let rest = url.split("://").last().unwrap_or(url);
+    let rest = rest.split('/').next().unwrap_or(rest);
+    let (login, hostport) = match rest.rsplit_once('@') {
+        Some((l, h)) => (Some(l), h),
+        None => (None, rest),
+    };
+    let (host, port) = match hostport.split_once(':') {
+        Some((h, p)) => (h, p.parse().unwrap_or(1883)),
+        None => (hostport, 1883),
+    };
+    let creds = login.map(|l| match l.split_once(':') {
+        Some((u, p)) => (u.to_string(), p.to_string()),
+        None => (l.to_string(), String::new()),
+    });
+    let host = if host.is_empty() { "localhost" } else { host };
+    (host.to_string(), port, creds)
+}
+
 pub async fn mqtt_loop(cfg: Arc<Config>, registry: Arc<Registry>) {
     if cfg.mqtt_url.is_empty() {
         info!("mqtt_disabled");
         return;
     }
-    let stripped = cfg.mqtt_url.replace("mqtt://", "");
-    let mut parts = stripped.split(':');
-    let host = parts.next().unwrap_or("localhost").to_string();
-    let port: u16 = parts
-        .next()
-        .and_then(|p| p.split('/').next())
-        .and_then(|p| p.parse().ok())
-        .unwrap_or(1883);
-    let topic = format!("edge.{}.deploy", cfg.gateway_id);
-    let opts = mqtt_options(&cfg.gateway_id, host, port);
-    let (client, mut eventloop) = AsyncClient::new(opts, 16);
-    if let Err(e) = client.subscribe(&topic, QoS::AtLeastOnce).await {
-        warn!(err = %e, "mqtt_subscribe_failed");
-        return;
+    let (host, port, creds) = parse_mqtt_url(&cfg.mqtt_url);
+    let topic = deploy_topic(&cfg.gateway_id, "+");
+    let prefix = deploy_topic(&cfg.gateway_id, "");
+    let mut opts = mqtt_options(&cfg.gateway_id, host, port);
+    if let Some((user, pass)) = creds {
+        opts.set_credentials(user, pass);
     }
-    info!(%topic, "mqtt_subscribed");
+    let (client, mut eventloop) = AsyncClient::new(opts, 16);
     loop {
         match eventloop.poll().await {
-            Ok(Event::Incoming(Incoming::Publish(p))) => {
-                if p.topic == topic {
-                    match registry.install_bundle(&p.payload).await {
-                        Ok(a) => info!(slug = %a.slug, "mqtt_bundle_loaded"),
-                        Err(e) => error!(err = %e, "mqtt_bundle_failed"),
-                    }
+            // every connect subscribes again, retained bundles arrive right after
+            Ok(Event::Incoming(Incoming::ConnAck(_))) => {
+                match client.try_subscribe(&topic, QoS::AtLeastOnce) {
+                    Ok(_) => info!(%topic, "mqtt_subscribed"),
+                    Err(e) => warn!(err = %e, "mqtt_subscribe_failed"),
                 }
+            }
+            Ok(Event::Incoming(Incoming::Publish(p))) => {
+                // clearing a retained bundle arrives as an empty message
+                let Some(slug) = p.topic.strip_prefix(&prefix) else {
+                    continue;
+                };
+                if p.payload.is_empty() {
+                    continue;
+                }
+                let digest = hex::encode(Sha256::digest(&p.payload));
+                let ack = match registry.install_bundle(&p.payload, Some(slug)).await {
+                    Ok(a) => {
+                        info!(slug = %a.slug, "mqtt_bundle_loaded");
+                        json!({"slug": slug, "digest": digest, "ok": true})
+                    }
+                    Err(e) => {
+                        error!(slug = %slug, err = %e, "mqtt_bundle_failed");
+                        json!({"slug": slug, "digest": digest, "ok": false, "error": e.to_string()})
+                    }
+                };
+                let _ = client.try_publish(
+                    ack_topic(&cfg.gateway_id, slug),
+                    QoS::AtLeastOnce,
+                    false,
+                    ack.to_string(),
+                );
             }
             Ok(_) => {}
             Err(e) => {

@@ -4,6 +4,7 @@
     ABENIX_ENROLL_TOKEN   the one-time token from the Edge page, only needed the first time
     ABENIX_EDGE_DATA      the data folder for the buffer and the gateway key (/var/lib/abenix-edge)
     ABENIX_CA_FILE        a CA bundle when Abenix uses a private certificate
+    ABENIX_EDGE_COLLECTORS_FILE  a JSON list of collectors set on this box, added to those from the platform
 """
 
 from __future__ import annotations
@@ -15,6 +16,7 @@ import logging
 import os
 import signal
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -178,6 +180,7 @@ class Gateway:
                 connection_id=d["connection_id"],
                 ingest_url=d["ingest_url"],
                 signing_pubkey_pem=d.get("signing_pubkey_pem") or "",
+                tenant_id=d.get("tenant_id") or "",
                 enrolled_at=int(time.time()),
                 enrolled_with=hashlib.sha256(self.token.encode()).hexdigest(),
                 config=d.get("config") or {},
@@ -207,7 +210,7 @@ class Gateway:
         self.sender.configure(cfg.get("uplink") or {})
         self.heartbeat_s = float(cfg.get("heartbeat_s") or 15)
         self.self_metrics_s = float(cfg.get("self_metrics_s") or 10)
-        await self.manager.apply(list(cfg.get("collectors") or []))
+        await self.manager.apply(self.merged_collectors(cfg))
         self.config, self.config_version = cfg, version
         self.state.update(config=cfg, config_version=version)
         LOG.info(
@@ -215,6 +218,23 @@ class Gateway:
             version,
             len(self.manager.running),
         )
+
+    def merged_collectors(self, cfg: dict[str, Any]) -> list[dict[str, Any]]:
+        """The platform's list wins on a shared id, a broken local file is reported and skipped."""
+        specs = list(cfg.get("collectors") or [])
+        path = os.environ.get("ABENIX_EDGE_COLLECTORS_FILE", "").strip()
+        if not path:
+            return specs
+        try:
+            local = json.loads(Path(path).read_text())
+            if not isinstance(local, list):
+                raise ValueError("it must hold a JSON list")
+        except (OSError, ValueError) as exc:
+            self.problem = f"The local collectors file {path} was skipped, {exc}"
+            LOG.error("local_collectors_skipped %s", self.problem)
+            return specs
+        ids = {str(s.get("id")) for s in specs}
+        return specs + [c for c in local if str(c.get("id")) not in ids]
 
     def health(self) -> dict[str, Any]:
         assert self.buffer and self.sender and self.manager
@@ -300,6 +320,8 @@ class Gateway:
             )
             if self.self_seq % 10 == 0:
                 self.state.update(self_seq=self.self_seq)
+        # a clean stop keeps the counter, so a restart does not repeat numbers
+        self.state.update(self_seq=self.self_seq)
 
     async def status_server(self, port: int) -> None:
         async def handle(
@@ -345,17 +367,26 @@ class Gateway:
         sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
         import runtime
 
-        os.environ.setdefault(
-            "SIGNING_PUBKEY_PEM", self.state.get("signing_pubkey_pem") or ""
-        )
+        # the enrolment names this gateway and its tenant, and bundles live on the data volume
+        pem = self.state.get("signing_pubkey_pem") or ""
+        if pem and not os.environ.get("SIGNING_PUBKEY_PEM"):
+            os.environ["SIGNING_PUBKEY_PEM"] = pem
+        os.environ["GATEWAY_ID"] = str(self.state.get("gateway_id"))
+        if self.state.get("tenant_id") and not os.environ.get("TENANT_ID"):
+            os.environ["TENANT_ID"] = str(self.state.get("tenant_id"))
+        os.environ.setdefault("BUNDLE_DIR", str(self.data_dir / "agents"))
         cfg = runtime.Config()
         try:
             runtime.check_startup(cfg)
         except SystemExit as exc:
+            self.problem = f"The agents role is off. {exc}"
             LOG.error("agents_role_off %s", exc)
             return
         registry = runtime.Registry(cfg)
         registry.reload_from_disk()
+        threading.Thread(
+            target=runtime.mqtt_subscriber, args=(cfg, registry), daemon=True
+        ).start()
         await runtime.http_server(cfg, registry, self.port)
 
     async def run(self) -> int:

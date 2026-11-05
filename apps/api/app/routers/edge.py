@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -9,10 +10,12 @@ import os
 import re
 import secrets
 import sys
+import threading
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 from cryptography.hazmat.primitives.asymmetric import rsa
@@ -250,10 +253,12 @@ def _serialize_gateway(g: EdgeGateway, full: bool = False) -> dict[str, Any]:
     }
     if full:
         out["collectors"] = [EC.masked(c) for c in (g.collectors or [])]
+        kept = {k: v for k, v in (g.settings or {}).items() if k != "push_token_enc"}
         out["settings"] = {
             **{f["key"]: f["default"] for f in EC.SETTINGS_FIELDS},
-            **(g.settings or {}),
+            **kept,
         }
+        out["push_token_set"] = bool((g.settings or {}).get("push_token_enc"))
     return out
 
 
@@ -264,39 +269,45 @@ async def runtime_download() -> JSONResponse:
             "name": "python",
             "label": "Python (reference)",
             "image": EC.image(),
-            "size_mb": 80,
+            "size_mb": 286,
             "helm_chart": "infra/helm/edge-runtime",
             "helm_install": (
                 "helm install abenix-edge ./infra/helm/edge-runtime "
                 "-n abenix-edge "
-                "--set platform.url=$PLATFORM_URL "
-                "--set platform.token=$EDGE_TOKEN "
-                "--set gateway.id=$GW"
+                "--set platform_url=$PLATFORM_URL "
+                "--set platform_token=$EDGE_TOKEN "
+                "--set gateway_id=$GW "
+                "--set auth_token=$EDGE_AUTH_TOKEN "
+                "--set-file signing_pubkey=signing_pub.pem"
             ),
             "docker_run": (
                 "docker run -d --name abenix-edge "
-                "-e PLATFORM_URL=... -e PLATFORM_TOKEN=... " + EC.image()
+                "-e PLATFORM_URL=... -e PLATFORM_TOKEN=... "
+                "-e EDGE_AUTH_TOKEN=... -e SIGNING_PUBKEY_PEM=... " + EC.image()
             ),
             "targets": ["x86_64-linux", "arm64-linux"],
             "deps": ["python3.12+"],
-            "use_when": "default — best LLM SDK ergonomics; ~80 MB pod",
+            "use_when": "the default, the only one that also runs collectors and store and forward",
         },
         {
             "name": "rust",
             "label": "Rust (single static binary)",
             "image": EC.image("edge-runtime-rust"),
-            "size_mb": 25,
+            "size_mb": 83,
             "helm_chart": "infra/helm/edge-runtime-rust",
             "helm_install": (
                 "helm install abenix-edge-rust ./infra/helm/edge-runtime-rust "
                 "-n abenix-edge "
-                "--set platform.url=$PLATFORM_URL "
-                "--set platform.token=$EDGE_TOKEN "
-                "--set gateway.id=$GW"
+                "--set platform_url=$PLATFORM_URL "
+                "--set platform_token=$EDGE_TOKEN "
+                "--set gateway_id=$GW "
+                "--set auth_token=$EDGE_AUTH_TOKEN "
+                "--set-file signing_pubkey=signing_pub.pem"
             ),
             "docker_run": (
                 "docker run -d --name abenix-edge-rust "
                 "-e PLATFORM_URL=... -e PLATFORM_TOKEN=... "
+                "-e EDGE_AUTH_TOKEN=... -e SIGNING_PUBKEY_PEM=... "
                 + EC.image("edge-runtime-rust")
             ),
             "targets": ["x86_64-linux", "arm64-linux", "armv7-linux"],
@@ -310,18 +321,21 @@ async def runtime_download() -> JSONResponse:
             "name": "c",
             "label": "C (musl static)",
             "image": EC.image("edge-runtime-c"),
-            "size_mb": 12,
+            "size_mb": 96,
             "helm_chart": "infra/helm/edge-runtime-c",
             "helm_install": (
                 "helm install abenix-edge-c ./infra/helm/edge-runtime-c "
                 "-n abenix-edge "
-                "--set platform.url=$PLATFORM_URL "
-                "--set platform.token=$EDGE_TOKEN "
-                "--set gateway.id=$GW"
+                "--set platform_url=$PLATFORM_URL "
+                "--set platform_token=$EDGE_TOKEN "
+                "--set gateway_id=$GW "
+                "--set auth_token=$EDGE_AUTH_TOKEN "
+                "--set-file signing_pubkey=signing_pub.pem"
             ),
             "docker_run": (
                 "docker run -d --name abenix-edge-c "
                 "-e PLATFORM_URL=... -e PLATFORM_TOKEN=... "
+                "-e EDGE_AUTH_TOKEN=... -e SIGNING_PUBKEY_PEM=... "
                 + EC.image("edge-runtime-c")
             ),
             "targets": ["armv7-linux", "arm64-linux", "x86_64-linux"],
@@ -415,6 +429,12 @@ async def register_gateway(
     )
     existing = res.scalar_one_or_none()
     now = datetime.now(timezone.utc)
+    if existing and existing.tenant_id != user.tenant_id:
+        return error(
+            "That gateway_id is already taken. Choose another one.",
+            409,
+            error_code="GATEWAY_ID_TAKEN",
+        )
     if existing:
         existing.name = name or existing.name
         existing.endpoint_url = endpoint_url or existing.endpoint_url
@@ -458,39 +478,231 @@ async def list_gateways(
     )
 
 
-async def _publish_to_mqtt(topic: str, payload: bytes) -> bool:
-    """Best-effort publish via paho. Returns False if MQTT is unreachable."""
-    mqtt_url = os.environ.get("MQTT_URL", "").strip()
-    if not mqtt_url:
-        return False
+MQTT_ACK_WAIT_S = 5.0
+_PUSH_TOKEN_KEY = "push_token_enc"
+
+
+def _deploy_topic(gateway_id: str, slug: str) -> str:
+    return f"edge/{gateway_id}/deploy/{slug}"
+
+
+def _ack_topic(gateway_id: str, slug: str) -> str:
+    return f"edge/{gateway_id}/ack/{slug}"
+
+
+def _push_token(g: EdgeGateway) -> str:
+    from app.core import crypto
+
+    enc = (g.settings or {}).get(_PUSH_TOKEN_KEY)
+    return crypto.decrypt(g.tenant_id, enc) if enc else ""
+
+
+def _mqtt_client(url: str) -> tuple[Any, str, int]:
+    import paho.mqtt.client as mqtt
+
+    u = urlparse(url if "://" in url else f"mqtt://{url}")
+    c = mqtt.Client(
+        mqtt.CallbackAPIVersion.VERSION2,
+        client_id=f"abenix-deploy-{secrets.token_hex(4)}",
+    )
+    if u.username:
+        c.username_pw_set(u.username, u.password)
+    return c, u.hostname or "localhost", u.port or 1883
+
+
+def _mqtt_deliver_sync(
+    url: str, topic: str, ack_topic: str, bundle: bytes, digest: str, wait_s: float
+) -> dict[str, Any]:
+    """QoS 1 and retained so a gateway that is off picks it up, then a short wait for its answer."""
+    out: dict[str, Any] = {
+        "attempted": True,
+        "published": False,
+        "acked": False,
+        "qos": 1,
+        "retained": True,
+        "gateway_error": None,
+        "error": None,
+    }
+    subscribed = threading.Event()
+    answered = threading.Event()
+
+    def on_connect(c: Any, _ud: Any, _flags: Any, rc: Any, _props: Any = None) -> None:
+        if getattr(rc, "value", rc) == 0:
+            c.subscribe(ack_topic, qos=1)
+        else:
+            out["error"] = f"the broker refused the connection {rc}"
+            subscribed.set()
+
+    def on_subscribe(*_a: Any) -> None:
+        subscribed.set()
+
+    def on_message(_c: Any, _ud: Any, msg: Any) -> None:
+        try:
+            ack = json.loads(msg.payload)
+        except ValueError:
+            return
+        if ack.get("digest") != digest:
+            return
+        if ack.get("ok"):
+            out["acked"] = True
+        else:
+            out["gateway_error"] = str(ack.get("error") or "the gateway refused it")
+        answered.set()
+
+    client = None
     try:
-        import paho.mqtt.publish as publish
-
-        host = mqtt_url.replace("mqtt://", "").split(":")[0] or "localhost"
-        port = 1883
-        if ":" in mqtt_url.replace("mqtt://", ""):
-            port = int(mqtt_url.replace("mqtt://", "").split(":")[1].split("/")[0])
-        publish.single(topic, payload=payload, hostname=host, port=port)
-        return True
-    except Exception as e:
+        client, host, port = _mqtt_client(url)
+        client.on_connect = on_connect
+        client.on_subscribe = on_subscribe
+        client.on_message = on_message
+        client.connect(host, port, 30)
+        client.loop_start()
+        if not subscribed.wait(5.0) or out["error"]:
+            out["error"] = out["error"] or "the broker did not answer in 5 s"
+            return out
+        info = client.publish(topic, bundle, qos=1, retain=True)
+        info.wait_for_publish(10.0)
+        out["published"] = info.is_published()
+        if not out["published"]:
+            out["error"] = "the broker did not confirm the publish in 10 s"
+            return out
+        answered.wait(wait_s)
+    except Exception as e:  # noqa: BLE001
+        out["error"] = f"could not reach the broker {e}"
         logger.warning("mqtt_publish_failed topic=%s err=%s", topic, e)
-        return False
+    finally:
+        if client is not None:
+            client.loop_stop()
+            try:
+                client.disconnect()
+            except Exception:  # noqa: BLE001
+                pass
+    return out
 
 
-async def _push_bundle_http(endpoint_url: str, slug: str, bundle: bytes) -> bool:
+def _mqtt_clear_sync(url: str, topic: str) -> None:
+    client = None
+    try:
+        client, host, port = _mqtt_client(url)
+        client.connect(host, port, 30)
+        client.loop_start()
+        client.publish(topic, b"", qos=1, retain=True).wait_for_publish(5.0)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("mqtt_clear_failed topic=%s err=%s", topic, e)
+    finally:
+        if client is not None:
+            client.loop_stop()
+            try:
+                client.disconnect()
+            except Exception:  # noqa: BLE001
+                pass
+
+
+async def _mqtt_deliver(
+    gateway_id: str, slug: str, bundle: bytes, digest: str
+) -> dict[str, Any]:
+    url = os.environ.get("MQTT_URL", "").strip()
+    if not url:
+        return {"attempted": False, "published": False, "acked": False}
+    return await asyncio.to_thread(
+        _mqtt_deliver_sync,
+        url,
+        _deploy_topic(gateway_id, slug),
+        _ack_topic(gateway_id, slug),
+        bundle,
+        digest,
+        MQTT_ACK_WAIT_S,
+    )
+
+
+async def _mqtt_clear(gateway_id: str, slug: str) -> None:
+    url = os.environ.get("MQTT_URL", "").strip()
+    if url:
+        await asyncio.to_thread(_mqtt_clear_sync, url, _deploy_topic(gateway_id, slug))
+
+
+async def _push_bundle_http(
+    endpoint_url: str, slug: str, bundle: bytes, token: str = ""
+) -> dict[str, Any]:
+    out: dict[str, Any] = {
+        "attempted": bool(endpoint_url),
+        "delivered": False,
+        "status": None,
+        "error": None,
+    }
     if not endpoint_url:
-        return False
+        return out
+    headers = {"Content-Type": "application/x-tar"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
             r = await client.post(
                 f"{endpoint_url.rstrip('/')}/agents/{slug}/bundle",
                 content=bundle,
-                headers={"Content-Type": "application/x-tar"},
+                headers=headers,
             )
-            return 200 <= r.status_code < 300
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.warning("edge_http_push_failed endpoint=%s err=%s", endpoint_url, e)
-        return False
+        out["error"] = f"could not reach {endpoint_url} {type(e).__name__}"
+        return out
+    out["status"] = r.status_code
+    out["delivered"] = 200 <= r.status_code < 300
+    if r.status_code == 401:
+        out["error"] = (
+            "the gateway refused the token, set push_token on this gateway to its "
+            "EDGE_AUTH_TOKEN"
+        )
+    elif not out["delivered"]:
+        try:
+            out["error"] = str(r.json().get("error") or r.text[:300])
+        except ValueError:
+            out["error"] = r.text[:300] or f"HTTP {r.status_code}"
+    return out
+
+
+def _deploy_outcome(mqtt: dict[str, Any], http: dict[str, Any]) -> dict[str, Any]:
+    """deployed is true only when the gateway itself said it loaded the bundle."""
+    delivered_via = (
+        "mqtt" if mqtt.get("acked") else "http" if http.get("delivered") else None
+    )
+    refused = mqtt.get("gateway_error") or (
+        http.get("error")
+        if http.get("status") is not None
+        and http.get("status") != 401
+        and not http.get("delivered")
+        else None
+    )
+    queued = bool(mqtt.get("published")) and not delivered_via and not refused
+    attempted = bool(mqtt.get("attempted") or http.get("attempted"))
+    reachable = bool(delivered_via or refused or http.get("status") is not None)
+    if delivered_via == "mqtt":
+        message = "The gateway loaded the bundle over MQTT."
+    elif delivered_via == "http":
+        message = "The gateway loaded the bundle over HTTP."
+    elif refused:
+        message = f"The gateway refused the bundle. {refused}"
+    elif queued:
+        message = (
+            f"The gateway did not answer in {MQTT_ACK_WAIT_S:g} s. The broker holds the "
+            "bundle and the gateway loads it when it next connects."
+        )
+    elif not attempted:
+        message = (
+            "This gateway cannot be reached. The API has no MQTT_URL and the gateway "
+            "has no endpoint_url. Set one of them and deploy again."
+        )
+    else:
+        why = [x for x in (mqtt.get("error"), http.get("error")) if x]
+        message = "The gateway cannot be reached. " + ". ".join(why)
+    return {
+        "deployed": delivered_via is not None,
+        "delivered_via": delivered_via,
+        "queued": queued,
+        "gateway_reachable": reachable if attempted else None,
+        "refused": bool(refused),
+        "message": message,
+    }
 
 
 @router.post("/gateways/{gateway_pk}/deploy")
@@ -500,24 +712,19 @@ async def deploy_to_gateway(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> JSONResponse:
-    """Compile + sign + push a `.agent` bundle to a gateway.
-
-    Tries MQTT first; falls back to HTTP POST against the gateway's endpoint.
-    """
+    """Compile, sign and send a `.agent` bundle, over MQTT first and HTTP when that is not confirmed."""
     if not await _can_manage(db, user):
         return error(MANAGE_REFUSAL, 403, error_code="FORBIDDEN")
     agent_id = (body.get("agent_id") or "").strip()
     if not agent_id:
         return error("agent_id is required", 400)
 
-    res = await db.execute(
-        select(EdgeGateway).where(EdgeGateway.id == uuid.UUID(gateway_pk))
-    )
-    g = res.scalar_one_or_none()
-    if g is None or g.tenant_id != user.tenant_id:
-        raise HTTPException(404, "gateway not found")
-
-    res2 = await db.execute(select(Agent).where(Agent.id == uuid.UUID(agent_id)))
+    g = await _gateway_or_404(db, user, gateway_pk)
+    try:
+        agent_uuid = uuid.UUID(agent_id)
+    except ValueError:
+        raise HTTPException(404, "agent not found")
+    res2 = await db.execute(select(Agent).where(Agent.id == agent_uuid))
     agent = res2.scalar_one_or_none()
     if agent is None or agent.tenant_id != user.tenant_id:
         raise HTTPException(404, "agent not found")
@@ -531,36 +738,51 @@ async def deploy_to_gateway(
     except EdgeCompileError as e:
         return error(str(e), 400)
 
-    topic = f"edge.{g.gateway_id}.deploy"
-    pushed = await _publish_to_mqtt(topic, bundle)
-    if not pushed:
-        pushed = await _push_bundle_http(g.endpoint_url or "", agent.slug, bundle)
+    topic = _deploy_topic(g.gateway_id, agent.slug)
+    mqtt = await _mqtt_deliver(g.gateway_id, agent.slug, bundle, digest)
+    http: dict[str, Any] = {"attempted": False, "delivered": False, "status": None}
+    if not mqtt.get("acked") and not mqtt.get("gateway_error"):
+        http = await _push_bundle_http(
+            g.endpoint_url or "", agent.slug, bundle, _push_token(g)
+        )
+    outcome = _deploy_outcome(mqtt, http)
+    if outcome["refused"] and mqtt.get("published"):
+        # a bundle the gateway refused must not come back on every reconnect
+        await _mqtt_clear(g.gateway_id, agent.slug)
+        outcome["queued"] = False
 
-    deployed = list(g.deployed_agents or [])
-    record = {
-        "slug": agent.slug,
-        "agent_id": str(agent.id),
-        "digest": digest,
-        "deployed_at": datetime.now(timezone.utc).isoformat(),
+    payload = {
+        **outcome,
+        "bundle_digest": digest,
+        "bundle_bytes": len(bundle),
+        "topic": topic,
+        "mqtt": mqtt,
+        "http": http,
     }
-    deployed = [d for d in deployed if d.get("slug") != agent.slug] + [record]
-    await db.execute(
-        update(EdgeGateway)
-        .where(EdgeGateway.id == g.id)
-        .values(deployed_agents=deployed, last_seen_at=datetime.now(timezone.utc))
-    )
-    await db.commit()
-
-    return success(
-        {
-            "deployed": True,
-            "transport": "mqtt" if pushed and os.environ.get("MQTT_URL") else "http",
-            "bundle_digest": digest,
-            "bundle_bytes": len(bundle),
-            "topic": topic,
-            "pushed": pushed,
+    if outcome["deployed"] or outcome["queued"]:
+        now = datetime.now(timezone.utc)
+        record = {
+            "slug": agent.slug,
+            "agent_id": str(agent.id),
+            "digest": digest,
+            "deployed_at": now.isoformat(),
+            "state": "delivered" if outcome["deployed"] else "queued",
         }
+        deployed = [
+            d for d in (g.deployed_agents or []) if d.get("slug") != agent.slug
+        ] + [record]
+        values: dict[str, Any] = {"deployed_agents": deployed}
+        if outcome["deployed"]:
+            values["last_seen_at"] = now
+        await db.execute(
+            update(EdgeGateway).where(EdgeGateway.id == g.id).values(**values)
+        )
+        await db.commit()
+        return success(payload)
+    code, err = (
+        (422, "GATEWAY_REFUSED") if outcome["refused"] else (502, "GATEWAY_UNREACHABLE")
     )
+    return error(outcome["message"], code, error_code=err, details=payload)
 
 
 @router.get("/gateways/{gateway_pk}/agents")
@@ -606,6 +828,10 @@ async def delete_gateway(
         return error(MANAGE_REFUSAL, 403, error_code="FORBIDDEN")
     g = await _gateway_or_404(db, user, gateway_pk)
     await _revoke_key(db, g)
+    # a retained bundle would otherwise wait on the broker for a gateway that is gone
+    for d in g.deployed_agents or []:
+        if d.get("slug"):
+            await _mqtt_clear(g.gateway_id, d["slug"])
     conn_id = g.telemetry_connection_id
     removed = False
     if remove_source and conn_id:
@@ -994,8 +1220,18 @@ async def update_gateway(
                 error_code="VALIDATION_ERROR",
                 details={"settings": sp},
             )
+        if (g.settings or {}).get(_PUSH_TOKEN_KEY):
+            st[_PUSH_TOKEN_KEY] = g.settings[_PUSH_TOKEN_KEY]
         g.settings = st
         changed = True
+    if "push_token" in body:
+        from app.core import crypto
+
+        token = str(body.get("push_token") or "").strip()
+        kept = {k: v for k, v in (g.settings or {}).items() if k != _PUSH_TOKEN_KEY}
+        if token:
+            kept[_PUSH_TOKEN_KEY] = crypto.encrypt(g.tenant_id, token)
+        g.settings = kept
     if changed:
         g.config_version = (g.config_version or 0) + 1
     await _audit(
@@ -1037,6 +1273,15 @@ async def install_command(
     token = ENROLL_PREFIX + secrets.token_urlsafe(32)
     g.enroll_token_hash = hashlib.sha256(token.encode()).hexdigest()
     g.enroll_expires_at = datetime.now(timezone.utc) + ENROLL_TTL
+    agent_token = None
+    if "agents" in (g.roles or []):
+        from app.core import crypto
+
+        agent_token = secrets.token_urlsafe(32)
+        g.settings = {
+            **(g.settings or {}),
+            _PUSH_TOKEN_KEY: crypto.encrypt(g.tenant_id, agent_token),
+        }
     reenrol = bool(g.enrolled_at or g.revoked_at)
     if reenrol:
         # the box enrols again with this token, its old key stops at once
@@ -1049,7 +1294,9 @@ async def install_command(
     )
     await db.commit()
     await db.refresh(g)
-    cmds = EC.install(g.gateway_id, url, token, list(g.collectors or []))
+    cmds = EC.install(
+        g.gateway_id, url, token, list(g.collectors or []), agent_token=agent_token
+    )
     return success(
         {
             "gateway": _serialize_gateway(g, full=True),
@@ -1199,6 +1446,7 @@ async def enroll(
             "config": _config_for(g),
             "config_version": g.config_version,
             "signing_pubkey_pem": pubkey,
+            "tenant_id": str(g.tenant_id),
         }
     )
 

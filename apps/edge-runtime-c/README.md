@@ -1,9 +1,9 @@
 # edge-runtime-c
 
-C port of `apps/edge-runtime/` for ultra-constrained plant gateways. Same wire
-contract: same `.agent` bundle format, same HTTP routes, same MQTT topic, same
-register POST. Drop-in replacement when the target box won't accept a Python
-or Rust runtime.
+C port of the agents half of `apps/edge-runtime/` for small plant gateways. Same
+`.agent` bundle format, HTTP routes, token, MQTT topics and register call. It has
+no gateway mode, so no enrolment, collectors or store and forward. An agent makes
+one model call and returns the text, there is no tool loop.
 
 ## Why C
 
@@ -22,7 +22,7 @@ openssl, json-c, libmicrohttpd) is the realistic minimum.
 | ARM Cortex-A7+   | armv7hf | cross-compile with `gcc-arm-linux-gnueabihf` + matching libs |
 | ARM Cortex-A53   | aarch64 | same, with `gcc-aarch64-linux-gnu`                      |
 | OpenWRT 22.03+   | yes     | install `libcurl libmosquitto-ssl libopenssl json-c libmicrohttpd` |
-| Embedded Linux   | 4.x+    | musl or glibc; needs ~12 MB RAM resident                |
+| Embedded Linux   | 4.x+    | musl or glibc, 3 MiB of memory idle in the Alpine image on arm64 |
 
 ## Build
 
@@ -36,23 +36,19 @@ Required dev packages:
 
 | distro  | packages                                                                         |
 |---------|----------------------------------------------------------------------------------|
-| alpine  | `gcc musl-dev make pkgconf curl-dev json-c-dev libmicrohttpd-dev mosquitto-dev openssl-dev zlib-dev` |
-| debian  | `gcc make pkg-config libcurl4-openssl-dev libjson-c-dev libmicrohttpd-dev libmosquitto-dev libssl-dev zlib1g-dev` |
-| openwrt | `gcc make pkg-config libcurl-dev libjson-c-dev libmicrohttpd-dev libmosquitto-dev libopenssl-dev zlib-dev`         |
+| alpine  | `gcc musl-dev make pkgconf curl-dev json-c-dev libmicrohttpd-dev mosquitto-dev openssl-dev` |
+| debian  | `gcc make pkg-config libcurl4-openssl-dev libjson-c-dev libmicrohttpd-dev libmosquitto-dev libssl-dev` |
+| openwrt | `gcc make pkg-config libcurl-dev libjson-c-dev libmicrohttpd-dev libmosquitto-dev libopenssl-dev`         |
 
 ## Binary size
 
-`make release` strips and produces a ~43 KB binary on alpine musl x86_64.
-The Docker image is alpine + the runtime libs + python3 (24 MB on its own,
-needed for the `code_executor` tool) and lands around 60 MB single-arch on
-disk. Drop the `python3` apk if `code_executor` isn't needed and the image
-falls to ~36 MB. Without libmicrohttpd the floor is ~14 MB.
+`make release` strips and produces a 67 KB binary on Alpine musl arm64. The image
+with its libraries and `python3` for `code_executor` is 96 MB.
 
 ## Container build
 
 ```sh
-docker build -t agentforge/edge-runtime-c:1.1.0 .
-docker images agentforge/edge-runtime-c:1.1.0
+docker build -t localhost:5000/abenix/edge-runtime-c:latest .
 ```
 
 ## Run
@@ -63,6 +59,7 @@ GATEWAY_ID=plc-floor-3 \
   PLATFORM_TOKEN=$EDGE_TOKEN \
   MQTT_URL=mqtt://broker:1883 \
   SIGNING_PUBKEY_PATH=/etc/edge/signing_pub.pem \
+  EDGE_AUTH_TOKEN=$EDGE_AUTH_TOKEN \
   ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY \
   ./build/release/edge-runtime-c --port 8080
 ```
@@ -76,8 +73,8 @@ Same env-var contract as the Python pod. See
 |------------------------------|--------|------------------------------------------------------|
 | `/health`                    | GET    | `{status, agents, gateway_id}`                       |
 | `/agents`                    | GET    | list of registered agents                            |
-| `/agents/{slug}/bundle`      | POST   | install a `.agent` bundle from the request body      |
-| `/agents/{slug}/execute`     | POST   | run the agent — body `{"message":"...", "params":{}}` |
+| `/agents/{slug}/bundle`      | POST   | needs the token, installs a `.agent` bundle from the request body |
+| `/agents/{slug}/execute`     | POST   | needs the token, runs the agent, body `{"message":"...", "params":{}}` |
 
 ## Test
 
@@ -86,36 +83,22 @@ make release
 bash tests/test_smoke.sh
 ```
 
-The smoke test boots the binary, generates a real signed bundle, pushes it
-over `/agents/{slug}/bundle`, and asserts the stub `echo` path comes back
-with `duration_ms`.
+The smoke test boots the binary with real signed bundles and checks the start
+refusals, the token, tampered, unsigned, foreign tenant, traversal and symlink
+bundles, the restart, `params.code` with its scrubbed environment and its limit.
+Run `bash scripts/edge-conformance.sh` for the same contract next to the other runtimes.
 
 ## Tool whitelist
 
-Manifest validation rejects anything outside:
+Manifest validation refuses anything outside `mqtt_publish`, `mqtt_subscribe`,
+`current_time`, `windowed_state`, `connector_call` and `code_executor`. The model
+is not given any of them. `code_executor` only opens `params.code`, and only with
+`EDGE_ENABLE_CODE_EXECUTOR=true`. Then it runs as `python3 -I -c` with no shell, an
+environment of `PATH` and `HOME`, its own process group and a 5 second limit.
 
-- `mqtt_publish`, `mqtt_subscribe`
-- `current_time`
-- `windowed_state`
-- `connector_call`
-- `code_executor` — runs as `python3 -c "$code"` with `alarm(5)`
+## Known limits
 
-`atlas_*` and `mcp_*` are explicitly forbidden.
-
-## Known gaps
-
-- Signature verification strips the `signature.sig` blocks from the tar and
-  verifies the remainder. The Python runtime instead rebuilds a fresh tar
-  from the non-sig members and verifies that. The two byte streams differ
-  in their trailing record-padding, so a Python-signed bundle won't
-  validate against the C runtime today (and vice versa). Either:
-  (a) sign at the bundle compiler against the byte-stripped form, or
-  (b) extend the C runtime to also try a deterministic rebuild path before
-  rejecting. The smoke test uses option (a).
-- Local model_weights/ inference is rejected with `phase_2: true`, matching
-  the Python runtime's v1.1 behaviour.
-- The `windowed_state` and `connector_call` tools are accepted in the tool
-  whitelist but not yet implemented as host-side shims; an agent that
-  invokes them through the Anthropic tool-use loop gets the model's tool
-  call without execution. Add shims in `executor.c` once the contract is
-  pinned.
+- The system prompt is kept up to 16 KB, a longer one is cut and the log says so.
+- At most 64 agents, 16 tools on an agent, and tar names up to 100 bytes.
+- Local `model_weights/` are refused with `phase_2: true`.
+- It verifies only the platform's signed view, not the older rebuilt tar the Python and Rust runtimes also accept.

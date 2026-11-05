@@ -101,6 +101,8 @@ def env(monkeypatch, tmp_path):
     monkeypatch.delenv("SIGNING_PUBKEY_PEM", raising=False)
     monkeypatch.delenv("EDGE_ALLOW_UNSIGNED", raising=False)
     monkeypatch.delenv("TENANT_ID", raising=False)
+    monkeypatch.delenv("EDGE_ALLOW_NO_AUTH", raising=False)
+    monkeypatch.setenv("EDGE_AUTH_TOKEN", "test-token")
     return monkeypatch
 
 
@@ -153,6 +155,8 @@ def test_allow_unsigned_needs_literal_true(env):
     env.setenv("EDGE_ALLOW_UNSIGNED", "yes")
     assert edge_runtime.Config().allow_unsigned is False
     env.setenv("EDGE_ALLOW_UNSIGNED", "TRUE")
+    assert edge_runtime.Config().allow_unsigned is False
+    env.setenv("EDGE_ALLOW_UNSIGNED", "true")
     assert edge_runtime.Config().allow_unsigned is True
 
 

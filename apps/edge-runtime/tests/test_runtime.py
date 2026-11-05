@@ -88,7 +88,10 @@ async def test_runtime_boots_loads_executes(tmp_path):
     os.environ["SIGNING_PUBKEY_PATH"] = str(pub_path)
     os.environ["MQTT_URL"] = ""
     os.environ["PLATFORM_TOKEN"] = ""
+    os.environ["EDGE_AUTH_TOKEN"] = "smoke-token"
     os.environ.pop("ANTHROPIC_API_KEY", None)
+    os.environ.pop("ANTHROPIC_AUTH_TOKEN", None)
+    os.environ.pop("CLAUDE_SUBSCRIPTION_TOKEN", None)
 
     cfg = edge_runtime.Config()
     registry = edge_runtime.Registry(cfg)
@@ -98,6 +101,7 @@ async def test_runtime_boots_loads_executes(tmp_path):
 
     bundle = _make_bundle("smoke-agent", key)
 
+    auth = {"Authorization": "Bearer smoke-token"}
     async with httpx.AsyncClient(timeout=5.0) as client:
         r = await client.get("http://127.0.0.1:8088/health")
         assert r.status_code == 200
@@ -106,7 +110,7 @@ async def test_runtime_boots_loads_executes(tmp_path):
         r = await client.post(
             "http://127.0.0.1:8088/agents/smoke-agent/bundle",
             content=bundle,
-            headers={"Content-Type": "application/x-tar"},
+            headers={"Content-Type": "application/x-tar", **auth},
         )
         assert r.status_code == 200, r.text
         assert r.json()["loaded"]["slug"] == "smoke-agent"
@@ -119,6 +123,7 @@ async def test_runtime_boots_loads_executes(tmp_path):
         r = await client.post(
             "http://127.0.0.1:8088/agents/smoke-agent/execute",
             json={"message": "hi"},
+            headers=auth,
         )
         assert r.status_code == 200
         body = r.json()

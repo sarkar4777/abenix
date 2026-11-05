@@ -13,7 +13,7 @@ WARN         := -Wall -Wextra -Wno-unused-parameter
 COMMON       := $(WARN) -pthread $(PKG_CFLAGS) -D_GNU_SOURCE
 CFLAGS_DEBUG := -O0 -g $(COMMON)
 CFLAGS_REL   := -O2 -DNDEBUG $(COMMON)
-LDLIBS       := $(PKG_LIBS) -lz -pthread
+LDLIBS       := $(PKG_LIBS) -pthread
 
 .PHONY: all debug release clean strip-release
 

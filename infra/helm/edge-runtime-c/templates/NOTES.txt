@@ -1,0 +1,5 @@
+{{ .Chart.Name }} is installed as {{ include "edge-runtime-c.fullname" . }}.
+
+Bundle install and execute need the token in Secret {{ include "edge-runtime-c.fullname" . }}-secret, key auth_token.
+Read it with
+  kubectl get secret -n {{ .Release.Namespace }} {{ include "edge-runtime-c.fullname" . }}-secret -o jsonpath='{.data.auth_token}' | base64 -d

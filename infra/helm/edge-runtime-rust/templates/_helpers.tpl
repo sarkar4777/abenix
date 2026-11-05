@@ -24,3 +24,16 @@ abenix.io/runtime-variant: rust
 app.kubernetes.io/name: {{ include "edge-runtime-rust.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
+
+{{- define "edge-runtime-rust.validate" -}}
+{{- if ne .Values.mode "legacy" -}}
+{{- fail "This runtime only runs agent bundles, mode must be legacy. Use infra/helm/edge-runtime for gateway mode." -}}
+{{- end -}}
+{{- if and (not .Values.signing_pubkey) (not (eq (toString .Values.allow_unsigned) "true")) -}}
+{{- fail "signing_pubkey is required. Fetch it from GET /api/edge/signing-key on the platform. allow_unsigned=true bypasses this for local development only." -}}
+{{- end -}}
+{{- end }}
+
+{{- define "edge-runtime-rust.literalTrue" -}}
+{{- if eq (toString .) "true" -}}true{{- else -}}false{{- end -}}
+{{- end }}

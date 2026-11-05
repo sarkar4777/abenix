@@ -25,6 +25,7 @@ void edge_log(const char *level, const char *fmt, ...)
     gmtime_r(&now, &tm);
 #endif
     strftime(ts, sizeof(ts), "%Y-%m-%dT%H:%M:%SZ", &tm);
+    flockfile(stderr);
     fprintf(stderr, "%s %s edge-runtime ", ts, level);
     va_list ap;
     va_start(ap, fmt);
@@ -32,6 +33,7 @@ void edge_log(const char *level, const char *fmt, ...)
     va_end(ap);
     fputc('\n', stderr);
     fflush(stderr);
+    funlockfile(stderr);
 }
 
 static void on_signal(int sig)
@@ -72,6 +74,13 @@ static void mkdir_p(const char *path)
     mkdir(tmp, 0755);
 }
 
+/* only the literal string true opens these */
+static int env_is_true(const char *key)
+{
+    const char *v = getenv(key);
+    return v && strcmp(v, "true") == 0;
+}
+
 static void load_config(edge_config_t *cfg, int argc, char **argv)
 {
     memset(cfg, 0, sizeof(*cfg));
@@ -83,11 +92,20 @@ static void load_config(edge_config_t *cfg, int argc, char **argv)
     getenv_into("MQTT_URL", cfg->mqtt_url, sizeof(cfg->mqtt_url), "");
     getenv_into("SIGNING_PUBKEY_PATH", cfg->signing_pubkey_path,
                 sizeof(cfg->signing_pubkey_path), "/etc/edge/signing_pub.pem");
+    getenv_into("SIGNING_PUBKEY_PEM", cfg->signing_pubkey_pem,
+                sizeof(cfg->signing_pubkey_pem), "");
+    getenv_into("EDGE_AUTH_TOKEN", cfg->auth_token, sizeof(cfg->auth_token), "");
+    getenv_into("TENANT_ID", cfg->tenant_id, sizeof(cfg->tenant_id), "");
+    cfg->allow_unsigned = env_is_true("EDGE_ALLOW_UNSIGNED");
+    cfg->allow_no_auth = env_is_true("EDGE_ALLOW_NO_AUTH");
+    cfg->code_enabled = env_is_true("EDGE_ENABLE_CODE_EXECUTOR");
     getenv_into("BUNDLE_DIR", cfg->bundle_dir, sizeof(cfg->bundle_dir),
                 "/var/edge/agents");
     getenv_into("ENDPOINT_URL", cfg->endpoint_url, sizeof(cfg->endpoint_url), "");
     getenv_into("ANTHROPIC_API_KEY", cfg->anthropic_api_key,
                 sizeof(cfg->anthropic_api_key), "");
+    getenv_into("ANTHROPIC_AUTH_TOKEN", cfg->anthropic_auth_token,
+                sizeof(cfg->anthropic_auth_token), getenv("CLAUDE_SUBSCRIPTION_TOKEN"));
     getenv_into("ANTHROPIC_BASE_URL", cfg->anthropic_base_url,
                 sizeof(cfg->anthropic_base_url), "https://api.anthropic.com");
 
@@ -104,25 +122,63 @@ static void load_config(edge_config_t *cfg, int argc, char **argv)
     mkdir_p(cfg->bundle_dir);
 }
 
+static void check_startup(const edge_config_t *cfg)
+{
+    int key = bundle_pubkey_state(cfg);
+    if (key < 0) {
+        fprintf(stderr, "edge-runtime refused to start, the signing public key could not be parsed\n");
+        exit(1);
+    }
+    if (cfg->allow_unsigned) {
+        edge_log("WARN", "EDGE_ALLOW_UNSIGNED=true, unsigned bundles will be accepted, development only");
+    } else if (key == 0) {
+        fprintf(stderr,
+                "edge-runtime refused to start, no signing public key. Set SIGNING_PUBKEY_PEM or mount it "
+                "at SIGNING_PUBKEY_PATH (%s). Fetch it from GET /api/edge/signing-key on the platform. "
+                "EDGE_ALLOW_UNSIGNED=true bypasses this for local development only.\n",
+                cfg->signing_pubkey_path);
+        exit(1);
+    }
+    if (cfg->allow_no_auth) {
+        edge_log("WARN", "EDGE_ALLOW_NO_AUTH=true, anyone who can reach this port can install and run agents, development only");
+    } else if (!cfg->auth_token[0]) {
+        fprintf(stderr,
+                "edge-runtime refused to start, no EDGE_AUTH_TOKEN. Set it so bundle install and execute "
+                "need a bearer token. EDGE_ALLOW_NO_AUTH=true bypasses this for local development only.\n");
+        exit(1);
+    }
+    if (cfg->code_enabled) {
+        edge_log("WARN", "EDGE_ENABLE_CODE_EXECUTOR=true, params.code runs for agents that list code_executor");
+    }
+    if (cfg->tenant_id[0]) {
+        edge_log("INFO", "tenant_binding tenant_id=%s", cfg->tenant_id);
+    }
+}
+
 int main(int argc, char **argv)
 {
-    edge_config_t cfg;
-    edge_registry_t registry;
+    static edge_config_t cfg;
+    static edge_registry_t registry;
 
     signal(SIGTERM, on_signal);
     signal(SIGINT, on_signal);
     signal(SIGPIPE, SIG_IGN);
 
     load_config(&cfg, argc, argv);
+    check_startup(&cfg);
     registry_init(&registry);
     registry_reload_from_disk(&registry, &cfg);
 
     edge_ctx_t ctx = { .cfg = &cfg, .registry = &registry };
 
+    /* an install holds two agent structs on its stack, musl threads default to 128 KB */
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+    pthread_attr_setstacksize(&attr, 1024 * 1024);
     pthread_t t_register, t_mqtt, t_http;
-    pthread_create(&t_register, NULL, register_loop_thread, &ctx);
-    pthread_create(&t_mqtt, NULL, mqtt_thread, &ctx);
-    pthread_create(&t_http, NULL, http_thread, &ctx);
+    pthread_create(&t_register, &attr, register_loop_thread, &ctx);
+    pthread_create(&t_mqtt, &attr, mqtt_thread, &ctx);
+    pthread_create(&t_http, &attr, http_thread, &ctx);
 
     edge_log("INFO", "started gateway_id=%s port=%d bundle_dir=%s",
              cfg.gateway_id, cfg.port, cfg.bundle_dir);

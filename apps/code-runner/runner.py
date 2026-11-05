@@ -190,12 +190,14 @@ def run_limits(
     limits: list[tuple[str, int, int]] = []
     if cpu and timeout_s > 0:
         limits.append(("RLIMIT_CPU", int(timeout_s) + 1, int(timeout_s) + 2))
+    # macOS has no way to lower RLIMIT_AS, and its RLIMIT_NPROC counts the whole user's processes
+    linux = sys.platform.startswith("linux")
     as_mult = float(os.environ.get("CODERUN_AS_MULTIPLIER", "1") or 0)
-    if as_mult > 0 and memory_mb > 0:
+    if linux and as_mult > 0 and memory_mb > 0:
         cap = int(memory_mb * as_mult) * 1024 * 1024
         limits.append(("RLIMIT_AS", cap, cap))
     nproc = int(os.environ.get("CODERUN_MAX_PROCS", "512"))
-    if nproc > 0:
+    if linux and nproc > 0:
         limits.append(("RLIMIT_NPROC", nproc, nproc))
     fsize = int(os.environ.get("CODERUN_MAX_FILE_MB", "256")) * 1024 * 1024
     if fsize > 0:

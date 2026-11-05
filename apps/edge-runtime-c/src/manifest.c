@@ -13,8 +13,6 @@ static const char *EDGE_SAFE_TOOLS[] = {
 
 static int is_edge_safe(const char *tool)
 {
-    if (strncmp(tool, "atlas_", 6) == 0) return 0;
-    if (strncmp(tool, "mcp_", 4) == 0) return 0;
     for (int i = 0; EDGE_SAFE_TOOLS[i]; i++) {
         if (strcmp(tool, EDGE_SAFE_TOOLS[i]) == 0) return 1;
     }
@@ -56,9 +54,18 @@ static void copy_str(char *dst, size_t cap, const char *src)
     dst[cap - 1] = '\0';
 }
 
-/* very narrow yaml-subset parser: top-level scalars, "tools: [...]" or
- * "tools:" + "- name" lines, and "edge_constraints:" with two scalars
- * (max_payload_bytes, max_runtime_seconds). other nested keys ignored. */
+static int add_tool(edge_agent_t *agent, const char *name)
+{
+    if (agent->tool_count >= EDGE_MAX_TOOLS || strlen(name) >= EDGE_MAX_TOOL_NAME) {
+        edge_log("ERROR", "manifest_tool_list_too_long");
+        return -1;
+    }
+    copy_str(agent->tools[agent->tool_count], EDGE_MAX_TOOL_NAME, name);
+    agent->tool_count++;
+    return 0;
+}
+
+/* narrow yaml subset, top level scalars, the tools list and the two edge limits */
 int manifest_parse_yaml(const char *yaml_text, size_t len, edge_agent_t *agent)
 {
     char *buf = (char *)malloc(len + 1);
@@ -66,7 +73,6 @@ int manifest_parse_yaml(const char *yaml_text, size_t len, edge_agent_t *agent)
     memcpy(buf, yaml_text, len);
     buf[len] = '\0';
 
-    /* defaults. */
     agent->max_payload_bytes = 65536;
     agent->max_runtime_seconds = 30;
     agent->temperature = 0.7;
@@ -91,18 +97,19 @@ int manifest_parse_yaml(const char *yaml_text, size_t len, edge_agent_t *agent)
         if (state == IN_TOOLS && raw[0] == '-') {
             char *v = raw + 1;
             while (*v == ' ') v++;
-            unquote(v);
             trim(v);
-            if (*v && agent->tool_count < EDGE_MAX_TOOLS) {
-                copy_str(agent->tools[agent->tool_count],
-                         EDGE_MAX_TOOL_NAME, v);
-                agent->tool_count++;
+            unquote(v);
+            if (*v && add_tool(agent, v) != 0) {
+                free(buf);
+                return -1;
             }
             continue;
         }
 
         if (state == IN_TOOLS && indent == 0) state = TOP;
         if (state == IN_EDGE && indent <= edge_indent) state = TOP;
+        /* an indented line here continues a scalar such as a long description, never a real key */
+        if (state == TOP && indent > 0) continue;
 
         char *colon = strchr(raw, ':');
         if (!colon) continue;
@@ -125,7 +132,11 @@ int manifest_parse_yaml(const char *yaml_text, size_t len, edge_agent_t *agent)
         if (strcmp(key, "name") == 0) {
             copy_str(agent->name, sizeof(agent->name), val);
         } else if (strcmp(key, "slug") == 0) {
+            /* too long fails the slug check, never a silently shortened name */
+            if (strlen(val) >= sizeof(agent->slug)) val[0] = '.';
             copy_str(agent->slug, sizeof(agent->slug), val);
+        } else if (strcmp(key, "tenant_id") == 0) {
+            copy_str(agent->tenant_id, sizeof(agent->tenant_id), val);
         } else if (strcmp(key, "version") == 0) {
             copy_str(agent->version, sizeof(agent->version), val);
         } else if (strcmp(key, "model") == 0) {
@@ -146,10 +157,9 @@ int manifest_parse_yaml(const char *yaml_text, size_t len, edge_agent_t *agent)
                 for (tok = strtok_r(p, ",", &ts); tok; tok = strtok_r(NULL, ",", &ts)) {
                     trim(tok);
                     unquote(tok);
-                    if (*tok && agent->tool_count < EDGE_MAX_TOOLS) {
-                        copy_str(agent->tools[agent->tool_count],
-                                 EDGE_MAX_TOOL_NAME, tok);
-                        agent->tool_count++;
+                    if (*tok && add_tool(agent, tok) != 0) {
+                        free(buf);
+                        return -1;
                     }
                 }
             } else {
@@ -169,16 +179,20 @@ int manifest_parse_yaml(const char *yaml_text, size_t len, edge_agent_t *agent)
     return 0;
 }
 
-int manifest_validate(const edge_agent_t *agent)
+int manifest_validate(const edge_agent_t *agent, char *err, size_t err_cap)
 {
     if (!agent->slug[0] || !agent->name[0] || !agent->version[0] ||
         !agent->model[0]) {
-        edge_log("ERROR", "manifest_missing_required");
+        snprintf(err, err_cap, "manifest missing required fields");
+        return -1;
+    }
+    if (!edge_valid_slug(agent->slug)) {
+        snprintf(err, err_cap, "manifest slug is not a safe name");
         return -1;
     }
     for (int i = 0; i < agent->tool_count; i++) {
         if (!is_edge_safe(agent->tools[i])) {
-            edge_log("ERROR", "tool_not_edge_safe tool=%s", agent->tools[i]);
+            snprintf(err, err_cap, "tool not edge-safe %s", agent->tools[i]);
             return -1;
         }
     }
