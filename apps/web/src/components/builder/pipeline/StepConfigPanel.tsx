@@ -221,6 +221,7 @@ function PipelineOverview({
   outputSchema?: string;
   onOutputSchemaChange?: (v: string) => void;
 }) {
+  const declaredTools = usePipelineStore((s) => s.agentTools);
   const validation = validatePipeline(allSteps);
 
   return (
@@ -260,7 +261,7 @@ function PipelineOverview({
           <RiskTierPicker
             value={riskTier}
             onChange={onRiskTierChange}
-            selectedTools={Array.from(new Set(allSteps.map((s) => s.toolName)))}
+            selectedTools={Array.from(new Set([...allSteps.map((s) => s.toolName), ...declaredTools]))}
             hasOutputSchema={!!(outputSchema || '').trim()}
             isPipeline
           />

@@ -249,16 +249,13 @@ test('1. Simple agent: describe, build, inspect, save, publish and use it from c
   }
 });
 
-// a product page the platform ships under /samples, so the run does not depend on the public internet
-const SAMPLE_PAGE = '/samples/bookshop-poetry.html';
-// the address the cluster fetches it from, the web service inside the cluster
-const WEB_IN_CLUSTER = process.env.AF_WEB_INTERNAL || 'http://abenix-web.abenix.svc.cluster.local:3000';
-const PRICE_URL = `${WEB_IN_CLUSTER}${SAMPLE_PAGE}`;
+// agents may not fetch internal addresses, so this reads a public demo bookshop
+const PRICE_URL = process.env.AF_PRICE_URL || 'https://books.toscrape.com/catalogue/category/books/poetry_23/index.html';
 
 // the oracle: average of the prices on the page, read by the test itself through the web app
 async function expectedAverage(page: Page): Promise<number | null> {
   try {
-    const res = await page.request.get(`${BASE}${SAMPLE_PAGE}`, { timeout: 20_000 });
+    const res = await page.request.get(PRICE_URL, { timeout: 20_000 });
     const html = await res.text();
     const prices = [...html.matchAll(/class="price_color">[^0-9]*([0-9]+\.[0-9]{2})</g)].map((m) => Number(m[1]));
     if (!prices.length) return null;
@@ -300,7 +297,7 @@ test('2. Pipeline: describe, build, inspect the canvas, run it and read the outp
   test.setTimeout(20 * 60_000);
   const avg = await expectedAverage(page);
   console.log(`expected average on the page: ${avg}`);
-  expect(avg, `the sample page ${SAMPLE_PAGE} is served and lists prices`).not.toBeNull();
+  expect(avg, `the page ${PRICE_URL} is reachable and lists prices`).not.toBeNull();
   const { dialog, text, raw } = await aiBuild(
     page,
     'A pipeline that takes a web page URL as input, fetches the page, extracts every product price on it, ' +

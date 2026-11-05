@@ -49,7 +49,11 @@ def _sign(signing_input: bytes, alg: str) -> bytes | None:
 
 
 def mint_user_token(
-    user_id: str, tenant_id: str, role: str, ttl: int = TOKEN_TTL_SECONDS
+    user_id: str,
+    tenant_id: str,
+    role: str,
+    ttl: int = TOKEN_TTL_SECONDS,
+    extra_claims: dict[str, str] | None = None,
 ) -> str:
     """Short-lived access token with the claims create_access_token issues."""
     alg = (os.environ.get("JWT_ALGORITHM") or "RS256").upper()
@@ -61,6 +65,7 @@ def mint_user_token(
         "type": "access",
         "exp": now + ttl,
         "iat": now,
+        **(extra_claims or {}),
     }
     header = {"alg": alg, "typ": "JWT"}
     signing_input = (
@@ -79,8 +84,17 @@ def mint_user_token(
     try:
         import uuid as _uuid
 
-        from app.core.security import create_access_token  # type: ignore
+        from app.core.security import create_access_token, create_purpose_token  # type: ignore
 
+        if extra_claims:
+            return create_purpose_token(
+                _uuid.UUID(str(user_id)),
+                "access",
+                max(ttl // 60, 1),
+                tenant_id=str(tenant_id),
+                role=role or "user",
+                **extra_claims,
+            )
         return create_access_token(
             _uuid.UUID(str(user_id)), _uuid.UUID(str(tenant_id)), role or "user"
         )

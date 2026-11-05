@@ -1460,7 +1460,10 @@ class _ApiApprover:
     ) -> tuple[dict[str, Any] | None, str]:
         from engine.tools import approval_gate as ag
 
-        headers = ag.auth_headers(ag.run_token(user_id, tenant_id))
+        # action approvals are reserved, the API lets only the runtime raise them
+        headers = ag.auth_headers(
+            ag.run_token(user_id, tenant_id, extra_claims={"raised_by": "runtime"})
+        )
         self._headers = headers
         return await ag.create_approval(body, headers)
 

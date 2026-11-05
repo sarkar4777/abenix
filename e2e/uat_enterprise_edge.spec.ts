@@ -137,6 +137,8 @@ test('EDGE #5 — Concurrent settings writes do not corrupt nested JSONB', async
     const v = (await d2.json()).data || {};
     expect(['detect', 'mask']).toContain(v.mode);
   }
+  // later specs expect their messages to reach moderation unmasked
+  await page.request.put(`${API}/api/settings/dlp`, { headers: auth(tok), data: { mode: 'detect', enabled: false } });
 });
 
 test('EDGE #6 — API-key scope: missing token returns 401, malformed returns 401', async ({ page }) => {

@@ -1283,6 +1283,23 @@ async def apply_ops(
     created_edges: list[AtlasEdge] = []
     skipped: int = 0
 
+    # read before the new nodes exist, they circle the nodes the user placed
+    centre = (
+        (
+            await db.execute(
+                select(
+                    func.avg(AtlasNode.position_x), func.avg(AtlasNode.position_y)
+                ).where(
+                    AtlasNode.graph_id == g.id,
+                    AtlasNode.position_x.is_not(None),
+                    AtlasNode.position_y.is_not(None),
+                )
+            )
+        ).one()
+        if auto_layout
+        else (None, None)
+    )
+
     # First pass — add_node ops. Ensures add_edge can find both ends.
     for op in ops:
         if not isinstance(op, dict):
@@ -1315,36 +1332,19 @@ async def apply_ops(
         db.add(n)
         by_label[label.lower()] = n
         created_nodes.append(n)
-    await db.flush()
 
-    # Auto-layout: arrange new nodes on a circle around the centroid
-    # of existing positions, leaving the user's hand-positioned nodes
-    # untouched. Cheap, deterministic, and looks intentional.
+    # placed before the insert, an update after it expires updated_at and the reply cannot read it
     if auto_layout and created_nodes:
         import math
 
-        created_ids = [n.id for n in created_nodes]
-        centre = (
-            await db.execute(
-                select(
-                    func.avg(AtlasNode.position_x), func.avg(AtlasNode.position_y)
-                ).where(
-                    AtlasNode.graph_id == g.id,
-                    AtlasNode.position_x.is_not(None),
-                    AtlasNode.position_y.is_not(None),
-                    AtlasNode.id.not_in(created_ids),
-                )
-            )
-        ).one()
-        if centre[0] is not None:
-            cx, cy = float(centre[0]), float(centre[1])
-        else:
-            cx, cy = 400.0, 300.0
+        cx = float(centre[0]) if centre[0] is not None else 400.0
+        cy = float(centre[1]) if centre[1] is not None else 300.0
         radius = 240 + 18 * len(created_nodes)
         for i, n in enumerate(created_nodes):
-            theta = (2 * math.pi * i) / max(len(created_nodes), 1)
+            theta = (2 * math.pi * i) / len(created_nodes)
             n.position_x = round(cx + radius * math.cos(theta), 1)
             n.position_y = round(cy + radius * math.sin(theta), 1)
+    await db.flush()
 
     # Second pass — add_edge ops. Resolved against the merged label map.
     for op in ops:

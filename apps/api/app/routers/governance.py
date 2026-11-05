@@ -392,7 +392,12 @@ async def set_governance_settings(
     role = user.role.value if hasattr(user.role, "value") else str(user.role)
     if role not in ("admin", "owner"):
         return error("Only an admin can change governance settings.", 403)
-    tenant = await db.get(Tenant, user.tenant_id)
+    tenant = await db.get(
+        Tenant,
+        user.tenant_id,
+        with_for_update={"key_share": True},
+        populate_existing=True,
+    )
     if tenant is None:
         return error("Tenant not found", 404)
     old = await _governance_settings(db, user.tenant_id)

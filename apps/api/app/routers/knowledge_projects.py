@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, get_db
@@ -244,8 +245,12 @@ async def delete_project(
             f"Project has {cnt} collection(s); delete or move them first",
             409,
         )
-    await db.delete(p)
-    await db.commit()
+    try:
+        await db.delete(p)
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        return error("Project still has collections, delete or move them first", 409)
     return success({"deleted": True})
 
 

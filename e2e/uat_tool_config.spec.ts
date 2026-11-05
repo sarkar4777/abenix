@@ -247,6 +247,6 @@ test.describe.serial('tool configuration', () => {
     await expect(page.locator('a[href="/admin/tool-config"]')).toHaveCount(0);
     await expect(page.getByTestId('credential-hint').first()).toContainText(/Ask an admin/);
     await visit(page, '/admin/tool-config');
-    await expect(page.getByTestId('tool-config-error')).toContainText(/Admin role required/);
+    await expect(page.getByRole('heading', { name: "You don't have access to this page" })).toBeVisible({ timeout: 30_000 });
   });
 });

@@ -56,7 +56,7 @@ class BootstrapCollectionSpec(BaseModel):
         pattern="^(private|project|tenant)$",
     )
     vector_backend: str = Field(
-        "pinecone",
+        "pgvector",
         pattern="^(pinecone|pgvector)$",
     )
     # Agents that should be granted access to this collection. Strings
@@ -88,7 +88,7 @@ class EnsureSubjectCollectionRequest(BaseModel):
         pattern="^(private|project|tenant)$",
     )
     vector_backend: str = Field(
-        "pinecone",
+        "pgvector",
         pattern="^(pinecone|pgvector)$",
     )
 

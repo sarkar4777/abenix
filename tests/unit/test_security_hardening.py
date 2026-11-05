@@ -782,3 +782,16 @@ def test_signup_admin_cannot_self_upgrade_in_mock_mode(monkeypatch):
 def test_tmpaudit_is_gone_and_ignored():
     assert not (ROOT / ".tmpaudit").exists()
     assert ".tmpaudit/" in (ROOT / ".gitignore").read_text()
+
+
+def test_only_a_runtime_token_may_raise_an_action_approval():
+    from types import SimpleNamespace
+
+    from app.routers import approvals
+
+    runtime = SimpleNamespace(_runtime_token=True)
+    person = SimpleNamespace()
+    assert approvals._refused_gate_kind("action:refund", person) is True
+    assert approvals._refused_gate_kind("action:refund", runtime) is False
+    # the runtime gets no other reserved kind
+    assert approvals._refused_gate_kind("autonomy.promote", runtime) is True

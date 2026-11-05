@@ -190,3 +190,72 @@ async def test_failed_sync_response_names_the_model_too():
     data = json.loads(resp.body)["data"]
     assert data["status"] == "failed"
     assert data["model"] == "claude-sonnet-5"
+
+
+class _CountingSession(FakeSession):
+    def __init__(self, agent, on_refresh=None):
+        super().__init__(agent, on_refresh)
+        self.commits = 0
+        self.rollbacks = 0
+
+    async def commit(self):
+        self.commits += 1
+
+    async def rollback(self):
+        self.rollbacks += 1
+
+
+async def test_a_wait_holds_no_open_transaction():
+    db = _CountingSession(_agent())
+    seen = []
+
+    class Events:
+        def __iter__(self):
+            seen.append(db.commits)
+            yield {"event": "done", "output": "hello"}
+
+    before = db.commits
+    await _execute(
+        _user(CAN_DELEGATE),
+        {"message": "hi", "stream": False, "wait": True},
+        db=db,
+        events=Events(),
+    )
+    assert seen and seen[0] > before
+
+
+async def test_a_queued_run_is_not_run_again_when_the_wait_breaks():
+    db = _CountingSession(_agent())
+
+    class Events:
+        def __iter__(self):
+            raise RuntimeError("connection lost")
+            yield
+
+    resp = await _execute(
+        _user(CAN_DELEGATE),
+        {"message": "hi", "stream": False, "wait": True},
+        db=db,
+        events=Events(),
+    )
+    assert resp.status_code == 202
+    data = json.loads(resp.body)["data"]
+    assert data["status"] == "running"
+    assert data["task_id"] == "task-1"
+    assert data["execution_id"]
+    assert db.rollbacks == 1
+
+
+async def test_a_failed_reload_after_the_wait_leaves_the_session_usable():
+    def broken(_row):
+        raise RuntimeError("connection lost")
+
+    db = _CountingSession(_agent(), on_refresh=broken)
+    resp = await _execute(
+        _user(CAN_DELEGATE),
+        {"message": "hi", "stream": False, "wait": True},
+        db=db,
+        events=[{"event": "done", "output": "hello"}],
+    )
+    assert db.rollbacks == 1
+    assert json.loads(resp.body)["data"]["output"] == "hello"

@@ -551,7 +551,12 @@ async def update_retention(
                 f"{RETENTION_LABELS[key]} must be a whole number of days, {low} or more",
                 400,
             )
-    result = await db.execute(select(Tenant).where(Tenant.id == user.tenant_id))
+    result = await db.execute(
+        select(Tenant)
+        .where(Tenant.id == user.tenant_id)
+        .with_for_update(key_share=True)
+        .execution_options(populate_existing=True)
+    )
     tenant = result.scalar_one_or_none()
     if not tenant:
         return error("Tenant not found", 404)
@@ -594,7 +599,12 @@ async def update_dlp_settings(
     """Update tenant DLP settings. Modes: detect, mask, block."""
     if user.role != UserRole.ADMIN:
         return error("Only tenant admins can change the data protection setting", 403)
-    result = await db.execute(select(Tenant).where(Tenant.id == user.tenant_id))
+    result = await db.execute(
+        select(Tenant)
+        .where(Tenant.id == user.tenant_id)
+        .with_for_update(key_share=True)
+        .execution_options(populate_existing=True)
+    )
     tenant = result.scalar_one_or_none()
     if not tenant:
         return error("Tenant not found", 404)
@@ -805,7 +815,12 @@ async def update_tenant_settings(
 ) -> JSONResponse:
     if user.role != UserRole.ADMIN:
         return error("only tenant admins can update tenant settings", 403)
-    t_q = await db.execute(select(Tenant).where(Tenant.id == user.tenant_id))
+    t_q = await db.execute(
+        select(Tenant)
+        .where(Tenant.id == user.tenant_id)
+        .with_for_update(key_share=True)
+        .execution_options(populate_existing=True)
+    )
     tenant = t_q.scalars().first()
     if tenant is None:
         return error("tenant not found", 404)

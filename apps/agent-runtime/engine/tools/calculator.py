@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import ast
 import math
+import re
+import statistics
 import operator
 from typing import Any
 
@@ -25,6 +27,9 @@ SAFE_FUNCTIONS = {
     "min": min,
     "max": max,
     "sum": sum,
+    "len": len,
+    "mean": statistics.fmean,
+    "avg": statistics.fmean,
     "sqrt": math.sqrt,
     "log": math.log,
     "log10": math.log10,
@@ -68,7 +73,20 @@ def _safe_eval(node: ast.AST) -> Any:
                 args = [_safe_eval(a) for a in node.args]
                 return fn(*args)
         raise ValueError("Unsupported function call")
+    if isinstance(node, (ast.List, ast.Tuple)):
+        return [_list_item(item) for item in node.elts]
     raise ValueError(f"Unsupported expression: {type(node).__name__}")
+
+
+def _list_item(node: ast.AST) -> Any:
+    # extracted values arrive quoted and may keep their currency sign
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        text = re.sub(r"[^0-9.eE+-]", "", node.value)
+        try:
+            return float(text)
+        except ValueError:
+            raise ValueError(f"Not a number: {node.value!r}") from None
+    return _safe_eval(node)
 
 
 class CalculatorTool(BaseTool):
@@ -76,7 +94,7 @@ class CalculatorTool(BaseTool):
     risk_tier = "low"
     description = (
         "Evaluate a mathematical expression safely. Supports basic arithmetic, "
-        "exponentiation, and math functions (sqrt, log, sin, cos, etc.)."
+        "exponentiation, math functions (sqrt, log, sin, cos, etc.) and lists (sum, len, mean, min, max over [1, 2, 3])."
     )
     input_schema: dict[str, Any] = {
         "type": "object",

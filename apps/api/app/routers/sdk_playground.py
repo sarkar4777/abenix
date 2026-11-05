@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -15,7 +16,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import async_session, get_current_user, get_db
@@ -25,6 +26,15 @@ from app.core.playground_access import (
     sandbox_image,
 )
 from app.core.responses import error, success
+
+
+def _subscription_usable() -> bool:
+    try:
+        from engine import claude_subscription  # type: ignore
+
+        return bool(claude_subscription.get_config().usable)
+    except Exception:
+        return False
 
 
 def _anthropic_client(api_key: str | None = None, sync: bool = False):
@@ -57,7 +67,7 @@ def _anthropic_client(api_key: str | None = None, sync: bool = False):
 sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "packages" / "db"))
 
 from models.user import User
-from models.agent import Agent
+from models.agent import Agent, AgentType
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/sdk-playground", tags=["sdk-playground"])
@@ -863,7 +873,15 @@ async def generate_code(
     if body.asset.type in ("agent", "pipeline"):
         try:
             agent_uuid = uuid.UUID(body.asset.id)
-            result = await db.execute(select(Agent).where(Agent.id == agent_uuid))
+            result = await db.execute(
+                select(Agent).where(
+                    Agent.id == agent_uuid,
+                    or_(
+                        Agent.tenant_id == user.tenant_id,
+                        Agent.agent_type == AgentType.OOB,
+                    ),
+                )
+            )
             agent = result.scalar_one_or_none()
             if agent:
                 asset_context = {
@@ -882,7 +900,7 @@ async def generate_code(
     try:
 
         api_key = os.environ.get("ANTHROPIC_API_KEY", "")
-        if not api_key:
+        if not api_key and not _subscription_usable():
             # Fallback: return template directly
             code = _build_template_code(
                 body.sdk, body.use_case, body.asset, body.message, body.context
@@ -891,7 +909,7 @@ async def generate_code(
                 {
                     "code": code,
                     "language": body.sdk,
-                    "explanation": f"Template-based code for {body.use_case}. Set ANTHROPIC_API_KEY for AI-generated code.",
+                    "explanation": f"Template-based code for {body.use_case}. Connect a Claude subscription or set ANTHROPIC_API_KEY for AI-generated code.",
                     "imports": (
                         ["abenix_sdk"] if body.sdk == "python" else ["@abenix/sdk"]
                     ),
@@ -914,7 +932,9 @@ async def generate_code(
 
         user_msg = f"Generate the code. {body.user_prompt or 'Make it production-ready with good error handling.'}"
 
-        response = client.messages.create(
+        # the client is synchronous and generation takes a while
+        response = await asyncio.to_thread(
+            client.messages.create,
             model="claude-sonnet-4-5-20250929",
             max_tokens=6000,
             system=system_prompt,

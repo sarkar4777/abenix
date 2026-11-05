@@ -1251,3 +1251,26 @@ class TestNodeTrace:
         assert len(summary) == 3
         assert summary[0]["node_type"] == "user_input"
         assert summary[2]["node_type"] == "tool_call"
+
+
+@pytest.mark.parametrize(
+    ("expression", "expected"),
+    [
+        ("sum([1, 2, 3]) / len([1, 2, 3])", "2"),
+        ("mean([10, 20])", "15"),
+        ("max(['£51.77', '£22.60'])", "51.77"),
+    ],
+)
+async def test_calculator_works_over_lists(expression, expected):
+    from engine.tools.calculator import CalculatorTool
+
+    res = await CalculatorTool().execute({"expression": expression})
+    assert not res.is_error
+    assert expected in res.content
+
+
+async def test_calculator_refuses_text_that_is_no_number():
+    from engine.tools.calculator import CalculatorTool
+
+    res = await CalculatorTool().execute({"expression": "sum(['hello'])"})
+    assert res.is_error

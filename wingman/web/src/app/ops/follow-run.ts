@@ -10,7 +10,7 @@ const FAILED = new Set(['failed', 'error', 'cancelled']);
 // polls the run until it ends, so the caller shows an answer or a reason and never nothing
 export async function followRun(
   executionId: string,
-  { intervalMs = 2500, maxWaitMs = 300_000, maxMisses = 5, get = fetch as typeof fetch, sleep = (ms: number) => new Promise((r) => setTimeout(r, ms)), stopped = () => false } = {},
+  { intervalMs = 2500, maxWaitMs = 300_000, maxMisses = 5, get = fetch as typeof fetch, sleep = (ms: number) => new Promise((r) => setTimeout(r, ms)), stopped = (() => false) as () => boolean } = {},
 ): Promise<{ snapshot?: Record<string, unknown> | null; error?: string }> {
   let misses = 0;
   for (let waited = 0; waited < maxWaitMs && !stopped(); waited += intervalMs) {

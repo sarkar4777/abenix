@@ -355,7 +355,12 @@ async def put_settings(
             f"These are not host names: {', '.join(bad[:5])}. Use names such as europa.eu.",
             400,
         )
-    tenant = await db.get(Tenant, user.tenant_id)
+    tenant = await db.get(
+        Tenant,
+        user.tenant_id,
+        with_for_update={"key_share": True},
+        populate_existing=True,
+    )
     if tenant is None:
         return error("Tenant not found", 404)
     cleaned = SW.clean_settings(body.model_dump())

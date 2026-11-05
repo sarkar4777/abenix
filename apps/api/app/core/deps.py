@@ -315,6 +315,8 @@ async def get_current_user(
     user = result.scalar_one_or_none()
     if not user:
         raise _auth_error()
+    if payload.get("raised_by") == "runtime":
+        user._runtime_token = True  # type: ignore[attr-defined]
     if sid:
         user._session_id = sid  # type: ignore[attr-defined]
         from app.core import sessions

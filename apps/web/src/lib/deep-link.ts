@@ -69,6 +69,8 @@ export function useDeepLink<T extends { id: string }>(
 export function scrollToDeepLinkRow(id: string, scroll: (el: Element | null) => void): void {
   if (typeof window === 'undefined') return;
   window.setTimeout(() => {
+    // the page can be gone before the timer fires
+    if (typeof document === 'undefined') return;
     const sel = `[data-deeplink-id="${typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(id) : id}"]`;
     scroll(document.querySelector(sel));
   }, 50);

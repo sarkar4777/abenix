@@ -31,3 +31,23 @@ describe('structured nodes in the pipeline builder', () => {
     expect(toolDisplayName('decision_evaluate')).toBe('decision_evaluate');
   });
 });
+
+describe('type: tool nodes in the pipeline builder', () => {
+  const tool: any = {
+    nodes: [
+      { id: 'load', type: 'tool', tool: 'database_query', input: { sql: 'SELECT 1', params: { id: '{{input.id}}' } } },
+      { id: 'text', type: 'tool', tool: 'llm_call', input: 'plain text' },
+    ],
+    edges: [],
+  };
+
+  it('keeps the tool and its input when the seed form is loaded and saved', () => {
+    const { steps, edges } = deserializeConfig(tool) as any;
+    expect(steps[0].toolName).toBe('database_query');
+    expect(steps[0].arguments).toEqual({ sql: 'SELECT 1', params: { id: '{{input.id}}' } });
+    expect(steps[1].arguments).toEqual({ input: 'plain text' });
+    const saved = serializeConfig(steps, edges, { x: 0, y: 0, zoom: 1 }) as any;
+    expect(saved.nodes[0].tool_name).toBe('database_query');
+    expect(saved.nodes[0].arguments.sql).toBe('SELECT 1');
+  });
+});

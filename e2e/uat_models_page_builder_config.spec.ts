@@ -122,12 +122,18 @@ test('Models page lets admin pin the Builder + Pipeline validation model', async
   ]);
 
   // 7. Re-read via the public endpoint — the new value must stick.
-  const afterResp = await page.request.get(
-    `${API}/api/settings/builder_model`,
-    { headers: { Authorization: `Bearer ${token}` } },
-  );
-  const afterBody = await afterResp.json();
-  expect(afterBody?.data?.value).toBe(target);
+  // each API worker caches settings for up to 30 seconds, the page says so too
+  await expect
+    .poll(
+      async () => {
+        const res = await page.request.get(`${API}/api/settings/builder_model`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        return (await res.json())?.data?.value;
+      },
+      { timeout: 40_000, intervals: [2_000] },
+    )
+    .toBe(target);
 
   // 8. Hop to /builder. The badge + hidden input must reflect the new model.
   await page.goto(`${BASE}/builder`, { waitUntil: 'domcontentloaded' });

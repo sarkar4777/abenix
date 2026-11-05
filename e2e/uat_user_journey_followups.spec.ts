@@ -12,8 +12,12 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 const BASE = process.env.BASE || 'http://localhost:3100';
+const API = process.env.API || 'http://localhost:8000';
 const ADMIN = { email: process.env.AF_EMAIL || 'admin@abenix.dev', password: process.env.AF_PASSWORD || 'Admin123456' };
-const STATE = JSON.parse(fs.readFileSync(path.join('test-results', 'user-journey.json'), 'utf-8')) as {
+const STATE_FILE = path.join('test-results', 'user-journey.json');
+const STATE = (fs.existsSync(STATE_FILE)
+  ? JSON.parse(fs.readFileSync(STATE_FILE, 'utf-8'))
+  : { user: '', ids: {} }) as {
   user: string;
   ids: Record<string, string>;
 };
@@ -122,6 +126,8 @@ test.use({ viewport: { width: 1440, height: 900 } });
 test('follow-ups: shared use, failures, changes and deletes', async ({ page }) => {
   test.setTimeout(60 * 60_000);
   page.on('dialog', (d) => d.accept());
+  const owner = await page.request.post(`${API}/api/auth/login`, { data: OWNER });
+  test.skip(!owner.ok(), 'the journey user is not on this cluster, run uat_user_journey_ui first');
   expect(ids.scorer && ids.analyst && ids.pipeline && ids.lead, 'run the journey spec first').toBeTruthy();
 
   try {

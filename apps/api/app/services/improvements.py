@@ -2870,7 +2870,12 @@ async def _sample_settings(db: AsyncSession, tenant_id: Any, agent_id: Any) -> N
     from models.tenant import Tenant
 
     t = (
-        await db.execute(select(Tenant).where(Tenant.id == tenant_id))
+        await db.execute(
+            select(Tenant)
+            .where(Tenant.id == tenant_id)
+            .with_for_update(key_share=True)
+            .execution_options(populate_existing=True)
+        )
     ).scalar_one_or_none()
     if t is None:
         return

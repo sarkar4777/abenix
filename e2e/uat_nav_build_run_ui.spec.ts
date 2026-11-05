@@ -983,7 +983,8 @@ test('Moderation: policies, a test that blocks, a chat that blocks, both in the 
   await expect(firstEvent).not.toContainText(secret);
   await shot(page, '25-moderation-test');
 
-  // a real chat hits the same policy
+  // a real chat hits the same policy, data protection in mask mode would hide the SSN from it
+  await api(page, 'PUT', '/api/settings/dlp', { mode: 'detect', enabled: false });
   await ensureAgent(page);
   await go(page, `/agents/${ids.agent}/chat`);
   const input = page.getByTestId('chat-input');

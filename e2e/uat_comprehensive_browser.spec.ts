@@ -120,7 +120,7 @@ test('INTEGRATIONS catalog: shows providers + admin RBAC + add/remove flow', asy
   await page.screenshot({ path: 'test-results/uat-integrations-admin.png', fullPage: true });
 
   // Check admin-only RBAC at the API level
-  const r = await page.request.get(`${API}/api/integrations`, { headers: { Authorization: `Bearer ${tok}` } });
+  const r = await page.request.get(`${API}/api/integrations/status`, { headers: { Authorization: `Bearer ${tok}` } });
   expect(r.ok()).toBeTruthy();
 });
 

@@ -244,7 +244,7 @@ export const TOOL_DOCS: Record<string, ToolDoc> = {
   calculator: {
     category: "Core",
     name: "Calculator",
-    description: "Evaluate a mathematical expression safely. Supports basic arithmetic, exponentiation, and math functions (sqrt, log, sin, cos, etc.).",
+    description: "Evaluate a mathematical expression safely. Supports basic arithmetic, exponentiation, math functions (sqrt, log, sin, cos, etc.) and lists (sum, len, mean, min, max over [1, 2, 3]).",
     parameters: [
       { name: "expression", type: "string", required: true, description: "The mathematical expression to evaluate, e.g. '(2 + 3) * 4'" },
     ],

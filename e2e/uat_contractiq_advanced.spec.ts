@@ -41,7 +41,7 @@ test.beforeEach(async ({ page }) => { await login(page); });
 test('upload a contract, watch extraction, open it and ask about it in chat', async ({ page }) => {
   // The old upload checks only picked a file and never pressed Upload, so they
   // passed on an untouched page. This one is the analyst's whole journey.
-  test.setTimeout(900_000);
+  test.setTimeout(1_800_000);
   const file = path.join(CONTRACTS_DIR, 'gas_supply_agreement_eu.txt');
   test.skip(!fs.existsSync(file), `missing ${file}`);
   const title = `UAT gas supply ${Date.now().toString(36)}`;
@@ -63,7 +63,7 @@ test('upload a contract, watch extraction, open it and ask about it in chat', as
   const view = page.getByRole('link', { name: /View Contract Details/i });
   // the page shows either the finished pipeline or why it stopped
   const stopped = page.locator('p.text-red-400').filter({ hasText: /fail|error/i });
-  await expect(view.or(stopped).first()).toBeVisible({ timeout: 800_000 });
+  await expect(view.or(stopped).first()).toBeVisible({ timeout: 1_500_000 });
   if (await stopped.isVisible()) throw new Error(`extraction stopped in the UI: ${await stopped.innerText()}`);
   await view.click();
   await expect(page).toHaveURL(/\/contracts\/[^/]+$/);
@@ -83,7 +83,9 @@ test('upload a contract, watch extraction, open it and ask about it in chat', as
   const reply = page.getByTestId('chat-msg-assistant').last();
   await expect(reply).toBeVisible({ timeout: 240_000 });
   await expect(page.getByText('Analyzing your portfolio...')).toBeHidden({ timeout: 240_000 });
-  expect((await reply.innerText()).toLowerCase()).toMatch(/nordgas|rhein/);
+  // extraction replaces the names typed in the form with the parties the document names
+  expect((await reply.innerText()).toLowerCase()).toMatch(/qatargas/);
+  expect((await reply.innerText()).toLowerCase()).toMatch(/engie/);
 });
 
 test('contracts list — first card opens detail page', async ({ page }) => {

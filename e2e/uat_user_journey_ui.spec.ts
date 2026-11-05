@@ -455,10 +455,10 @@ test('a new teammate builds a supplier risk desk through the UI', async ({ page 
       await page.getByRole('button', { name: 'Python' }).first().click();
       await page.getByTestId('generate-code').click();
       await expect(page.locator('pre').filter({ hasText: /import|abenix/i }).first()).toBeVisible({ timeout: 120_000 });
-      await page.getByRole('button', { name: /^Run$/ }).first().click();
-      const output = page.locator('section, div').filter({ hasText: /^Output/ }).last();
-      await expect(output).toContainText(/Nordtek|completed|risk/i, { timeout: 300_000 });
-      await record(page, 'sdk run in browser', true, 'generated Python ran in the browser');
+      // running code in the browser takes a permission this new member was not given
+      await expect(page.getByRole('button', { name: /^Run$/ })).toHaveCount(0);
+      await expect(page.locator('body')).toContainText('Run playground code permission');
+      await record(page, 'sdk run in browser', true, 'a member without the permission is told why there is no Run button');
     });
 
     // ── 9. triggers ───────────────────────────────────────────────────────

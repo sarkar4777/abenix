@@ -26,6 +26,7 @@ async function gotoOk(page: Page, path: string) {
 
 test.describe.serial('Wingman — full browser UAT', () => {
   test('shell renders, sidebar exposes the surface links', async ({ page }) => {
+    test.setTimeout(120_000);
     await gotoOk(page, '/');
     expect(page.url()).toMatch(/\/(home|workbench)$/);
     // A cold pod takes a while to serve its first page after a deploy. Give

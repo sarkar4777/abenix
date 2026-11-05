@@ -246,7 +246,12 @@ async def put_sso(
 ) -> JSONResponse:
     if not _admin(user):
         return error("Only workspace admins can change single sign-on", 403)
-    tenant = await db.get(Tenant, user.tenant_id)
+    tenant = await db.get(
+        Tenant,
+        user.tenant_id,
+        with_for_update={"key_share": True},
+        populate_existing=True,
+    )
     if tenant is None:
         return error("Workspace not found", 404)
     issuer = (body.issuer or "").strip().rstrip("/")
@@ -315,7 +320,12 @@ async def delete_sso(
 ) -> JSONResponse:
     if not _admin(user):
         return error("Only workspace admins can change single sign-on", 403)
-    tenant = await db.get(Tenant, user.tenant_id)
+    tenant = await db.get(
+        Tenant,
+        user.tenant_id,
+        with_for_update={"key_share": True},
+        populate_existing=True,
+    )
     if tenant is None:
         return error("Workspace not found", 404)
     settings = dict(tenant.settings or {})

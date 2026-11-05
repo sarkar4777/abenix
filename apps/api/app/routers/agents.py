@@ -2610,6 +2610,7 @@ async def execute_agent(
     from app.core.runtime_pools import POOL_NOT_DEPLOYED, effective_pool, pool_problem
 
     agent_pool = effective_pool(agent)
+    _submitted = False
     if settings.scaling_exec_remote and agent_pool != "inline":
         _no_pool = await pool_problem(agent_pool)
         if _no_pool:
@@ -2660,6 +2661,7 @@ async def execute_agent(
                 "conversation_id": body.conversation_id or "",
             }
             task_id = await backend.submit(agent_pool, payload)
+            _submitted = True
 
             if body.stream:
                 # Client wants the stream — subscribe to the execution
@@ -2714,6 +2716,8 @@ async def execute_agent(
                     },
                 )
             if body.wait:
+                # a long wait in an open transaction gets the connection killed by the idle timeout
+                await db.commit()
                 from app.core.execution_bus import subscribe_events
                 import asyncio as _asyncio
 
@@ -2848,6 +2852,7 @@ async def execute_agent(
                 try:
                     await db.refresh(execution)
                 except Exception as _refresh_err:
+                    await db.rollback()
                     logging.getLogger(__name__).warning(
                         "could not reload execution %s after the wait, reason %s",
                         execution.id,
@@ -2964,6 +2969,25 @@ async def execute_agent(
                 }
             )
         except Exception as _enqueue_err:
+            if _submitted:
+                # the queue has this run, running it here as well would do the work twice
+                logging.getLogger(__name__).warning(
+                    "lost track of queued run %s, reason %s",
+                    execution.id,
+                    _enqueue_err,
+                )
+                await db.rollback()
+                return success(
+                    {
+                        "execution_id": str(execution.id),
+                        "task_id": task_id,
+                        "pool": agent_pool,
+                        "status": "running",
+                        "mode": "async",
+                        "message": "The run was queued but this request stopped following it. Follow it by its execution id.",
+                    },
+                    status_code=202,
+                )
             # enqueue failed, run inline so the request still succeeds
             logging.getLogger(__name__).warning(
                 "remote-exec enqueue failed, falling back to inline: %s",
@@ -3479,7 +3503,9 @@ async def _stream_pipeline_execution(
                 out = pr.final_output
                 if isinstance(out, dict):
                     out = out.get("response", out.get("content", str(out)))
-                execution.output_message = str(out)[:50000]
+                execution.output_message = str(out)[
+                    : int(os.environ.get("AGENT_OUTPUT_MAX_CHARS", "1000000"))
+                ]
 
             # Aggregate tokens, cost, and tool calls from all pipeline nodes
             serialized_result = serialize_pipeline_result(pr)
@@ -3605,6 +3631,8 @@ async def _non_stream_pipeline_execution(
             metadata={"mode": "pipeline"},
         )
 
+        # the run can outlast the idle transaction timeout
+        await db.commit()
         result = await executor.execute(
             pipeline_nodes,
             build_run_context(
@@ -3688,7 +3716,9 @@ async def _non_stream_pipeline_execution(
                 out = json.dumps(out, default=str)
             except (TypeError, ValueError):
                 out = str(out)
-        execution.output_message = str(out)[:50000]
+        execution.output_message = str(out)[
+            : int(os.environ.get("AGENT_OUTPUT_MAX_CHARS", "1000000"))
+        ]
 
     # Store node_results and execution_trace for the flight recorder
     execution.node_results = serialized.get("node_results")
@@ -4572,6 +4602,9 @@ async def _non_stream_execution(
         )
     except Exception:
         pass
+
+    # the run can outlast the idle transaction timeout
+    await db.commit()
 
     try:
         result = await executor.invoke(message)

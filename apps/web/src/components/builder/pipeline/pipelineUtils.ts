@@ -569,8 +569,13 @@ function agentNodeArguments(node: PipelineNodeConfig): Record<string, unknown> {
     const out = (raw.output || raw.fields) as Record<string, unknown> | undefined;
     return out && typeof out === 'object' ? { ...out, ...args } : args;
   }
-  if (!agentNodeTool(node)) return args;
   const raw = node as unknown as Record<string, unknown>;
+  if (!agentNodeTool(node)) {
+    // type: tool nodes may carry their arguments under input, as the engine reads them
+    if (String(raw.type || '').toLowerCase() !== 'tool' || raw.input === undefined) return args;
+    if (raw.input && typeof raw.input === 'object') return { ...args, ...(raw.input as Record<string, unknown>) };
+    return args.input === undefined ? { ...args, input: raw.input } : args;
+  }
   if (raw.input !== undefined && args.input_message === undefined) args.input_message = raw.input;
   if (raw.context !== undefined && args.__context__ === undefined) args.__context__ = raw.context;
   return args;
@@ -668,7 +673,7 @@ export function deserializeConfig(
 
   const steps: PipelineStep[] = config.nodes.map((node) => ({
     id: node.id,
-    toolName: agentNodeTool(node) || structuredNodeTool(node) || node.tool_name || (node as unknown as Record<string, string>).toolName || 'unknown',
+    toolName: agentNodeTool(node) || structuredNodeTool(node) || node.tool_name || (node as unknown as Record<string, string>).tool || (node as unknown as Record<string, string>).toolName || 'unknown',
     label: node.label || node.id.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
     arguments: agentNodeArguments(node),
     dependsOn: [...(node.depends_on || [])],

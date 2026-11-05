@@ -201,7 +201,7 @@ class KnowledgeStoreTool(BaseTool):
                 f"Vector store: {results.get('vectors_stored', 0)} embeddings indexed"
             )
         elif results.get("vector_error"):
-            summary_parts.append(f"Vector store: failed â€” {results['vector_error']}")
+            summary_parts.append(f"Vector store: failed, {results['vector_error']}")
 
         if run_cognify:
             if results["cognify_status"] == "complete":
@@ -243,7 +243,7 @@ class KnowledgeStoreTool(BaseTool):
         from engine.knowledge import hybrid_search as hs
 
         settings = await hs._kb_index_settings([kb_id])
-        backend, model = settings.get(kb_id, ("pinecone", None))
+        backend, model = settings.get(kb_id, ("pgvector", None))
         try:
             vectors = await hs.embed_for_collection(chunks, model)
         except Exception as exc:

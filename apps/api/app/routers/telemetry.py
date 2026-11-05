@@ -937,7 +937,12 @@ async def set_quota(
             return error(f"{k} must be at least 1", 422, error_code="VALIDATION_ERROR")
         clean[k] = v
     t = (
-        await db.execute(select(Tenant).where(Tenant.id == user.tenant_id))
+        await db.execute(
+            select(Tenant)
+            .where(Tenant.id == user.tenant_id)
+            .with_for_update(key_share=True)
+            .execution_options(populate_existing=True)
+        )
     ).scalar_one()
     st = dict(t.settings or {})
     st[Q.OVERRIDE_KEY] = clean

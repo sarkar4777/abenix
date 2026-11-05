@@ -1196,11 +1196,12 @@ async def _run_one(payload: dict) -> None:
                 logger.warning("pipeline dlp skipped: %s", _e)
 
             if result.final_output:
-                # 50 KB cap matches the DB output_message column.
                 final_text = (
                     result.final_output
                     if isinstance(result.final_output, str)
-                    else json.dumps(result.final_output, default=str)[:50_000]
+                    else json.dumps(result.final_output, default=str)[
+                        : int(os.environ.get("AGENT_OUTPUT_MAX_CHARS", "1000000"))
+                    ]
                 )
 
             # Translate the executor's status to the DB row's status.
@@ -1534,12 +1535,14 @@ async def _run_one(payload: dict) -> None:
                                 output = json.dumps(_rewritten, default=str)
             except Exception as _ppe:
                 logger.warning("consumer: per-agent post_processor skipped: %s", _ppe)
-            # 50 KB cap matches /apps/api routers/agents.py and the DB
-            # Text column. Bumped from 4_000 — the old cap silently
-            # truncated long synthesizer briefs (OracleNet, executive
-            # briefing) and produced invalid partial JSON in the UI.
-            _AGENT_OUTPUT_CAP = 50_000
+            _AGENT_OUTPUT_CAP = int(os.environ.get("AGENT_OUTPUT_MAX_CHARS", "1000000"))
             full_output_str = str(output)[:_AGENT_OUTPUT_CAP]
+            if len(str(output)) > _AGENT_OUTPUT_CAP:
+                logger.warning(
+                    "consumer: output of %s cut at %d chars",
+                    execution_id,
+                    _AGENT_OUTPUT_CAP,
+                )
             _tid_done = (
                 _last_done.get("trace_id") if isinstance(_last_done, dict) else None
             )

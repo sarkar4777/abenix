@@ -278,7 +278,12 @@ async def put_lesson_retention(
             f"Retention must be between {lo} and {hi} days.", 422, "INVALID_RETENTION"
         )
     tenant = (
-        await db.execute(select(Tenant).where(Tenant.id == user.tenant_id))
+        await db.execute(
+            select(Tenant)
+            .where(Tenant.id == user.tenant_id)
+            .with_for_update(key_share=True)
+            .execution_options(populate_existing=True)
+        )
     ).scalar_one()
     settings = dict(tenant.settings or {})
     before = svc.retention_days(settings)

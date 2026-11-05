@@ -47,6 +47,19 @@ const save = () => {
   fs.writeFileSync(STATE, JSON.stringify(state, null, 2));
 };
 
+// a state file from before a rebuild names people this cluster has never seen
+test.beforeAll(async ({ request }) => {
+  for (const who of [state.member, state.reviewer]) {
+    if (!who) continue;
+    const r = await request.post(`${API}/api/auth/login`, { data: { email: who.email, password: who.password } });
+    if (!r.ok()) {
+      for (const k of Object.keys(state)) delete (state as any)[k];
+      fs.rmSync(STATE, { force: true });
+      return;
+    }
+  }
+});
+
 test.describe.configure({ mode: 'serial', timeout: 10 * 60_000 });
 test.use({ viewport: { width: 1440, height: 900 } });
 

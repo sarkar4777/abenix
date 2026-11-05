@@ -249,7 +249,8 @@ test('live: a fake participant joins the room, the bot answers and declines, end
     const botLines = page.getByTestId('transcript-bot-line');
     if (ready.stt_ready) {
       await room.getByTestId('join-mic').click();
-      await expect(room.getByTestId('join-mic')).toHaveAttribute('data-on', 'true');
+      // publishing a track has to finish its media handshake first
+      await expect(room.getByTestId('join-mic')).toHaveAttribute('data-on', 'true', { timeout: 60_000 });
       await expect(page.getByTestId('transcript-line').filter({ hasText: /roadmap/i }).first()).toBeVisible({ timeout: BOT_WAIT });
       await expect(botLines.first()).toBeVisible({ timeout: BOT_WAIT });
       note('verified', `voice question heard, bot replied: ${(await botLines.first().innerText()).slice(0, 160)}`);

@@ -294,9 +294,13 @@ test('enough approved actions promote it to Acts within limits, then it acts wit
 
   const before = (await actions(page)).filter((a) => a.mode === 'auto').length;
   await runSample(page, 3);
-  const auto = (await actions(page)).filter((a) => a.mode === 'auto');
+  // the ledger is written a moment after the run reports its summary
+  const acted = async () => {
+    const all = await actions(page);
+    return all.filter((a) => a.mode === 'auto').length + all.filter((a) => a.level_at_time === 3 && a.status === 'pending').length;
+  };
+  await expect.poll(acted, { timeout: 90_000, intervals: [3_000] }).toBeGreaterThan(before);
   const fallbacks = (await actions(page)).filter((a) => a.level_at_time === 3 && a.status === 'pending');
-  expect(auto.length + fallbacks.length).toBeGreaterThan(before);
   // anything it did not do alone says why on its card
   for (const f of fallbacks.slice(0, 1)) {
     await expect(page.locator(`[data-testid="action-card"][data-action-id="${f.id}"]`).getByTestId('action-card-fallback')).toBeVisible();

@@ -66,13 +66,20 @@ def auth_headers(auth_token: str) -> dict[str, str]:
     return headers
 
 
-def run_token(user_id: str, tenant_id: str, user_role: str = "") -> str:
+def run_token(
+    user_id: str,
+    tenant_id: str,
+    user_role: str = "",
+    extra_claims: dict[str, str] | None = None,
+) -> str:
     """A short-lived token for the user the run belongs to, or the internal one."""
     if user_id and tenant_id:
         try:
             from engine.tools.invoke_agent import mint_user_token
 
-            token = mint_user_token(user_id, tenant_id, user_role)
+            token = mint_user_token(
+                user_id, tenant_id, user_role, extra_claims=extra_claims
+            )
             if token:
                 return token
         except Exception:  # noqa: BLE001

@@ -277,7 +277,16 @@ async def update_setting(
 
     # Validate against the model catalogue for *.model settings
     if key.endswith(".model") and value not in {m["id"] for m in AVAILABLE_MODELS}:
-        return error(f"Model '{value}' is not in the allowed list", 400)
+        # the pickers offer the pricing catalogue, so a model listed there is valid too
+        listed = await db.execute(
+            text(
+                "SELECT 1 FROM llm_model_pricing "
+                "WHERE model = :m AND is_active = TRUE LIMIT 1"
+            ),
+            {"m": value},
+        )
+        if listed.first() is None:
+            return error(f"Model '{value}' is not in the allowed list", 400)
 
     # Numeric settings are read on the execution hot path, so reject a bad
     # value here rather than letting every run silently fall back.

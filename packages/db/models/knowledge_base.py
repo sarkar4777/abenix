@@ -95,11 +95,9 @@ class KnowledgeBase(UUIDMixin, TenantMixin, TimestampMixin, Base):
     chunk_size: Mapped[int] = mapped_column(Integer, default=512)
     chunk_overlap: Mapped[int] = mapped_column(Integer, default=50)
     # v2: which vector backend stores this collection's embeddings.
-    # Defaults to pinecone for legacy rows; new collections default to
-    # pgvector via the API layer (Phase 5 will let users pick).
     vector_backend: Mapped[str] = mapped_column(
         String(20),
-        default="pinecone",
+        default="pgvector",
     )
     status: Mapped[KBStatus] = mapped_column(
         Enum(KBStatus, name="kb_status"), default=KBStatus.PROCESSING

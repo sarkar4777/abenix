@@ -70,6 +70,7 @@ export default function ContractIQUploadPage() {
   const [uploading, setUploading] = useState(false);
   const [extracting, setExtracting] = useState(false);
   const [contractId, setContractId] = useState<string | null>(null);
+  const [extractionDone, setExtractionDone] = useState(false);
   const [agentStatuses, setAgentStatuses] = useState<Record<string, { status: AgentStatus; progress: number }>>({});
   const [errorMsg, setErrorMsg] = useState('');
   const abortRef = useRef<AbortController | null>(null);
@@ -104,6 +105,7 @@ export default function ContractIQUploadPage() {
   };
 
   const startExtraction = async (cid: string) => {
+    setExtractionDone(false);
     setExtracting(true);
     const initial: Record<string, { status: AgentStatus; progress: number }> = {};
     AGENTS.forEach(a => { initial[a.id] = { status: 'pending', progress: 0 }; });
@@ -128,6 +130,7 @@ export default function ContractIQUploadPage() {
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
+      let finished = false;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -150,18 +153,41 @@ export default function ContractIQUploadPage() {
                 },
               }));
             } else if (evt.event === 'done') {
+              finished = true;
               setContractId(evt.contract_id);
+              setExtractionDone(true);
             } else if (evt.event === 'error') {
+              finished = true;
               setErrorMsg(evt.message || 'Extraction error');
             }
           } catch { /* ignore parse errors */ }
         }
       }
+      if (!finished) await followAfterDroppedStream(cid, token, controller.signal);
     } catch (e: any) {
       if (e.name !== 'AbortError') {
-        setErrorMsg(`Extraction error: ${e.message}`);
+        // the work goes on without the stream, so ask the server how it ended
+        try {
+          await followAfterDroppedStream(cid, token, controller.signal);
+        } catch {
+          setErrorMsg(`Extraction error: ${e.message}`);
+        }
       }
     }
+  };
+
+  const followAfterDroppedStream = async (cid: string, token: string | null, signal: AbortSignal) => {
+    for (let i = 0; i < 240; i++) {
+      const r = await fetch(`${API_URL}/api/contractiq/contracts/${cid}`, {
+        headers: { Authorization: `Bearer ${token}` },
+        signal,
+      });
+      const status = String((await r.json())?.data?.status || '').toLowerCase();
+      if (status === 'analyzed') { setContractId(cid); setExtractionDone(true); return; }
+      if (status === 'error') { setErrorMsg('Extraction failed. Open the contract to see why.'); return; }
+      await new Promise((done) => setTimeout(done, 5000));
+    }
+    setErrorMsg('Extraction is still running after 20 minutes. Check the contract list later.');
   };
 
   const handleUpload = async () => {
@@ -207,7 +233,8 @@ export default function ContractIQUploadPage() {
     }
   };
 
-  const allComplete = extracting && AGENTS.every(a => agentStatuses[a.id]?.status === 'complete');
+  // the server says when it is done, the graph step only gets queued and never reads complete
+  const allComplete = extracting && extractionDone;
   const hasError = extracting && Object.values(agentStatuses).some(s => s.status === 'error');
   const logout = () => { localStorage.removeItem('contractiq_token'); localStorage.removeItem('contractiq_refresh_token'); localStorage.removeItem('contractiq_user'); router.replace('/'); };
 

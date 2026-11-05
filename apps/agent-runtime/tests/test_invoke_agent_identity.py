@@ -256,3 +256,17 @@ async def test_child_run_submit_carries_the_parent_trace(monkeypatch):
     post = next(r for r in seen if r.method == "POST")
     assert "0af7651916cd43dd8448eb211c80319c" in post.headers["traceparent"]
     assert post.headers["authorization"].startswith("Bearer ")
+
+
+def test_a_gate_token_says_the_runtime_raised_it():
+    import base64
+    import json as _json
+
+    def claims(token):
+        part = token.split(".")[1]
+        return _json.loads(base64.urlsafe_b64decode(part + "=" * (-len(part) % 4)))
+
+    plain = ia.mint_user_token("u1", "t1", "user")
+    gate = ia.mint_user_token("u1", "t1", "user", extra_claims={"raised_by": "runtime"})
+    assert "raised_by" not in claims(plain)
+    assert claims(gate)["raised_by"] == "runtime"

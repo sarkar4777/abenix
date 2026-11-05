@@ -679,13 +679,19 @@ def _reserved_gate_kind(kind: str | None) -> bool:
     )
 
 
+def _refused_gate_kind(kind: str | None, user: Any) -> bool:
+    if getattr(user, "_runtime_token", False) and (kind or "").startswith("action:"):
+        return False
+    return _reserved_gate_kind(kind)
+
+
 @router.post("")
 async def create_approval(
     body: ApprovalCreate,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
-    if _reserved_gate_kind(body.gate_kind):
+    if _refused_gate_kind(body.gate_kind, user):
         return error(
             f"{body.gate_kind} approvals are raised by the platform itself and cannot "
             "be created here. Pick another kind.",
@@ -1007,7 +1013,12 @@ async def set_webhook(
 ) -> JSONResponse:
     if user.role.value not in ("admin", "owner"):
         return error("Only tenant admins can configure approval webhooks", 403)
-    res = await db.execute(select(Tenant).where(Tenant.id == user.tenant_id))
+    res = await db.execute(
+        select(Tenant)
+        .where(Tenant.id == user.tenant_id)
+        .with_for_update(key_share=True)
+        .execution_options(populate_existing=True)
+    )
     tenant = res.scalar_one_or_none()
     if not tenant:
         return error("Tenant not found", 404)

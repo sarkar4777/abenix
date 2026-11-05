@@ -44,6 +44,15 @@ if [ "${API_PORT}" != "8000" ]; then
   esac
 fi
 
+# Secrets saved in the app stay encrypted across redeploys, so reuse the key the cluster has
+ensure_local_data_key() {
+  [ -n "${ABENIX_DATA_KEY_KEK_BASE64:-}" ] && return 0
+  ABENIX_DATA_KEY_KEK_BASE64="$(kubectl -n "${NAMESPACE}" get secret abenix-secrets \
+    -o jsonpath='{.data.ABENIX_DATA_KEY_KEK_BASE64}' 2>/dev/null | base64 -d 2>/dev/null || true)"
+  [ -n "${ABENIX_DATA_KEY_KEK_BASE64}" ] || ABENIX_DATA_KEY_KEK_BASE64="$(openssl rand -base64 32)"
+  export ABENIX_DATA_KEY_KEK_BASE64
+}
+
 # Build --set flags for secrets from environment variables
 _build_secrets_flags() {
   local flags=""
@@ -448,12 +457,13 @@ build_core_service() {
   local host_build=false
   case " ${MINIKUBE_HOST_BUILD:-web} " in *" ${svc} "*) [ -n "${MINIKUBE_ACTIVE_DOCKERD:-}" ] && host_build=true ;; esac
   local hostenv=(env -u DOCKER_HOST -u DOCKER_TLS_VERIFY -u DOCKER_CERT_PATH -u MINIKUBE_ACTIVE_DOCKERD)
+  local build_log="${TMPDIR:-/tmp}/abenix-build-${svc}.log"
   if [ "${host_build}" = "true" ]; then
     log "${svc}: building on the host, then loading into minikube"
     if ! (set -o pipefail; "${hostenv[@]}" docker build -t "${image}" -t "${registry}/${svc}:latest" \
-        ${BUILD_ARGS[@]+"${BUILD_ARGS[@]}"} -f "${ROOT_DIR}/${dockerfile}" "${ctx}" 2>&1 | tail -5); then
+        ${BUILD_ARGS[@]+"${BUILD_ARGS[@]}"} -f "${ROOT_DIR}/${dockerfile}" "${ctx}" 2>&1 | tee "${build_log}" | tail -5); then
       _heartbeat_stop
-      err "${svc}: image build failed, the running image was left as it is"
+      err "${svc}: image build failed, the running image was left as it is. Full log, ${build_log}"
       return 1
     fi
     # minikube image load keeps a tag it already has, so a rebuild at the same SHA never landed
@@ -1837,6 +1847,7 @@ deploy_local() {
     || warn "timescaledb is still running its schema job, check it with: kubectl -n ${NAMESPACE} get jobs"
   ok "Streaming + tsdb infra installed"
 
+  ensure_local_data_key
   step "Installing/upgrading Helm release '${RELEASE_NAME}'"
   # shellcheck disable=SC2046
   helm upgrade --install ${HELM_FORCE[@]+"${HELM_FORCE[@]}"} "${RELEASE_NAME}" "${HELM_DIR}" \

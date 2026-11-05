@@ -451,9 +451,10 @@ def _parse_extraction_json(text: str) -> dict | None:
     return None
 
 
-def _parse_date(date_str: str) -> datetime | None:
+def _parse_date(date_str: object) -> datetime | None:
     """Parse a date string, ensuring it's timezone-aware."""
-    if not date_str:
+    # the model sometimes returns a bare year or a number here
+    if not date_str or not isinstance(date_str, str):
         return None
     try:
         dt = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
@@ -848,7 +849,20 @@ async def extract_contract(
                                     description=f"Per-user contracts corpus for {user_email}",
                                 )
                                 kb_id = coll["id"]
-                                kg_result = await kg_forge.knowledge.cognify(kb_id, doc_ids=[str(contract_id)])
+                                # Cognify reads documents of the collection, so the contract goes in first
+                                doc = await kg_forge.knowledge.upload(
+                                    kb_id,
+                                    raw_text.encode("utf-8"),
+                                    filename=f"contract-{contract_id}.txt",
+                                    content_type="text/plain",
+                                )
+                                for _ in range(120):
+                                    docs = await kg_forge.knowledge.documents(kb_id, limit=500)
+                                    row = next((d for d in docs if str(d.get("id")) == str(doc["id"])), None)
+                                    if row and str(row.get("status", "")).lower() in {"ready", "failed", "error"}:
+                                        break
+                                    await asyncio.sleep(5)
+                                kg_result = await kg_forge.knowledge.cognify(kb_id, doc_ids=[str(doc["id"])])
                                 logger.info("Cognify triggered for contract %s: job=%s kb=%s", contract_id, kg_result.get("job_id"), kb_id)
                         except Exception as e:
                             logger.warning("Background Cognify failed for contract %s: %s", contract_id, e)
@@ -884,7 +898,12 @@ async def extract_contract(
         # detached by asyncio.create_task above.
         try:
             while True:
-                event = await progress_queue.get()
+                try:
+                    event = await asyncio.wait_for(progress_queue.get(), timeout=15)
+                except asyncio.TimeoutError:
+                    # a proxy drops a stream that stays silent during a long agent run
+                    yield ": keepalive\n\n"
+                    continue
                 if event is SENTINEL:
                     return
                 yield f"data: {json.dumps(event)}\n\n"
@@ -892,7 +911,11 @@ async def extract_contract(
             logger.info("SSE consumer cancelled for contract %s; extraction continues in background", contract_id)
             raise
 
-    return StreamingResponse(stream_extraction(), media_type="text/event-stream")
+    return StreamingResponse(
+        stream_extraction(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.post("/contracts/{contract_id}/deep-extract")
@@ -1293,7 +1316,7 @@ async def list_timeline(
         by_status[e["status"]] = by_status.get(e["status"], 0) + 1
         if e["event_date"]:
             try:
-                d = datetime.fromisoformat(e["event_date"].replace("Z", "+00:00"))
+                d = datetime.fromisoformat(str(e["event_date"]).replace("Z", "+00:00"))
                 delta = (d - now).total_seconds()
                 if 0 <= delta <= 30 * 86400:
                     upcoming_30d += 1

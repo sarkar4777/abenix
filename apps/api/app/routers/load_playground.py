@@ -18,7 +18,7 @@ from typing import Any
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import async_session, get_current_user, get_db
@@ -28,6 +28,15 @@ from app.core.playground_access import (
     sandbox_image,
 )
 from app.core.responses import error
+
+
+def _subscription_usable() -> bool:
+    try:
+        from engine import claude_subscription  # type: ignore
+
+        return bool(claude_subscription.get_config().usable)
+    except Exception:
+        return False
 
 
 def _anthropic_client(api_key: str | None = None, sync: bool = False):
@@ -61,7 +70,7 @@ from app.core.responses import success
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "packages" / "db"))
 
-from models.agent import Agent
+from models.agent import Agent, AgentType
 from models.user import User
 
 router = APIRouter(prefix="/api/load-playground", tags=["load-playground"])
@@ -135,12 +144,14 @@ Output ONLY the Python code, no prose, no markdown fences. The code MUST start w
 async def _llm_generate(system_prompt: str, user_prompt: str) -> tuple[str, str]:
     """Returns (code, model_used). Falls back to a template if no LLM key."""
     api_key = os.environ.get("ANTHROPIC_API_KEY", "")
-    if not api_key:
+    if not api_key and not _subscription_usable():
         return "", "none"
     try:
 
         client = _anthropic_client(api_key, sync=True)
-        resp = client.messages.create(
+        # the client is synchronous and generation takes a while
+        resp = await asyncio.to_thread(
+            client.messages.create,
             model="claude-sonnet-4-5-20250929",
             max_tokens=6000,
             system=system_prompt,
@@ -266,7 +277,15 @@ async def generate_load_script(
     if body.target.id:
         try:
             aid = uuid.UUID(body.target.id)
-            r = await db.execute(select(Agent).where(Agent.id == aid))
+            r = await db.execute(
+                select(Agent).where(
+                    Agent.id == aid,
+                    or_(
+                        Agent.tenant_id == user.tenant_id,
+                        Agent.agent_type == AgentType.OOB,
+                    ),
+                )
+            )
             agent = r.scalar_one_or_none()
             if agent:
                 body.target.slug = body.target.slug or agent.slug

@@ -362,6 +362,8 @@ test('audit log: find my own actions with the filters, check the trail', async (
 });
 
 test('models catalogue: view and edit a model, then put it back', async ({ page }) => {
+  // the sample is registered on request, so a fresh cluster does not have it yet
+  expect((await api(page, 'POST', '/api/ml-models/samples/iris')).status).toBeLessThan(300);
   await nav(page, '/admin/models');
   const row = page.getByTestId('ml-row-iris-sample');
   await expect(row).toBeVisible({ timeout: 20_000 });

@@ -8,6 +8,8 @@ from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 from typing import Any
 
+import httpx
+
 
 from engine import autonomy, credentials, governance, risk
 from engine.agent_budget import BUDGET_EXCEEDED, run_budget_message, run_cost_limit
@@ -401,6 +403,38 @@ def _turn_separator(sent_tail: str, token: str) -> str:
     if not sent_tail or not token or sent_tail.isspace() or token[0].isspace():
         return ""
     return "\n\n"
+
+
+async def collect_stream(
+    llm_router: Any, kwargs: dict[str, Any]
+) -> tuple[str, list[dict[str, Any]], dict[str, Any]]:
+    """Read a model stream to its end, once more if the connection drops."""
+    for attempt in (1, 2):
+        text = ""
+        tool_calls: list[dict[str, Any]] = []
+        meta: dict[str, Any] = {}
+        try:
+            stream = await llm_router.complete(**kwargs)
+            async for ev in stream:
+                if ev.event == "token":
+                    text += ev.data
+                elif ev.event == "tool_call":
+                    tool_calls.append(
+                        {
+                            "id": ev.data.get("id", ""),
+                            "name": ev.data.get("name", ""),
+                            "arguments": ev.data.get("arguments", {}),
+                        }
+                    )
+                elif ev.event == "done":
+                    meta = ev.data
+            return text, tool_calls, meta
+        except httpx.TransportError as exc:
+            # nothing has reached the caller yet, so starting over is safe
+            if attempt == 2:
+                raise
+            logger.warning("model stream dropped, trying once more: %s", exc)
+    raise AssertionError("unreachable")
 
 
 class AgentExecutor:
@@ -840,23 +874,9 @@ class AgentExecutor:
             llm_start = time.monotonic()
             if _need_stream:
                 # Collapse the StreamEvent generator into an LLMResponse.
-                stream_gen = await self.llm_router.complete(**complete_kwargs)
-                full_text = ""
-                accum_tool_calls: list[dict[str, Any]] = []
-                done_meta: dict[str, Any] = {}
-                async for ev in stream_gen:  # type: ignore[union-attr]
-                    if ev.event == "token":
-                        full_text += ev.data
-                    elif ev.event == "tool_call":
-                        accum_tool_calls.append(
-                            {
-                                "id": ev.data.get("id", ""),
-                                "name": ev.data.get("name", ""),
-                                "arguments": ev.data.get("arguments", {}),
-                            }
-                        )
-                    elif ev.event == "done":
-                        done_meta = ev.data
+                full_text, accum_tool_calls, done_meta = await collect_stream(
+                    self.llm_router, complete_kwargs
+                )
                 resp = LLMResponse(
                     content=full_text,
                     # The router reports which model actually served the

@@ -282,6 +282,8 @@ export default function BuilderPage() {
 
   const reactFlowRef = useRef<ReactFlowInstance | null>(null);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout>>();
+  // tools a pipeline declares that no step names, a save must not drop them
+  const declaredPipelineTools = useRef<string[]>([]);
 
   // Delete a node and its edges + clean up tool_config
   const deleteNode = useCallback(
@@ -551,6 +553,8 @@ export default function BuilderPage() {
         if (mc.mode === 'pipeline' && mc.pipeline_config) {
           setBuilderMode('pipeline');
           pipelineStore.deserialize(mc.pipeline_config as PipelineConfig);
+          const used = deriveToolsFromSteps(usePipelineStore.getState().steps);
+          declaredPipelineTools.current = tools.filter((t: string) => !used.includes(t));
         } else {
           setBuilderMode('agent');
           setNodes(buildInitialNodes(loaded, tools));
@@ -870,7 +874,9 @@ export default function BuilderPage() {
       modelConfig.mode = 'pipeline';
       modelConfig.pipeline_config = pipelineStore.serialize();
       pipelineSnapshot = JSON.stringify(modelConfig.pipeline_config);
-      modelConfig.tools = deriveToolsFromSteps(pipelineStore.steps);
+      modelConfig.tools = [
+        ...new Set([...deriveToolsFromSteps(pipelineStore.steps), ...declaredPipelineTools.current]),
+      ].sort();
     } else {
       modelConfig.tools = selectedTools;
     }

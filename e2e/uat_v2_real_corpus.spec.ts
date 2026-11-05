@@ -199,11 +199,11 @@ test('REAL #7 — re-embed dry-run returns cost estimate', async ({ page }) => {
   const tok = await login(page);
   const r = await page.request.post(`${API}/api/knowledge/${testKbId}/reembed`, {
     headers: auth(tok),
-    data: { embedding_model: 'voyage-3', dry_run: true },
+    data: { embedding_model: 'text-embedding-3-large', dry_run: true },
   });
   expect([200, 201]).toContain(r.status());
   const body = (await r.json()).data;
-  expect(body.to_model).toBe('voyage-3');
+  expect(body.to_model).toBe('text-embedding-3-large');
   expect(typeof body.estimated_usd).toBe('number');
   expect(body.estimated_usd).toBeGreaterThanOrEqual(0);
   console.log(`  reembed estimate: $${body.estimated_usd} for ${body.chunks_to_reembed} chunks`);
