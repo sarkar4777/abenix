@@ -6,6 +6,7 @@ import uuid
 from pathlib import Path
 from urllib.parse import urlparse
 
+from anyio import to_thread
 from fastapi import APIRouter, Depends, File, Request, UploadFile
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from sqlalchemy import select
@@ -241,16 +242,18 @@ async def change_password(
             "Use Forgot password on the sign-in page to set one.",
             400,
         )
-    if not verify_password(body.current_password, user.password_hash):
+    if not await to_thread.run_sync(
+        verify_password, body.current_password, user.password_hash
+    ):
         return error("Current password is incorrect", 400)
 
     problem = password_problem(body.new_password)
     if problem:
         return error(problem, 400)
-    if verify_password(body.new_password, user.password_hash):
+    if await to_thread.run_sync(verify_password, body.new_password, user.password_hash):
         return error("The new password is the same as the current one", 400)
 
-    user.password_hash = hash_password(body.new_password)
+    user.password_hash = await to_thread.run_sync(hash_password, body.new_password)
     # other devices must sign in again with the new password
     signed_out = await sessions.revoke(
         db,

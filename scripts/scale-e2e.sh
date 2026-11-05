@@ -832,7 +832,7 @@ check_g() {
 
 H_PID=""
 rules_backlog() { # t2 defines no rules, so this is what puts entries in the rules pool's streams
-  kc exec -i "deploy/${REL}-api" -c api -- python3 - "$1" >/dev/null 2>&1 <<'PY'
+  kc exec -i "deploy/${REL}-api" -c api -- python3 - "$1" > "${OUT}/rules-backlog.log" 2>&1 <<'PY'
 import asyncio, os, sys, time
 import redis.asyncio as aioredis
 from app.telemetry.rules.evaluator import SHARDS, in_stream
@@ -936,8 +936,25 @@ check_i_finish() {
 
 runner_pod() { kc get pods -l "abenix.io/pool=default,app.kubernetes.io/name=agent-runtime" --field-selector=status.phase=Running -o jsonpath='{.items[0].metadata.name}' 2>/dev/null; }
 
+burn_zip() { # a real CPU load, the add fixture is too light to move an HPA
+  python3 - "$1" <<'PY'
+import sys, zipfile
+main = """import json, sys, time
+payload = json.loads(sys.stdin.read().strip() or "{}")
+end = time.perf_counter() + 0.25
+n = 0
+while time.perf_counter() < end:
+    n += 1
+print(json.dumps({"sum": payload.get("a", 0) + payload.get("b", 0), "spins": n}))
+"""
+with zipfile.ZipFile(sys.argv[1], "w") as z:
+    z.writestr("burn/main.py", main)
+    z.writestr("burn/README.md", "CPU load for scale tests\n")
+PY
+}
+
 upload_asset() {
-  local zip="${ROOT_DIR}/e2e/fixtures/uat_python_app.zip" tries=0 status=""
+  local zip="${1:-${ROOT_DIR}/e2e/fixtures/uat_python_app.zip}" tries=0 status=""
   [ -f "${zip}" ] || return 1
   ASSET_ID=$(curl -sS -m 120 -K "${AUTH}" -F "file=@${zip};type=application/zip" \
     -F "metadata={\"name\":\"scale-e2e-${RUN}\",\"description\":\"scale-e2e\"}" \
@@ -977,13 +994,21 @@ check_j() {
   rc=$?
   dep=$(find_runner)
   [ -n "${dep}" ] || { record j FAIL "no runner Deployment for the asset, bench exit ${rc}"; return; }
-  # concurrent calls for a while so CPU rises past its target on the small requests
+  local latency_asset="${ASSET_ID}"
+  burn_zip "${OUT}/burn.zip"
+  if ! upload_asset "${OUT}/burn.zip"; then
+    record j FAIL "the CPU load asset did not become ready"
+    return
+  fi
+  bench "${log}" --input "${input}" --scenario warm --n 5 --max-p50-ms 0 --max-p99-ms 0
+  dep=$(find_runner)
+  [ -n "${dep}" ] || { record j FAIL "no runner Deployment for the CPU load asset"; return; }
   sample_start j "${dep}"
   local i=0 rc2=0 t0
   t0=$(date +%s)
-  while [ $(($(date +%s) - t0)) -lt 150 ] && [ "$(ready_of "${dep}")" -lt 2 ]; do
+  while [ $(($(date +%s) - t0)) -lt 240 ] && [ "$(ready_of "${dep}")" -lt 2 ]; do
     i=$((i + 1))
-    bench "${log}" --input "${input}" --scenario concurrency --concurrency 64 --n 64 --min-calls-per-s 0 || rc2=$?
+    bench "${log}" --input "${input}" --scenario concurrency --concurrency 32 --n 320 --min-calls-per-s 0 || rc2=$?
   done
   sample_stop j
   local peak
@@ -995,6 +1020,7 @@ check_j() {
   local s
   while read -r s; do number "runner $(printf '%s' "${s}" | cut -d' ' -f1)" "$(printf '%s' "${s}" | cut -d' ' -f2-)"; done < "${OUT}/runner-summary.txt"
   number "doc says, warm p50, p99, calls a second, after zero" "17.9 ms, 21.6 ms, 57, 3.5 s"
+  : "${latency_asset}"
   # idle past CODE_RUNNER_IDLE_SECONDS, then the reaper must take it to zero
   log "j waiting for the runner to go idle, then forcing the reaper"
   sleep 70

@@ -3,6 +3,7 @@ import re
 import uuid
 from html import escape as html_escape
 
+from anyio import to_thread
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, EmailStr
 from sqlalchemy import func, select
@@ -94,7 +95,7 @@ async def register(
     user = User(
         id=uuid.uuid4(),
         email=body.email,
-        password_hash=hash_password(body.password),
+        password_hash=await to_thread.run_sync(hash_password, body.password),
         full_name=body.full_name,
         role=UserRole.ADMIN,
         tenant_id=tenant.id,
@@ -160,7 +161,9 @@ async def login(
     result = await db.execute(select(User).where(User.email == body.email))
     user = result.scalar_one_or_none()
 
-    if not user or not verify_password(body.password, user.password_hash):
+    if not user or not await to_thread.run_sync(
+        verify_password, body.password, user.password_hash
+    ):
         return error("Invalid email or password", 401)
 
     if not user.is_active:
@@ -322,7 +325,7 @@ async def reset_password(
     if problem:
         return error(problem, 400)
 
-    user.password_hash = hash_password(body.new_password)
+    user.password_hash = await to_thread.run_sync(hash_password, body.new_password)
     signed_out = await sessions.revoke(db, user.id, reason="password_reset")
     await log_action(
         db,
@@ -438,7 +441,7 @@ async def accept_invite(
     user = User(
         id=uuid.uuid4(),
         email=email,
-        password_hash=hash_password(body.password),
+        password_hash=await to_thread.run_sync(hash_password, body.password),
         full_name=full_name,
         role=role,
         tenant_id=invite.tenant_id,

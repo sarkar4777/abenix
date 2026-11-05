@@ -113,3 +113,5 @@ improvements:
 codeRunners:
   maxReplicas: 3
   idleSeconds: 60
+  # the bench is far past the normal 30, which would keep the runner warm on purpose
+  hotCallsPerHour: 999999
