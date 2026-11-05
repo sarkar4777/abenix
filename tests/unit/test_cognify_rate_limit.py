@@ -1,4 +1,4 @@
-"""The token bucket waits instead of failing and backoff respects the provider."""
+"""The shared bucket waits instead of failing and backoff respects the provider."""
 
 from __future__ import annotations
 
@@ -6,9 +6,9 @@ import asyncio
 
 import pytest
 
+from engine.knowledge import embed_gate
 from engine.knowledge.rate_limit import (
     CallLimiter,
-    TokenBucket,
     backoff_delay,
     is_retryable,
     with_backoff,
@@ -17,39 +17,102 @@ from engine.knowledge.rate_limit import (
 
 class _Clock:
     def __init__(self):
-        self.now = 0.0
         self.slept = []
-
-    def __call__(self):
-        return self.now
 
     async def sleep(self, seconds):
         self.slept.append(seconds)
-        self.now += seconds
 
 
-def test_the_bucket_paces_calls_to_the_rate():
-    clock = _Clock()
-    bucket = TokenBucket(60, capacity=2, clock=clock, sleep=clock.sleep)
+class _Redis:
+    """The shape of the Lua bucket, so two processes can share it in a test."""
+
+    def __init__(self):
+        self.spent = {}
+        self.keys = {}
+        self.calls = []
+
+    def eval(self, script, n, key, rate, cap, need, strict):
+        self.calls.append(key)
+        have = cap - self.spent.get(key, 0)
+        wait = max(0.0, (need - have) / rate)
+        self.spent[key] = self.spent.get(key, 0) + need
+        return str(wait).encode()
+
+    def pttl(self, key):
+        return self.keys.get(key, -2)
+
+    def set(self, key, value, px):
+        self.keys[key] = px
+
+
+def _limiter(redis, rpm=600, tpm=1000, sleep=None, provider="anthropic"):
+    gate = embed_gate.RateGate(f"cognify:{provider}", rpm, tpm, client=redis)
+    return CallLimiter(provider, rpm, tpm, gate=gate, sleep=sleep or _no_sleep)
+
+
+async def _no_sleep(_seconds):
+    return None
+
+
+def test_two_workers_draw_from_one_bucket():
+    redis, slept = _Redis(), []
+
+    async def nap(seconds):
+        slept.append(seconds)
+
+    first, second = _limiter(redis, sleep=nap), _limiter(redis, sleep=nap)
 
     async def go():
-        for _ in range(5):
-            await bucket.acquire(1)
-
-    asyncio.run(go())
-    assert sum(clock.slept) == pytest.approx(3.0)
-
-
-def test_tokens_and_requests_both_limit():
-    clock = _Clock()
-    limiter = CallLimiter(600, 1000, clock=clock, sleep=clock.sleep)
-
-    async def go():
-        await limiter.acquire(1000)
-        return await limiter.acquire(500)
+        await first.acquire(1000)
+        return await second.acquire(500)
 
     waited = asyncio.run(go())
     assert waited == pytest.approx(30.0, abs=0.5)
+    assert slept == [waited]
+    assert set(redis.calls) == {
+        "kb:gate:cognify:anthropic:requests",
+        "kb:gate:cognify:anthropic:tokens",
+    }
+
+
+def test_a_provider_wait_holds_the_other_workers():
+    redis = _Redis()
+    first, second = _limiter(redis), _limiter(redis)
+    asyncio.run(first.after_failure(_Err(429, retry_after=20)))
+    assert second.gate.pause_remaining() == pytest.approx(20.0, abs=0.5)
+    assert asyncio.run(second.acquire(1)) == pytest.approx(20.0, abs=0.5)
+
+
+def test_a_refusal_with_no_wait_holds_nobody():
+    redis = _Redis()
+    limiter = _limiter(redis)
+    asyncio.run(limiter.after_failure(_Err(400, retry_after=20)))
+    assert limiter.gate.pause_remaining() == 0
+
+
+def test_jobs_on_one_provider_share_a_gate_in_redis(monkeypatch):
+    from engine.knowledge import cognify_pipeline as cp
+
+    monkeypatch.setattr(cp, "_provider_of", lambda model: "anthropic")
+    a = cp.build_context("k", "t", "j1", {}, "", tenant_cfg=_TENANT_CFG)
+    b = cp.build_context("k", "t", "j2", {}, "", tenant_cfg=_TENANT_CFG)
+    assert a.limiter.gate is b.limiter.gate
+    assert a.limiter.gate.name == "cognify:anthropic"
+
+
+def test_the_gate_name_follows_the_provider_the_model_reaches(monkeypatch):
+    from engine.knowledge import cognify_pipeline as cp
+    from engine.llm_router import LLMRouter
+
+    monkeypatch.setattr(
+        LLMRouter,
+        "candidate_chain",
+        lambda self, model: [("claude_subscription", model)],
+    )
+    assert cp._provider_of("claude-haiku-4-5") == "claude_subscription"
+
+
+_TENANT_CFG = {"auto_accept_threshold": 0.85, "conflict_action": "flag"}
 
 
 class _Err(Exception):

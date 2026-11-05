@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -47,10 +47,27 @@ def _is_admin(user: User) -> bool:
 
 
 class ReplaceDocumentRequest(BaseModel):
-    new_filename: str = Field(min_length=1, max_length=500)
-    new_storage_url: str = Field(min_length=1, max_length=1000)
-    new_file_type: str = Field(min_length=1, max_length=50)
-    new_file_size: int = Field(ge=0)
+    # the id an upload returned, or the older form that names the stored file
+    new_document_id: uuid.UUID | None = None
+    new_filename: str | None = Field(default=None, min_length=1, max_length=500)
+    new_storage_url: str | None = Field(default=None, min_length=1, max_length=1000)
+    new_file_type: str | None = Field(default=None, min_length=1, max_length=50)
+    new_file_size: int | None = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def _one_form(self) -> "ReplaceDocumentRequest":
+        stored = (
+            self.new_filename,
+            self.new_storage_url,
+            self.new_file_type,
+            self.new_file_size,
+        )
+        if self.new_document_id is not None:
+            if any(v is not None for v in stored):
+                raise ValueError("Send new_document_id or the file fields, not both.")
+        elif any(v is None for v in stored):
+            raise ValueError("Send new_document_id, the id your upload returned.")
+        return self
 
 
 def _owned_storage_url(url: str, tenant_id: Any, kb_id: Any) -> bool:
@@ -63,6 +80,34 @@ def _owned_storage_url(url: str, tenant_id: Any, kb_id: Any) -> bool:
         f"/{tenant_id}/kb/{kb_id}/" in f"/{norm}"
         or f"/{tenant_id}/{kb_id}/" in f"/{norm}"
     )
+
+
+async def _document_in(
+    db: AsyncSession, kb_id: uuid.UUID, doc_id: uuid.UUID
+) -> Document | None:
+    return (
+        await db.execute(
+            select(Document).where(Document.id == doc_id, Document.kb_id == kb_id)
+        )
+    ).scalar_one_or_none()
+
+
+COPY_GRANTS_SQL = """
+INSERT INTO document_grants
+    (id, document_id, tenant_id, subject_type, subject_id, permission,
+     granted_by, granted_at, expires_at)
+SELECT gen_random_uuid(), CAST(:new_id AS uuid), tenant_id, subject_type, subject_id,
+       permission, granted_by, granted_at, expires_at
+FROM document_grants WHERE document_id = CAST(:old_id AS uuid)
+ON CONFLICT DO NOTHING
+"""
+
+
+async def _copy_grants(db: AsyncSession, old_id: uuid.UUID, new_id: uuid.UUID) -> None:
+    # without this a restricted document's new version would be open to everyone
+    from sqlalchemy import text
+
+    await db.execute(text(COPY_GRANTS_SQL), {"old_id": old_id, "new_id": new_id})
 
 
 def _stamp_superseded(kb: KnowledgeBase, old: Document) -> None:
@@ -110,18 +155,14 @@ async def replace_document(
         return error("Document not found", 404)
     if not await user_can_edit_collection(db, user=user, kb=kb):
         return error("You don't have permission to edit this collection", 403)
-    if not _owned_storage_url(body.new_storage_url, user.tenant_id, kb_id):
+    if body.new_document_id is None and not _owned_storage_url(
+        body.new_storage_url, user.tenant_id, kb_id
+    ):
         return error(
             "The new file must be uploaded to this collection first. Upload it, then replace with that file.",
             400,
         )
-    res = await db.execute(
-        select(Document).where(
-            Document.id == doc_id,
-            Document.kb_id == kb_id,
-        )
-    )
-    old = res.scalar_one_or_none()
+    old = await _document_in(db, kb_id, doc_id)
     if old is None:
         return error("Document not found", 404)
     if not old.is_current:
@@ -129,19 +170,37 @@ async def replace_document(
             "Cannot replace a superseded version; replace the current head", 400
         )
 
-    new = Document(
-        id=uuid.uuid4(),
-        kb_id=kb_id,
-        filename=body.new_filename,
-        file_type=body.new_file_type,
-        file_size=body.new_file_size,
-        storage_url=body.new_storage_url,
-        parent_document_id=old.parent_document_id or old.id,
-        version_number=(old.version_number or 1) + 1,
-        is_current=True,
-        uploaded_by=user.id,
-    )
+    parent = old.parent_document_id or old.id
+    version = (old.version_number or 1) + 1
+    if body.new_document_id is not None:
+        new = await _document_in(db, kb_id, body.new_document_id)
+        if new is None:
+            return error("The new document was not found in this collection", 404)
+        if new.id == old.id:
+            return error(
+                "That file is already the current version, there is nothing to replace.",
+                409,
+            )
+        if not new.is_current or new.parent_document_id is not None:
+            return error("That document is already part of a version history", 409)
+        new.parent_document_id = parent
+        new.version_number = version
+    else:
+        new = Document(
+            id=uuid.uuid4(),
+            kb_id=kb_id,
+            filename=body.new_filename,
+            file_type=body.new_file_type,
+            file_size=body.new_file_size,
+            storage_url=body.new_storage_url,
+            parent_document_id=parent,
+            version_number=version,
+            is_current=True,
+            uploaded_by=user.id,
+        )
     db.add(new)
+    await db.flush()
+    await _copy_grants(db, old.id, new.id)
     old.is_current = False
     old.superseded_by = new.id
     await db.commit()
@@ -158,15 +217,16 @@ async def replace_document(
     # the new version is processed like any upload, otherwise it never gets chunks
     from app.routers.knowledge import _dispatch_processing
 
-    _dispatch_processing(
-        doc_id=str(new.id),
-        kb_id=str(kb_id),
-        file_path=new.storage_url,
-        filename=new.filename,
-        file_type=new.file_type,
-        chunk_size=kb.chunk_size,
-        chunk_overlap=kb.chunk_overlap,
-    )
+    if body.new_document_id is None:
+        _dispatch_processing(
+            doc_id=str(new.id),
+            kb_id=str(kb_id),
+            file_path=new.storage_url,
+            filename=new.filename,
+            file_type=new.file_type,
+            chunk_size=kb.chunk_size,
+            chunk_overlap=kb.chunk_overlap,
+        )
     if kb.vector_backend == "pinecone" and old.chunk_count:
         _stamp_superseded(kb, old)
     return success(

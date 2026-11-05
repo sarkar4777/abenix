@@ -334,6 +334,138 @@ def test_pinecone_flip_moves_namespace_and_drops_the_old_one(
     assert index.ns[f"{kb}.g1"][f"{doc}_0"]["policy_id"] == "P9"
 
 
+def test_the_file_path_embeds_batches_while_the_document_is_still_being_read(
+    kb_conn, monkeypatch, embed, tmp_path
+):
+    cur = kb_conn.cursor()
+    tenant = make_tenant(cur)
+    kb = make_kb(cur, tenant)
+    doc = make_doc(cur, kb, ["old"])
+    path = tmp_path / "big.txt"
+    path.write_text("x")
+    cur.execute(
+        "UPDATE documents SET storage_url = %s, file_type = 'txt' WHERE id = %s",
+        (str(path), doc),
+    )
+    total = kb_reembed.EMBED_BATCH * 3 + 7
+    read = []
+
+    def lazily(blocks, size, overlap):
+        for i in range(total):
+            read.append(i)
+            yield f"chunk {i}", i // 50
+
+    monkeypatch.setattr(dp, "_iter_chunks", lazily)
+    read_at_first_embed = []
+    original = dp._embed_chunks
+
+    def spy(chunks, model=None, strict=False):
+        read_at_first_embed.append(len(read))
+        return original(chunks, model, strict)
+
+    monkeypatch.setattr(dp, "_embed_chunks", spy)
+    monkeypatch.setattr(
+        dp, "_extract_blocks", lambda *a: pytest.fail("the whole file was loaded")
+    )
+    jid = _job(cur, tenant, kb)
+    kb_reembed.reembed_slice(jid, requeue=lambda _j: None)
+    assert read_at_first_embed[0] <= kb_reembed.EMBED_BATCH
+    assert [len(c) for c in embed] == [kb_reembed.EMBED_BATCH] * 3 + [7]
+    cur.execute(
+        "SELECT chunk_index, content, metadata->>'page' FROM chunks WHERE document_id = %s "
+        "AND embedding_generation = 1 ORDER BY chunk_index",
+        (doc,),
+    )
+    rows = cur.fetchall()
+    assert len(rows) == total
+    assert rows[120] == (120, "chunk 120", "2")
+    kb_conn.commit()
+
+
+def test_indexed_text_comes_back_one_page_at_a_time_in_order(kb_conn, embed):
+    cur = kb_conn.cursor()
+    tenant = make_tenant(cur)
+    kb = make_kb(cur, tenant)
+    total = kb_reembed.EMBED_BATCH * 2 + 5
+    doc = make_doc(
+        cur, kb, [f"c{i}" for i in range(total)], metadata={"policy_id": "P7"}
+    )
+    kb_conn.commit()
+
+    class Spy:
+        most = 0
+
+        def __init__(self, real):
+            self.real = real
+
+        def execute(self, *a):
+            return self.real.execute(*a)
+
+        def fetchall(self):
+            rows = self.real.fetchall()
+            Spy.most = max(Spy.most, len(rows))
+            return rows
+
+    stream = kb_reembed._stored_chunks_pgvector(Spy(cur), kb, doc, 0)
+    assert [text for text, _page in stream] == [f"c{i}" for i in range(total)]
+    assert Spy.most == kb_reembed.EMBED_BATCH
+    assert kb_reembed._carried_pgvector(cur, kb, doc, 0) == {"policy_id": "P7"}
+    kb_conn.commit()
+
+
+def test_an_unreadable_file_falls_back_to_indexed_text_mid_way(
+    kb_conn, monkeypatch, embed, tmp_path
+):
+    cur = kb_conn.cursor()
+    tenant = make_tenant(cur)
+    kb = make_kb(cur, tenant)
+    doc = make_doc(cur, kb, ["kept one", "kept two"], metadata={"policy_id": "P7"})
+    path = tmp_path / "broken.txt"
+    path.write_text("x")
+    cur.execute(
+        "UPDATE documents SET storage_url = %s, file_type = 'txt' WHERE id = %s",
+        (str(path), doc),
+    )
+
+    def breaks(blocks, size, overlap):
+        for i in range(kb_reembed.EMBED_BATCH + 1):
+            yield f"from the file {i}", None
+        raise ValueError("corrupt page")
+
+    monkeypatch.setattr(dp, "_iter_chunks", breaks)
+    jid = _job(cur, tenant, kb)
+    assert (
+        kb_reembed.reembed_slice(jid, requeue=lambda _j: None)["status"] == "completed"
+    )
+    cur.execute(
+        "SELECT content, metadata->>'policy_id' FROM chunks WHERE document_id = %s "
+        "AND embedding_generation = 1 ORDER BY chunk_index",
+        (doc,),
+    )
+    assert cur.fetchall() == [("kept one", "P7"), ("kept two", "P7")]
+    cur.execute(
+        "SELECT from_file, from_indexed_text FROM kb_reembed_jobs WHERE id = %s", (jid,)
+    )
+    assert cur.fetchone() == (0, 1)
+    kb_conn.commit()
+
+
+def test_pinecone_chunks_are_fetched_one_batch_at_a_time():
+    asked = []
+
+    class Index:
+        def fetch(self, ids, namespace):
+            asked.append(len(ids))
+            return {"vectors": {i: {"metadata": {"text": i}} for i in ids}}
+
+    count = kb_reembed.EMBED_BATCH * 2 + 3
+    stream = kb_reembed._stored_chunks_pinecone(Index(), "ns", "d", count)
+    assert next(stream) == ("d_0", None)
+    assert asked == [kb_reembed.EMBED_BATCH]
+    assert len(list(stream)) == count - 1
+    assert asked == [kb_reembed.EMBED_BATCH, kb_reembed.EMBED_BATCH, 3]
+
+
 # the API
 
 

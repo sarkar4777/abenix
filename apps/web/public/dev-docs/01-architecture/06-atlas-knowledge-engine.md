@@ -171,7 +171,7 @@ Starters are the `ATLAS_STARTERS` dict in [`routers/atlas.py`](../../apps/api/ap
 | `sample_rate` | 1.0 | The share for `sample` and `salient` |
 | `max_chunks_per_doc` | none | At most this many per document, the richest ones |
 | `max_parallel_chunks` | 4 | Model calls at once per document task |
-| `requests_per_minute`, `tokens_per_minute` | 300, 400000 | The token bucket for one worker process, so the real rate is this times worker concurrency times replicas |
+| `requests_per_minute`, `tokens_per_minute` | 300, 400000 | The token bucket every Cognify worker shares for this provider, in Redis. If Redis does not answer each process limits itself |
 | `llm_resolution` | true | Ask the model about close names at the end, within what is left of the budget |
 
 1. **Plan.** `run_cognify_job` checks the daily budget and Neo4j, creates the constraint and indexes, stamps older nodes with their search token and tenant, and records the documents in `cognify_job_documents`. Documents with `cognified_at` set are left out unless `force` or `doc_ids` asks for them. With nothing to do the job ends `complete` with `stop_reason` `up_to_date`.

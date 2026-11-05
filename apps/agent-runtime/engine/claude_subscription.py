@@ -254,6 +254,17 @@ def build_sync_client(api_key: str | None = None):
     return anthropic.Anthropic(), False
 
 
+def vision_provider(anthropic_key: str, google_key: str) -> str:
+    """Keys first, the plan only when no key can read the page."""
+    if anthropic_key.strip():
+        return "anthropic"
+    if google_key.strip():
+        return "gemini"
+    if get_config().usable:
+        return "claude_subscription"
+    return "none"
+
+
 async def vision_text(
     image_b64: str, prompt: str, model: str, api_key: str = "", timeout: float = 60.0
 ) -> str:

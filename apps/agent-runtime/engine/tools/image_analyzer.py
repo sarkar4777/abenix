@@ -94,35 +94,27 @@ class ImageAnalyzerTool(BaseTool):
         if question and operation != "question":
             prompt += f"\n\nAlso answer this specific question: {question}"
 
-        # Try Claude Vision first, then OpenAI
-        result = await self._analyze_with_claude(image_url, prompt, compare_url)
-        if result:
-            return ToolResult(
-                content=json.dumps(
-                    {
-                        "status": "success",
-                        "operation": operation,
-                        "analysis": result,
-                        "model": "claude-vision",
-                    }
+        # the subscription is last, it only reads the image when no key can
+        for label, analyze in (
+            ("claude-vision", self._analyze_with_claude_key),
+            ("openai-vision", self._analyze_with_openai),
+            ("claude-vision", self._analyze_with_subscription),
+        ):
+            result = await analyze(image_url, prompt, compare_url)
+            if result:
+                return ToolResult(
+                    content=json.dumps(
+                        {
+                            "status": "success",
+                            "operation": operation,
+                            "analysis": result,
+                            "model": label,
+                        }
+                    )
                 )
-            )
-
-        result = await self._analyze_with_openai(image_url, prompt, compare_url)
-        if result:
-            return ToolResult(
-                content=json.dumps(
-                    {
-                        "status": "success",
-                        "operation": operation,
-                        "analysis": result,
-                        "model": "openai-vision",
-                    }
-                )
-            )
 
         return ToolResult(
-            content="Error: No vision API available. Set ANTHROPIC_API_KEY or OPENAI_API_KEY.",
+            content="No vision API is available. Set ANTHROPIC_API_KEY or OPENAI_API_KEY, or activate a Claude subscription.",
             is_error=True,
         )
 
@@ -160,23 +152,51 @@ class ImageAnalyzerTool(BaseTool):
         except Exception:
             return None
 
-    async def _analyze_with_claude(
+    async def _analyze_with_claude_key(
         self, image_url: str, prompt: str, compare_url: str = ""
     ) -> str | None:
-        """Analyze image using Anthropic Claude Vision API."""
+        api_key = self.cfg("ANTHROPIC_API_KEY")
+        if not api_key:
+            return None
+        try:
+            import anthropic
+
+            client = anthropic.AsyncAnthropic(api_key=api_key)
+        except Exception:
+            return None
+        return await self._analyze_with_claude(
+            client, "claude-sonnet-4-5-20250929", image_url, prompt, compare_url
+        )
+
+    async def _analyze_with_subscription(
+        self, image_url: str, prompt: str, compare_url: str = ""
+    ) -> str | None:
         from engine import claude_subscription
 
-        # A Claude subscription is a valid credential here too, so don't
-        # bail just because ANTHROPIC_API_KEY is unset.
-        api_key = self.cfg("ANTHROPIC_API_KEY")
-        if not api_key and not claude_subscription.get_config().usable:
+        if not claude_subscription.get_config().usable:
             return None
-
         try:
-            import anthropic  # noqa: F401 - surfaced via the helper below
+            client, _ = claude_subscription.build_async_client()
+        except Exception:
+            return None
+        return await self._analyze_with_claude(
+            client,
+            claude_subscription.effective_model("claude-sonnet-4-5-20250929"),
+            image_url,
+            prompt,
+            compare_url,
+        )
 
-            client, _ = claude_subscription.build_async_client(api_key)
-
+    async def _analyze_with_claude(
+        self,
+        client: Any,
+        model: str,
+        image_url: str,
+        prompt: str,
+        compare_url: str = "",
+    ) -> str | None:
+        """Analyze image using Anthropic Claude Vision API."""
+        try:
             content: list[dict[str, Any]] = []
 
             # Load primary image
@@ -215,7 +235,7 @@ class ImageAnalyzerTool(BaseTool):
             content.append({"type": "text", "text": prompt})
 
             resp = await client.messages.create(
-                model="claude-sonnet-4-5-20250929",
+                model=model,
                 max_tokens=4096,
                 messages=[{"role": "user", "content": content}],
             )

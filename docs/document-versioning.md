@@ -13,19 +13,18 @@ Two things create a new version: the replace call below, and Source Watch when i
 
 ## Replace a document
 
-The route is in [`apps/api/app/routers/knowledge_v2.py`](../apps/api/app/routers/knowledge_v2.py). The body names a file that is already in storage.
+The route is in [`apps/api/app/routers/knowledge_v2.py`](../apps/api/app/routers/knowledge_v2.py). Upload the amended file to the collection first, then pass the document id the upload returned. Nothing else is needed.
 
 ```
 POST /api/knowledge/{kb_id}/documents/{doc_id}/replace
 {
-  "new_filename": "contract-v2.pdf",
-  "new_storage_url": "<tenant>/kb/<kb>/<new-blob>",
-  "new_file_type": "application/pdf",
-  "new_file_size": 482917
+  "new_document_id": "<id from the upload>"
 }
 ```
 
-The call adds a new row with the same `parent_document_id` and `version_number` one higher, and marks the old row `is_current = false` with `superseded_by` set to the new id. It answers 201:
+The older form still works. It names a file that is already in storage, with `new_filename`, `new_storage_url`, `new_file_type` and `new_file_size`, and it queues that file for processing. An uploaded document is already queued.
+
+The call links the new row with the same `parent_document_id` and `version_number` one higher, and marks the old row `is_current = false` with `superseded_by` set to the new id. It answers 201:
 
 ```json
 {"id": "<new id>", "version_number": 2, "parent_document_id": "<first version id>", "supersedes": "<old id>"}

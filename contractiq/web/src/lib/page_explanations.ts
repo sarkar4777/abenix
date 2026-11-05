@@ -702,59 +702,48 @@ export const PAGE_EXPLANATIONS: Record<string, PageExplanation> = {
     glossary: pick(['kyc', 'counterparty', 'pd', 'lgd', 'guardrail']),
   },
 
-  'credit-risk-counterparty': {
-    routeKey: 'credit-risk-counterparty',
-    page_title: 'Counterparty credit risk',
+  'credit-risk': {
+    routeKey: 'credit-risk',
+    page_title: 'Counterparty risk overview',
     purpose:
-      'This page estimates the credit risk you are running on a single counterparty across all your contracts with them. It combines a probability of default with a loss given default to produce expected loss in dollar terms.\n\nProbability of default is taken from public credit ratings where available, and from a structural model (Merton-style) where it is not. Loss given default uses a sector default of 60% unless your contracts specify collateral terms that change it. The page is explicit about which path it took.',
+      'This page is the credit picture across every counterparty named in your contracts. It shows how many have been assessed, the average score and probability of default, who is high risk, and who has not been assessed yet.\n\nOpen a counterparty from the heat map or an assessment card to see its own financials and provenance on the counterparty page.',
     sections: [
       {
-        title: 'Probability of default',
+        title: 'Portfolio totals',
         what_it_shows:
-          'Annualised PD as stored on the counterparty row in the database. No live agent run.',
+          'Counterparties, how many are assessed, average credit score, high risk count and average probability of default, worked out from the stored assessments.',
         agent_slug: undefined,
         tools_used: [],
-        data_quality: 'real-fetched',
+        data_quality: 'mixed',
         layman_note:
-          'The PD value is a field on the counterparty record seeded at tenant setup (e.g. from an internal rating or a manually-entered band). There is no live agent fetching ratings or running a structural model in this build. A 2% PD does not mean the counterparty will default — it means that across a large population of similar entities, about 2 in 100 default in a year. Use it for sizing limits, not for predicting an individual default.',
+          'These are simple sums and averages over assessments already saved. A counterparty with no assessment counts in the total but not in the averages.',
       },
       {
-        title: 'Loss given default',
+        title: 'Credit assessments',
         what_it_shows:
-          'The fraction of exposure you expect to lose if the counterparty defaults, after collateral and recoveries. Stored on the counterparty row.',
-        agent_slug: undefined,
+          'One card per assessed counterparty with its score, narrative, ratios, risk factors and recommended mitigations. Assess runs the credit agent for one name, Assess All runs it for every name still unassessed.',
+        agent_slug: 'contractiq-credit-risk',
         tools_used: [],
-        data_quality: 'real-fetched',
+        data_quality: 'agent-simulated',
         layman_note:
-          'Like PD, LGD is a counterparty-table field, not a model output. It is whatever was loaded at seed time — a sector default or a manually overridden value. There is no live collateral parser or sector-LGD agent in this build. Re-seed the counterparty record if you want a different number.',
+          'A card is the view of an agent at the moment it ran, not a live rating. Run the assessment again when you want it refreshed.',
       },
     ],
     data_flow: [
       {
         step: 1,
-        label: 'Browser calls /api/contractiq/counterparties/{id}',
+        label: 'Browser reads the portfolio, the assessments and the counterparties',
         detail:
-          'The page passes the counterparty id. The API joins the contracts table to get exposure and reads PD and LGD from the counterparty row.',
+          'Three calls under /api/contractiq, for the totals, the assessment cards and the list of counterparties.',
       },
       {
         step: 2,
-        label: 'API reads PD and LGD off the counterparty record',
+        label: 'Assess runs the agent',
         detail:
-          'No agent run. PD and LGD are stored fields seeded at tenant setup. The API returns whatever is on the row, with a source tag noting that it is a seeded value.',
-      },
-      {
-        step: 3,
-        label: 'API computes expected loss',
-        detail:
-          'Multiplication only: PD × LGD × exposure. A simple validation step checks that PD is in [0,1] and LGD is in [0,1] before returning.',
-      },
-      {
-        step: 4,
-        label: 'UI renders panels and totals',
-        detail: 'No further math in the browser.',
+          'The API runs the credit agent for the chosen names and saves each result, then the page reads everything again.',
       },
     ],
-    glossary: pick(['counterparty', 'pd', 'lgd', 'mtm', 'guardrail']),
+    glossary: pick(['counterparty', 'pd', 'lgd', 'guardrail']),
   },
 
   landing: {

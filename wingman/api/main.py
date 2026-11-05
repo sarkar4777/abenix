@@ -682,6 +682,8 @@ def _parse_agent_json(raw: str) -> dict[str, Any]:
 # corridor_id keyed by execution_id, so the result endpoint can echo it
 # back without the frontend having to round-trip it.
 _ANALYZE_INDEX: dict[str, str] = {}
+# runs started from the ops page, only these may write the ops cache
+_OPS_RUNS: set[str] = set()
 
 
 @app.post("/api/wingman/corridors/{corridor_id}/analyze")
@@ -1083,37 +1085,52 @@ async def acknowledge_offer(offer_id: str) -> dict[str, Any]:
 
 @app.get("/api/wingman/ops/snapshot")
 async def ops_snapshot() -> dict[str, Any]:
-    """Single call to wingman-ops-monitor — returns vessels + weather + ranked alerts."""
+    """Start wingman-ops-monitor and answer at once, the page follows the run live."""
     try:
         async with _abenix_client() as forge:
-            result = await forge.execute(
+            submitted = await forge.execute(
                 "wingman-ops-monitor",
-                json.dumps({"corridors": [c["id"] for c in CORRIDORS if c.get("active")]}),
-                wait_timeout_seconds=300,
+                json.dumps(
+                    {"corridors": [c["id"] for c in CORRIDORS if c.get("active")]}
+                ),
+                wait="submitted",
             )
     except HTTPException:
         raise
     except Exception as e:
         logger.exception("ops-snapshot agent failed")
         raise HTTPException(status_code=502, detail=f"Backend unreachable: {e}")
+    if submitted.execution_id:
+        _OPS_RUNS.add(submitted.execution_id)
+    return {
+        "data": {
+            "execution_id": submitted.execution_id,
+            "status": submitted.status or "running",
+        }
+    }
+
+
+@app.get("/api/wingman/ops/result/{execution_id}")
+async def ops_result(execution_id: str) -> dict[str, Any]:
+    """The snapshot once the run has ended, the page polls this while it runs."""
+    async with _abenix_client() as forge:
+        try:
+            row = await forge.executions.get(execution_id) or {}
+        except Exception as e:
+            logger.warning("execution fetch failed for %s: %s", execution_id, e)
+            raise HTTPException(status_code=502, detail=f"Execution fetch failed: {e}")
+    status = (row.get("status") or "running").lower()
+    raw = row.get("output") or row.get("output_message") or ""
     parsed: dict[str, Any] = {}
-    raw = result.output or ""
-    try:
-        parsed = json.loads(raw)
-    except Exception:
-        s = raw.strip()
-        first, last = s.find("{"), s.rfind("}")
-        if first != -1 and last > first:
-            try:
-                parsed = json.loads(s[first : last + 1])
-            except Exception:
-                parsed = {"narrative": raw[:1500]}
-    if parsed:
+    if status in {"completed", "succeeded"}:
+        parsed = _parse_agent_json(raw) or ({"narrative": raw[:1500]} if raw else {})
+    if parsed and execution_id in _OPS_RUNS:
+        _OPS_RUNS.discard(execution_id)
         candidate = {
             **parsed,
-            "execution_id": result.execution_id,
-            "cost_usd": result.cost,
-            "duration_ms": result.duration_ms,
+            "execution_id": execution_id,
+            "cost_usd": row.get("cost"),
+            "duration_ms": row.get("duration_ms"),
         }
         if result_cache._payload_is_load_bearing(candidate):
             try:
@@ -1122,10 +1139,12 @@ async def ops_snapshot() -> dict[str, Any]:
                 logger.warning("cache write ops/snapshot failed: %s", e)
     return {
         "data": {
-            "execution_id": result.execution_id,
-            "snapshot": parsed,
-            "cost_usd": result.cost,
-            "duration_ms": result.duration_ms,
+            "execution_id": execution_id,
+            "status": status,
+            "snapshot": parsed or None,
+            "error_message": row.get("error_message"),
+            "cost_usd": row.get("cost"),
+            "duration_ms": row.get("duration_ms"),
         }
     }
 

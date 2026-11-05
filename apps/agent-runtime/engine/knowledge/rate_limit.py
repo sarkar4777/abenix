@@ -1,12 +1,13 @@
-"""Token bucket and backoff for Cognify model calls."""
+"""Shared rate limit and backoff for Cognify model calls."""
 
 from __future__ import annotations
 
 import asyncio
 import random
-import time
 from collections.abc import Awaitable, Callable
 from typing import TypeVar
+
+from engine.knowledge.embed_gate import RateGate, cognify_gate, retry_after_seconds
 
 T = TypeVar("T")
 
@@ -24,61 +25,33 @@ RETRYABLE_TEXT = (
 )
 
 
-class TokenBucket:
-    """Refills continuously, a request bigger than the bucket waits for a full one."""
-
-    def __init__(
-        self,
-        rate_per_minute: float,
-        capacity: float | None = None,
-        clock: Callable[[], float] = time.monotonic,
-        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
-    ) -> None:
-        self.rate = max(float(rate_per_minute), 0.001) / 60.0
-        self.capacity = float(capacity if capacity is not None else rate_per_minute)
-        self.tokens = self.capacity
-        self._clock = clock
-        self._sleep = sleep
-        self._updated = clock()
-        self._lock = asyncio.Lock()
-
-    def _refill(self) -> None:
-        now = self._clock()
-        self.tokens = min(
-            self.capacity, self.tokens + (now - self._updated) * self.rate
-        )
-        self._updated = now
-
-    async def acquire(self, amount: float = 1.0) -> float:
-        amount = min(float(amount), self.capacity)
-        waited = 0.0
-        async with self._lock:
-            while True:
-                self._refill()
-                if self.tokens >= amount:
-                    self.tokens -= amount
-                    return waited
-                delay = (amount - self.tokens) / self.rate
-                waited += delay
-                await self._sleep(delay)
-
-
 class CallLimiter:
-    """Requests per minute and tokens per minute for one worker process."""
+    """Requests and tokens per minute on the gate every Cognify worker shares."""
 
     def __init__(
         self,
+        provider: str,
         requests_per_minute: float,
         tokens_per_minute: float,
-        **kw,
+        gate: RateGate | None = None,
+        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ) -> None:
-        self.requests = TokenBucket(requests_per_minute, **kw)
-        self.tokens = TokenBucket(tokens_per_minute, **kw)
+        self.gate = gate or cognify_gate(
+            provider, requests_per_minute, tokens_per_minute
+        )
+        self._sleep = sleep
 
     async def acquire(self, estimated_tokens: int) -> float:
-        waited = await self.requests.acquire(1)
-        waited += await self.tokens.acquire(max(1, estimated_tokens))
-        return waited
+        wait = await asyncio.to_thread(self.gate.wait_needed, estimated_tokens)
+        if wait > 0:
+            await self._sleep(wait)
+        return wait
+
+    async def after_failure(self, exc: BaseException) -> None:
+        """A provider that names a wait holds every worker for that long."""
+        hinted = getattr(exc, "retry_after", None) or retry_after_seconds(exc)
+        if hinted and is_retryable(exc):
+            await asyncio.to_thread(self.gate.pause, float(hinted))
 
 
 def is_retryable(exc: BaseException) -> bool:

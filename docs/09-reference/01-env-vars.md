@@ -393,7 +393,7 @@ Also read by the API in embedded mode, since it imports the same engine.
 | `COGNIFY_DEFAULT_MODEL` | `claude-haiku-4-5-20251001` | Extraction model when a run names none. Chart `cognifyWorker.defaultModel` |
 | `COGNIFY_JOB_BUDGET_USD` | `50` | The most one job may spend when the request does not say. Chart `cognifyWorker.jobBudgetUsd` |
 | `COGNIFY_MAX_PARALLEL_CHUNKS` | `4` | Model calls at once per document task |
-| `COGNIFY_REQUESTS_PER_MINUTE` / `COGNIFY_TOKENS_PER_MINUTE` | `300` / `400000` | Token bucket per worker process. The real rate is this times concurrency times replicas |
+| `COGNIFY_REQUESTS_PER_MINUTE` / `COGNIFY_TOKENS_PER_MINUTE` | `300` / `400000` | One token bucket per provider in Redis, shared by every Cognify worker. Set these to your provider tier. If Redis does not answer each process limits itself |
 | `COGNIFY_GRAPH_BATCH_CHUNKS` | `20` | Chunks between graph writes, budget checks and progress updates |
 | `COGNIFY_ENTITY_BATCH` / `COGNIFY_RELATIONSHIP_BATCH` | `200` / `500` | Rows per Neo4j transaction |
 | `COGNIFY_TASK_TIME_SLICE_S` | `1200` | A document task requeues itself after this. Keep it under `CELERY_TASK_SOFT_TIME_LIMIT` |

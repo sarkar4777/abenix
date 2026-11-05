@@ -253,16 +253,92 @@ async def test_vision_works_on_a_subscription_with_no_keys(module, call):
             True,
             "anthropic",
         ),
-        ({"GOOGLE_API_KEY": "g"}, True, "claude_subscription"),
+        ({"GOOGLE_API_KEY": "g"}, True, "gemini"),
         ({"GOOGLE_API_KEY": "g"}, False, "gemini"),
+        ({}, True, "claude_subscription"),
     ],
 )
-def test_vision_order_is_key_then_plan_then_google(module, env, usable, expected):
+def test_vision_order_is_key_then_google_then_plan(module, env, usable, expected):
     with (
         patch.dict(os.environ, env, clear=True),
         patch.object(cs, "get_config", return_value=_cfg(usable=usable)),
     ):
         assert module._provider() == expected
+
+
+async def test_image_analyzer_reads_with_a_key_before_the_plan(monkeypatch):
+    from engine.tools import image_analyzer as ia
+
+    tool = ia.ImageAnalyzerTool()
+    used = []
+
+    def answer(name, result):
+        async def go(*a):
+            used.append(name)
+            return result
+
+        return go
+
+    monkeypatch.setattr(tool, "_analyze_with_claude_key", answer("key", None))
+    monkeypatch.setattr(tool, "_analyze_with_openai", answer("openai", "seen"))
+    monkeypatch.setattr(tool, "_analyze_with_subscription", answer("plan", "plan"))
+    out = await tool.execute({"image_url": "a.png"})
+    assert used == ["key", "openai"] and "openai-vision" in out.content
+
+
+async def test_image_analyzer_uses_the_plan_when_no_key_is_set():
+    from engine.tools import image_analyzer as ia
+
+    tool = ia.ImageAnalyzerTool()
+    messages = FakeMessages()
+    image = (b"png", "image/png")
+
+    async def load(_url):
+        return base64.b64encode(image[0]).decode(), image[1]
+
+    with (
+        patch.dict(os.environ, {}, clear=True),
+        patch.object(cs, "get_config", return_value=_cfg()),
+        patch.object(cs, "build_async_client", _fake_client(messages)),
+        patch.object(tool, "_load_image_base64", load),
+    ):
+        out = await tool.execute({"image_url": "a.png"})
+    assert "claude-vision" in out.content and "page text" in out.content
+
+
+async def test_image_analyzer_key_is_not_replaced_by_an_active_plan():
+    from engine.tools import image_analyzer as ia
+
+    tool = ia.ImageAnalyzerTool()
+    messages = FakeMessages()
+    made_with_plan = _fake_client(FakeMessages())
+
+    async def load(_url):
+        return base64.b64encode(b"png").decode(), "image/png"
+
+    with (
+        patch.dict(os.environ, {"ANTHROPIC_API_KEY": "sk-a"}, clear=True),
+        patch.object(cs, "get_config", return_value=_cfg()),
+        patch.object(cs, "build_async_client", made_with_plan),
+        patch(
+            "anthropic.AsyncAnthropic",
+            return_value=SimpleNamespace(messages=messages),
+        ) as made,
+        patch.object(tool, "_load_image_base64", load),
+    ):
+        await tool.execute({"image_url": "a.png"})
+    assert made.call_args.kwargs["api_key"] == "sk-a"
+    assert messages.kwargs is not None
+
+
+def test_the_key_description_says_what_vision_does():
+    from engine.provider_credentials import PROVIDER_CONFIG_FIELDS
+
+    text = next(
+        f.description for f in PROVIDER_CONFIG_FIELDS if f.key == "ANTHROPIC_API_KEY"
+    )
+    assert "takes precedence" not in text
+    assert "vision only when no key is set" in text
 
 
 async def test_an_anthropic_key_is_used_before_the_plan():

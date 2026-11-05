@@ -17,6 +17,8 @@ import PageHeader from '@/components/layout/PageHeader';
 import { fetchAllAgents } from '@/lib/fetch-all-agents';
 import { EmbeddingModelPanel } from '@/components/knowledge/EmbeddingModelPanel';
 import { ConnectorsPanel } from '@/components/knowledge/ConnectorsPanel';
+import { CognifyStartDialog } from '@/components/knowledge/CognifyStartDialog';
+import { KnowledgeSearchSettings } from '@/components/knowledge/KnowledgeSearchSettings';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -26,6 +28,9 @@ interface KBDetail {
   project_id: string | null;
   agent_id: string | null;
   default_visibility?: string | null;
+  search_language?: string;
+  index_mode?: string;
+  can_edit?: boolean;
 }
 
 interface AgentGrant {
@@ -88,8 +93,7 @@ export default function KnowledgeEnginePage() {
   const [kb, setKb] = useState<KBDetail | null>(null);
   const [agentGrants, setAgentGrants] = useState<AgentGrant[]>([]);
   const [loading, setLoading] = useState(true);
-  const [cognifying, setCognifying] = useState(false);
-  const [cognifyError, setCognifyError] = useState<string | null>(null);
+  const [cognifyOpen, setCognifyOpen] = useState(false);
 
   // Terminal vs running — any job not in complete/failed is still running.
   // We surface the running one as a sticky banner + disable the Run button
@@ -167,26 +171,6 @@ export default function KnowledgeEnginePage() {
     const h = setInterval(loadData, 4000);
     return () => clearInterval(h);
   }, [runningJob?.id, loadData]);
-
-  // Trigger cognify
-  const triggerCognify = async () => {
-    setCognifying(true);
-    setCognifyError(null);
-    try {
-      const res = await fetch(`${API_URL}/api/knowledge-engines/${kbId}/cognify`, {
-        method: 'POST', headers, body: JSON.stringify({}),
-      });
-      if (!res.ok) {
-        const b = await res.json().catch(() => null);
-        setCognifyError(b?.error?.message || `Cognify did not start (HTTP ${res.status})`);
-      }
-      // Poll initial state; the running-job effect above keeps refreshing.
-      await loadData();
-    } catch {
-      setCognifyError('Cognify did not start. Check your connection and try again.');
-    }
-    setCognifying(false);
-  };
 
   const stopCognify = async (jobId: string) => {
     await fetch(`${API_URL}/api/knowledge-engines/${kbId}/cognify/${jobId}/stop`, { method: 'POST', headers });
@@ -279,20 +263,18 @@ export default function KnowledgeEnginePage() {
         secondaryAction={{ label: 'Use in an agent', icon: Bot, href: `/builder?kb=${kbId}` }}
         primaryAction={
           <button
-            onClick={triggerCognify}
-            disabled={cognifying || !!runningJob}
+            onClick={() => setCognifyOpen(true)}
+            disabled={!!runningJob}
             className="px-4 py-2 min-h-[40px] bg-gradient-to-r from-emerald-500 to-cyan-600 text-white text-sm font-medium rounded-lg hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-2"
             data-testid="run-cognify"
           >
-            {(cognifying || runningJob) ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-            {runningJob ? `Cognify: ${runningJob.status}…` : (cognifying ? 'Starting…' : 'Run Cognify')}
+            {runningJob ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+            {runningJob ? `Cognify: ${runningJob.status}…` : 'Run Cognify'}
           </button>
         }
       />
 
-      {cognifyError && (
-        <p role="alert" data-testid="cognify-error" className="text-xs text-red-300 border border-red-500/30 bg-red-500/5 rounded-lg px-3 py-2">{cognifyError}</p>
-      )}
+      <CognifyStartDialog kbId={kbId} open={cognifyOpen} onClose={() => setCognifyOpen(false)} onStarted={loadData} />
 
       {/* Running Cognify job banner — live progress while the background
           cognify-worker extracts entities. Without this, users clicked
@@ -426,6 +408,16 @@ export default function KnowledgeEnginePage() {
         ))}
       </div>
 
+      {kb && (
+        <KnowledgeSearchSettings
+          kbId={kbId}
+          language={kb.search_language ?? 'simple'}
+          indexMode={kb.index_mode ?? 'shared'}
+          canEdit={kb.can_edit !== false}
+          onChanged={loadData}
+        />
+      )}
+
       <EmbeddingModelPanel kbId={kbId} />
 
       <ConnectorsPanel kbId={kbId} />
@@ -520,6 +512,11 @@ export default function KnowledgeEnginePage() {
             )}
             <span>Latency: <span className="text-slate-300">{searchMeta.latency_ms as number}ms</span></span>
           </div>
+        )}
+        {!!searchMeta?.degraded && (
+          <p role="status" data-testid="kb-search-degraded" className="text-xs text-amber-300 border border-amber-500/30 bg-amber-500/5 rounded-lg px-3 py-2 mb-3">
+            {String(searchMeta.degraded)}
+          </p>
         )}
 
         {/* Results */}

@@ -34,13 +34,15 @@ The v2.0 release added access control, versioning, model swaps, purge and audit 
 
 ## Document versioning
 
-`POST /api/knowledge/{kb}/documents/{doc}/replace` records a new version of a document. Upload the amended file to the same collection first, then call replace with it:
+`POST /api/knowledge/{kb}/documents/{doc}/replace` records a new version of a document. Upload the amended file to the same collection first, then call replace with the document id the upload returned.
 
 ```json
-{"new_filename": "contract-v2.pdf", "new_storage_url": "...", "new_file_type": "pdf", "new_file_size": 48213}
+{"new_document_id": "..."}
 ```
 
-The call checks the collection is in the caller's tenant and that they can edit it (404 or 403), and that the new file sits under this tenant's and collection's storage prefix (400). It adds a new `documents` row whose `parent_document_id` points at the first version, with `version_number` one higher, marks the old row `is_current=false, superseded_by=<new_id>`, queues the new version for processing and answers 201 with the new id. Replacing a row that is already superseded is 400. The action is audited as `document.replaced`.
+The older form with `new_filename`, `new_storage_url`, `new_file_type` and `new_file_size` still works.
+
+The call checks the collection is in the caller's tenant and that they can edit it (404 or 403), and that the new file is in this collection (404 for an id, 400 for a storage path outside this tenant's and collection's prefix). A document already in a version history is 409. The new `documents` row gets a `parent_document_id` pointing at the first version and a `version_number` one higher, the old row becomes `is_current=false, superseded_by=<new_id>`, a stored file is queued for processing (an upload already is) and the call answers 201 with the new id. Replacing a row that is already superseded is 400. The action is audited as `document.replaced`.
 
 Search and Cognify use the current version only, so agents and callers need no change. Hybrid search drops superseded rows the same way it drops restricted ones, before ranking, and Cognify skips them. The document list shows the current version only. The old row stays as history, and editors and admins read it with `GET /api/knowledge/{kb}/documents/{doc}/versions` or `GET /api/knowledge-bases/{kb}/documents?include_history=true`.
 
@@ -66,6 +68,8 @@ Per-tenant row in `cognify_configs`, edited at `/settings/cognify`. The pipeline
 | `conflict_action` | `flag` | Applies when sources disagree on an entity's type. See below |
 | `max_parallel_docs` | 8 | Documents processed at once within a job |
 | `daily_budget_usd` | none | Once the tenant's Cognify spend for the UTC day reaches it, the job processes no more documents and says how many it skipped |
+
+Run Cognify on the engine page opens a dialog for the job budget and which chunks to read, with a cost estimate from `dry_run` before anything is spent. The same page holds the language and vector index settings of the collection.
 
 A budget of 0 stops every new job straight away with a message, which pauses Cognify until it is raised. A job no worker picks up within 15 minutes, or that runs for more than 6 hours, is closed as failed the next time its jobs are listed, so it no longer blocks Run Cognify.
 

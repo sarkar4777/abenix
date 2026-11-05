@@ -218,6 +218,7 @@ class KnowledgeSearchTool(BaseTool):
                 agent_id=str(self.agent_id or ""),
             )
 
+            degraded = {"degraded": response.degraded} if response.degraded else {}
             if not response.results:
                 return ToolResult(
                     content=(
@@ -226,6 +227,7 @@ class KnowledgeSearchTool(BaseTool):
                         "reachable but produced 0 hits at the requested "
                         "top_k. The caller should treat this as 'searched, "
                         "found nothing' (NOT as 'KB not configured')."
+                        + (f" {response.degraded}" if response.degraded else "")
                     ),
                     metadata={
                         "warning": "collection_empty_or_no_match",
@@ -234,6 +236,7 @@ class KnowledgeSearchTool(BaseTool):
                         "results": 0,
                         "hits": [],
                         "kb_ids_searched": [str(x) for x in validated_ids],
+                        **degraded,
                     },
                 )
 
@@ -279,6 +282,7 @@ class KnowledgeSearchTool(BaseTool):
                     "graph_count": response.graph_results_count,
                     "entities": response.entities_found,
                     "latency_ms": response.latency_ms,
+                    **degraded,
                     **({"warnings": [response.degraded]} if response.degraded else {}),
                 },
             )

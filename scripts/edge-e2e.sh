@@ -291,10 +291,14 @@ persistence:
 YAML
 }
 
+# check runs its command in a subshell, so a release has to be noted before it
+remember_release() {
+  case " $RELEASES " in *" $1 "*) ;; *) RELEASES="$RELEASES $1" ;; esac
+}
+
 install_release() { # install_release <release> <chart> <values file> <extra helm args...>
   local rel="$1" chart="$2" values="$3" out
   shift 3
-  case " $RELEASES " in *" $rel "*) ;; *) RELEASES="$RELEASES $rel" ;; esac
   out="$(helm upgrade --install "$rel" "${ROOT}/infra/helm/${chart}" -n "$NS" -f "$values" "$@" --wait --timeout 300s 2>&1)" \
     || { printf '%s\n' "$out" | tail -2; return 1; }
 }
@@ -363,6 +367,7 @@ endpoint_url: "${base}"
 YAML
     llm_values
   } > "$values"
+  remember_release "$rel"
   check "$v" chart_install install_release "$rel" "$chart" "$values" --set-file "signing_pubkey=$WORK/platform_pub.pem" || return 0
 
   neg_values="$WORK/${neg}.yaml"
@@ -375,6 +380,7 @@ anthropic_api_key: "dummy-key-for-a-silent-server"
 anthropic_base_url: "${BLACKHOLE}"
 YAML
   } > "$neg_values"
+  remember_release "$neg"
   check "$v" chart_install_refusal_pod install_release "$neg" "$chart" "$neg_values" --set-file "signing_pubkey=$WORK/test_pub.pem" || return 0
 
   local pk out agent slug digest line name msg
@@ -591,6 +597,7 @@ gateway_mode() {
 
   values="$WORK/${GW_REL}.yaml"
   gateway_values "$token" "$auth" > "$values"
+  remember_release "$GW_REL"
   check gateway chart_install_gateway_mode install_release "$GW_REL" edge-runtime "$values" || return 0
 
   check gateway enrolled_with_etk_token tool gw-wait "$pk" "g['enrolled_at'] is not None" 60

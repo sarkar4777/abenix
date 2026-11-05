@@ -217,6 +217,7 @@ export interface SearchResult {
   /** entity names the graph pass matched */
   entitiesFound: string[];
   modeUsed?: string;
+  degraded?: string | null;
   vectorCount?: number;
   graphCount?: number;
   latencyMs?: number;
@@ -763,6 +764,7 @@ class KnowledgeClient {
       results: data.results || [],
       entitiesFound: data.entities_found || [],
       modeUsed: data.mode_used,
+      degraded: data.degraded ?? null,
       vectorCount: data.vector_count,
       graphCount: data.graph_count,
       latencyMs: data.latency_ms,

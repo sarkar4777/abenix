@@ -31,13 +31,9 @@ _RENDER_DPI = 150
 
 
 def _provider() -> str:
-    if credentials.get("ANTHROPIC_API_KEY").strip():
-        return "anthropic"
-    if claude_subscription.get_config().usable:
-        return "claude_subscription"
-    if credentials.get("GOOGLE_API_KEY").strip():
-        return "gemini"
-    return "none"
+    return claude_subscription.vision_provider(
+        credentials.get("ANTHROPIC_API_KEY"), credentials.get("GOOGLE_API_KEY")
+    )
 
 
 async def _render_pages(pdf_path: str) -> list[bytes]:

@@ -23,6 +23,7 @@ import DeepLinkMissing from '@/components/shared/DeepLinkMissing';
 import ResourceShareDialog from '@/components/share/ResourceShareDialog';
 import DocumentAccessModal from '@/components/knowledge/DocumentAccessModal';
 import ResponsiveModal from '@/components/ui/ResponsiveModal';
+import { INDEX_MODE_HELP, LANGUAGE_HELP, SEARCH_LANGUAGES, languageLabel } from '@/lib/knowledge-settings';
 import { KnowledgeSkeleton } from '@/components/ui/Skeleton';
 import EmptyState from '@/components/ui/EmptyState';
 import DeleteWithDependents from '@/components/ui/DeleteWithDependents';
@@ -122,13 +123,15 @@ function CreateModal({
   const [description, setDescription] = useState('');
   const [projectId, setProjectId] = useState(initialProject);
   const [visibility, setVisibility] = useState('project');
+  const [language, setLanguage] = useState('simple');
+  const [indexMode, setIndexMode] = useState('shared');
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState('');
   const { data: projects } = useApi<{ id: string; name: string }[]>(open ? '/api/knowledge-projects?limit=100' : null);
 
   useEffect(() => { if (open) setProjectId(initialProject); }, [open, initialProject]);
 
-  const reset = () => { setName(''); setDescription(''); setVisibility('project'); setErr(''); };
+  const reset = () => { setName(''); setDescription(''); setVisibility('project'); setLanguage('simple'); setIndexMode('shared'); setErr(''); };
 
   const submit = async () => {
     if (!name.trim()) { setErr('Name is required'); return; }
@@ -143,6 +146,8 @@ function CreateModal({
           description: description.trim(),
           project_id: projectId || undefined,
           default_visibility: visibility,
+          search_language: language,
+          index_mode: indexMode,
         }),
       });
       const json = await res.json();
@@ -210,6 +215,32 @@ function CreateModal({
           </div>
         </div>
         <p className="text-[11px] text-slate-500 -mt-2">{VISIBILITY_HELP[visibility]}</p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label htmlFor="kb-new-language" className="block text-xs text-slate-400 mb-1.5">Language</label>
+            <select
+              id="kb-new-language"
+              value={language}
+              onChange={(e) => setLanguage(e.target.value)}
+              className="w-full px-3 py-2 bg-slate-800/50 border border-slate-700 rounded-lg text-sm text-white focus:outline-none focus:border-cyan-500"
+            >
+              {SEARCH_LANGUAGES.map((l) => <option key={l} value={l}>{languageLabel(l)}</option>)}
+            </select>
+          </div>
+          <div>
+            <label htmlFor="kb-new-index-mode" className="block text-xs text-slate-400 mb-1.5">Vector index</label>
+            <select
+              id="kb-new-index-mode"
+              value={indexMode}
+              onChange={(e) => setIndexMode(e.target.value)}
+              className="w-full px-3 py-2 bg-slate-800/50 border border-slate-700 rounded-lg text-sm text-white focus:outline-none focus:border-cyan-500"
+            >
+              <option value="shared">Build as documents arrive</option>
+              <option value="deferred">Wait, I am bulk loading</option>
+            </select>
+          </div>
+        </div>
+        <p className="text-[11px] text-slate-500 -mt-2">{LANGUAGE_HELP} {INDEX_MODE_HELP[indexMode]}</p>
         {err && <p role="alert" className="text-xs text-red-400">{err}</p>}
         <div className="flex justify-end gap-2 pt-2">
           <button onClick={() => { reset(); onClose(); }} className="px-4 py-2 text-sm text-slate-400 hover:text-white transition-colors">

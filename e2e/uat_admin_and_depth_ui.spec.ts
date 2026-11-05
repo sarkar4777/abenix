@@ -480,6 +480,8 @@ test('cognify: a 0 budget stops the next job with a message, then put back', asy
 
   await go(page, `/knowledge/${kb.id}/engine`);
   await page.getByTestId('run-cognify').click();
+  // builds before the start dialog start the job on the first click
+  await page.getByTestId('cognify-start').click({ timeout: 5_000 }).catch(() => undefined);
   const failed = page.locator('[data-testid="cognify-job"][data-status="failed"]').filter({ hasText: 'budget' }).first();
   await expect(async () => {
     await page.reload({ waitUntil: 'domcontentloaded' });

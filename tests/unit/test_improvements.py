@@ -653,6 +653,7 @@ def world(monkeypatch):
         svc, "settings_for", AsyncMock(return_value=R.settings_for({}, None))
     )
     monkeypatch.setattr(svc, "kick", lambda: None)
+    monkeypatch.setattr(svc, "is_sample", AsyncMock(return_value=False))
 
     async def emit(db_, tenant_id, event_type, payload):
         emitted.append((event_type, payload))
@@ -778,12 +779,61 @@ async def test_author_refused_solo_and_sample_self_approve(world, monkeypatch):
         await svc.self_approval_reason(world.db, world.author, world.agent)
         == svc.SOLO_SELF_APPROVAL
     )
-    world.agent.slug = svc.SAMPLE_SLUG
+    monkeypatch.setattr(svc, "is_sample", AsyncMock(return_value=True))
     monkeypatch.setattr(svc, "someone_else_can_approve", AsyncMock(return_value=True))
     assert (
         await svc.self_approval_reason(world.db, world.author, world.agent)
         == svc.SAMPLE_SELF_APPROVAL
     )
+
+
+class _Scripted:
+    """Answers each query from a list and keeps what was asked."""
+
+    def __init__(self, *answers):
+        self.answers = list(answers)
+        self.asked = []
+
+    async def execute(self, stmt):
+        self.asked.append(stmt)
+        return Res([self.answers.pop(0)] if self.answers else [])
+
+
+async def test_a_sample_with_a_suffixed_slug_still_counts_as_the_sample():
+    agent = Obj(tenant_id=TENANT, slug=f"{svc.SAMPLE_SLUG}-a1b2c3")
+    db = _Scripted("cluster-id")
+    assert await svc.is_sample(db, agent) is True
+    sql = str(db.asked[0].compile(compile_kwargs={"literal_binds": False}))
+    assert "lesson_clusters.signature" in sql and "slug" not in sql
+
+
+async def test_only_the_cluster_makes_a_sample_not_the_slug_a_user_can_pick():
+    agent = Obj(tenant_id=TENANT, slug=svc.SAMPLE_SLUG)
+    assert await svc.is_sample(_Scripted(), agent) is False
+    assert await svc.is_sample(_Scripted(), None) is False
+
+
+async def test_the_author_of_a_suffixed_sample_may_approve_it(monkeypatch):
+    author = _user(role=UserRole.CREATOR, name="Author")
+    agent = Obj(
+        tenant_id=TENANT, slug=f"{svc.SAMPLE_SLUG}-a1b2c3", creator_id=author.id
+    )
+    monkeypatch.setattr(svc, "someone_else_can_approve", AsyncMock(return_value=True))
+    assert (
+        await svc.self_approval_reason(_Scripted("cluster-id"), author, agent)
+        == svc.SAMPLE_SELF_APPROVAL
+    )
+
+
+async def test_install_finds_the_sample_by_its_cluster_after_a_delete(monkeypatch):
+    agent = Obj(tenant_id=TENANT, slug=f"{svc.SAMPLE_SLUG}-a1b2c3")
+    cluster = Obj(tenant_id=TENANT, agent_id=agent.id)
+    db = _Scripted(agent, cluster)
+    monkeypatch.setattr(svc, "_reset_sample", AsyncMock(return_value=False))
+    out = await svc.install_sample(db, _user())
+    assert out["agent_id"] == str(agent.id) and out["created"] is False
+    where = str(db.asked[0]).split("WHERE")[1]
+    assert "lesson_clusters.signature" in where and "agents.slug" not in where
 
 
 async def test_signoff_route_refuses_the_author(world, monkeypatch):

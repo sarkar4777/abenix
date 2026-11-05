@@ -27,13 +27,9 @@ def _google_key() -> str:
 
 
 def _provider() -> str:
-    if os.environ.get("ANTHROPIC_API_KEY", "").strip():
-        return "anthropic"
-    if claude_subscription.get_config().usable:
-        return "claude_subscription"
-    if _google_key():
-        return "gemini"
-    return "none"
+    return claude_subscription.vision_provider(
+        os.environ.get("ANTHROPIC_API_KEY", ""), _google_key()
+    )
 
 
 async def _render_pages_to_png(blob_path: str) -> list[bytes]:

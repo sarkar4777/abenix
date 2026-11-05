@@ -203,13 +203,18 @@ async def extract_from_chunk(
     async def _call():
         if limiter is not None:
             await limiter.acquire(estimate_chunk_tokens(chunk_text))
-        return await llm.complete(
-            messages=[{"role": "user", "content": user_prompt}],
-            system=system_prompt,
-            model=model,
-            temperature=0.1,  # Low temperature for consistent extraction
-            max_tokens=EXTRACTION_MAX_TOKENS,
-        )
+        try:
+            return await llm.complete(
+                messages=[{"role": "user", "content": user_prompt}],
+                system=system_prompt,
+                model=model,
+                temperature=0.1,  # Low temperature for consistent extraction
+                max_tokens=EXTRACTION_MAX_TOKENS,
+            )
+        except Exception as exc:
+            if limiter is not None:
+                await limiter.after_failure(exc)
+            raise
 
     response = None
     try:

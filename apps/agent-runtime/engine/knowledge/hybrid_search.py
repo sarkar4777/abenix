@@ -41,6 +41,10 @@ class EmbeddingProviderError(Exception):
 _AZURE_STRIP_WARNED = False
 
 
+class NoEmbeddingProvider(EmbeddingProviderError):
+    """Nothing is configured, which is not an outage, so an empty keyword result stands."""
+
+
 def _normalize_azure_endpoint(raw: str) -> str:
     """Strip the /openai/deployments path the SDK adds itself. Trailing slashes too."""
     if not raw:
@@ -340,11 +344,15 @@ async def hybrid_search(
         except EmbeddingProviderError as e:
             # the chunk text is still in Postgres, match words rather than fail the search
             vector_results = await _keyword_search_pg(query, kb_ids, fetch, hidden)
-            if not vector_results:
+            not_configured = isinstance(e, NoEmbeddingProvider)
+            if not vector_results and not not_configured:
                 raise
             outage = True
             response.degraded = (
-                "Matched by keywords because the embedding provider is unavailable: "
+                "Searched by keywords because no embedding provider is configured. "
+                "Add one for semantic search."
+                if not_configured
+                else "Matched by keywords because the embedding provider is unavailable, "
                 f"{str(e)[:200]}"
             )
             response.mode_used = "keyword"
@@ -352,7 +360,7 @@ async def hybrid_search(
             _SEARCH_NOTES.reset(notes_token)
         if notes:
             response.degraded = " ".join([response.degraded, *notes]).strip()
-        response.vector_results_count = len(vector_results)
+        response.vector_results_count = 0 if outage else len(vector_results)
 
     graph_results: list[SearchResult] = []
 
@@ -586,7 +594,7 @@ async def _vector_search_pgvector(
             logger.error("Embedding provider unavailable (pgvector path): %s", e)
             raise EmbeddingProviderError(str(e)) from e
         if emb is None:
-            return []
+            raise NoEmbeddingProvider("no embedding provider is configured")
         emb_str = "[" + ",".join(f"{x:.7f}" for x in emb) + "]"
 
         db_url = _async_db_url()
@@ -1089,7 +1097,7 @@ async def _vector_search_pinecone(
         if not pinecone_key:
             return []
         if not ((azure_key and azure_endpoint) or openai_key):
-            return []
+            raise NoEmbeddingProvider("no embedding provider is configured")
 
         # Embedding-provider failures (rate-limit, 5xx, transport errors) must
         # NOT degrade to an empty result — that hides a real outage as "no
@@ -1101,7 +1109,7 @@ async def _vector_search_pinecone(
             logger.error("Embedding provider unavailable: %s", e)
             raise EmbeddingProviderError(str(e)) from e
         if query_vector is None:
-            return []
+            raise NoEmbeddingProvider("no embedding provider is configured")
 
         # Search across all KB namespaces (Pinecone v7+ returns structured objects)
         pc = Pinecone(api_key=pinecone_key)
@@ -1205,6 +1213,7 @@ async def _vector_search_pinecone(
         raise
     except Exception as e:
         logger.error("Vector search failed: %s", e)
+        _search_note(f"Vector search failed and returned nothing, {str(e)[:200]}")
         return []
 
 

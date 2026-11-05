@@ -1,7 +1,7 @@
 """Re-embed a knowledge collection with another embedding model, for any size.
 
-A job works in slices. Each slice stages whole documents, one small transaction
-per embedding batch, into rows or a Pinecone namespace that no query reads, then
+A job works in slices. Each slice stages whole documents, one batch of chunks in
+memory and one small transaction per batch, into rows or a Pinecone namespace that no query reads, then
 hands over to the next slice, so no task limit bounds the corpus. Pausing, a
 crash or a provider outage loses at most the document in hand. The flip is one
 row update on the collection, so queries move in one step however many chunks
@@ -17,7 +17,7 @@ import logging
 import os
 import time
 import uuid
-from typing import Any, Callable
+from typing import Any, Callable, Iterator
 
 from worker.celery_app import celery_app
 from worker.tasks import document_processor as dp
@@ -60,43 +60,75 @@ def _carried(meta: Any) -> dict[str, Any]:
     return {k: v for k, v in meta.items() if k not in _OWN_KEYS}
 
 
-def _stored_chunks_pgvector(
-    cur: Any, kb_id: str, doc_id: str, generation: int
-) -> tuple[list[str], list[int | None], dict[str, Any]]:
+def _carried_pgvector(cur: Any, kb_id: str, doc_id: str, generation: int) -> dict:
     cur.execute(
-        "SELECT content, metadata FROM chunks WHERE collection_id = %s "
-        "AND document_id = %s AND embedding_generation = %s ORDER BY chunk_index",
+        "SELECT metadata FROM chunks WHERE collection_id = %s AND document_id = %s "
+        "AND embedding_generation = %s AND content <> '' ORDER BY chunk_index LIMIT 1",
         (kb_id, doc_id, generation),
     )
-    rows = [r for r in cur.fetchall() if r[0]]
-    pages = [(r[1] or {}).get("page") if isinstance(r[1], dict) else None for r in rows]
-    return [r[0] for r in rows], pages, _carried(rows[0][1]) if rows else {}
+    row = cur.fetchone()
+    return _carried(row[0]) if row else {}
+
+
+def _stored_chunks_pgvector(
+    cur: Any, kb_id: str, doc_id: str, generation: int
+) -> Iterator[tuple[str, int | None]]:
+    after = -1
+    while True:
+        cur.execute(
+            "SELECT chunk_index, content, metadata FROM chunks WHERE collection_id = %s "
+            "AND document_id = %s AND embedding_generation = %s AND chunk_index > %s "
+            "ORDER BY chunk_index LIMIT %s",
+            (kb_id, doc_id, generation, after, EMBED_BATCH),
+        )
+        rows = cur.fetchall()
+        if not rows:
+            return
+        after = rows[-1][0]
+        for _index, content, meta in rows:
+            if content:
+                yield content, meta.get("page") if isinstance(meta, dict) else None
+
+
+def _pinecone_page(
+    index: Any, namespace: str, doc_id: str, start: int, stop: int
+) -> list[dict[str, Any]]:
+    ids = [f"{doc_id}_{i}" for i in range(start, stop)]
+    resp = index.fetch(ids=ids, namespace=namespace)
+    vectors = getattr(resp, "vectors", None) or (
+        resp.get("vectors", {}) if isinstance(resp, dict) else {}
+    )
+    metas = []
+    for vid in ids:
+        v = vectors.get(vid)
+        if v is None:
+            continue
+        meta = getattr(v, "metadata", None) or (
+            v.get("metadata", {}) if isinstance(v, dict) else {}
+        )
+        if meta.get("text"):
+            metas.append(meta)
+    return metas
+
+
+def _carried_pinecone(index: Any, namespace: str, doc_id: str, count: int) -> dict:
+    for start in range(0, count, EMBED_BATCH):
+        metas = _pinecone_page(
+            index, namespace, doc_id, start, min(start + EMBED_BATCH, count)
+        )
+        if metas:
+            return _carried(metas[0])
+    return {}
 
 
 def _stored_chunks_pinecone(
     index: Any, namespace: str, doc_id: str, count: int
-) -> tuple[list[str], list[int | None], dict[str, Any]]:
-    texts: list[str] = []
-    pages: list[int | None] = []
-    carried: dict[str, Any] = {}
-    ids = [f"{doc_id}_{i}" for i in range(count)]
-    for i in range(0, len(ids), 500):
-        resp = index.fetch(ids=ids[i : i + 500], namespace=namespace)
-        vectors = getattr(resp, "vectors", None) or (
-            resp.get("vectors", {}) if isinstance(resp, dict) else {}
-        )
-        for vid in ids[i : i + 500]:
-            v = vectors.get(vid)
-            if v is None:
-                continue
-            meta = getattr(v, "metadata", None) or (
-                v.get("metadata", {}) if isinstance(v, dict) else {}
-            )
-            if meta.get("text"):
-                carried = carried or _carried(meta)
-                texts.append(meta["text"])
-                pages.append(meta.get("page"))
-    return texts, pages, carried
+) -> Iterator[tuple[str, int | None]]:
+    for start in range(0, count, EMBED_BATCH):
+        for meta in _pinecone_page(
+            index, namespace, doc_id, start, min(start + EMBED_BATCH, count)
+        ):
+            yield meta["text"], meta.get("page")
 
 
 def _stage_loose_vectors(
@@ -143,34 +175,29 @@ def _stage_loose_vectors(
     return staged
 
 
-def _document_chunks(
-    doc: dict[str, Any],
-    kb: dict[str, Any],
-    stored: Callable[[], tuple[list[str], list[int | None], dict[str, Any]]],
-) -> tuple[list[str], list[int | None], dict[str, Any], str]:
-    """Re-extract and re-chunk the file, or fall back to the indexed chunk text."""
+class _Unreadable(Exception):
+    """The file can not be re-extracted, the indexed text is used instead."""
+
+
+def _file_chunks(
+    doc: dict[str, Any], kb: dict[str, Any]
+) -> Iterator[tuple[str, int | None]]:
+    """Re-extract and re-chunk the file, holding at most the ingest window of its text."""
     tmp = None
     try:
         local, tmp = dp._local_path(doc["storage_url"] or "", doc["file_type"] or "")
-        blocks, _method, _quality = dp._extract_blocks(local, doc["file_type"] or "")
-        if blocks:
-            chunks, pages = dp._chunk_blocks(
-                blocks, kb["chunk_size"] or 1000, kb["chunk_overlap"] or 200
-            )
-            if chunks:
-                return chunks, pages, stored()[2], "file"
-    except Exception as e:
-        logger.info(
-            "re-embed: %s not re-extractable (%s), using indexed text", doc["id"], e
+        blocks, _info = dp._document_blocks(local, doc["file_type"] or "")
+        yield from dp._iter_chunks(
+            blocks, kb["chunk_size"] or 1000, kb["chunk_overlap"] or 200
         )
+    except Exception as e:
+        raise _Unreadable(str(e)) from e
     finally:
         if tmp:
             try:
                 os.unlink(tmp)
             except OSError:
                 pass
-    chunks, pages, carried = stored()
-    return chunks, pages, carried, "indexed"
 
 
 _DOC_COLUMNS = "d.id::text, d.filename, d.file_type, d.storage_url, d.chunk_count"
@@ -268,15 +295,10 @@ class _Job:
     ) -> None:
         if self.index is not None:
             batch = []
-            for j, (text, vec) in enumerate(zip(part, vectors)):
+            for j, (text, vec, page) in enumerate(zip(part, vectors, pages)):
+                i = start + j
                 v = dp._pinecone_vector(
-                    self.kb_id,
-                    doc["id"],
-                    doc["filename"],
-                    start + j,
-                    text,
-                    vec,
-                    pages,
+                    self.kb_id, doc["id"], doc["filename"], i, text, vec, {i: page}
                 )
                 v["metadata"] = {**carried, **v["metadata"]}
                 batch.append(v)
@@ -285,9 +307,11 @@ class _Job:
         from psycopg2.extras import execute_values
 
         rows = []
-        for j, (text, vec) in enumerate(zip(part, vectors)):
+        for j, (text, vec, page) in enumerate(zip(part, vectors, pages)):
             i = start + j
-            meta = {**carried, **dp._chunk_meta(doc["filename"], i, text, pages)}
+            meta = {**carried, **dp._chunk_meta(doc["filename"], i, text, None)}
+            if page is not None:
+                meta["page"] = page
             rows.append(
                 (
                     str(uuid.uuid4()),
@@ -310,17 +334,7 @@ class _Job:
             template="(%s, %s, %s, %s, %s, %s::jsonb, %s::vector, %s, %s)",
         )
 
-    def stage(self, doc: dict[str, Any]) -> None:
-        def stored() -> tuple[list[str], list[int | None], dict[str, Any]]:
-            if self.index is None:
-                return _stored_chunks_pgvector(
-                    self.cur, self.kb_id, doc["id"], self.source
-                )
-            return _stored_chunks_pinecone(
-                self.index, self.namespace(self.source), doc["id"], doc["chunk_count"]
-            )
-
-        chunks, pages, carried, source = _document_chunks(doc, self.kb, stored)
+    def _clear_staged(self, doc: dict[str, Any]) -> None:
         # a document starts over after a crash, what it staged earlier goes first
         if self.index is None:
             self.cur.execute(
@@ -329,25 +343,82 @@ class _Job:
                 (self.kb_id, doc["id"], self.target),
             )
         self.conn.commit()
-        for b in range(0, len(chunks), EMBED_BATCH):
-            part = chunks[b : b + EMBED_BATCH]
+
+    def _stage_stream(
+        self,
+        doc: dict[str, Any],
+        chunks: Iterator[tuple[str, int | None]],
+        carried: dict[str, Any],
+    ) -> int:
+        """Embeds and writes one batch at a time, the only text held is that batch."""
+        staged = 0
+        part: list[str] = []
+        pages: list[int | None] = []
+
+        def flush() -> None:
+            nonlocal staged, part, pages
             self._spend_check(part)
             vectors, _real = dp._embed_chunks(part, self.row["to_model"], strict=True)
             if len(vectors) != len(part):
                 raise ReembedError("embedding provider returned a short batch")
-            self._write_rows(doc, b, part, vectors, pages, carried)
+            self._write_rows(doc, staged, part, vectors, pages, carried)
             self.conn.commit()
+            staged += len(part)
+            part, pages = [], []
+
+        for text, page in chunks:
+            part.append(text)
+            pages.append(page)
+            if len(part) >= EMBED_BATCH:
+                flush()
+        if part:
+            flush()
+        return staged
+
+    def stage(self, doc: dict[str, Any]) -> None:
+        if self.index is None:
+            carried = _carried_pgvector(self.cur, self.kb_id, doc["id"], self.source)
+            stored = _stored_chunks_pgvector(
+                self.cur, self.kb_id, doc["id"], self.source
+            )
+        else:
+            source_ns = self.namespace(self.source)
+            carried = _carried_pinecone(
+                self.index, source_ns, doc["id"], doc["chunk_count"]
+            )
+            stored = _stored_chunks_pinecone(
+                self.index, source_ns, doc["id"], doc["chunk_count"]
+            )
+        self._clear_staged(doc)
+        source = "file"
+        file_chunks = _file_chunks(doc, self.kb)
+        try:
+            staged = self._stage_stream(doc, file_chunks, carried)
+        except _Unreadable as e:
+            logger.info(
+                "re-embed: %s not re-extractable (%s), using indexed text", doc["id"], e
+            )
+            staged = 0
+        finally:
+            file_chunks.close()
+        if not staged:
+            source = "indexed"
+            self._clear_staged(doc)
+            staged = self._stage_stream(doc, stored, carried)
         if self.index is not None:
-            stale = [f"{doc['id']}_{i}" for i in range(len(chunks), doc["chunk_count"])]
-            for i in range(0, len(stale), 1000):
+            for i in range(staged, doc["chunk_count"], 1000):
                 self.index.delete(
-                    ids=stale[i : i + 1000], namespace=self.namespace(self.target)
+                    ids=[
+                        f"{doc['id']}_{j}"
+                        for j in range(i, min(i + 1000, doc["chunk_count"]))
+                    ],
+                    namespace=self.namespace(self.target),
                 )
         self.cur.execute(
             "INSERT INTO kb_reembed_documents (job_id, document_id, chunk_count, source) "
             "VALUES (%s, %s, %s, %s) ON CONFLICT (job_id, document_id) DO UPDATE "
             "SET chunk_count = EXCLUDED.chunk_count, source = EXCLUDED.source",
-            (self.id, doc["id"], len(chunks), source),
+            (self.id, doc["id"], staged, source),
         )
         self.cur.execute(
             "UPDATE kb_reembed_jobs SET documents_done = "

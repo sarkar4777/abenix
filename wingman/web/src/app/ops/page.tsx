@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { Ship, AlertTriangle, Wifi, Loader2, RefreshCw, Cloud, Activity } from 'lucide-react';
 import DagDrawer from '../components/DagDrawer';
@@ -9,6 +9,7 @@ import PipelineStrip from '../components/PipelineStrip';
 import ExplainerPanel from '../components/ExplainerPanel';
 import { OPS_EXPLAINER } from '../components/explainer-specs';
 import { CacheMeta, readCacheEnvelope, formatAge } from '../components/cache-helpers';
+import { followRun } from './follow-run';
 
 const OPS_PIPELINE = [
   { id: 'wingman-ops-monitor', label: 'Ops Monitor', kind: 'agent' as const, icon: 'sparkles' as const, hint: 'wingman-ops-monitor agent' },
@@ -31,6 +32,13 @@ export default function OpsPage() {
   const [cacheMeta, setCacheMeta] = useState<CacheMeta | null>(null);
   const [loading, setLoading] = useState(false);
   const [activeExecution, setActiveExecution] = useState<string | null>(null);
+  const [refreshError, setRefreshError] = useState('');
+  const left = useRef(false);
+
+  useEffect(() => {
+    left.current = false;
+    return () => { left.current = true; };
+  }, []);
 
   const loadCached = () => fetch('/api/wingman/ops/cached')
     .then((r) => r.json())
@@ -45,17 +53,23 @@ export default function OpsPage() {
 
   const refresh = async () => {
     setLoading(true);
+    setRefreshError('');
     try {
       const r = await fetch('/api/wingman/ops/snapshot');
-      const j = await r.json();
-      const data = j.data;
-      const fresh = data?.snapshot;
+      const j = await r.json().catch(() => null);
+      const executionId = j?.data?.execution_id;
+      if (!r.ok || !executionId) throw new Error(j?.detail || `The ops monitor did not start, HTTP ${r.status}.`);
+      setActiveExecution(executionId);
+      const { snapshot, error } = await followRun(executionId, { stopped: () => left.current });
+      if (error) setRefreshError(error);
+      const fresh = snapshot as Snapshot | null | undefined;
       if (fresh && (fresh.vessels?.length || fresh.alerts?.length || fresh.weather?.length || fresh.narrative)) {
         setSnap(fresh);
       }
-      if (data?.execution_id) setActiveExecution(data.execution_id);
       await loadCached();
-    } catch { /* ignore */ }
+    } catch (e) {
+      setRefreshError(e instanceof Error ? e.message : String(e));
+    }
     setLoading(false);
   };
 
@@ -95,6 +109,12 @@ export default function OpsPage() {
           </div>
         }
       />
+
+      {refreshError && (
+        <p role="alert" data-testid="ops-refresh-error" className="mb-4 rounded-lg border border-rose-500/30 bg-rose-500/5 px-4 py-2 text-xs text-rose-300">
+          Refresh failed. {refreshError}
+        </p>
+      )}
 
       <ExplainerPanel spec={OPS_EXPLAINER} />
 

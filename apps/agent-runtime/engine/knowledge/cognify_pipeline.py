@@ -313,6 +313,17 @@ class CognifyContext:
     local_chunks: int = 0
 
 
+def _provider_of(model: str) -> str:
+    """The provider this model will really reach, the limit belongs to that account."""
+    from engine.llm_router import LLMRouter
+
+    try:
+        return LLMRouter().candidate_chain(model)[0][0]
+    except Exception as e:
+        logger.warning("cognify limit for %s uses the model name: %s", model, e)
+        return model
+
+
 def build_context(
     kb_id: str,
     tenant_id: str,
@@ -338,6 +349,7 @@ def build_context(
         ontology=ontology,
         selection=ChunkSelection.from_config(config),
         limiter=CallLimiter(
+            _provider_of(config.get("model") or DEFAULT_COGNIFY_MODEL),
             float(config.get("requests_per_minute") or DEFAULT_RPM),
             float(config.get("tokens_per_minute") or DEFAULT_TPM),
         ),

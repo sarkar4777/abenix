@@ -266,7 +266,7 @@ export default function CreditRiskPage() {
             </button>
           </div>
         </div>
-        <PageExplainer routeKey="credit-risk-counterparty" />
+        <PageExplainer routeKey="credit-risk" />
 
         {/* KYC surface callout */}
         <a

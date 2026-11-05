@@ -31,6 +31,8 @@ PROPOSE_LOCK_KEY = 0x494D5050  # "IMPP"
 WATCH_LOCK_KEY = 0x494D5057  # "IMPW"
 SAMPLE_SLUG = "sample-temperature-helper"
 SAMPLE_NAME = "Temperature helper (sample)"
+# lesson clusters are signed with a hash, so no user action can make this one
+SAMPLE_SIGNATURE = "sample:kelvin"
 CLAIM_MINUTES = 20
 RUN_TIMEOUT = int(os.environ.get("IMPROVEMENTS_RUN_TIMEOUT_SECONDS", "180"))
 MAX_CASES = 200
@@ -255,8 +257,21 @@ async def stopped(tenant_id: Any) -> str | None:
     )
 
 
-def is_sample(agent: Any) -> bool:
-    return str(getattr(agent, "slug", "") or "") == SAMPLE_SLUG
+async def is_sample(db: AsyncSession, agent: Any) -> bool:
+    if agent is None:
+        return False
+    C = Cluster()
+    return (
+        await db.execute(
+            select(C.id)
+            .where(
+                C.tenant_id == agent.tenant_id,
+                C.agent_id == agent.id,
+                C.signature == SAMPLE_SIGNATURE,
+            )
+            .limit(1)
+        )
+    ).scalar_one_or_none() is not None
 
 
 # rows
@@ -366,7 +381,7 @@ async def someone_else_can_approve(db: AsyncSession, user: Any) -> bool:
 
 async def self_approval_reason(db: AsyncSession, user: Any, agent: Any) -> str | None:
     """Why the author may approve a fix to their own agent, None when someone else must."""
-    if is_sample(agent):
+    if await is_sample(db, agent):
         return SAMPLE_SELF_APPROVAL
     if await someone_else_can_approve(db, user):
         return None
@@ -1821,7 +1836,7 @@ async def request_approval(db: AsyncSession, p: Any) -> dict[str, Any]:
         "kind": GATE,
         "proposal_id": str(p.id),
         "agent_creator_id": _s(getattr(agent, "creator_id", None)),
-        "is_sample": is_sample(agent),
+        "is_sample": await is_sample(db, agent),
         "self_approval": self_reason,
         "link": f"/agents/{p.agent_id}/improvements?proposal={p.id}",
     }
@@ -2678,13 +2693,18 @@ async def install_sample(db: AsyncSession, user: Any) -> dict[str, Any]:
     from models.agent import AgentStatus
     from models.evals import EvalCase, EvalSuite
 
+    C, L = Cluster(), Lesson()
     agent = (
         await db.execute(
-            select(Agent).where(
+            select(Agent)
+            .join(C, C.agent_id == Agent.id)
+            .where(
                 Agent.tenant_id == user.tenant_id,
-                Agent.slug == SAMPLE_SLUG,
+                C.signature == SAMPLE_SIGNATURE,
                 Agent.status != AgentStatus.ARCHIVED,
             )
+            .order_by(Agent.created_at.desc())
+            .limit(1)
         )
     ).scalar_one_or_none()
     if agent is None:
@@ -2715,13 +2735,12 @@ async def install_sample(db: AsyncSession, user: Any) -> dict[str, Any]:
                 "SAMPLE_FAILED",
             )
         agent = await get_agent(db, user.tenant_id, payload["data"]["id"])
-    C, L = Cluster(), Lesson()
     cluster = (
         await db.execute(
             select(C).where(
                 C.tenant_id == user.tenant_id,
                 C.agent_id == agent.id,
-                C.signature == "sample:kelvin",
+                C.signature == SAMPLE_SIGNATURE,
             )
         )
     ).scalar_one_or_none()
@@ -2740,7 +2759,7 @@ async def install_sample(db: AsyncSession, user: Any) -> dict[str, Any]:
         agent_id=agent.id,
         title=SAMPLE_CLUSTER_TITLE,
         summary="People asked for Kelvin and got Fahrenheit, then said what the right answer was.",
-        signature="sample:kelvin",
+        signature=SAMPLE_SIGNATURE,
         count=len(SAMPLE_LESSONS),
         negative_count=len(SAMPLE_LESSONS),
         severity="medium",

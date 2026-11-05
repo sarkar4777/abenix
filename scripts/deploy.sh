@@ -2775,7 +2775,8 @@ testbed_load() {
       --timeout="$(( count / (rate > 0 ? rate : 1) + 180 ))s" >/dev/null 2>&1; then
     kubectl logs -n "${TESTBED_NS}" "job/kafka-load-${run}" | tail -1
   else
-    warn "the burst did not finish, see: kubectl -n ${TESTBED_NS} logs job/kafka-load-${run}"
+    err "the burst did not finish, check kubectl -n ${TESTBED_NS} logs job/kafka-load-${run}"
+    return 1
   fi
 }
 

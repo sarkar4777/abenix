@@ -314,7 +314,7 @@ def test_the_prompt_carries_the_ontology(monkeypatch):
     seen = {}
 
     class _Router:
-        async def complete(self, messages, system, model, temperature):
+        async def complete(self, messages, system, model, temperature, max_tokens=None):
             seen["system"] = system
             return types.SimpleNamespace(
                 content=json.dumps({"entities": [], "relationships": []}),

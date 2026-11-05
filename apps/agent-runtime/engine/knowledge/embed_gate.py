@@ -1,4 +1,4 @@
-"""Embedding rate limit shared by every worker, with a pause all of them honour after a 429."""
+"""Provider rate limits shared by every worker, with a pause all of them honour after a 429."""
 
 from __future__ import annotations
 
@@ -206,6 +206,16 @@ def embed_gate(provider: str) -> RateGate:
                 float(os.environ.get("KB_EMBED_TPM", "1000000")),
             )
             _GATES[provider] = gate
+        return gate
+
+
+def cognify_gate(provider: str, rpm: float, tpm: float) -> RateGate:
+    key = f"cognify:{provider}:{rpm}:{tpm}"
+    with _GATES_LOCK:
+        gate = _GATES.get(key)
+        if gate is None:
+            gate = RateGate(f"cognify:{provider}", rpm, tpm)
+            _GATES[key] = gate
         return gate
 
 
