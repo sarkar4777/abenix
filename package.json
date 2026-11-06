@@ -59,6 +59,9 @@
     "brace-expansion": "^5.0.9",
     "jsdom": "^29.1.1",
     "source-map-js": "^1.2.2",
-    "katex": "^0.18.2"
+    "katex": "^0.18.2",
+    "@gorules/jdm-editor": {
+      "zod": "^4.6.6"
+    }
   }
 }
