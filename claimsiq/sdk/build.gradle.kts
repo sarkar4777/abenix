@@ -8,7 +8,7 @@ plugins {
 }
 
 // carries the platform version from VERSION
-version = "2.5.11"
+version = "2.5.12"
 
 dependencies {
     api("com.fasterxml.jackson.core:jackson-databind:2.17.2")

@@ -1,6 +1,6 @@
 {
   "name": "@abenix/sdk",
-  "version": "2.5.11",
+  "version": "2.5.12",
   "description": "Abenix JavaScript/TypeScript SDK for executing and monitoring AI agents",
   "type": "module",
   "main": "dist/index.js",

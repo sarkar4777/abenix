@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v2.5.12 — 2026-11-06
 
 ### Security
 - Next.js 15.5.29 in the platform and every app, plus dompurify, undici, vite, zod, vitest, glob and minimatch at their fixed versions
