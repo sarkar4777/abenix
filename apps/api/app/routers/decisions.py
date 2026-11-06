@@ -1230,7 +1230,7 @@ async def update_model(
                 error_code="TIER_LOCKED",
                 details={"version": waiting},
             )
-        await governance.ensure_fresh()
+        await governance.ensure_fresh(max_age=0)
         pol = (
             governance.policy(str(user.tenant_id), m.risk_tier).get("publish_approvals")
             or {}
@@ -1659,7 +1659,7 @@ async def _guard_action(
     db: AsyncSession, user: User, m: DecisionModel, reason: str
 ) -> tuple[JSONResponse | None, int, dict[str, Any]]:
     """None to act at once, an error, or the sign-off a request needs."""
-    await governance.ensure_fresh()
+    await governance.ensure_fresh(max_age=0)
     need, pa = _needs_signoff(user.tenant_id, m.risk_tier)
     if need <= 0:
         return None, 0, pa
@@ -2863,7 +2863,7 @@ async def publish(
             409,
             error_code="NOT_APPROVED",
         )
-    await governance.ensure_fresh()
+    await governance.ensure_fresh(max_age=0)
     a = await db.get(Approval, v.approval_id) if v.approval_id else None
     refused = _publish_refusal(
         str(user.tenant_id), n, v.risk_tier_at_proposal, m.risk_tier, a
@@ -3096,7 +3096,7 @@ async def sign_off_info(
     v = await _version(db, m, n) if m else None
     if v is None:
         return error(f"{key} has no version {n}.", 404)
-    await governance.ensure_fresh()
+    await governance.ensure_fresh(max_age=0)
     a = await db.get(Approval, v.approval_id) if v.approval_id else None
     current = a is not None
     if a is None:

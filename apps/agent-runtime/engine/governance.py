@@ -37,6 +37,7 @@ _switches: dict[tuple[str, str, str], str] = {}
 # agents and pipelines above low, by id
 _agent_tiers: dict[str, str] = {}
 _loaded_at = 0.0
+_generation = 0
 _lock: asyncio.Lock | None = None
 _bg: asyncio.Task | None = None
 _loader: Callable[[], Awaitable[tuple | None]] | None = None
@@ -119,7 +120,8 @@ def configure(
 
 
 def invalidate() -> None:
-    global _loaded_at
+    global _loaded_at, _generation
+    _generation += 1
     _loaded_at = 0.0
 
 
@@ -190,6 +192,7 @@ async def _refresh(force: bool) -> None:
     async with _lock:  # type: ignore[union-attr]
         if not force and time.monotonic() - _loaded_at < _ttl:
             return
+        generation = _generation
         try:
             data = await _read_db()
         except Exception as exc:  # noqa: BLE001
@@ -197,7 +200,9 @@ async def _refresh(force: bool) -> None:
             data = None
         if data is not None:
             _load(*data)
-        _loaded_at = time.monotonic()
+        # a write that landed during the read may be missing from what was loaded
+        if generation == _generation:
+            _loaded_at = time.monotonic()
 
 
 async def ensure_fresh(force: bool = False, max_age: float | None = None) -> None:

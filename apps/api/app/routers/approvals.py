@@ -545,7 +545,8 @@ async def _tier_floor(
         ).scalar()
     if not tier or risk.normalize(tier) == "low":
         return body.required_signoffs, None
-    await governance.ensure_fresh()
+    # each worker caches policies, and this one may not have seen a save on another
+    await governance.ensure_fresh(max_age=0)
     pol = (
         governance.policy(str(user.tenant_id), risk.normalize(tier)).get(
             "publish_approvals"

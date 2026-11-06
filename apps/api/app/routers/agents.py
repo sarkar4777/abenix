@@ -130,7 +130,7 @@ async def _risk_activation_problem(agent: Agent) -> str | None:
 
     mc = agent.model_config_ or {}
     tier = _risk.normalize(mc.get("risk_tier"))
-    await governance.ensure_fresh()
+    await governance.ensure_fresh(max_age=0)
     pol = governance.policy(str(agent.tenant_id), tier)
     has_schema = bool(
         mc.get("output_schema")

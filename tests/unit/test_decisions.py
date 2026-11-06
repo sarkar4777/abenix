@@ -464,3 +464,30 @@ def test_date_facts_accept_datetimes():
     facts = copy.deepcopy(FACTS)
     facts["shipment"]["date"] = dt.datetime(2026, 3, 1, 12, 0)
     assert ev(c, facts, as_of="2026-03-01").outcome == "decided"
+
+
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        ("1.234,56", 1234.56),
+        ("1,234.56", 1234.56),
+        ("1.234.567", 1234567),
+        ("1,234,567", 1234567),
+        ("1,234", 1234),
+        ("1.234", 1.234),
+        ("12,5", 12.5),
+        ("-1.234,5", -1234.5),
+        (" 42 ", 42),
+    ],
+)
+def test_number_strings_read_in_either_notation(text, expected):
+    from engine.decisions.evaluator import _coerce
+
+    assert _coerce("number", text) == (True, expected)
+
+
+@pytest.mark.parametrize("text", ["1,2,3", "12,34,56", "1.2.3", "abc"])
+def test_malformed_number_strings_are_refused(text):
+    from engine.decisions.evaluator import _coerce
+
+    assert _coerce("number", text)[0] is False

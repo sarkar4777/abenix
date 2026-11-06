@@ -107,6 +107,23 @@ def _set(facts: dict[str, Any], path: str, value: Any) -> None:
     cur[parts[-1]] = value
 
 
+_THOUSANDS_COMMA = re.compile(r"[+-]?\d{1,3}(,\d{3})+(\.\d+)?")
+_THOUSANDS_DOT = re.compile(r"[+-]?\d{1,3}((\.\d{3})+,\d+|(\.\d{3}){2,})")
+_DECIMAL_COMMA = re.compile(r"[+-]?\d+,\d+")
+
+
+def _parse_number(text: str) -> float:
+    """Read 1,234.56 and 1.234,56 alike. A single 1.234 stays a decimal and 1,234 a thousand."""
+    s = text.strip()
+    if _THOUSANDS_COMMA.fullmatch(s):
+        s = s.replace(",", "")
+    elif _THOUSANDS_DOT.fullmatch(s):
+        s = s.replace(".", "").replace(",", ".")
+    elif _DECIMAL_COMMA.fullmatch(s):
+        s = s.replace(",", ".")
+    return float(s)
+
+
 def _coerce(t: str, v: Any) -> tuple[bool, Any]:
     """(ok, value) with the value in the engine's canonical form for the type."""
     if t == "number":
@@ -116,7 +133,7 @@ def _coerce(t: str, v: Any) -> tuple[bool, Any]:
             return True, v
         if isinstance(v, str):
             try:
-                n = float(v.strip().replace(",", ""))
+                n = _parse_number(v)
                 return True, int(n) if n.is_integer() else n
             except ValueError:
                 return False, v

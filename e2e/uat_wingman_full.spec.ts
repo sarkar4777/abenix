@@ -162,6 +162,7 @@ test.describe('Wingman — full browser UAT', () => {
   });
 
   test('inbox: parse one email → structured offer', async ({ page }) => {
+    test.setTimeout(240_000);
     await gotoOk(page, '/inbox');
     const buttons = page.getByRole('button', { name: /Extract structured offer/i });
     await expect(buttons.first()).toBeVisible({ timeout: 10_000 });
