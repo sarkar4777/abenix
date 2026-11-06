@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v2.5.11 — 2026-11-06
 
 ### Added
 - The enterprise context graph. An Atlas graph bound to a collection types what Cognify extracts, entities record their concept, and Atlas shows entity counts and browses and queries the real instances in Neo4j
@@ -9,12 +9,28 @@
 - Atlas overview, viewport, neighbourhood and search routes. The page opens a graph of any size without loading it all
 - OCR for scanned pages behind `KB_OCR_MODE`, with Tesseract, PyMuPDF and unstructured in the worker image
 - Neo4j heap and page cache sizing guide, install time checks of the memory settings, and an Enterprise edition option
+- Streaming knowledge uploads with resume, physical backups with a restore drill, GDPR actions for knowledge, and connectors
+- The settings data page, which was missing
+- Tests that run on real pods, `edge-e2e`, `edge-conformance` and `scale-e2e`, with the edge jobs in CI, plus a knowledge load test with a realistic company corpus
+- `AGENT_OUTPUT_MAX_CHARS` sets how much run output is kept, 1 MB by default
+- Local deploys create and reuse a secrets key, and a failed host build keeps its full log
+- `deploy.sh` subcommands for edge and scale
 
 ### Changed
 - Cognify runs one task per document with progress in Postgres. Reruns skip finished chunks by hash, and what the model returned survives a crash
 - Entity resolution uses blocking on tokens and rare trigrams, off the event loop, streaming from Neo4j
 - Atlas snapshots store only what changed, with pruning. Older full snapshots still restore
 - `/sync-kb` works in background batches past 500 documents, and export streams
+- Every edge runtime refuses unsigned bundles and unauthenticated installs by default. MQTT delivery uses QoS 1 and retained topics, and deploy reports what really happened. Charts can run gateway mode
+- Ingest uses bounded workers, shared rate limiting and COPY batches, chunks are partitioned, and crowded search returns full pages
+- Dedicated pools are real pools, and KEDA can read lag on a pool that never started because the API creates the JetStream durable
+- Model pods on Kubernetes use a token limited to one model
+- Search falls back to DuckDuckGo with `ddgs` and Google needs reach a connected Claude subscription
+- New shared collections default to pgvector
+- The calculator takes lists, with `len`, `mean` and `avg`
+- Decision facts read `1.234,56` and `1,234.56` alike. `12,5` is 12.5 and malformed values such as `1,2,3` are refused. A single `1.234` stays a decimal and `1,234` stays a thousand
+- The readiness route runs its checks at most once every 2 seconds
+- The k6 baseline sets its login rate with `LOGIN_RPS` and signs in once in setup, and the recorded numbers are measured again
 
 ### Fixed
 - `graph_explorer` failed on every call, it opened its session wrongly
@@ -26,6 +42,27 @@
 - A long Cognify job was called stalled after 6 hours even while working
 - Reruns added duplicate `graph_relationships` rows
 - The API and worker disagreed on the default Celery broker database
+- A queued run waiting past the idle transaction timeout lost its session, started a second inline run and returned 500. A queued run is now never run twice
+- Run output was silently cut at 50,000 characters
+- A dropped model stream failed the run, it is now read again once
+- Concurrent saves of tenant settings lost each other's sections
+- A risk policy saved on one API worker could stay unseen on another for up to 10 seconds, so a new approval or a decision action could use the old rules. A save landing during a policy refresh could be missed the same way
+- A login stalled every other request on the API, bcrypt now runs off the event loop
+- Tenant isolation gaps on caches, tools, files, scaling, slugs, playground agent lookups and the platform database
+- Scoped keys can stream, and validation errors stay 422
+- Failed embeddings are visible and retention is enforced
+- Builder autosave wiped `tool` and `input` on seed form pipelines and dropped declared tools
+- Model Selection offered catalogue models that saving then refused
+- Deleting a project with dependants raised a raw database error, it now explains the conflict
+- Kubernetes model deploys failed on a missing image and showed Starting forever
+- MCP install failed and hid its errors
+- Playground generation ignored a connected subscription and blocked the API
+- A dense chunk overran the output limit and lost its extraction, whole items are now kept and the chunk retries as two halves
+- Document replace works from a document id and keeps grants, and re-embed runs in batches
+- A Helm 4 upgrade stopped the whole deploy after any manual `kubectl` patch
+- First run on a new machine failed. Scripts are executable so app keys get minted, MinIO no longer blocks compose, and `dev-local` honours a venv and reports failures
+- ContractIQ shows its finished state, survives a dropped stream and an odd date value, and uploads the contract before Cognify
+- The Wingman ops page broke its image build
 
 ## v2.5.10 — 2026-10-12
 
