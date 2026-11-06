@@ -17,7 +17,8 @@ path = "src/main.rs"
 [dependencies]
 tokio = { version = "1", features = ["full"] }
 axum = { version = "0.7", default-features = false, features = ["http1", "json", "tokio", "matched-path"] }
-rumqttc = "0.24"
+# this runtime speaks plain MQTT, the TLS feature only pulled in an old rustls
+rumqttc = { version = "0.24", default-features = false }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 rsa = { version = "0.9", features = ["sha2"] }
 sha2 = "0.10"

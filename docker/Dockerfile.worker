@@ -18,6 +18,8 @@ COPY apps/agent-runtime/requirements.txt ./requirements-runtime.txt
 RUN pip install --no-cache-dir --upgrade pip setuptools && \
     pip install --no-cache-dir -r requirements.txt && \
     pip install --no-cache-dir -r requirements-runtime.txt 2>/dev/null || true
+# unstructured caps filelock below 4, the security fixes are above that and it only uses FileLock
+RUN pip install --no-cache-dir "filelock>=4.2.1"
 
 FROM base AS runtime
 # procps: readiness probe uses `pgrep -f celery`. netcat-openbsd: the

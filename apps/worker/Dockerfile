@@ -11,6 +11,7 @@ f=open('/tmp/req.txt','w'); \
 [f.write(d+chr(10)) for d in sorted(set(a+b+c))]" && \
     pip install --no-cache-dir --upgrade pip setuptools && \
     pip install --no-cache-dir -r /tmp/req.txt && \
+    pip install --no-cache-dir "filelock>=4.2.1" && \
     mkdir -p /usr/local/share/nltk_data && NLTK_DATA=/usr/local/share/nltk_data python3 -c "from unstructured.partition.text import partition_text; print(partition_text(text=chr(72)+chr(105)+chr(46)+chr(32)+chr(72)+chr(105)+chr(46)))"
 
 FROM python:3.12-slim

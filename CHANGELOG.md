@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Security
+- Next.js 15.5.29 in the platform and every app, plus dompurify, undici, vite, zod, vitest, glob and minimatch at their fixed versions
+- The Rust edge runtime no longer builds the old `rustls` and `rustls-webpki` that `rumqttc` brought in with a TLS feature it never used
+- The worker image installs `filelock` 4.2.1 or newer
+
 ## v2.5.11 — 2026-11-06
 
 ### Added
