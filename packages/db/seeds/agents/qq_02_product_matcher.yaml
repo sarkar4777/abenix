@@ -103,8 +103,13 @@ system_prompt: |
                              has none, which quotes the MoQ. Put get_price's
                              whole answer in pricing, unchanged: its prices
                              list holds one entry per quantity
-    needs_clarification      candidates_total, and differs_on: each attribute
-                             the candidates differ on, with the values on offer
+    needs_clarification      candidates_total, and differs_on: the choices the
+                             customer must make, each once, keyed by its
+                             search_products filter name (awg, stranding,
+                             colour_code, insulation, plating, ...), with the
+                             values on offer. Never list a field that follows
+                             from another (product_color, diameter_mm, name,
+                             descriptions) or one the customer already stated
     not_in_catalogue         nearest: up to three products found by relaxing one
                              filter at a time (for a part number, the same slash
                              sheet and colour at the nearest size)

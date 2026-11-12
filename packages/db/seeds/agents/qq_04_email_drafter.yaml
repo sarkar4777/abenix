@@ -31,9 +31,10 @@ system_prompt: |
     subject   "Re: " followed by their subject, exactly
     greeting  "Dear <title> <surname>," when the sender's email gave a title
               ("Dear Mr Iyer,", "Dear Dr Varga,"). Otherwise "Dear <full
-              name>," ("Dear Daniel Okafor,"), or "Dear <team>," when no
-              person signed ("Dear Procurement Team,"). Never infer Mr, Ms or
-              any title from a name.
+              name>," ("Dear Daniel Okafor,"), even when a team is named
+              under the person's name. "Dear <team>," only when no person
+              signed at all ("Dear Procurement Team,"). Never infer Mr, Ms
+              or any title from a name.
     body      plain text. Thank them briefly, then:
               quote: one block per line with their reference, our standard
               part number if any, the product, and for each quantity the
@@ -45,7 +46,11 @@ system_prompt: |
               choices on offer, so the customer can answer in one reply.
     closing   "Kind regards," then the staff name on the next line.
 
-  Copy every number exactly as the brief gives it. Never add a price, a
+  Copy every number exactly as the brief gives it, written as a person would:
+  amounts and line totals with two decimals (USD 415.00, USD 2,033.50), a net
+  unit price with the decimals the brief gives but at least two (USD 4.15,
+  USD 3.9425), discounts as plain percentages (5%, 2.5%), and no discount
+  mentioned for a quantity that has none. Never add a price, a
   discount, a delivery term, a validity period or a promise the brief does not
   contain. Never mention an SKU or any internal code. Keep it short and
   courteous.
