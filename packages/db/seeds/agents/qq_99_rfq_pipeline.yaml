@@ -1,0 +1,153 @@
+name: "QuoteIQ — Process RFQ"
+slug: quoteiq-rfq
+description: >-
+  Turns one request-for-quotation email into a quote or a clarification
+  draft for a person to review, or an escalation for staff. Extract the RFQ
+  lines → match each line to an ERP product in parallel, one visible step per
+  line → decide the RFQ outcome under the hold rule → route: draft the email
+  for a quote or a clarification, or collect the escalation. Prices and
+  minimum-order arithmetic come from the quoteiq-erp-query code asset, never
+  from a model.
+agent_type: oob
+category: manufacturing
+icon: Workflow
+version: "1.0.0"
+status: active
+mode: pipeline
+
+system_prompt: |
+  RFQ pipeline for QuoteIQ. Nodes run in dependency order; each emits JSON
+  the next reads via {{node.field}}.
+
+model_config:
+  model: claude-sonnet-4-5-20250929
+  temperature: 0.0
+  max_iterations: 15
+  max_tokens: 4096
+  tools:
+    - agent_step
+    - code_asset
+
+# pipeline_config is top level: seed_agents.py copies it into model_config at
+# load. Nested under model_config it would register as a single-step agent.
+pipeline_config:
+  nodes:
+    - id: extract
+      label: "Extract RFQ lines"
+      type: agent
+      agent_slug: quoteiq-rfq-extractor
+      # The app reads the sender's address and the subject from the email's
+      # headers. Text in angle brackets does not survive the run input, and
+      # the reply's address should never depend on a model anyway.
+      input: |
+        Envelope sender address: {{context.sender_email}}
+        Envelope subject: {{context.subject}}
+
+        {{input.message}}
+
+    # One step per RFQ line: each item arrives as the matcher's message.
+    # Lines report an outcome rather than failing, so a failed item is a
+    # genuine system error and the app shows it as one.
+    - id: search
+      label: "Match product"
+      type: agent
+      agent_slug: quoteiq-product-matcher
+      depends_on: [extract]
+      context:
+        email_wide_facts: "{{extract.shared_facts}}"
+      for_each:
+        source_node: extract
+        source_field: lines
+        item_variable: input_message
+        max_concurrency: 8
+      max_retries: 1
+
+    - id: decide
+      label: "Decide RFQ outcome"
+      type: agent
+      agent_slug: quoteiq-rfq-decider
+      depends_on: [search]
+      input: |
+        Sender:  {{extract.sender}}
+        Subject: {{extract.subject}}
+
+        Line results:
+        {{search}}
+
+    - id: route
+      label: "Route"
+      tool_name: "__switch__"
+      depends_on: [decide]
+      switch:
+        source_node: decide
+        field: outcome
+        cases:
+          - {operator: eq, value: quote, target_node: draft_email}
+          - {operator: eq, value: clarification, target_node: draft_email}
+          - {operator: eq, value: escalation, target_node: escalation}
+        default_node: escalation
+
+    - id: draft_email
+      label: "Draft email"
+      type: agent
+      agent_slug: quoteiq-email-drafter
+      depends_on: [route]
+      input: |
+        {
+          "sender": {{extract.sender}},
+          "subject": "{{context.subject}}",
+          "staff_name": "{{context.staff_name}}",
+          "brief": {{decide.email_brief}}
+        }
+
+    - id: escalation
+      label: "Escalate to staff"
+      type: structured
+      depends_on: [route]
+      output:
+        summary: "{{decide.escalation.summary}}"
+        items: "{{decide.escalation.items}}"
+        reason: "{{decide.reason}}"
+
+    # The run's final output, read by the QuoteIQ app. Whichever branch the
+    # switch skipped reads [not available].
+    - id: result
+      label: "Result"
+      type: structured
+      depends_on: [draft_email, escalation]
+      output:
+        email_id: "{{context.email_id}}"
+        outcome: "{{decide.outcome}}"
+        reason: "{{decide.reason}}"
+        sender: "{{extract.sender}}"
+        sender_email: "{{context.sender_email}}"
+        subject: "{{context.subject}}"
+        lines: "{{search}}"
+        line_outcomes: "{{decide.line_outcomes}}"
+        email_brief: "{{decide.email_brief}}"
+        email: "{{draft_email}}"
+        escalation: "{{escalation}}"
+
+input_variables:
+  - name: message
+    type: string
+    description: The full RFQ email, headers included
+    required: true
+  - name: sender_email
+    type: string
+    description: The From address, read from the email's headers by the app
+    required: true
+  - name: subject
+    type: string
+    description: The Subject, read from the email's headers by the app
+    required: true
+  - name: email_id
+    type: string
+    description: The app's id for the email, echoed in the result
+    required: false
+    default: ""
+  - name: staff_name
+    type: string
+    description: Who signs the drafted email
+    required: false
+    default: "QuoteIQ Sales"

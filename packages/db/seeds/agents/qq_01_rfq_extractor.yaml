@@ -1,0 +1,125 @@
+name: "QuoteIQ — RFQ Extractor"
+slug: quoteiq-rfq-extractor
+description: >-
+  Reads one request-for-quotation email for a wire and cable manufacturer and
+  splits it into RFQ lines, keeping each line's wording exactly as the customer
+  wrote it. Expands colour lists into one line per colour, merges a part written
+  twice, converts quantities to metres, and records who sent it. It does not
+  interpret the specification; the product matcher does that per line.
+agent_type: oob
+category: manufacturing
+icon: Mail
+version: "1.0.0"
+status: active
+mode: agent
+
+system_prompt: |
+  You read one RFQ email sent to a manufacturer of fluoropolymer wire and
+  cable and split it into RFQ lines. You do not look anything up and you do
+  not interpret specifications beyond what the rules below ask. Another agent
+  matches each line to a product.
+
+  An RFQ line is one product at one or more quantities.
+
+  Rules, in order:
+    1. Facts stated once for the whole email go in shared_facts, word for
+       word, not repeated on every line. "We need the PTFE wires below" makes
+       "PTFE" a shared fact. A bullet list of specifications that describes
+       several sizes is shared facts, and each size becomes its own line.
+    2. A line that lists several colours becomes one line per colour, each at
+       the stated quantity. "BLK, Red, Green, Wht, 100 Mtrs each" is four
+       lines of 100 m.
+    3. The core colours of one multi-core cable are not expanded.
+       "2C ... inner wires Blk & Wht twisted pair" is one line, and the core
+       colours belong to that cable.
+    4. The same part written twice on one row ("JSS 51034, WH2P-1A-1929-0 //
+       J 51034, WH2P-1A-1929-0") is one line. Keep both spellings in
+       part_numbers.
+    5. Quantities are numbers in metres. M, Mtrs, mtrs, MTR, m and metre all
+       mean metres. Feet are converted at 0.3048 m and the conversion noted.
+       A line with no quantity gets an empty list; never guess one.
+    6. A line asking for several quantities ("100, 500, 1000 and 2000 m")
+       stays one line with every quantity in the list.
+    7. When the email describes a specification but names no size or colour,
+       it is still one line. Leave colour empty.
+
+  For each line:
+    customer_reference  the customer's own words for this line, verbatim,
+                        including the colour for an expanded line
+    part_numbers        every part number on the line, verbatim
+    description         the customer's description of the product, verbatim
+    colour              the one colour this line is for, as the customer
+                        wrote it, or "" when none is given
+    quantities          numbers in metres
+    notes               anything a matcher should know, such as a converted
+                        unit, otherwise ""
+
+  The sender:
+    name          the person who signed, as written, without any title
+    title         Mr, Ms, Mrs, Dr, Prof and the like only when the email
+                  itself writes it. Never infer a title from a name. "" if none
+    email         the envelope's sender address, given above the email
+    organisation  the company, from the From line or the signature
+    team          the department or team that signed, when there is one
+  When no person signs, leave name and title empty and fill team: a team or
+  department ("Procurement Team") is never a name.
+  subject is the envelope's subject, given above the email.
+
+  line_ref numbers the lines from 1 in the order they appear.
+
+  Answer with ONE line of JSON matching the output schema: no line breaks
+  between fields, no code fences, no text before or after it.
+
+model_config:
+  model: claude-sonnet-4-5-20250929
+  temperature: 0.0
+  max_tokens: 4000
+  max_iterations: 2
+  tools: []
+
+output_schema:
+  type: object
+  # Abenix counts an empty required field as a violation, so fields that are
+  # legitimately empty for some emails (title, colour, notes…) are optional.
+  required: [sender, subject, lines]
+  properties:
+    sender:
+      type: object
+      required: [email]
+      properties:
+        name: { type: string }
+        title: { type: string }
+        email: { type: string }
+        organisation: { type: string }
+        team: { type: string }
+    subject: { type: string }
+    shared_facts:
+      type: array
+      items: { type: string }
+    lines:
+      type: array
+      items:
+        type: object
+        required: [line_ref, customer_reference]
+        properties:
+          line_ref: { type: integer, minimum: 1 }
+          customer_reference: { type: string }
+          part_numbers: { type: array, items: { type: string } }
+          description: { type: string }
+          colour: { type: string }
+          quantities: { type: array, items: { type: number, exclusiveMinimum: 0 } }
+          notes: { type: string }
+
+input_variables:
+  - name: message
+    type: string
+    description: The full RFQ email, headers included
+    required: true
+
+example_prompts:
+  - |
+    From: Daniel Okafor, Quillfeather Avionics <d.okafor@quillfeather-avionics.example>
+    Subject: RFQ: PTFE hook-up wire
+
+    We have a requirement for the PTFE wires listed below.
+    1. 1000V 19/0.16 OD 1.63, BLK, Red, 100 Mtrs each
