@@ -1,0 +1,23 @@
+From: Anika Varga, Lumenvale Medical Imaging <a.varga@lumenvale-imaging.example>
+Subject: Quotation request: high-voltage wire
+
+Dear Sir or Madam,
+
+We are looking for a quotation for the following high-voltage wires.
+
+Required specifications:
+- Single-core high-voltage wire
+- 20 AWG (19 × AWG32) and 18 AWG (19 × AWG30)
+- Nickel-plated stranded copper conductor
+- PTFE insulation (or an equivalent fluoropolymer)
+- Corona and partial-discharge resistant
+- Operating voltage: min. 6 kV
+- Test voltage: min. 20 kV
+- Operating temperature: -90 °C to +250 °C
+- Colours: red (20 AWG) and black (18 AWG)
+
+Please quote for 100, 500, 1000 and 2000 m.
+
+Best regards,
+Dr Anika Varga
+Engineering Lead

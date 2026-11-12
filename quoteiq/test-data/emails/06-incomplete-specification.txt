@@ -1,0 +1,17 @@
+From: Sam Whitfield, Sorrelpoint Aerospace <s.whitfield@sorrelpoint-aero.example>
+Subject: Price enquiry: PTFE wire
+
+Hello,
+
+Please quote your best price for wire to the specification below.
+
+- Conforming to JSS 51034 / MIL-DTL-16878
+- Voltage rating: 600 V RMS
+- Operating temperature: -65 °C to +200 °C
+- Conductor: stranded, silver-plated copper
+- Insulation: PTFE
+- Resistant to acids, alkalis and hydrocarbons
+
+Thanks,
+Sam Whitfield
+Sourcing Team

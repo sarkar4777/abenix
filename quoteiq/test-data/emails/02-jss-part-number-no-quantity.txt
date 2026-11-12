@@ -1,0 +1,12 @@
+From: Brackenmoor Defence Systems, Procurement <procurement@brackenmoor-defence.example>
+Subject: Quotation request: J 51034 wire
+
+Dear Sir or Madam,
+
+Please send us your best quotation for the part below.
+
+Part number: J 51034, WH2P-1A-1936-9
+Description: WIRE PTFE 600V 19/0.13 OD 1.2 W
+
+Kind regards,
+Procurement Team

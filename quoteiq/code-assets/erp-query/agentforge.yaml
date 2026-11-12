@@ -1,0 +1,82 @@
+name: quoteiq-erp-query
+description: >-
+  Mock ERP for the QuoteIQ RFQ example. Searches a wire and cable catalogue
+  with structured filters, returns one product by SKU, prices a quantity
+  (MoQ, quantity-break discount, lead time) and lists the values a field
+  takes. The catalogue is products.csv beside the code. The calling agent
+  turns the customer's wording into filters; this asset only filters, looks
+  up and does the price arithmetic.
+
+input_schema:
+  type: object
+  required: [operation]
+  properties:
+    operation:
+      type: string
+      enum: [search_products, get_product, get_price, list_values]
+    standard_part_number:
+      type: string
+      description: "M22759 part number, exact, or a prefix ending in * (M22759/16-*)"
+    product_family:
+      type: string
+      description: "Hook-up wire, Airframe wire, High-voltage wire, Multi-core cable, Data cable, Tape"
+    awg: { type: integer }
+    stranding: { type: string, description: "Strand count / strand AWG, e.g. 19/34. Convert metric 19/0.16 first" }
+    cores: { type: integer }
+    twisted: { type: boolean }
+    core_colours: { type: string, description: "Colour codes of a multi-core cable's cores, e.g. 0/9" }
+    conductor: { type: string }
+    plating: { type: string, description: "silver, tin or nickel" }
+    insulation:
+      description: "One material or a list of acceptable ones, e.g. [PTFE, FEP, PFA]"
+      oneOf:
+        - { type: string }
+        - { type: array, items: { type: string } }
+    jacket: { type: string }
+    colour_code: { type: string, description: "MIL-STD-681 digit: 0 black, 1 brown, 2 red, 3 orange, 4 yellow, 5 green, 6 blue, 7 violet, 8 grey, 9 white" }
+    od_mm: { type: number, description: "Overall diameter asked for" }
+    od_tolerance_mm: { type: number, description: "Default 0.1" }
+    min_voltage_v: { type: number, description: "Rated at least this, in volts" }
+    min_test_voltage_v: { type: number, description: "Tested at least this, in volts" }
+    temp_min_c: { type: number, description: "Must be rated down to this temperature" }
+    temp_max_c: { type: number, description: "Must be rated up to this temperature" }
+    corona_resistant: { type: boolean }
+    text: { type: string, description: "Words that must all appear in the name or descriptions" }
+    limit: { type: integer, description: "Products returned by search, default 20, max 50" }
+    sku: { type: string, description: "For get_product and get_price" }
+    quantity: { type: number, description: "For get_price. Leave out to quote the MoQ" }
+    quantities: { type: array, items: { type: number }, description: "For get_price, several quantities at once" }
+    field: { type: string, description: "For list_values" }
+
+output_schema:
+  type: object
+  properties:
+    operation: { type: string }
+    total: { type: integer, description: "search_products: how many products match" }
+    returned: { type: integer }
+    products: { type: array, items: { type: object } }
+    ignored_filters: { type: array, items: { type: string } }
+    product: { type: object, description: "get_product" }
+    prices:
+      type: array
+      description: "get_price: one entry per quantity"
+      items:
+        type: object
+        properties:
+          requested_qty: { type: [number, "null"] }
+          quoted_qty: { type: number }
+          moq_applied: { type: boolean }
+          discount_pct: { type: number }
+          net_unit_price: { type: number }
+          line_total: { type: number }
+    values: { type: array, description: "list_values" }
+    error: { type: string }
+
+example_input:
+  operation: search_products
+  awg: 22
+  stranding: "19/34"
+  min_voltage_v: 1000
+  insulation: PTFE
+  od_mm: 1.63
+  colour_code: "9"
