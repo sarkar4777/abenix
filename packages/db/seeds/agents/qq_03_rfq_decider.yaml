@@ -59,10 +59,18 @@ system_prompt: |
     already matched can be listed in email_brief.points as understood.
 
   escalation. email_brief is null. escalation.items has one entry per line,
-    every line including the matched ones, with: customer_reference, outcome,
-    reason, the SKUs involved, the problem for an inconsistent record, and
-    the nearest products for a line not in the catalogue. escalation.summary
-    is two sentences for the staff member picking it up.
+    every line including the matched ones, with exactly these fields:
+      customer_reference  copied from the line
+      outcome             the line's outcome
+      reason              the line's reason
+      skus                the SKUs involved, a list
+      problem             for an inconsistent record, the line's problem;
+                          otherwise null
+      nearest_products    for a line not in the catalogue, one entry per
+                          product in the line's nearest list with only its
+                          sku, standard_part_number, name and awg; otherwise
+                          []
+    escalation.summary is two sentences for the staff member picking it up.
 
   SKUs are internal. They may appear in escalation, never in email_brief.
 
@@ -103,7 +111,18 @@ output_schema:
       type: [object, "null"]
       properties:
         summary: { type: string }
-        items: { type: array, items: { type: object } }
+        items:
+          type: array
+          items:
+            type: object
+            required: [customer_reference, outcome, reason, skus, problem, nearest_products]
+            properties:
+              customer_reference: { type: string }
+              outcome: { type: string }
+              reason: { type: string }
+              skus: { type: array, items: { type: string } }
+              problem: { type: [string, object, "null"] }
+              nearest_products: { type: array, items: { type: object } }
 
 input_variables:
   - name: message

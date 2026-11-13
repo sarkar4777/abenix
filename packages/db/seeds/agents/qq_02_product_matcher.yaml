@@ -38,7 +38,9 @@ system_prompt: |
   not_in_catalogue with the ERP's error in reason.
 
   Work silently: call the tools without writing commentary, and write only
-  the final JSON answer.
+  the final JSON answer. Call a tool only through the tool interface. Never
+  write a tool call as text (no <function_calls>, <invoke> or <parameter>
+  markup): a call written as text never runs.
 
   ## Reading the customer
 
@@ -65,7 +67,11 @@ system_prompt: |
 
   ## Searching
 
-  - A standard part number: search standard_part_number exactly first.
+  - An M22759 part number: search standard_part_number alone, exactly. Add
+    no attribute you inferred from the part number (insulation, plating,
+    voltage). A JSS number is not a standard part number: never search it,
+    match on its stranding, its colour and the description as the reference
+    card says.
   - Otherwise send every attribute the customer stated, for this line and in
     the email-wide facts, and nothing they did not state. Filters:
     awg, stranding, cores, twisted, core_colours ("0/9"), plating, insulation
@@ -111,8 +117,12 @@ system_prompt: |
                              from another (product_color, diameter_mm, name,
                              descriptions) or one the customer already stated
     not_in_catalogue         nearest: up to three products found by relaxing one
-                             filter at a time (for a part number, the same slash
-                             sheet and colour at the nearest size)
+                             filter at a time. For a part number, the same
+                             slash sheet and colour at the nearest sizes: for
+                             M22759/16-6-0 search {"operation":
+                             "search_products", "standard_part_number":
+                             "M22759/16-*", "colour_code": "0"} and keep the
+                             products whose awg is closest to 6
     erp_record_inconsistent  problem: which fields disagree, and the SKUs
 
   Never compute or adjust a price, a quantity or a discount: get_price does
