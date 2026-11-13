@@ -73,7 +73,7 @@ run_python() {
   # Each standalone app keeps its own suite under <app>/api/tests. Nothing ran
   # them — not CI, not this script — so they could rot unnoticed. They are
   # cheap (no cluster, under a second each) so there is no reason to skip them.
-  for _app in contractiq resolveai wingman industrial-iot mideasttourism pharmavigil; do
+  for _app in contractiq resolveai wingman industrial-iot mideasttourism pharmavigil quoteiq; do
     if compgen -G "${_app}/api/tests/test_*.py" > /dev/null 2>&1; then
       say "Python: ${_app}/api tests"
       ( cd "${_app}/api" && python -m pytest tests/ -q --tb=short )

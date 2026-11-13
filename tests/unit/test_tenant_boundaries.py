@@ -34,6 +34,7 @@ APPS = (
     "contractiq",
     "wingman",
     "pharmavigil",
+    "quoteiq",
     "resolveai",
     "mideasttourism",
     "claimsiq",

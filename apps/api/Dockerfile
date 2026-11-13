@@ -44,6 +44,7 @@ COPY infra/use_cases_catalog.json ./infra/use_cases_catalog.json
 COPY contractiq/code-assets/ ./contractiq/code-assets/
 COPY pharmavigil/aimodels/ ./pharmavigil/aimodels/
 COPY pharmavigil/code-assets/ ./pharmavigil/code-assets/
+COPY quoteiq/code-assets/ ./quoteiq/code-assets/
 COPY wingman/code-assets/ ./wingman/code-assets/
 USER appuser
 EXPOSE 8000

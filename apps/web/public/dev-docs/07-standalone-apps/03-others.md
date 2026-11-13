@@ -128,3 +128,4 @@ Once you have done this for one app, the others follow the same shape.
 - [01-wingman](01-wingman.md) — most evolved example
 - [02-contractiq](02-contractiq.md) — E&C-Copilot, the largest app
 - [05-pharmavigil](05-pharmavigil.md) — pipeline, code assets and one ML model
+- [06-quoteiq](06-quoteiq.md) — per-line search, a pricing code asset and approval-gated emails

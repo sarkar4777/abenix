@@ -7,7 +7,7 @@ A map of the repo so a new contributor knows where to land. For what the product
 Five things ship from this monorepo:
 
 1. **Abenix platform**, the core product. API, web, agent-runtime pools, the Celery worker, warm code runners, edge runtimes.
-2. **Standalone apps**, domain UIs that call the platform through the SDK: `contractiq/`, `wingman/`, `industrial-iot/`, `mideasttourism/`, `resolveai/`, `pharmavigil/`, and `claimsiq/` (Java and Vaadin).
+2. **Standalone apps**, domain UIs that call the platform through the SDK: `contractiq/`, `wingman/`, `industrial-iot/`, `mideasttourism/`, `resolveai/`, `pharmavigil/`, `quoteiq/`, and `claimsiq/` (Java and Vaadin).
 3. **SDKs**. `packages/sdk/python/abenix_sdk/` is canonical. `scripts/sync-sdks.sh` copies it into `packages/agent-sdk/` and every Python standalone's `api/sdk/`, and `--check` fails on drift. `packages/sdk/js/` is the TypeScript SDK (`@abenix/sdk`) and `packages/sdk/react/` holds React bindings.
 4. **Helm chart**. `infra/helm/abenix/` deploys the platform. Standalone apps deploy from their own `<app>/k8s/` manifests.
 5. **The public mirror**. `scripts/publish-public.sh` strips sensitive pieces and rewrites history to the public repo on every release.
@@ -31,7 +31,7 @@ Five things ship from this monorepo:
 │   ├── agent-sdk/             # synced copy of the Python SDK
 │   ├── mcp-servers/           # MCP servers (BigQuery, Exasol, migration, SQL transform)
 │   └── shared/                # shared TypeScript package
-├── contractiq/ wingman/ industrial-iot/ mideasttourism/ resolveai/ pharmavigil/ claimsiq/
+├── contractiq/ wingman/ industrial-iot/ mideasttourism/ resolveai/ pharmavigil/ quoteiq/ claimsiq/
 ├── infra/helm/abenix/         # the Helm chart and its values-*.yaml
 ├── docker/                    # Dockerfile.api, .web, .worker, .agent-runtime, .model-serving
 ├── scripts/                   # deploy, dev, lint, UAT, load and publish scripts

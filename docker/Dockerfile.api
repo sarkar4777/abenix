@@ -51,6 +51,7 @@ COPY contractiq/aimodels/ ./contractiq/aimodels/
 COPY contractiq/code-assets/ ./contractiq/code-assets/
 COPY pharmavigil/aimodels/ ./pharmavigil/aimodels/
 COPY pharmavigil/code-assets/ ./pharmavigil/code-assets/
+COPY quoteiq/code-assets/ ./quoteiq/code-assets/
 WORKDIR /app/apps/api
 
 ENV PYTHONPATH="/app/packages/db:/app/packages/sdk/python:/app/apps/agent-runtime"

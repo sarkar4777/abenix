@@ -1,0 +1,16 @@
+# The API image is built from quoteiq/ so it can copy test-data/emails.
+# Keep everything else out of its build context, the web app's
+# node_modules and .next above all.
+web
+k8s
+scripts
+code-assets
+logs
+README.md
+start.sh
+.dockerignore
+api/tests
+api/pytest.ini
+**/__pycache__
+**/.pytest_cache
+**/*.pyc

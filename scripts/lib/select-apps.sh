@@ -28,6 +28,7 @@ APP_REGISTRY=(
   "claimsiq|ClaimsIQ|claimsiq|3005|insurance FNOL (Java + Vaadin)"
   "wingman|Wingman|wingman|3006/8006|energy commodity trading"
   "pharmavigil|PharmaVigil|pharmavigil|3007/8007|drug safety + signal detection"
+  "quoteiq|QuoteIQ|quoteiq|3008/8008|RFQ quoting for a wire and cable maker"
 )
 
 SELECTED_APPS=()

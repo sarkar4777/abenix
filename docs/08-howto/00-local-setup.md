@@ -79,6 +79,7 @@ slow. Seven ship in the repo and you rarely need all of them.
     5  ClaimsIQ           3005       insurance FNOL (Java + Vaadin)
     6  Wingman            3006/8006  energy commodity trading
     7  PharmaVigil        3007/8007  drug safety + signal detection
+    8  QuoteIQ            3008/8008  RFQ quoting for a wire and cable maker
 
     Numbers or names, comma separated — e.g. "1,3" or "pharmavigil,claimsiq".
     "all" for everything, "none" for the core platform only.
@@ -138,6 +139,7 @@ hostnames. Nothing needs to go in `/etc/hosts`.
 | ClaimsIQ | http://localhost:3005 |
 | Wingman | http://localhost:3006 |
 | PharmaVigil | http://localhost:3007 |
+| QuoteIQ | http://localhost:3008 |
 | Grafana | http://localhost:3030 (`admin` and the password in secret `abenix-grafana-admin`, `abenix-admin` unless `GRAFANA_ADMIN_PASSWORD` was set when it was created) |
 | Prometheus | http://localhost:9090 |
 | MQTT broker | `mqtt://localhost:1883`, plain MQTT from the `abenix-mosquitto` forward |

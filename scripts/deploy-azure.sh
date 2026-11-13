@@ -202,6 +202,7 @@ _expand_only() {
     resolveai)      echo "resolveai-api resolveai-web" ;;
     wingman)        echo "wingman-api wingman-web" ;;
     pharmavigil)    echo "pharmavigil-api pharmavigil-web" ;;
+    quoteiq)        echo "quoteiq-api quoteiq-web" ;;
     claimsiq)       echo "claimsiq" ;;
     observability)  echo "observability" ;;
     livekit)        echo "livekit" ;;
@@ -524,6 +525,8 @@ declare -A DOCKERFILES=(
   [wingman-web]="wingman/web/Dockerfile"
   [pharmavigil-api]="pharmavigil/api/Dockerfile"
   [pharmavigil-web]="pharmavigil/web/Dockerfile"
+  [quoteiq-api]="quoteiq/api/Dockerfile"
+  [quoteiq-web]="quoteiq/web/Dockerfile"
   # ClaimsIQ is a single-container Spring Boot + Vaadin app — one image,
   # no api/web split. Dockerfile is inside app/ but the build context
   # MUST be the claimsiq root so the multi-stage build can reach both
@@ -553,6 +556,9 @@ declare -A BUILD_CONTEXTS=(
   [wingman-web]="${ROOT_DIR}/wingman/web"
   [pharmavigil-api]="${ROOT_DIR}/pharmavigil/api"
   [pharmavigil-web]="${ROOT_DIR}/pharmavigil/web"
+  # quoteiq-api copies the example emails from test-data/, so its context is the app root.
+  [quoteiq-api]="${ROOT_DIR}/quoteiq"
+  [quoteiq-web]="${ROOT_DIR}/quoteiq/web"
   [claimsiq]="${ROOT_DIR}/claimsiq"
 )
 
@@ -632,6 +638,7 @@ build_and_push() {
     resolveai-api resolveai-web
     wingman-api wingman-web
     pharmavigil-api pharmavigil-web
+    quoteiq-api quoteiq-web
     claimsiq
   )
   local built=0 skipped=0
@@ -1557,6 +1564,40 @@ deploy_pharmavigil() {
   ok "PharmaVigil deployed"
 }
 
+deploy_quoteiq() {
+  if [ -n "${ONLY_CSV}" ] && ! _should_do "quoteiq-api" && ! _should_do "quoteiq-web"; then return 0; fi
+  local manifest="${ROOT_DIR}/quoteiq/k8s/quoteiq.yaml"
+  if [ ! -f "${manifest}" ]; then warn "QuoteIQ manifest missing — skip"; return; fi
+
+  step "Deploying QuoteIQ"
+  local qq_key="${QUOTEIQ_ABENIX_API_KEY:-}"
+  if [ -z "${qq_key}" ]; then
+    qq_key=$(kubectl get secret quoteiq-secrets -n "${NAMESPACE}" \
+      -o jsonpath='{.data.QUOTEIQ_ABENIX_API_KEY}' 2>/dev/null | base64 -d 2>/dev/null)
+    if [ -z "${qq_key}" ] || [ "${qq_key}" = "REPLACE_AT_DEPLOY_TIME" ]; then
+      log "  Minting Abenix API key for QuoteIQ..."
+      qq_key=$(_generate_abenix_api_key || echo "PLACEHOLDER_CHANGE_ME")
+    fi
+  fi
+
+  sed \
+    -e "s|localhost:5000/abenix/quoteiq-api:latest|${ACR_LOGIN_SERVER}/quoteiq-api:${IMAGE_TAG}|g" \
+    -e "s|localhost:5000/abenix/quoteiq-web:latest|${ACR_LOGIN_SERVER}/quoteiq-web:${IMAGE_TAG}|g" \
+    -e "s|imagePullPolicy: IfNotPresent|imagePullPolicy: Always|g" \
+    "${manifest}" | kubectl apply -f - 2>&1 | tail -5
+
+  # The manifest ships a placeholder Secret, so this has to follow the apply
+  # or it gets clobbered by it.
+  kubectl create secret generic quoteiq-secrets \
+    --namespace="${NAMESPACE}" \
+    --from-literal=QUOTEIQ_ABENIX_API_KEY="${qq_key}" \
+    --dry-run=client -o yaml | kubectl apply -f - 2>&1 | tail -2
+
+  kubectl -n "${NAMESPACE}" rollout restart deploy/quoteiq-api 2>&1 | tail -1 || true
+  kubectl -n "${NAMESPACE}" rollout restart deploy/quoteiq-web 2>&1 | tail -1 || true
+  ok "QuoteIQ deployed"
+}
+
 
 deploy_wingman() {
   if [ -n "${ONLY_CSV}" ] && ! _should_do "wingman-api" && ! _should_do "wingman-web"; then return 0; fi
@@ -1849,6 +1890,18 @@ spec:
           - path: /
             pathType: Prefix
             backend: { service: { name: pharmavigil-api, port: { number: 8007 } } }
+    - host: quotes.${host}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend: { service: { name: quoteiq-web, port: { number: 3008 } } }
+    - host: quotes-api.${host}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend: { service: { name: quoteiq-api, port: { number: 8008 } } }
     - host: wm.${host}
       http:
         paths:
@@ -1869,8 +1922,13 @@ EOF
         NEXT_PUBLIC_ABENIX_WEB_URL="${abenix_web_url}" 2>&1 | tail -1 || true
     fi
   done
+  # QuoteIQ builds its links to runs and approvals in the API, not the web app.
+  if kubectl -n "${NAMESPACE}" get deploy quoteiq-api >/dev/null 2>&1; then
+    kubectl -n "${NAMESPACE}" set env deploy/quoteiq-api \
+      ABENIX_WEB_URL="${abenix_web_url}" 2>&1 | tail -1 || true
+  fi
 
-  ok "Ingress ready: http://${host}  (ciq, tourism, iot, care, claims, safety, wm, grafana, prom, tempo each .${host})"
+  ok "Ingress ready: http://${host}  (ciq, tourism, iot, care, claims, safety, quotes, wm, grafana, prom, tempo each .${host})"
 }
 
 deploy_all() {
@@ -1905,6 +1963,7 @@ deploy_all() {
   deploy_resolveai || warn "ResolveAI deploy failed (non-fatal)"
   deploy_wingman || warn "Wingman deploy failed (non-fatal)"
   deploy_pharmavigil || warn "PharmaVigil deploy failed (non-fatal)"
+  deploy_quoteiq || warn "QuoteIQ deploy failed (non-fatal)"
   deploy_claimsiq || warn "ClaimsIQ deploy failed (non-fatal)"
   # Phase 4 — idempotent ABENIX_API_KEY reconciliation. Every standalone
   # secret is validated against the platform api_keys table; orphaned keys
@@ -2255,6 +2314,8 @@ deploy_status() {
     "Tempo"               "http://tempo.${host}" \
     "PharmaVigil"         "http://safety.${host}" \
     "PharmaVigil API"     "http://safety-api.${host}/health" \
+    "QuoteIQ"             "http://quotes.${host}" \
+    "QuoteIQ API"         "http://quotes-api.${host}/health" \
     "Wingman"             "http://wm.${host}"
 
 

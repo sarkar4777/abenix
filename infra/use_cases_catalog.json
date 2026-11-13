@@ -76,5 +76,15 @@
     "host_subdomain": "safety",
     "local_port": 3007,
     "env_var": "PHARMAVIGIL_PUBLIC_URL"
+  },
+  {
+    "key": "quoteiq",
+    "label": "QuoteIQ",
+    "description": "RFQ emails for a wire and cable maker: each line matched to a product in the ERP, a quote or a clarification drafted for review.",
+    "icon": "cable",
+    "color": "cyan",
+    "host_subdomain": "quotes",
+    "local_port": 3008,
+    "env_var": "QUOTEIQ_PUBLIC_URL"
   }
 ]

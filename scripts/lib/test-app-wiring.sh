@@ -21,7 +21,7 @@ deploy_for() {
     source scripts/lib/select-apps.sh
     select_apps
     out=""
-    for k in contractiq mideasttourism industrial-iot resolveai wingman pharmavigil claimsiq; do
+    for k in contractiq mideasttourism industrial-iot resolveai wingman pharmavigil quoteiq claimsiq; do
       app_selected "$k" && out="$out $k"
     done
     echo "${out# }"
@@ -32,7 +32,7 @@ echo "deploy.sh / dev-local.sh selection"
 check "APPS=none -> nothing"        ""                          "$(deploy_for none)"
 check "APPS=pharmavigil -> one"     "pharmavigil"               "$(deploy_for pharmavigil)"
 check "APPS=7,5 -> two by number"   "pharmavigil claimsiq"      "$(deploy_for 7,5)"
-check "APPS=all -> every app"       "contractiq mideasttourism industrial-iot resolveai wingman pharmavigil claimsiq" "$(deploy_for all)"
+check "APPS=all -> every app"       "contractiq mideasttourism industrial-iot resolveai wingman pharmavigil quoteiq claimsiq" "$(deploy_for all)"
 
 # ── the guard lines really exist in deploy.sh ────────────────────────────
 echo ""

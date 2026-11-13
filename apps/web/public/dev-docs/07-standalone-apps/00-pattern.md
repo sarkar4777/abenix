@@ -335,6 +335,7 @@ The Python apps in this repo vendor the SDK under `<app>/api/sdk/abenix_sdk/`. `
 - [02-contractiq](02-contractiq.md) — E&C-Copilot, the largest app: contract extraction, KB + knowledge graph, many agents.
 - [03-others](03-others.md) — short tours of Mideast Tourism, ResolveAI, Industrial-IoT and ClaimsIQ.
 - [05-pharmavigil](05-pharmavigil.md) — a nine-node pipeline with code assets and one ML model, and why each piece sits where it does.
+- [06-quoteiq](06-quoteiq.md) — a pipeline with a `for_each` step per RFQ line, a code asset that does the search and pricing, and every draft reviewed as an Abenix approval.
 - [03-sdk/00-overview](../03-sdk/00-overview.md) — the SDK reference proper.
 - [01-architecture/01-tenants-rbac](../01-architecture/01-tenants-rbac.md) — the actAs pattern from the platform side.
 - [02-runtime/06-agent-to-agent](../02-runtime/06-agent-to-agent.md) — how to compose multiple platform agents in one feature.

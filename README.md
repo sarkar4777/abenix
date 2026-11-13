@@ -54,6 +54,7 @@
   - [ResolveAI — customer-resolution case management](#resolveai-customer-resolution-case-management)
   - [ContractIQ — energy contract intelligence](#contractiq-energy-contract-intelligence)
   - [PharmaVigil — drug-safety intelligence](#pharmavigil-drug-safety-intelligence)
+  - [QuoteIQ — RFQ quoting for a wire and cable maker](#quoteiq-rfq-quoting-for-a-wire-and-cable-maker)
   - [Wingman — commodities trading desk](#wingman-commodities-trading-desk)
 - [Edge runtimes](#edge-runtimes)
   - [How a cloud agent reaches the edge](#how-a-cloud-agent-reaches-the-edge)
@@ -466,6 +467,7 @@ gets a hostname under the ingress load balancer's IP via `nip.io`.
 | ClaimsIQ | http://localhost:3005 | `http://claims.<ip>.nip.io` | no login — open UI |
 | Wingman | http://localhost:3006 | `http://wm.<ip>.nip.io` | platform login |
 | PharmaVigil | http://localhost:3007 | `http://safety.<ip>.nip.io` | no login — open UI |
+| QuoteIQ | http://localhost:3008 | `http://quotes.<ip>.nip.io` | no login — open UI |
 | Grafana | http://localhost:3030 | `http://grafana.<ip>.nip.io` | `admin` / secret `abenix-grafana-admin` (default `abenix-admin`) |
 | Prometheus | http://localhost:9090 | `http://prom.<ip>.nip.io` | none |
 | MQTT broker | `mqtt://localhost:1883` (`MQTT_PORT`, the `abenix-mosquitto` forward) | in-cluster only, `abenix-mosquitto:1883` | none by default |
@@ -488,7 +490,7 @@ Every other key a tool needs can be added later, at run time, by an admin under 
 <a id="showcase-apps"></a>
 ## 🎯 Showcase apps
 
-Seven standalone apps ship in this repo, plus OracleNet which lives inside the core UI. Each one is a real product surface — every line of business logic flows through the platform via the SDK + actAs pattern. `dev-local.sh` and `deploy.sh` ask which ones to start, and `deploy-azure.sh` deploys them.
+Eight standalone apps ship in this repo, plus OracleNet which lives inside the core UI. Each one is a real product surface — every line of business logic flows through the platform via the SDK + actAs pattern. `dev-local.sh` and `deploy.sh` ask which ones to start, and `deploy-azure.sh` deploys them.
 
 <a id="oraclenet-strategic-decision-analysis"></a>
 ### OracleNet — strategic decision-analysis
@@ -591,6 +593,28 @@ over the same features by 7.6 points of accuracy and 0.20 of AUC.
 <p align="center">
   <img src="docs/screenshots/usecases/pharmavigil-case.png" alt="PharmaVigil case detail" width="100%" />
   <br/><em>PharmaVigil case detail — coded terms, seriousness criteria, causality, disproportionality and the review gate</em>
+</p>
+
+<a id="quoteiq-rfq-quoting-for-a-wire-and-cable-maker"></a>
+### QuoteIQ — RFQ quoting for a wire and cable maker
+
+Request-for-quotation emails for a fluoropolymer wire and cable manufacturer,
+written the way customers really write them: military part numbers, shorthand
+like `600V 7/0.16 OD 1.1 BLK, Wht, Red, Grn`, or a plain-language spec. Each
+line is matched to a product in a mock ERP, and the RFQ ends as a quote or a
+clarification for a person to review, or an escalation to staff. Seven nodes,
+four agents and a code asset.
+
+*Why it's interesting.* The model reads and the code counts. An agent turns
+each line's wording into a structured ERP query, and a code asset does the
+search and every price, so a quote's numbers never come from the model. Each
+line is searched in its own `for_each` step, so the run view shows how every
+line was matched. And no email goes out unreviewed: every draft is an Abenix
+approval whose three decisions are send, ask the customer, or escalate.
+
+<p align="center">
+  <img src="docs/screenshots/usecases/quoteiq-email.png" alt="QuoteIQ email page" width="100%" />
+  <br/><em>QuoteIQ email page — each line matched to a product, the minimum order quantity applied where the request fell short, and the quote waiting for review</em>
 </p>
 
 <a id="wingman-commodities-trading-desk"></a>
