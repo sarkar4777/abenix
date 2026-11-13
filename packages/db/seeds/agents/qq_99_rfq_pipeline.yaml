@@ -4,8 +4,9 @@ description: >-
   Turns one request-for-quotation email into a quote or a clarification
   draft for a person to review, or an escalation for staff. Extract the RFQ
   lines → match each line to an ERP product in parallel, one visible step per
-  line → decide the RFQ outcome under the hold rule → route: draft the email
-  for a quote or a clarification, or collect the escalation. Prices and
+  line → take each matched line's product and prices from the ERP → decide
+  the RFQ outcome under the hold rule → route: draft the email for a quote or
+  a clarification, or collect the escalation. Products, prices and
   minimum-order arithmetic come from the quoteiq-erp-query code asset, never
   from a model.
 agent_type: oob
@@ -62,17 +63,33 @@ pipeline_config:
         max_concurrency: 8
       max_retries: 1
 
+    # Not a model. Every matched line's product record and prices are taken
+    # from the ERP for the quantities the extractor read, replacing whatever
+    # the matcher wrote, so no SKU, description or number on a quote comes
+    # from a model. A matched SKU the ERP doesn't hold fails the step.
+    - id: price
+      label: "Price from the ERP"
+      tool_name: code_asset
+      depends_on: [search]
+      arguments:
+        code_asset_id: quoteiq-erp-query
+        timeout_seconds: 60
+        input:
+          operation: price_lines
+          lines: "{{search}}"
+          rfq_lines: "{{extract.lines}}"
+
     - id: decide
       label: "Decide RFQ outcome"
       type: agent
       agent_slug: quoteiq-rfq-decider
-      depends_on: [search]
+      depends_on: [price]
       input: |
         Sender:  {{extract.sender}}
         Subject: {{extract.subject}}
 
         Line results:
-        {{search}}
+        {{price.result.lines}}
 
     - id: route
       label: "Route"
@@ -122,7 +139,7 @@ pipeline_config:
         sender: "{{extract.sender}}"
         sender_email: "{{context.sender_email}}"
         subject: "{{context.subject}}"
-        lines: "{{search}}"
+        lines: "{{price.result.lines}}"
         line_outcomes: "{{decide.line_outcomes}}"
         email_brief: "{{decide.email_brief}}"
         email: "{{draft_email}}"

@@ -5,7 +5,8 @@ description: >-
   (MoQ, quantity-break discount, lead time) and lists the values a field
   takes. The catalogue is products.csv beside the code. The calling agent
   turns the customer's wording into filters; this asset only filters, looks
-  up and does the price arithmetic.
+  up and does the price arithmetic. The pipeline's price_lines step replaces
+  every matched line's product and prices with the ERP's own.
 
 input_schema:
   type: object
@@ -13,7 +14,7 @@ input_schema:
   properties:
     operation:
       type: string
-      enum: [search_products, get_product, get_price, list_values]
+      enum: [search_products, get_product, get_price, list_values, price_lines]
     standard_part_number:
       type: string
       description: "M22759 part number, exact, or a prefix ending in * (M22759/16-*)"
@@ -47,6 +48,8 @@ input_schema:
     quantity: { type: number, description: "For get_price. Leave out to quote the MoQ" }
     quantities: { type: array, items: { type: number }, description: "For get_price, several quantities at once" }
     field: { type: string, description: "For list_values" }
+    lines: { type: array, description: "For price_lines, called by the pipeline: the matcher's line results" }
+    rfq_lines: { type: array, items: { type: object }, description: "For price_lines: the extractor's RFQ lines, for their quantities" }
 
 output_schema:
   type: object
@@ -70,6 +73,7 @@ output_schema:
           net_unit_price: { type: number }
           line_total: { type: number }
     values: { type: array, description: "list_values" }
+    lines: { type: array, description: "price_lines: the line results, products and prices from the ERP" }
     error: { type: string }
 
 example_input:

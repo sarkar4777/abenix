@@ -6,8 +6,9 @@ description: >-
   1.1 BLK", or plain-language specifications), turns it into structured filters
   for the quoteiq-erp-query code asset, and decides the line's outcome:
   matched, needs clarification, not in catalogue, or ERP record inconsistent.
-  Prices a matched line through the same asset, so no number on a quote comes
-  from the model.
+  It names the product but doesn't price it: the pipeline's next step takes a
+  matched line's product record and prices from the same asset, so nothing on
+  a quote comes from the model.
 agent_type: oob
 category: manufacturing
 icon: Search
@@ -30,8 +31,6 @@ system_prompt: |
      "min_voltage_v": 600, "limit": 50}
     {"operation": "search_products", "standard_part_number": "M22759/16-22-9"}
     {"operation": "get_product", "sku": "FW-12345"}
-    {"operation": "get_price", "sku": "FW-12345", "quantities": [100, 500]}
-    {"operation": "get_price", "sku": "FW-12345"}          (quotes the MoQ)
     {"operation": "list_values", "field": "plating"}
   If the ERP answers with an error, read it and correct the call. After three
   failed calls for the same line, stop and report the line as
@@ -102,13 +101,9 @@ system_prompt: |
   with that in mind. The RFQ is sound; the ERP is not.
 
   For each outcome, also report:
-    matched                  product, and pricing. You MUST call get_price
-                             for a matched line: {"operation": "get_price",
-                             "sku": ..., "quantities": [the line's
-                             quantities]}, or without quantities when the line
-                             has none, which quotes the MoQ. Put get_price's
-                             whole answer in pricing, unchanged: its prices
-                             list holds one entry per quantity
+    matched                  product: its sku, standard_part_number and name.
+                             Don't price it: the pipeline's next step takes
+                             the product record and the prices from the ERP
     needs_clarification      candidates_total, and differs_on: the choices the
                              customer must make, each once, keyed by its
                              search_products filter name (awg, stranding,
@@ -125,9 +120,8 @@ system_prompt: |
                              products whose awg is closest to 6
     erp_record_inconsistent  problem: which fields disagree, and the SKUs
 
-  Never compute or adjust a price, a quantity or a discount: get_price does
-  that. Never invent a product, an attribute or a value the ERP did not
-  return. Copy line_ref and customer_reference from the line you were given.
+  Never compute a price, a quantity or a discount. Never invent a product,
+  an attribute or a value the ERP did not return. Copy line_ref and customer_reference from the line you were given.
 
   Answer with ONE line of JSON matching the output schema: no line breaks
   between fields, no code fences, no text before or after it.
@@ -170,9 +164,6 @@ output_schema:
         name: { type: string }
         sale_description: { type: string }
         uom: { type: string }
-    pricing:
-      type: [object, "null"]
-      description: "The get_price result, copied as returned"
     candidates_total: { type: integer }
     differs_on:
       type: object

@@ -602,7 +602,7 @@ Request-for-quotation emails for a fluoropolymer wire and cable manufacturer,
 written the way customers really write them: military part numbers, shorthand
 like `600V 7/0.16 OD 1.1 BLK, Wht, Red, Grn`, or a plain-language spec. Each
 line is matched to a product in a mock ERP, and the RFQ ends as a quote or a
-clarification for a person to review, or an escalation to staff. Seven nodes,
+clarification for a person to review, or an escalation to staff. Eight nodes,
 four agents and a code asset.
 
 *Why it's interesting.* The model reads and the code counts. An agent turns

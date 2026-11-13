@@ -14,6 +14,7 @@ echo '{"operation": "search_products", "standard_part_number": "M22759/16-22-9"}
 | `get_product` | `sku` | One full record, including the bookkeeping fields search leaves out |
 | `get_price` | `sku`, and `quantity` or `quantities` (leave both out to quote the MoQ) | Per quantity: quoted quantity, `moq_applied`, discount, net unit price, line total. Also MoQ, breaks, lead time |
 | `list_values` | `field` | The values that field takes in the catalogue |
+| `price_lines` | `lines` (the matcher's line results) and `rfq_lines` (the extractor's lines) | The same line results, with each matched line's product record and prices taken from the ERP for the quantities in the email, and nearest products the ERP doesn't hold dropped. Fails, with a non-zero exit, when a matched SKU isn't in the ERP |
 
 Filters: `standard_part_number` (exact, or a prefix ending in `*`), `product_family`, `awg`, `stranding`, `cores`, `twisted`, `core_colours`, `conductor`, `plating`, `insulation` (one or a list), `jacket`, `colour_code`, `od_mm` with `od_tolerance_mm` (default 0.1), `min_voltage_v`, `min_test_voltage_v`, `temp_min_c`, `temp_max_c`, `corona_resistant`, `text`.
 
@@ -21,7 +22,7 @@ Ratings are minimums: `min_voltage_v: 6000` matches anything rated 6 kV or more,
 
 ## How it decides
 
-It doesn't judge. The agent reads the customer's wording, converts it (metric stranding to AWG, colour names to MIL-STD-681 codes) and chooses the filters. This asset filters, looks up and does the price arithmetic, so a quote's numbers never depend on the model:
+It doesn't judge. The agent reads the customer's wording, converts it (metric stranding to AWG, colour names to MIL-STD-681 codes) and chooses the filters. This asset filters, looks up and does the price arithmetic. The pipeline's step after the matcher calls `price_lines`, so a quote's product and numbers come from here, never from the model's answer:
 
 - The quoted quantity is the requested one, or the MoQ when none was given or the request is below it.
 - The discount is that of the highest quantity break the quoted quantity reaches.

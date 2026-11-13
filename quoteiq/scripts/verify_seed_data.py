@@ -291,6 +291,50 @@ def check_sandbox_entry(products) -> None:
     check(values.get("values") == ["nickel", "silver", "tin"], f"list_values plating: {values.get('values')}")
 
 
+def check_price_lines(products) -> None:
+    """The pipeline's step after the matcher takes products and prices from the ERP."""
+    print("\nprice_lines")
+    real = products[0]
+    other = products[1]
+    # a matcher answer that names a real SKU but invents its record and price,
+    # wrapped as a pipeline step's result
+    invented = {
+        "line_ref": 1, "customer_reference": "ref 1", "outcome": "matched",
+        "product": {"sku": real["sku"], "name": "invented name", "sale_description": "invented"},
+        "pricing": {"prices": [{"requested_qty": 100, "net_unit_price": 9.99, "line_total": 999.0}]},
+    }
+    no_qty = {"line_ref": 2, "customer_reference": "ref 2", "outcome": "matched", "product": {"sku": other["sku"]}}
+    not_found = {
+        "line_ref": 3, "customer_reference": "ref 3", "outcome": "not_in_catalogue",
+        "nearest": [{"sku": real["sku"], "name": "invented", "why": "next size"}, {"sku": "FW-00000"}],
+    }
+    rfq = [{"line_ref": 1, "quantities": [100, 5000]}, {"line_ref": 2}, {"line_ref": 3, "quantities": [150]}]
+    lines = [{"response": json.dumps(invented), "cost": 0.01}, json.dumps(no_qty), not_found, "not JSON"]
+    out = erp.run({"operation": "price_lines", "lines": lines, "rfq_lines": rfq}, products)
+    got = out.get("lines") or []
+    check(len(got) == 4, f"one result per line: {len(got)}")
+    if len(got) != 4:
+        return
+    first = json.loads(got[0]["response"])
+    truth = erp.run({"operation": "get_price", "sku": real["sku"], "quantities": [100, 5000]}, products)
+    check(first["product"]["name"] == real["name"], "matched product record comes from the ERP")
+    check(first["pricing"] == truth, "matched prices come from the ERP, for the email's quantities")
+    check(got[0]["cost"] == 0.01, "the step result around the answer is kept")
+    second = json.loads(got[1])
+    check([p["quoted_qty"] for p in second["pricing"]["prices"]] == [other["moq"]],
+          "a line with no quantity is quoted at the MoQ")
+    nearest = got[2]["nearest"]
+    check([n["sku"] for n in nearest] == [real["sku"]] and nearest[0]["name"] == real["name"]
+          and nearest[0]["why"] == "next size", "nearest products come from the ERP, unknown SKUs dropped")
+    check(got[3] == "not JSON", "an unreadable answer is passed on unchanged")
+    bad = {**invented, "product": {"sku": "FW-00000"}}
+    request = json.dumps({"operation": "price_lines", "lines": [json.dumps(bad)], "rfq_lines": rfq})
+    proc = subprocess.run([sys.executable, str(ASSET / "main.py")], input=request,
+                          capture_output=True, text=True, timeout=30)
+    check(proc.returncode != 0 and "FW-00000" in proc.stdout,
+          f"a matched SKU the ERP doesn't hold fails the step: exit {proc.returncode}")
+
+
 def main() -> int:
     products = erp.load_products()
     expected = json.loads(EXPECTED.read_text(encoding="utf-8"))
@@ -301,6 +345,7 @@ def main() -> int:
     check_catalogue(products, expected, by_signature)
     check_examples(products, expected, by_signature)
     check_sandbox_entry(products)
+    check_price_lines(products)
 
     print()
     if failures:

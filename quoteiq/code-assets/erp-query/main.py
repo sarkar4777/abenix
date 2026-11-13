@@ -8,10 +8,13 @@ the code. Operations:
   get_product      one full record by SKU
   get_price        quoted quantity, MoQ, quantity-break discount, lead time
   list_values      the values a field takes, so callers use the ERP's terms
+  price_lines      the pipeline's step after the matcher: every matched line's
+                   product and prices taken from the ERP
 
 The model reads the customer's wording and decides the filters. This program
-only filters, looks up and does the price arithmetic, so a quote's numbers
-never depend on the model's arithmetic.
+only filters, looks up and does the price arithmetic. A matched line's product
+record and prices come from price_lines, not from the matcher's answer, so a
+quote's numbers never depend on the model.
 """
 
 from __future__ import annotations
@@ -349,12 +352,91 @@ def list_values(products: list[dict[str, Any]], args: dict[str, Any]) -> dict[st
     return {"operation": "list_values", "field": field, "values": values}
 
 
+QUOTED_PRODUCT_FIELDS = ("sku", "standard_part_number", "name", "sale_description", "uom")
+NEAREST_FIELDS = ("sku", "standard_part_number", "name", "awg")
+
+
+def _line_answer(item: Any) -> tuple[dict[str, Any] | None, Any]:
+    """The matcher's answer inside one line result, and how to put it back.
+
+    A pipeline step's result wraps the answer as {"response": "<json>", "cost": ...}.
+    An answer that isn't JSON is left as it is: the decider and the app treat
+    it as unreadable.
+    """
+    if isinstance(item, dict) and "response" in item:
+        answer, _ = _line_answer(item["response"])
+        if answer is None:
+            return None, item
+        text = isinstance(item["response"], str)
+        return answer, lambda a: {**item, "response": json.dumps(a) if text else a}
+    if isinstance(item, str):
+        try:
+            answer = json.loads(item)
+        except ValueError:
+            return None, item
+        return (answer, json.dumps) if isinstance(answer, dict) else (None, item)
+    if isinstance(item, dict):
+        return item, lambda a: a
+    return None, item
+
+
+def price_lines(products: list[dict[str, Any]], args: dict[str, Any]) -> dict[str, Any]:
+    """Replace what the matcher reported about products with the ERP's own records.
+
+    A matched line gets the chosen product's record and the prices for the
+    quantities the extractor read from the email, whatever the matcher wrote.
+    A nearest product the ERP doesn't hold is dropped. A matched line whose SKU
+    the ERP doesn't hold is an error: the matcher chose something that doesn't
+    exist, and the step fails rather than quote it.
+    """
+    lines = args.get("lines")
+    if not isinstance(lines, list):
+        raise RequestError("lines must be the list of the matcher's line results")
+    rfq_lines = args.get("rfq_lines")
+    if not isinstance(rfq_lines, list):
+        raise RequestError("rfq_lines must be the extractor's list of RFQ lines")
+    quantities = {
+        line.get("line_ref"): line.get("quantities")
+        for line in rfq_lines if isinstance(line, dict)
+    }
+    by_sku = {p["sku"]: p for p in products}
+    out = []
+    for item in lines:
+        answer, put_back = _line_answer(item)
+        if answer is None:
+            out.append(put_back)
+            continue
+        ref = answer.get("line_ref")
+        if answer.get("outcome") == "matched":
+            sku = str((answer.get("product") or {}).get("sku") or "").strip().upper()
+            if sku not in by_sku:
+                raise RequestError(f"line {ref} was matched to {sku or 'no SKU'}, which the ERP doesn't hold")
+            if ref not in quantities:
+                raise RequestError(f"line {ref} is not one of the RFQ's lines")
+            product = by_sku[sku]
+            answer["product"] = {k: product.get(k) for k in QUOTED_PRODUCT_FIELDS}
+            answer["pricing"] = get_price(products, {"sku": sku, "quantities": quantities[ref]})
+        if isinstance(answer.get("nearest"), list):
+            answer["nearest"] = [
+                {**entry, **{k: by_sku[s].get(k) for k in NEAREST_FIELDS}}
+                for entry in answer["nearest"]
+                if isinstance(entry, dict)
+                and (s := str(entry.get("sku") or "").strip().upper()) in by_sku
+            ]
+        out.append(put_back(answer))
+    return {"operation": "price_lines", "lines": out}
+
+
 OPERATIONS = {
     "search_products": search_products,
     "get_product": get_product,
     "get_price": get_price,
     "list_values": list_values,
+    "price_lines": price_lines,
 }
+# Called by the pipeline, not by a model, so no one is there to read an error
+# and correct the call: the program exits non-zero and the step fails.
+PIPELINE_OPERATIONS = {"price_lines"}
 
 
 def _flatten(payload: dict[str, Any]) -> dict[str, Any]:
@@ -393,7 +475,10 @@ def main() -> None:
     except Exception as exc:  # noqa: BLE001
         json.dump({"error": f"invalid JSON on stdin: {exc}"}, sys.stdout)
         return
-    json.dump(run(payload), sys.stdout)
+    answer = run(payload)
+    json.dump(answer, sys.stdout)
+    if answer.get("operation") in PIPELINE_OPERATIONS and "error" in answer:
+        sys.exit(1)
 
 
 if __name__ == "__main__":
