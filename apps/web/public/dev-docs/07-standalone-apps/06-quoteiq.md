@@ -16,7 +16,7 @@ quoteiq/
                 app/routers (emails, reviews, health), tests/, sdk/
   web/          Next.js on :3008. Pages: / (inbox), /emails/[id]
   code-assets/  erp-query: the mock ERP and its 127-product catalogue
-  scripts/      generate_products.py (the catalogue), verify_seed_data.py
+  scripts/      generate_products.py (the catalogue), verify_seed_data.py, evaluate_pipeline.py
   test-data/    emails/ (seven example RFQs), expected-outcomes.json
   k8s/          quoteiq.yaml (quoteiq-api ClusterIP, quoteiq-web NodePort 30308)
   start.sh      local dev launcher
@@ -210,6 +210,12 @@ still going when the API stopped is picked up again on start.
 `test-data/expected-outcomes.json` holds each line's expected outcome and each
 reply's expected greeting. The emails are reworded from real enquiries, with
 invented senders on `.example` domains.
+
+`scripts/evaluate_pipeline.py` runs the emails through the pipeline and scores
+every run against those expectations: the status, each line's outcome, the
+nearest sizes, the greeting, no SKU in an email, and every matched line's
+prices against the code asset's own arithmetic. It also reports each email's
+true cost, each line's search included.
 
 ---
 

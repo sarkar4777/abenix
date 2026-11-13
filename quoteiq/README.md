@@ -28,7 +28,7 @@ quoteiq/
   api/           FastAPI on :8008. app/core (store, runs, reviews), app/routers, tests, sdk (vendored)
   web/           Next.js on :3008. / (inbox), /emails/[id] (one email)
   code-assets/   erp-query: the mock ERP and its catalogue
-  scripts/       generate_products.py (the catalogue), verify_seed_data.py
+  scripts/       generate_products.py (the catalogue), verify_seed_data.py, evaluate_pipeline.py
   test-data/     emails/ (seven example RFQs), expected-outcomes.json
 ```
 
@@ -201,6 +201,15 @@ With the app running against Abenix, a Playwright spec processes the next waitin
 
 ```bash
 npx playwright test e2e/uat_quoteiq.spec.ts
+```
+
+To evaluate the agents themselves, `scripts/evaluate_pipeline.py` sends the example emails through the pipeline, without the app, and scores every run against `test-data/expected-outcomes.json`: the status, every line's outcome, the nearest sizes for a size not made, the recipient and greeting, no SKU in an email, and every matched line's prices against the ERP code asset's own arithmetic. It reports each email's time and cost, each line's search included. Running the emails calls the model; `--score-only` scores the saved runs again for free:
+
+```bash
+pip install -r quoteiq/api/requirements.txt
+export QUOTEIQ_ABENIX_API_KEY=af_...
+python3 quoteiq/scripts/evaluate_pipeline.py          # all seven, or by number: 02 07
+python3 quoteiq/scripts/evaluate_pipeline.py --score-only
 ```
 
 The web app is checked by its type check, lint and build:
