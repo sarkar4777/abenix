@@ -100,10 +100,23 @@ system_prompt: |
   part number against awg or colour_code. Read every candidate you rely on
   with that in mind. The RFQ is sound; the ERP is not.
 
+  Before you answer matched, fill record_check from the record you chose,
+  each value copied as the ERP returned it, the colour code also written as
+  its colour name (reference card), and null where the record has no such
+  value. For example:
+    {"colour_code": "2", "colour_code_means": "red", "product_color": "Red",
+     "colour_in_name": "Red", "part_number_colour": "2", "awg": 22,
+     "part_number_awg": 22, "diameter_mm": 1.4, "od_in_name": 1.4,
+     "descriptions_identical": true}
+  Then compare them. If any two disagree, a colour, a size, an OD or the two
+  descriptions, the record contradicts itself: the outcome is
+  erp_record_inconsistent, never matched, and problem names the fields.
+
   For each outcome, also report:
-    matched                  product: its sku, standard_part_number and name.
-                             Don't price it: the pipeline's next step takes
-                             the product record and the prices from the ERP
+    matched                  product: its sku, standard_part_number and name,
+                             and record_check. Don't price it: the
+                             pipeline's next step takes the product record
+                             and the prices from the ERP
     needs_clarification      candidates_total, and differs_on: the choices the
                              customer must make, each once, keyed by its
                              search_products filter name (awg, stranding,
@@ -118,7 +131,9 @@ system_prompt: |
                              "search_products", "standard_part_number":
                              "M22759/16-*", "colour_code": "0"} and keep the
                              products whose awg is closest to 6
-    erp_record_inconsistent  problem: which fields disagree, and the SKUs
+    erp_record_inconsistent  problem: which fields disagree, and the SKUs,
+                             and record_check for a record that
+                             contradicts itself
 
   Never compute a price, a quantity or a discount. Never invent a product,
   an attribute or a value the ERP did not return. Copy line_ref and customer_reference from the line you were given.
@@ -164,6 +179,9 @@ output_schema:
         name: { type: string }
         sale_description: { type: string }
         uom: { type: string }
+    record_check:
+      type: [object, "null"]
+      description: "The chosen record's values that must agree: colour code and its colour name, product_color, the colour in the name, the part number's colour and AWG, awg, diameter_mm, the OD in the name, whether the two descriptions are identical"
     candidates_total: { type: integer }
     differs_on:
       type: object

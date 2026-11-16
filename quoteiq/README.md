@@ -212,6 +212,12 @@ python3 quoteiq/scripts/evaluate_pipeline.py          # all seven, or by number:
 python3 quoteiq/scripts/evaluate_pipeline.py --score-only
 ```
 
+The key must be one the Abenix you run against knows. A cluster deploy mints its own key into the `quoteiq-secrets` Secret, so a key from a dev-local `.env` gets `HTTP 401: Not authenticated` there. On a cluster, take the key from the Secret:
+
+```bash
+export QUOTEIQ_ABENIX_API_KEY=$(kubectl get secret -n abenix quoteiq-secrets -o jsonpath='{.data.QUOTEIQ_ABENIX_API_KEY}' | base64 -d)
+```
+
 The web app is checked by its type check, lint and build:
 
 ```bash
