@@ -1,0 +1,9 @@
+{
+  "operation": "search_products",
+  "awg": 22,
+  "stranding": "19/34",
+  "min_voltage_v": 1000,
+  "insulation": "PTFE",
+  "od_mm": 1.63,
+  "colour_code": "9"
+}

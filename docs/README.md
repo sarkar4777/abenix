@@ -125,13 +125,14 @@ From `git clone` to a running cluster.
 - [The `--only` deploy trap](06-deployment/deploy-only-trap.md)
 
 ### 7. Building apps on Abenix
-How a third party builds a vertical app that uses Abenix as a remote platform. Includes references for the seven example apps in this monorepo.
+How a third party builds a vertical app that uses Abenix as a remote platform. Includes references for the eight example apps in this monorepo.
 
 - [00 — Building an app on top of Abenix (read this first)](07-standalone-apps/00-pattern.md)
 - [01 — Wingman (reference: energy trading)](07-standalone-apps/01-wingman.md)
 - [02 — E&C-Copilot (reference: contract intelligence)](07-standalone-apps/02-contractiq.md)
 - [03 — Mideast Tourism, ResolveAI, ClaimsIQ, Industrial-IoT (reference)](07-standalone-apps/03-others.md)
 - [05 — PharmaVigil (reference: drug safety)](07-standalone-apps/05-pharmavigil.md)
+- [06 — QuoteIQ (reference: RFQ quoting)](07-standalone-apps/06-quoteiq.md)
 
 ### 8. How-to (walkthroughs)
 Concrete step-by-step guides for the most common developer tasks.

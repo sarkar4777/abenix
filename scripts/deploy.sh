@@ -112,7 +112,7 @@ usage() {
   echo "  build          Build Docker images only"
   echo "  reload <svc>   Rebuild one service and restart it"
   echo "                 core: api web worker agent-runtime edge-runtime"
-  echo "                 apps: {contractiq,industrial-iot,resolveai,wingman,mideasttourism,pharmavigil}-{api,web}, claimsiq"
+  echo "                 apps: {contractiq,industrial-iot,resolveai,wingman,mideasttourism,pharmavigil,quoteiq}-{api,web}, claimsiq"
   echo "  forwards       Re-establish and verify all local port forwards"
   echo "  chart          Apply the Helm chart to the local cluster with the images already running, no build"
   echo "                 TELEMETRY_INGEST_REPLICAS=2 sets the telemetry ingest replicas"
@@ -654,6 +654,24 @@ build_images() {
     done
   fi
 
+  # Build QuoteIQ standalone images (api + web). The API's Dockerfile copies
+  # the example emails from test-data/, so its context is the app root.
+  # Mirrors BUILD_CONTEXTS in scripts/deploy-azure.sh.
+  if _should_build_app quoteiq && [ -d "${ROOT_DIR}/quoteiq" ]; then
+    step "Building QuoteIQ standalone images"
+    for part in "api" "web"; do
+      local qq_img="${registry}/quoteiq-${part}:${IMAGE_TAG}"
+      local qq_df="${ROOT_DIR}/quoteiq/${part}/Dockerfile"
+      local qq_ctx="${ROOT_DIR}/quoteiq/${part}"
+      [ "${part}" = "api" ] && qq_ctx="${ROOT_DIR}/quoteiq"
+      [ ! -f "${qq_df}" ] && { warn "No Dockerfile for quoteiq/${part}"; continue; }
+      log "Building quoteiq-${part}..."
+      _build_app_image "quoteiq-${part}" "${qq_df}" "${qq_ctx}" \
+        "${qq_img}" "${registry}/quoteiq-${part}:latest" || { _skip_app quoteiq; break; }
+      if [ "${push}" = "true" ]; then docker push "${qq_img}" 2>&1 | tail -1; fi
+    done
+  fi
+
 
   # Build Mideast Tourism + Wingman standalone images. Both ship k8s
   # manifests already pointing at localhost:5000/abenix/*, and
@@ -866,6 +884,30 @@ deploy_pharmavigil() {
     --namespace="${NAMESPACE}" --timeout=120s 2>&1 | tail -3 || warn "PharmaVigil API not ready in 120s"
   kubectl wait --for=condition=ready pod -l app=pharmavigil-web \
     --namespace="${NAMESPACE}" --timeout=120s 2>&1 | tail -3 || warn "PharmaVigil Web not ready in 120s"
+}
+
+# ── Deploy QuoteIQ standalone ────────────────────────────────────────────────
+deploy_quoteiq() {
+  if [ ! -f "${ROOT_DIR}/quoteiq/k8s/quoteiq.yaml" ]; then
+    warn "QuoteIQ k8s manifests not found, skipping"
+    return 0
+  fi
+  step "Deploying QuoteIQ to namespace ${NAMESPACE}"
+  local qq_key
+  qq_key="$(_kept_secret quoteiq-secrets QUOTEIQ_ABENIX_API_KEY "${QUOTEIQ_ABENIX_API_KEY:-}")"
+  _note_key QUOTEIQ_ABENIX_API_KEY "${qq_key}"
+
+  kubectl apply -f "${ROOT_DIR}/quoteiq/k8s/quoteiq.yaml" 2>&1 | tail -10
+  kubectl create secret generic quoteiq-secrets \
+    --namespace="${NAMESPACE}" \
+    --from-literal=QUOTEIQ_ABENIX_API_KEY="${qq_key}" \
+    --dry-run=client -o yaml | kubectl apply -f - 2>&1 | tail -3
+  ok "QuoteIQ deployed"
+
+  kubectl wait --for=condition=ready pod -l app=quoteiq-api \
+    --namespace="${NAMESPACE}" --timeout=120s 2>&1 | tail -3 || warn "QuoteIQ API not ready in 120s"
+  kubectl wait --for=condition=ready pod -l app=quoteiq-web \
+    --namespace="${NAMESPACE}" --timeout=120s 2>&1 | tail -3 || warn "QuoteIQ Web not ready in 120s"
 }
 
 
@@ -1607,6 +1649,7 @@ setup_port_forwards() {
   _plan resolveai-web 3004 3004;      _plan resolveai-api 8004 8004
   _plan wingman-web 3006 3006;        _plan wingman-api 8006 8006
   _plan pharmavigil-web 3007 3007;    _plan pharmavigil-api 8007 8007
+  _plan quoteiq-web 3008 3008;        _plan quoteiq-api 8008 8008
   # ClaimsIQ is a single Spring Boot + Vaadin container — no api/web split.
   _plan claimsiq 3005 3005
   # LiveKit signaling for the browser, matches LIVEKIT_PUBLIC_URL
@@ -1912,6 +1955,7 @@ deploy_local() {
   app_selected resolveai      && { deploy_resolveai       || warn "ResolveAI deployment failed (non-fatal)"; }
   app_selected wingman        && { deploy_wingman         || warn "Wingman deployment failed (non-fatal)"; }
   app_selected pharmavigil    && { deploy_pharmavigil     || warn "PharmaVigil deployment failed (non-fatal)"; }
+  app_selected quoteiq        && { deploy_quoteiq         || warn "QuoteIQ deployment failed (non-fatal)"; }
   app_selected claimsiq       && { deploy_claimsiq        || warn "ClaimsIQ deployment failed (non-fatal)"; }
   [ "${#SELECTED_APPS[@]}" -eq 0 ] && log "No use-case apps selected — core platform only."
   if [ "${#FAILED_APPS[@]}" -gt 0 ]; then
@@ -2229,6 +2273,7 @@ deploy_forwards() {
     "claimsiq:3005"
     "wingman-web:3006" "wingman-api:8006"
     "pharmavigil-web:3007" "pharmavigil-api:8007"
+    "quoteiq-web:3008" "quoteiq-api:8008"
     "abenix-neo4j:${NEO4J_PORT}"
     "abenix-prometheus:${PROMETHEUS_PORT}" "abenix-grafana:${GRAFANA_PORT}"
     "abenix-mailpit:${MAILPIT_PORT}" "abenix-webhook-catcher:${CATCHER_PORT}"
@@ -2346,12 +2391,13 @@ deploy_reload() {
     resolveai-api|resolveai-web)       kind="app"; app_dir="resolveai";       app_part="${svc#resolveai-}" ;;
     wingman-api|wingman-web)           kind="app"; app_dir="wingman";         app_part="${svc#wingman-}" ;;
     pharmavigil-api|pharmavigil-web)   kind="app"; app_dir="pharmavigil";     app_part="${svc#pharmavigil-}" ;;
+    quoteiq-api|quoteiq-web)           kind="app"; app_dir="quoteiq";         app_part="${svc#quoteiq-}" ;;
     mideasttourism-api|mideasttourism-web) kind="app"; app_dir="mideasttourism"; app_part="${svc#mideasttourism-}" ;;
     claimsiq)                          kind="app"; app_dir="claimsiq";         app_part="app" ;;
     *)
       err "reload does not know '${svc}'"
       err "  core: api web worker agent-runtime edge-runtime"
-      err "  apps: {contractiq,industrial-iot,resolveai,wingman,mideasttourism,pharmavigil}-{api,web}"
+      err "  apps: {contractiq,industrial-iot,resolveai,wingman,mideasttourism,pharmavigil,quoteiq}-{api,web}"
       exit 1
       ;;
   esac
@@ -2431,11 +2477,11 @@ deploy_reload() {
       done
     fi
   else
-    # mideasttourism-api is the one app whose Dockerfile COPYs from the app
-    # root rather than from the api/ subdirectory.
+    # mideasttourism-api and quoteiq-api COPY from the app root rather than
+    # from the api/ subdirectory.
     local ctx="${ROOT_DIR}/${app_dir}/${app_part}"
     local dockerfile="${ctx}/Dockerfile"
-    if [ "${svc}" = "mideasttourism-api" ]; then
+    if [ "${svc}" = "mideasttourism-api" ] || [ "${svc}" = "quoteiq-api" ]; then
       ctx="${ROOT_DIR}/${app_dir}"
     fi
     # ClaimsIQ's Dockerfile is under app/ but its Gradle build needs the whole

@@ -1,0 +1,6 @@
+[project]
+name = "erp-query"
+version = "1.0.0"
+description = "Mock ERP for the QuoteIQ example: product search, lookup and pricing over a CSV catalogue"
+requires-python = ">=3.11"
+dependencies = []

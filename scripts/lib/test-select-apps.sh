@@ -23,7 +23,7 @@ check() { # check <name> <expected> <actual>
 
 joined() { parse_app_selection "$1" 2>/dev/null | tr '\n' ' ' | sed 's/ $//'; }
 
-ALL="contractiq mideasttourism industrial-iot resolveai claimsiq wingman pharmavigil"
+ALL="contractiq mideasttourism industrial-iot resolveai claimsiq wingman pharmavigil quoteiq"
 
 echo "parse_app_selection"
 check "empty means all"            "${ALL}" "$(joined '')"
@@ -35,7 +35,7 @@ check "single key"                 "pharmavigil" "$(joined 'pharmavigil')"
 check "two keys"                   "pharmavigil claimsiq" "$(joined 'pharmavigil,claimsiq')"
 check "spaces are tolerated"       "pharmavigil claimsiq" "$(joined ' pharmavigil , claimsiq ')"
 check "numbers select by position" "contractiq industrial-iot" "$(joined '1,3')"
-check "last number"                "pharmavigil" "$(joined '7')"
+check "last number"                "quoteiq" "$(joined '8')"
 check "mixed keys and numbers"     "contractiq pharmavigil" "$(joined '1,pharmavigil')"
 check "unknown token is skipped"   "pharmavigil" "$(joined 'nosuchapp,pharmavigil')"
 check "out-of-range number skipped" ""         "$(joined '99')"

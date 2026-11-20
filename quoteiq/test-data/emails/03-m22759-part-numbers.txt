@@ -1,0 +1,20 @@
+From: Hannah Reyes, Tessaline Electronics <h.reyes@tessaline-electronics.example>
+Subject: RFQ: M22759/16 wire
+
+Hello,
+
+Could you please quote the following?
+
+Part number       Qty    UOM
+M22759/16-16-2    305    M
+M22759/16-22-2    1000   M
+M22759/16-22-9    500    M
+M22759/16-12-4    500    M
+M22759/16-20-1    500    M
+M22759/16-22-0    2000   M
+M22759/16-8-6     100    M
+M22759/16-16-6    100    M
+
+Thank you,
+Hannah Reyes
+Buying Team

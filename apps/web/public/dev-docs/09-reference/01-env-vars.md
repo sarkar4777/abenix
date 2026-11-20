@@ -720,7 +720,8 @@ chart sets `EDGE_ALLOW_UNSIGNED` from `edge.allowUnsigned`, default `false`. See
 Each app reads `ABENIX_API_URL` and its own key, for example
 `CONTRACTIQ_ABENIX_API_KEY`, `WINGMAN_ABENIX_API_KEY`,
 `INDUSTRIALIOT_ABENIX_API_KEY`, `MIDEASTTOURISM_ABENIX_API_KEY`,
-`RESOLVEAI_ABENIX_API_KEY` and `PHARMAVIGIL_ABENIX_API_KEY`.
+`RESOLVEAI_ABENIX_API_KEY`, `PHARMAVIGIL_ABENIX_API_KEY` and
+`QUOTEIQ_ABENIX_API_KEY`.
 `scripts/seed-standalone-keys.sh` mints them and patches each app's Secret.
 
 Wingman also reads `WINGMAN_CACHE_DIR` (`/data/wingman-cache`),

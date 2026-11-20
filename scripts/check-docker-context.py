@@ -34,6 +34,8 @@ def context_for(df: str) -> str:
         return "claimsiq"
     if df == "mideasttourism/api/Dockerfile":
         return "mideasttourism"
+    if df == "quoteiq/api/Dockerfile":
+        return "quoteiq"
     return str(Path(df).parent).replace("\\", "/")
 
 

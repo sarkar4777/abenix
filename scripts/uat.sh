@@ -44,7 +44,7 @@ SUITE_ADMIN=(
 )
 # standalone apps, each owned by its app; they need the app stacks running
 SUITE_APPS=(
-  uat_model_fallback_ui uat_apps_full uat_wingman uat_claimsiq_deep uat_pharmavigil
+  uat_model_fallback_ui uat_apps_full uat_wingman uat_claimsiq_deep uat_pharmavigil uat_quoteiq
   uat_resolveai_browser uat_contractiq_browser
 )
 

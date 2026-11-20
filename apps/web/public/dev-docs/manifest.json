@@ -337,6 +337,10 @@
         {
           "slug": "07-standalone-apps/05-pharmavigil",
           "title": "PharmaVigil — drug safety"
+        },
+        {
+          "slug": "07-standalone-apps/06-quoteiq",
+          "title": "QuoteIQ — RFQ quoting"
         }
       ]
     },

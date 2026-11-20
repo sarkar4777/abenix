@@ -40,6 +40,13 @@ pharmavigil/web
 pharmavigil/k8s
 !pharmavigil/aimodels
 !pharmavigil/code-assets
+quoteiq/api
+quoteiq/web
+quoteiq/k8s
+quoteiq/scripts
+quoteiq/test-data
+quoteiq/logs
+!quoteiq/code-assets
 mideasttourism
 ppa-analysis
 tpi-analysis

@@ -50,6 +50,7 @@ DISCOVERY_ROOTS = [
     REPO_ROOT / "pharmavigil",
     REPO_ROOT / "resolveai",
     REPO_ROOT / "claimsiq",
+    REPO_ROOT / "quoteiq",
     # Generic shared examples (kept for tenants that haven't enabled a
     # specific vertical yet).
     REPO_ROOT / "examples" / "code-assets",

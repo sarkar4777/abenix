@@ -38,6 +38,7 @@ APPS=(
   "resolveai|resolveai-secrets|RESOLVEAI_ABENIX_API_KEY|standalone-resolveai|resolveai-api,resolveai-web"
   "wingman|wingman-secrets|WINGMAN_ABENIX_API_KEY|standalone-wingman|wingman-api,wingman-web"
   "pharmavigil|pharmavigil-secrets|PHARMAVIGIL_ABENIX_API_KEY|standalone-pharmavigil|pharmavigil-api,pharmavigil-web"
+  "quoteiq|quoteiq-secrets|QUOTEIQ_ABENIX_API_KEY|standalone-quoteiq|quoteiq-api,quoteiq-web"
   "claimsiq|claimsiq-secrets|CLAIMSIQ_ABENIX_API_KEY|standalone-claimsiq|claimsiq"
 )
 

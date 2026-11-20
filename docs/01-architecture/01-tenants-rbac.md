@@ -148,6 +148,7 @@ Each standalone app picks a `subject_type` and stays with it.
 | `resolveai` | ResolveAI customer service |
 | `industrial-iot` | Industrial-IoT (`INDUSTRIALIOT_ACTING_SUBJECT_TYPE` overrides it) |
 | `pharmavigil` | PharmaVigil |
+| `quoteiq` | QuoteIQ |
 | `external` | Default when the header has no `subject_type` |
 
 The platform does not check the type against a fixed list. New apps should pick a stable, kebab-case slug. Renaming it after rows exist splits the history.

@@ -269,6 +269,8 @@ ALL_PORTS=(
   "3006|Wingman Web|wingman-web"
   "8007|PharmaVigil API|pharmavigil-api"
   "3007|PharmaVigil Web|pharmavigil-web"
+  "8008|QuoteIQ API|quoteiq-api"
+  "3008|QuoteIQ Web|quoteiq-web"
 )
 
 # ── Detect if a port is currently LISTENING ───────────────────────────
@@ -1060,6 +1062,7 @@ WANT = {
     'CLAIMSIQ_ABENIX_API_KEY':     'standalone-claimsiq',
     'WINGMAN_ABENIX_API_KEY':      'standalone-wingman',
     'PHARMAVIGIL_ABENIX_API_KEY':  'standalone-pharmavigil',
+    'QUOTEIQ_ABENIX_API_KEY':      'standalone-quoteiq',
 }
 
 async def run():
@@ -1167,6 +1170,7 @@ for k,v in json.load(sys.stdin).items(): print(f'{k}={v}')
   port_listening 8004 && echo -e "  ${CYAN}ResolveAI API${NC}  http://localhost:8004"
   port_listening 8006 && echo -e "  ${CYAN}Wingman API${NC}  http://localhost:8006"
   port_listening 8007 && echo -e "  ${CYAN}PharmaVigil API${NC}  http://localhost:8007"
+  port_listening 8008 && echo -e "  ${CYAN}QuoteIQ API${NC}  http://localhost:8008"
   echo -e "  ${CYAN}API Docs${NC}           http://localhost:8000/docs"
   echo -e "  ${CYAN}Neo4j Browser${NC}      http://localhost:7474"
   echo ""

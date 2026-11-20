@@ -1,0 +1,16 @@
+From: Rajesh Iyer, Corvane Rail Systems <r.iyer@corvane-rail.example>
+Subject: Quote and lead time: PTFE wire
+
+Good day,
+
+Please share your best quote and lead time for the parts below.
+
+MPN                                                  Description                       UOM   Qty
+JSS 51034, WH2P-1A-1927-0                            WIRE PTFE 600V 19/0.36 OD 2.6 BK  MTR   24
+JSS 51034, WH2P-1A-1927-2                            WIRE PTFE 600V 19/0.36 OD 2.6 R   MTR   21
+JSS 51034, WH2P-1A-1929-0 // J 51034, WH2P-1A-1929-0 WIRE PTFE 600V 19/0.29 OD 2.2 BK  MTR   21
+JSS 51034, WH2P-1A-1929-2                            WIRE PTFE 600V 19/0.29 OD 2.2 R   MTR   21
+
+Regards,
+Mr Rajesh Iyer
+Stores Department

@@ -1,0 +1,91 @@
+{
+  "about": "For every example email: each RFQ line, the ERP query an ideal agent would send after reading it, and the expected outcome. quantities [] means the email gave none, so the MoQ is quoted.",
+  "emails": [
+    {
+      "file": "01-shorthand-colour-expansion.txt",
+      "expected_status": "Success",
+      "expected_greeting": "Dear Daniel Okafor,",
+      "lines": [
+        {"ref": "1. 1000V 19/0.16 OD 1.63 BLK", "query": {"awg": 22, "stranding": "19/34", "min_voltage_v": 1000, "insulation": "PTFE", "od_mm": 1.63, "colour_code": "0"}, "quantities": [100], "expected": "matched", "moq_applied": false},
+        {"ref": "1. 1000V 19/0.16 OD 1.63 Red", "query": {"awg": 22, "stranding": "19/34", "min_voltage_v": 1000, "insulation": "PTFE", "od_mm": 1.63, "colour_code": "2"}, "quantities": [100], "expected": "matched", "moq_applied": false},
+        {"ref": "1. 1000V 19/0.16 OD 1.63 Green", "query": {"awg": 22, "stranding": "19/34", "min_voltage_v": 1000, "insulation": "PTFE", "od_mm": 1.63, "colour_code": "5"}, "quantities": [100], "expected": "matched", "moq_applied": false},
+        {"ref": "1. 1000V 19/0.16 OD 1.63 Wht", "query": {"awg": 22, "stranding": "19/34", "min_voltage_v": 1000, "insulation": "PTFE", "od_mm": 1.63, "colour_code": "9"}, "quantities": [100], "expected": "matched", "moq_applied": false},
+        {"ref": "2. 600V 7/0.16 OD 1.1 BLK", "query": {"awg": 26, "stranding": "7/34", "min_voltage_v": 600, "insulation": "PTFE", "od_mm": 1.1, "colour_code": "0"}, "quantities": [100], "expected": "matched", "moq_applied": false},
+        {"ref": "2. 600V 7/0.16 OD 1.1 Wht", "query": {"awg": 26, "stranding": "7/34", "min_voltage_v": 600, "insulation": "PTFE", "od_mm": 1.1, "colour_code": "9"}, "quantities": [100], "expected": "matched", "moq_applied": false},
+        {"ref": "2. 600V 7/0.16 OD 1.1 Red", "query": {"awg": 26, "stranding": "7/34", "min_voltage_v": 600, "insulation": "PTFE", "od_mm": 1.1, "colour_code": "2"}, "quantities": [100], "expected": "matched", "moq_applied": false},
+        {"ref": "2. 600V 7/0.16 OD 1.1 Grn", "query": {"awg": 26, "stranding": "7/34", "min_voltage_v": 600, "insulation": "PTFE", "od_mm": 1.1, "colour_code": "5"}, "quantities": [100], "expected": "matched", "moq_applied": false},
+        {"ref": "3. 600V 7/0.16 OD 1.4 BLK", "query": {"awg": 26, "stranding": "7/34", "min_voltage_v": 600, "insulation": "PTFE", "od_mm": 1.4, "colour_code": "0"}, "quantities": [100], "expected": "matched", "moq_applied": false},
+        {"ref": "3. 600V 7/0.16 OD 1.4 Wht", "query": {"awg": 26, "stranding": "7/34", "min_voltage_v": 600, "insulation": "PTFE", "od_mm": 1.4, "colour_code": "9"}, "quantities": [100], "expected": "matched", "moq_applied": false},
+        {"ref": "3. 600V 7/0.16 OD 1.4 Red", "query": {"awg": 26, "stranding": "7/34", "min_voltage_v": 600, "insulation": "PTFE", "od_mm": 1.4, "colour_code": "2"}, "quantities": [100], "expected": "matched", "moq_applied": false},
+        {"ref": "3. 600V 7/0.16 OD 1.4 Grn", "query": {"awg": 26, "stranding": "7/34", "min_voltage_v": 600, "insulation": "PTFE", "od_mm": 1.4, "colour_code": "5"}, "quantities": [100], "expected": "matched", "moq_applied": false},
+        {"ref": "4. Cable 2C PTFE 7/0.20 OD 3.7 PTFE jacket, Blk & Wht twisted pair", "query": {"cores": 2, "awg": 24, "stranding": "7/32", "insulation": "PTFE", "jacket": "PTFE", "twisted": true, "od_mm": 3.7, "core_colours": "0/9"}, "quantities": [], "expected": "matched", "moq_applied": true}
+      ]
+    },
+    {
+      "file": "02-jss-part-number-no-quantity.txt",
+      "expected_status": "Success",
+      "expected_greeting": "Dear Procurement Team,",
+      "lines": [
+        {"ref": "J 51034, WH2P-1A-1936-9: WIRE PTFE 600V 19/0.13 OD 1.2 W", "query": {"awg": 24, "stranding": "19/36", "min_voltage_v": 600, "insulation": "PTFE", "od_mm": 1.2, "colour_code": "9"}, "quantities": [], "expected": "matched", "moq_applied": true}
+      ]
+    },
+    {
+      "file": "03-m22759-part-numbers.txt",
+      "expected_status": "Success",
+      "expected_greeting": "Dear Hannah Reyes,",
+      "lines": [
+        {"ref": "M22759/16-16-2", "query": {"standard_part_number": "M22759/16-16-2"}, "quantities": [305], "expected": "matched", "moq_applied": false},
+        {"ref": "M22759/16-22-2", "query": {"standard_part_number": "M22759/16-22-2"}, "quantities": [1000], "expected": "matched", "moq_applied": false},
+        {"ref": "M22759/16-22-9", "query": {"standard_part_number": "M22759/16-22-9"}, "quantities": [500], "expected": "matched", "moq_applied": false},
+        {"ref": "M22759/16-12-4", "query": {"standard_part_number": "M22759/16-12-4"}, "quantities": [500], "expected": "matched", "moq_applied": false},
+        {"ref": "M22759/16-20-1", "query": {"standard_part_number": "M22759/16-20-1"}, "quantities": [500], "expected": "matched", "moq_applied": false},
+        {"ref": "M22759/16-22-0", "query": {"standard_part_number": "M22759/16-22-0"}, "quantities": [2000], "expected": "matched", "moq_applied": false},
+        {"ref": "M22759/16-8-6", "query": {"standard_part_number": "M22759/16-8-6"}, "quantities": [100], "expected": "matched", "moq_applied": false},
+        {"ref": "M22759/16-16-6", "query": {"standard_part_number": "M22759/16-16-6"}, "quantities": [100], "expected": "matched", "moq_applied": false}
+      ]
+    },
+    {
+      "file": "04-jss-part-numbers-lead-time.txt",
+      "expected_status": "Success",
+      "expected_greeting": "Dear Mr Iyer,",
+      "lines": [
+        {"ref": "JSS 51034, WH2P-1A-1927-0: 600V 19/0.36 OD 2.6 BK", "query": {"awg": 14, "stranding": "19/27", "min_voltage_v": 600, "insulation": "PTFE", "od_mm": 2.6, "colour_code": "0"}, "quantities": [24], "expected": "matched", "moq_applied": true},
+        {"ref": "JSS 51034, WH2P-1A-1927-2: 600V 19/0.36 OD 2.6 R", "query": {"awg": 14, "stranding": "19/27", "min_voltage_v": 600, "insulation": "PTFE", "od_mm": 2.6, "colour_code": "2"}, "quantities": [21], "expected": "matched", "moq_applied": true},
+        {"ref": "JSS 51034, WH2P-1A-1929-0 (written twice): 600V 19/0.29 OD 2.2 BK", "query": {"awg": 16, "stranding": "19/29", "min_voltage_v": 600, "insulation": "PTFE", "od_mm": 2.2, "colour_code": "0"}, "quantities": [21], "expected": "matched", "moq_applied": true},
+        {"ref": "JSS 51034, WH2P-1A-1929-2: 600V 19/0.29 OD 2.2 R", "query": {"awg": 16, "stranding": "19/29", "min_voltage_v": 600, "insulation": "PTFE", "od_mm": 2.2, "colour_code": "2"}, "quantities": [21], "expected": "matched", "moq_applied": true}
+      ]
+    },
+    {
+      "file": "05-high-voltage-spec-quantity-breaks.txt",
+      "expected_status": "Success",
+      "expected_greeting": "Dear Dr Varga,",
+      "lines": [
+        {"ref": "20 AWG (19 x AWG32) red", "query": {"cores": 1, "awg": 20, "stranding": "19/32", "plating": "nickel", "insulation": ["PTFE", "FEP", "PFA"], "corona_resistant": true, "min_voltage_v": 6000, "min_test_voltage_v": 20000, "temp_min_c": -90, "temp_max_c": 250, "colour_code": "2"}, "quantities": [100, 500, 1000, 2000], "expected": "matched", "distinct_prices": true, "moq_applied": false},
+        {"ref": "18 AWG (19 x AWG30) black", "query": {"cores": 1, "awg": 18, "stranding": "19/30", "plating": "nickel", "insulation": ["PTFE", "FEP", "PFA"], "corona_resistant": true, "min_voltage_v": 6000, "min_test_voltage_v": 20000, "temp_min_c": -90, "temp_max_c": 250, "colour_code": "0"}, "quantities": [100, 500, 1000, 2000], "expected": "matched", "distinct_prices": true, "moq_applied": false}
+      ]
+    },
+    {
+      "file": "06-incomplete-specification.txt",
+      "expected_status": "Need customer clarification",
+      "expected_greeting": "Dear Sam Whitfield,",
+      "lines": [
+        {"ref": "600 V, -65 to +200 C, stranded silver-plated copper, PTFE", "query": {"min_voltage_v": 600, "temp_min_c": -65, "temp_max_c": 200, "plating": "silver", "insulation": "PTFE"}, "quantities": [], "expected": "needs_clarification", "differ_on": ["awg", "colour_code"]}
+      ]
+    },
+    {
+      "file": "07-additional-sizes.txt",
+      "expected_status": "Escalated",
+      "lines": [
+        {"ref": "M22759/16-18-2", "query": {"standard_part_number": "M22759/16-18-2"}, "quantities": [500], "expected": "matched", "moq_applied": false},
+        {"ref": "M22759/16-14-9", "query": {"standard_part_number": "M22759/16-14-9"}, "quantities": [250], "expected": "erp_record_inconsistent"},
+        {"ref": "M22759/16-6-0", "query": {"standard_part_number": "M22759/16-6-0"}, "quantities": [150], "expected": "not_in_catalogue", "nearest_query": {"standard_part_number": "M22759/16-*", "colour_code": "0"}, "nearest_awg": 8}
+      ]
+    }
+  ],
+  "known_data_issues": [
+    {"why": "Example 7: colour field says red, part number and name say white", "query": {"standard_part_number": "M22759/16-14-9"}, "count": 1},
+    {"why": "Sale and purchase descriptions disagree on colour", "query": {"awg": 28, "stranding": "7/36", "insulation": "PTFE", "colour_code": "9", "od_mm": 0.71}, "count": 1},
+    {"why": "Diameter field disagrees with the OD in the name", "query": {"awg": 20, "insulation": "FEP", "colour_code": "0"}, "count": 1},
+    {"why": "The same product entered twice under two SKUs", "query": {"product_family": "Hook-up wire", "awg": 20, "plating": "nickel", "colour_code": "2"}, "count": 2}
+  ]
+}

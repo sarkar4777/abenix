@@ -1,0 +1,10 @@
+node_modules
+.next
+.turbo
+dist
+build
+test-results
+playwright-report
+*.log
+.env*
+.DS_Store
